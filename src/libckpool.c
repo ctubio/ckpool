@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 Con Kolivas
+ * Copyright 2014 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -22,6 +22,200 @@
 
 #include "ckpool.h"
 #include "libckpool.h"
+
+/* Place holders for when we add lock debugging */
+#define GETLOCK(_lock, _file, _func, _line)
+#define GOTLOCK(_lock, _file, _func, _line)
+#define TRYLOCK(_lock, _file, _func, _line)
+#define DIDLOCK(_ret, _lock, _file, _func, _line)
+#define GUNLOCK(_lock, _file, _func, _line)
+#define INITLOCK(_typ, _lock, _file, _func, _line)
+
+void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+{
+	GETLOCK(lock, file, func, line);
+	if (unlikely(pthread_mutex_lock(lock)))
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK! errno=%d", errno);
+	GOTLOCK(lock, file, func, line);
+}
+
+void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+{
+	if (unlikely(pthread_mutex_unlock(lock)))
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK! errno=%d", errno);
+	GUNLOCK(lock, file, func, line);
+}
+
+void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+{
+	_mutex_unlock_noyield(lock, file, func, line);
+	sched_yield();
+}
+
+int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+{
+	TRYLOCK(lock, file, func, line);
+	int ret = pthread_mutex_trylock(lock);
+	DIDLOCK(ret, lock, file, func, line);
+	return ret;
+}
+
+void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	GETLOCK(lock, file, func, line);
+	if (unlikely(pthread_rwlock_wrlock(lock)))
+		quitfrom(1, file, func, line, "WTF WRLOCK ERROR ON LOCK! errno=%d", errno);
+	GOTLOCK(lock, file, func, line);
+}
+
+int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+{
+	TRYLOCK(lock, file, func, line);
+	int ret = pthread_rwlock_trywrlock(lock);
+	DIDLOCK(ret, lock, file, func, line);
+	return ret;
+}
+
+void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	GETLOCK(lock, file, func, line);
+	if (unlikely(pthread_rwlock_rdlock(lock)))
+		quitfrom(1, file, func, line, "WTF RDLOCK ERROR ON LOCK! errno=%d", errno);
+	GOTLOCK(lock, file, func, line);
+}
+
+void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	if (unlikely(pthread_rwlock_unlock(lock)))
+		quitfrom(1, file, func, line, "WTF RWLOCK ERROR ON UNLOCK! errno=%d", errno);
+	GUNLOCK(lock, file, func, line);
+}
+
+void _rd_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	_rw_unlock(lock, file, func, line);
+}
+
+void _wr_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	_rw_unlock(lock, file, func, line);
+}
+
+void _rd_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	_rw_unlock(lock, file, func, line);
+	sched_yield();
+}
+
+void _wr_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	_rw_unlock(lock, file, func, line);
+	sched_yield();
+}
+
+void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+{
+	if (unlikely(pthread_mutex_init(lock, NULL)))
+		quitfrom(1, file, func, line, "Failed to pthread_mutex_init errno=%d", errno);
+	INITLOCK(lock, CGLOCK_MUTEX, file, func, line);
+}
+
+void mutex_destroy(pthread_mutex_t *lock)
+{
+	/* Ignore return code. This only invalidates the mutex on linux but
+	 * releases resources on windows. */
+	pthread_mutex_destroy(lock);
+}
+
+void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+{
+	if (unlikely(pthread_rwlock_init(lock, NULL)))
+		quitfrom(1, file, func, line, "Failed to pthread_rwlock_init errno=%d", errno);
+	INITLOCK(lock, CGLOCK_RW, file, func, line);
+}
+
+void rwlock_destroy(pthread_rwlock_t *lock)
+{
+	pthread_rwlock_destroy(lock);
+}
+
+void _cklock_init(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_mutex_init(&lock->mutex, file, func, line);
+	_rwlock_init(&lock->rwlock, file, func, line);
+}
+
+void cklock_destroy(cklock_t *lock)
+{
+	rwlock_destroy(&lock->rwlock);
+	mutex_destroy(&lock->mutex);
+}
+
+/* Read lock variant of cklock. Cannot be promoted. */
+void _ck_rlock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_mutex_lock(&lock->mutex, file, func, line);
+	_rd_lock(&lock->rwlock, file, func, line);
+	_mutex_unlock_noyield(&lock->mutex, file, func, line);
+}
+
+/* Intermediate variant of cklock - behaves as a read lock but can be promoted
+ * to a write lock or demoted to read lock. */
+void _ck_ilock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_mutex_lock(&lock->mutex, file, func, line);
+}
+
+/* Unlock intermediate variant without changing to read or write version */
+void _ck_uilock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_mutex_unlock(&lock->mutex, file, func, line);
+}
+
+/* Upgrade intermediate variant to a write lock */
+void _ck_ulock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_wr_lock(&lock->rwlock, file, func, line);
+}
+
+/* Write lock variant of cklock */
+void _ck_wlock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_mutex_lock(&lock->mutex, file, func, line);
+	_wr_lock(&lock->rwlock, file, func, line);
+}
+
+/* Downgrade write variant to a read lock */
+void _ck_dwlock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_wr_unlock_noyield(&lock->rwlock, file, func, line);
+	_rd_lock(&lock->rwlock, file, func, line);
+	_mutex_unlock_noyield(&lock->mutex, file, func, line);
+}
+
+/* Demote a write variant to an intermediate variant */
+void _ck_dwilock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_wr_unlock(&lock->rwlock, file, func, line);
+}
+
+/* Downgrade intermediate variant to a read lock */
+void _ck_dlock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_rd_lock(&lock->rwlock, file, func, line);
+	_mutex_unlock_noyield(&lock->mutex, file, func, line);
+}
+
+void _ck_runlock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_rd_unlock(&lock->rwlock, file, func, line);
+}
+
+void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int line)
+{
+	_wr_unlock_noyield(&lock->rwlock, file, func, line);
+	_mutex_unlock(&lock->mutex, file, func, line);
+}
 
 void keep_sockalive(int fd)
 {

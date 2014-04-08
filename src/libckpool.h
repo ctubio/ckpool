@@ -14,6 +14,81 @@
 
 #include <stdbool.h>
 #include <errno.h>
+#include <pthread.h>
+#include <stdio.h>
+
+#define mutex_lock(_lock) _mutex_lock(_lock, __FILE__, __func__, __LINE__)
+#define mutex_unlock_noyield(_lock) _mutex_unlock_noyield(_lock, __FILE__, __func__, __LINE__)
+#define mutex_unlock(_lock) _mutex_unlock(_lock, __FILE__, __func__, __LINE__)
+#define mutex_trylock(_lock) _mutex_trylock(_lock, __FILE__, __func__, __LINE__)
+#define wr_lock(_lock) _wr_lock(_lock, __FILE__, __func__, __LINE__)
+#define wr_trylock(_lock) _wr_trylock(_lock, __FILE__, __func__, __LINE__)
+#define rd_lock(_lock) _rd_lock(_lock, __FILE__, __func__, __LINE__)
+#define rw_unlock(_lock) _rw_unlock(_lock, __FILE__, __func__, __LINE__)
+#define rd_unlock_noyield(_lock) _rd_unlock_noyield(_lock, __FILE__, __func__, __LINE__)
+#define wr_unlock_noyield(_lock) _wr_unlock_noyield(_lock, __FILE__, __func__, __LINE__)
+#define rd_unlock(_lock) _rd_unlock(_lock, __FILE__, __func__, __LINE__)
+#define wr_unlock(_lock) _wr_unlock(_lock, __FILE__, __func__, __LINE__)
+#define mutex_init(_lock) _mutex_init(_lock, __FILE__, __func__, __LINE__)
+#define rwlock_init(_lock) _rwlock_init(_lock, __FILE__, __func__, __LINE__)
+#define cklock_init(_lock) _cklock_init(_lock, __FILE__, __func__, __LINE__)
+#define ck_rlock(_lock) _ck_rlock(_lock, __FILE__, __func__, __LINE__)
+#define ck_ilock(_lock) _ck_ilock(_lock, __FILE__, __func__, __LINE__)
+#define ck_uilock(_lock) _ck_uilock(_lock, __FILE__, __func__, __LINE__)
+#define ck_ulock(_lock) _ck_ulock(_lock, __FILE__, __func__, __LINE__)
+#define ck_wlock(_lock) _ck_wlock(_lock, __FILE__, __func__, __LINE__)
+#define ck_dwlock(_lock) _ck_dwlock(_lock, __FILE__, __func__, __LINE__)
+#define ck_dwilock(_lock) _ck_dwilock(_lock, __FILE__, __func__, __LINE__)
+#define ck_dlock(_lock) _ck_dlock(_lock, __FILE__, __func__, __LINE__)
+#define ck_runlock(_lock) _ck_runlock(_lock, __FILE__, __func__, __LINE__)
+#define ck_wunlock(_lock) _ck_wunlock(_lock, __FILE__, __func__, __LINE__)
+
+#define IN_FMT_FFL " in %s %s():%d"
+#define quitfrom(status, _file, _func, _line, fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt IN_FMT_FFL, ##__VA_ARGS__, _file, _func, _line); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+	exit(status); \
+} while (0)
+
+/* cgminer locks, a write biased variant of rwlocks */
+struct cklock {
+	pthread_mutex_t mutex;
+	pthread_rwlock_t rwlock;
+};
+
+typedef struct cklock cklock_t;
+
+void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
+void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line);
+void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
+int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
+void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
+void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void _rd_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void _wr_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void _rd_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void _wr_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, const int line);
+void mutex_destroy(pthread_mutex_t *lock);
+void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
+void rwlock_destroy(pthread_rwlock_t *lock);
+void _cklock_init(cklock_t *lock, const char *file, const char *func, const int line);
+void cklock_destroy(cklock_t *lock);
+void _ck_rlock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_ilock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_uilock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_ulock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_wlock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_dwlock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_dwilock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_dlock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_runlock(cklock_t *lock, const char *file, const char *func, const int line);
+void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int line);
 
 static inline bool sock_connecting(void)
 {

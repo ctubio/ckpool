@@ -34,7 +34,7 @@ PKG_PROG_PKG_CONFIG()
 AC_CHECK_HEADERS(stdio.h stdlib.h fcntl.h sys/time.h unistd.h)
 AC_CHECK_HEADERS(ctype.h errno.h byteswap.h string.h time.h)
 AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h)
-AC_CHECK_HEADERS(alloca.h pthread.h)
+AC_CHECK_HEADERS(alloca.h pthread.h stdio.h)
 AC_CHECK_HEADERS(sys/types.h sys/socket.h)
 AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h)
 
