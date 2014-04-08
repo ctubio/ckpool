@@ -67,6 +67,9 @@
 #define __maybe_unused		__attribute__((unused))
 #define uninitialised_var(x) x = x
 
+/* Typedefs are evil but we use this one so often... */
+typedef unsigned char uchar;
+
 static inline void swap_256(void *dest_p, const void *src_p)
 {
 	uint32_t *dest = dest_p;
