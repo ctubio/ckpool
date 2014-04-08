@@ -1,0 +1,121 @@
+/*
+ * Copyright 2014 Con Kolivas
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 3 of the License, or (at your option)
+ * any later version.  See COPYING for more details.
+ */
+
+/* This file should contain all exported functions of libckpool */
+
+#ifndef CKPOOL_H
+#define CKPOOL_H
+
+#include "config.h"
+
+#if HAVE_BYTESWAP_H
+# include <byteswap.h>
+#endif
+
+#if HAVE_ENDIAN_H
+# include <endian.h>
+#elif HAVE_SYS_ENDIAN_H
+# include <sys/endian.h>
+#endif
+
+/* This assumes htobe32 is a macro in endian.h, and if it doesn't exist, then
+ * htobe64 also won't exist */
+#ifndef htobe32
+# if __BYTE_ORDER == __LITTLE_ENDIAN
+#  define htole16(x) (x)
+#  define le16toh(x) (x)
+#  define htole32(x) (x)
+#  define htole64(x) (x)
+#  define le32toh(x) (x)
+#  define le64toh(x) (x)
+#  define be32toh(x) bswap_32(x)
+#  define be64toh(x) bswap_64(x)
+#  define htobe16(x) bswap_16(x)
+#  define htobe32(x) bswap_32(x)
+#  define htobe64(x) bswap_64(x)
+# elif __BYTE_ORDER == __BIG_ENDIAN
+#  define htole16(x) bswap_16(x)
+#  define le16toh(x) bswap_16(x)
+#  define htole32(x) bswap_32(x)
+#  define le32toh(x) bswap_32(x)
+#  define le64toh(x) bswap_64(x)
+#  define htole64(x) bswap_64(x)
+#  define be32toh(x) (x)
+#  define be64toh(x) (x)
+#  define htobe16(x) (x)
+#  define htobe32(x) (x)
+#  define htobe64(x) (x)
+# endif
+#endif
+
+#define unlikely(expr) (__builtin_expect(!!(expr), 0))
+#define likely(expr) (__builtin_expect(!!(expr), 1))
+#define __maybe_unused		__attribute__((unused))
+#define uninitialised_var(x) x = x
+
+static inline void swap256(void *dest_p, const void *src_p)
+{
+	uint32_t *dest = dest_p;
+	const uint32_t *src = src_p;
+
+	dest[0] = src[7];
+	dest[1] = src[6];
+	dest[2] = src[5];
+	dest[3] = src[4];
+	dest[4] = src[3];
+	dest[5] = src[2];
+	dest[6] = src[1];
+	dest[7] = src[0];
+}
+
+static inline void bswap256(void *dest_p, const void *src_p)
+{
+	uint32_t *dest = dest_p;
+	const uint32_t *src = src_p;
+
+	dest[0] = bswap32(src[7]);
+	dest[1] = bswap32(src[6]);
+	dest[2] = bswap32(src[5]);
+	dest[3] = bswap32(src[4]);
+	dest[4] = bswap32(src[3]);
+	dest[5] = bswap32(src[2]);
+	dest[6] = bswap32(src[1]);
+	dest[7] = bswap32(src[0]);
+}
+
+static inline void flip80(void *dest_p, const void *src_p)
+{
+	uint32_t *dest = dest_p;
+	const uint32_t *src = src_p;
+	int i;
+
+	for (i = 0; i < 20; i++)
+		dest[i] = swab32(src[i]);
+}
+
+static inline void flip32(void *dest_p, const void *src_p)
+{
+	uint32_t *dest = dest_p;
+	const uint32_t *src = src_p;
+	int i;
+
+	for (i = 0; i < 8; i++)
+		dest[i] = swab32(src[i]);
+}
+
+static inline void flip80(void *dest_p, const void *src_p)
+{
+	uint32_t *dest = dest_p;
+	const uint32_t *src = src_p;
+	int i;
+
+	for (i = 0; i < 20; i++)
+		dest[i] = swab32(src[i]);
+}
+#endif /* CKPOOL_H */

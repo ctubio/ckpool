@@ -31,4 +31,9 @@ AC_FUNC_ALLOCA
 
 PKG_PROG_PKG_CONFIG()
 
+AC_CHECK_HEADERS(stdio.h stdlib.h fcntl.h sys/time.h unistd.h)
+AC_CHECK_HEADERS(ctype.h errno.h)
+AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h)
+AC_CHECK_HEADERS(alloca.h pthread.h)
+
 AC_OUTPUT([Makefile] [src/Makefile])
