@@ -1,9 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-
-#include "libckpool.h"
-
 /*
  * Copyright 2011-2014 Con Kolivas
  *
@@ -12,8 +6,3 @@
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.  See COPYING for more details.
  */
-
-int main(void)
-{
-	return 0;
-}

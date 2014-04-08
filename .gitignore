@@ -1,5 +1,7 @@
 *.o
 *.bin
+*.la
+*.lo
 
 autom4te.cache
 .deps
@@ -32,3 +34,9 @@ ckpool
 ltmain.sh
 
 *.m4
+
+.libs/
+
+libtool
+
+
