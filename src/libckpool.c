@@ -18,6 +18,9 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
+#include <errno.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -160,7 +163,7 @@ void b58tobin(uchar *b58bin, const uchar *b58)
 	}
 }
 
-void address_to_pubkeyhash(uchar *pkh, const uchar *addr)
+void address_to_pubkeytxn(uchar *pkh, const uchar *addr)
 {
 	uchar b58bin[25];
 
@@ -191,4 +194,173 @@ int ser_number(uchar *s, int32_t val)
 	*i32 = htole32(val);
 	s[0] = len++;
 	return len;
+}
+
+/* For testing a le encoded 256 byte hash against a target */
+bool fulltest(const uchar *hash, const uchar *target)
+{
+	uint32_t *hash32 = (uint32_t *)hash;
+	uint32_t *target32 = (uint32_t *)target;
+	bool ret = true;
+	int i;
+
+	for (i = 28 / 4; i >= 0; i--) {
+		uint32_t h32tmp = le32toh(hash32[i]);
+		uint32_t t32tmp = le32toh(target32[i]);
+
+		if (h32tmp > t32tmp) {
+			ret = false;
+			break;
+		}
+		if (h32tmp < t32tmp) {
+			ret = true;
+			break;
+		}
+	}
+	return ret;
+}
+
+void copy_tv(tv_t *dest, const tv_t *src)
+{
+	memcpy(dest, src, sizeof(tv_t));
+}
+
+void ts_to_tv(tv_t *val, const ts_t *spec)
+{
+	val->tv_sec = spec->tv_sec;
+	val->tv_usec = spec->tv_nsec / 1000;
+}
+
+void tv_to_ts(ts_t *spec, const tv_t *val)
+{
+	spec->tv_sec = val->tv_sec;
+	spec->tv_nsec = val->tv_usec * 1000;
+}
+
+void us_to_tv(tv_t *val, int64_t us)
+{
+	lldiv_t tvdiv = lldiv(us, 1000000);
+
+	val->tv_sec = tvdiv.quot;
+	val->tv_usec = tvdiv.rem;
+}
+
+void us_to_ts(ts_t *spec, int64_t us)
+{
+	lldiv_t tvdiv = lldiv(us, 1000000);
+
+	spec->tv_sec = tvdiv.quot;
+	spec->tv_nsec = tvdiv.rem * 1000;
+}
+
+void ms_to_ts(ts_t *spec, int64_t ms)
+{
+	lldiv_t tvdiv = lldiv(ms, 1000);
+
+	spec->tv_sec = tvdiv.quot;
+	spec->tv_nsec = tvdiv.rem * 1000000;
+}
+
+void ms_to_tv(tv_t *val, int64_t ms)
+{
+	lldiv_t tvdiv = lldiv(ms, 1000);
+
+	val->tv_sec = tvdiv.quot;
+	val->tv_usec = tvdiv.rem * 1000;
+}
+
+void tv_time(tv_t *tv)
+{
+	gettimeofday(tv, NULL);
+}
+
+void ts_time(ts_t *ts)
+{
+	clock_gettime(CLOCK_MONOTONIC, ts);
+}
+
+void cksleep_prepare_r(ts_t *ts)
+{
+	ts_time(ts);
+}
+
+void nanosleep_abstime(ts_t *ts_end)
+{
+	int ret;
+
+	do {
+		ret = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts_end, NULL);
+	} while (ret == EINTR);
+}
+
+void timeraddspec(ts_t *a, const ts_t *b)
+{
+	a->tv_sec += b->tv_sec;
+	a->tv_nsec += b->tv_nsec;
+	if (a->tv_nsec >= 1000000000) {
+		a->tv_nsec -= 1000000000;
+		a->tv_sec++;
+	}
+}
+
+/* Reentrant version of cksleep functions allow start time to be set separately
+ * from the beginning of the actual sleep, allowing scheduling delays to be
+ * counted in the sleep. */
+void cksleep_ms_r(ts_t *ts_start, int ms)
+{
+	ts_t ts_end;
+
+	ms_to_ts(&ts_end, ms);
+	timeraddspec(&ts_end, ts_start);
+	nanosleep_abstime(&ts_end);
+}
+
+void cksleep_us_r(ts_t *ts_start, int64_t us)
+{
+	ts_t ts_end;
+
+	us_to_ts(&ts_end, us);
+	timeraddspec(&ts_end, ts_start);
+	nanosleep_abstime(&ts_end);
+}
+
+void cksleep_ms(int ms)
+{
+	ts_t ts_start;
+
+	cksleep_prepare_r(&ts_start);
+	cksleep_ms_r(&ts_start, ms);
+}
+
+void cksleep_us(int64_t us)
+{
+	ts_t ts_start;
+
+	cksleep_prepare_r(&ts_start);
+	cksleep_us_r(&ts_start, us);
+}
+
+/* Returns the microseconds difference between end and start times as a double */
+double us_tvdiff(tv_t *end, tv_t *start)
+{
+	/* Sanity check. We should only be using this for small differences so
+	 * limit the max to 60 seconds. */
+	if (unlikely(end->tv_sec - start->tv_sec > 60))
+		return 60000000;
+	return (end->tv_sec - start->tv_sec) * 1000000 + (end->tv_usec - start->tv_usec);
+}
+
+/* Returns the milliseconds difference between end and start times */
+int ms_tvdiff(tv_t *end, tv_t *start)
+{
+	/* Like us_tdiff, limit to 1 hour. */
+	if (unlikely(end->tv_sec - start->tv_sec > 3600))
+		return 3600000;
+	return (end->tv_sec - start->tv_sec) * 1000 + (end->tv_usec - start->tv_usec) / 1000;
+}
+
+/* Returns the seconds difference between end and start times as a double */
+double tvdiff(tv_t *end, tv_t *start)
+{
+	return end->tv_sec - start->tv_sec + (end->tv_usec - start->tv_usec) / 1000000.0;
 }

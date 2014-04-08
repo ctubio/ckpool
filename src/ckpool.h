@@ -70,6 +70,9 @@
 /* Typedefs are evil but we use this one so often... */
 typedef unsigned char uchar;
 
+typedef struct timeval tv_t;
+typedef struct timespec ts_t;
+
 static inline void swap_256(void *dest_p, const void *src_p)
 {
 	uint32_t *dest = dest_p;
