@@ -14,6 +14,8 @@
 
 #include "config.h"
 
+#include <stdint.h>
+
 #if HAVE_BYTESWAP_H
 # include <byteswap.h>
 #endif
@@ -22,6 +24,12 @@
 # include <endian.h>
 #elif HAVE_SYS_ENDIAN_H
 # include <sys/endian.h>
+#endif
+
+#ifndef bswap_16
+ #define bswap_16 __builtin_bswap16
+ #define bswap_32 __builtin_bswap32
+ #define bswap_64 __builtin_bswap64
 #endif
 
 /* This assumes htobe32 is a macro in endian.h, and if it doesn't exist, then
@@ -59,7 +67,7 @@
 #define __maybe_unused		__attribute__((unused))
 #define uninitialised_var(x) x = x
 
-static inline void swap256(void *dest_p, const void *src_p)
+static inline void swap_256(void *dest_p, const void *src_p)
 {
 	uint32_t *dest = dest_p;
 	const uint32_t *src = src_p;
@@ -74,48 +82,38 @@ static inline void swap256(void *dest_p, const void *src_p)
 	dest[7] = src[0];
 }
 
-static inline void bswap256(void *dest_p, const void *src_p)
+static inline void bswap_256(void *dest_p, const void *src_p)
 {
 	uint32_t *dest = dest_p;
 	const uint32_t *src = src_p;
 
-	dest[0] = bswap32(src[7]);
-	dest[1] = bswap32(src[6]);
-	dest[2] = bswap32(src[5]);
-	dest[3] = bswap32(src[4]);
-	dest[4] = bswap32(src[3]);
-	dest[5] = bswap32(src[2]);
-	dest[6] = bswap32(src[1]);
-	dest[7] = bswap32(src[0]);
+	dest[0] = bswap_32(src[7]);
+	dest[1] = bswap_32(src[6]);
+	dest[2] = bswap_32(src[5]);
+	dest[3] = bswap_32(src[4]);
+	dest[4] = bswap_32(src[3]);
+	dest[5] = bswap_32(src[2]);
+	dest[6] = bswap_32(src[1]);
+	dest[7] = bswap_32(src[0]);
 }
 
-static inline void flip80(void *dest_p, const void *src_p)
-{
-	uint32_t *dest = dest_p;
-	const uint32_t *src = src_p;
-	int i;
-
-	for (i = 0; i < 20; i++)
-		dest[i] = swab32(src[i]);
-}
-
-static inline void flip32(void *dest_p, const void *src_p)
+static inline void flip_32(void *dest_p, const void *src_p)
 {
 	uint32_t *dest = dest_p;
 	const uint32_t *src = src_p;
 	int i;
 
 	for (i = 0; i < 8; i++)
-		dest[i] = swab32(src[i]);
+		dest[i] = bswap_32(src[i]);
 }
 
-static inline void flip80(void *dest_p, const void *src_p)
+static inline void flip_80(void *dest_p, const void *src_p)
 {
 	uint32_t *dest = dest_p;
 	const uint32_t *src = src_p;
 	int i;
 
 	for (i = 0; i < 20; i++)
-		dest[i] = swab32(src[i]);
+		dest[i] = bswap_32(src[i]);
 }
 #endif /* CKPOOL_H */

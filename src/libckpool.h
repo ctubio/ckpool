@@ -12,4 +12,6 @@
 #ifndef LIBCKPOOL_H
 #define LIBCKPOOL_H
 
+void keep_sockalive(int fd);
+
 #endif /* LIBCKPOOL_H */
