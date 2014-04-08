@@ -16,11 +16,9 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
-#include <errno.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -39,6 +37,20 @@ void keep_sockalive(int fd)
 	setsockopt(fd, SOL_TCP, TCP_KEEPCNT, &tcp_one, sizeof(tcp_one));
 	setsockopt(fd, SOL_TCP, TCP_KEEPIDLE, &tcp_keepidle, sizeof(tcp_keepidle));
 	setsockopt(fd, SOL_TCP, TCP_KEEPINTVL, &tcp_keepintvl, sizeof(tcp_keepintvl));
+}
+
+void noblock_socket(int fd)
+{
+	int flags = fcntl(fd, F_GETFL, 0);
+
+	fcntl(fd, F_SETFL, O_NONBLOCK | flags);
+}
+
+void block_socket(int fd)
+{
+	int flags = fcntl(fd, F_GETFL, 0);
+
+	fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
 /* Align a size_t to 4 byte boundaries for fussy arches */

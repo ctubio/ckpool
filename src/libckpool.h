@@ -13,8 +13,30 @@
 #define LIBCKPOOL_H
 
 #include <stdbool.h>
+#include <errno.h>
+
+static inline bool sock_connecting(void)
+{
+	return errno == EINPROGRESS;
+}
+
+static inline bool sock_blocks(void)
+{
+	return (errno == EAGAIN || errno == EWOULDBLOCK);
+}
+static inline bool sock_timeout(void)
+{
+	return (errno == ETIMEDOUT);
+}
+static inline bool interrupted(void)
+{
+	return (errno == EINTR);
+}
 
 void keep_sockalive(int fd);
+void noblock_socket(int fd);
+void block_socket(int fd);
+bool sock_connecting(void);
 void align_len(size_t *len);
 void __bin2hex(uchar *s, const uchar *p, size_t len);
 void *bin2hex(const uchar *p, size_t len);
