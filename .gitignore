@@ -28,3 +28,7 @@ config.h
 mkinstalldirs
 
 *.swp
+ckpool
+ltmain.sh
+
+*.m4
