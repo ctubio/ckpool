@@ -38,4 +38,10 @@ AC_CHECK_HEADERS(alloca.h pthread.h stdio.h math.h)
 AC_CHECK_HEADERS(sys/types.h sys/socket.h)
 AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h)
 
+PTHREAD_LIBS="-lpthread"
+MATH_LIBS="-lm"
+
+AC_SUBST(PTHREAD_LIBS)
+AC_SUBST(MATH_LIBS)
+
 AC_OUTPUT([Makefile] [src/Makefile])
