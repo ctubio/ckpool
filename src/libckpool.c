@@ -19,6 +19,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include <math.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -569,4 +570,173 @@ int ms_tvdiff(tv_t *end, tv_t *start)
 double tvdiff(tv_t *end, tv_t *start)
 {
 	return end->tv_sec - start->tv_sec + (end->tv_usec - start->tv_usec) / 1000000.0;
+}
+
+/* Create an exponentially decaying average over interval */
+void decay_time(double *f, double fadd, double fsecs, double interval)
+{
+	double ftotal, fprop;
+
+	if (fsecs <= 0)
+		return;
+	fprop = 1.0 - 1 / (exp(fsecs / interval));
+	ftotal = 1.0 + fprop;
+	*f += (fadd / fsecs * fprop);
+	*f /= ftotal;
+}
+
+/* Convert a double value into a truncated string for displaying with its
+ * associated suitable for Mega, Giga etc. Buf array needs to be long enough */
+void suffix_string(double val, char *buf, size_t bufsiz, int sigdigits)
+{
+	const double kilo = 1000;
+	const double mega = 1000000;
+	const double giga = 1000000000;
+	const double tera = 1000000000000;
+	const double peta = 1000000000000000;
+	const double exa  = 1000000000000000000;
+	char suffix[2] = "";
+	bool decimal = true;
+	double dval;
+
+	if (val >= exa) {
+		val /= peta;
+		dval = val / kilo;
+		strcpy(suffix, "E");
+	} else if (val >= peta) {
+		val /= tera;
+		dval = val / kilo;
+		strcpy(suffix, "P");
+	} else if (val >= tera) {
+		val /= giga;
+		dval = val / kilo;
+		strcpy(suffix, "T");
+	} else if (val >= giga) {
+		val /= mega;
+		dval = val / kilo;
+		strcpy(suffix, "G");
+	} else if (val >= mega) {
+		val /= kilo;
+		dval = val / kilo;
+		strcpy(suffix, "M");
+	} else if (val >= kilo) {
+		dval = val / kilo;
+		strcpy(suffix, "K");
+	} else {
+		dval = val;
+		decimal = false;
+	}
+
+	if (!sigdigits) {
+		if (decimal)
+			snprintf(buf, bufsiz, "%.3g%s", dval, suffix);
+		else
+			snprintf(buf, bufsiz, "%d%s", (unsigned int)dval, suffix);
+	} else {
+		/* Always show sigdigits + 1, padded on right with zeroes
+		 * followed by suffix */
+		int ndigits = sigdigits - 1 - (dval > 0.0 ? floor(log10(dval)) : 0);
+
+		snprintf(buf, bufsiz, "%*.*f%s", sigdigits + 1, ndigits, dval, suffix);
+	}
+}
+
+/* truediffone == 0x00000000FFFF0000000000000000000000000000000000000000000000000000
+ * Generate a 256 bit binary LE target by cutting up diff into 64 bit sized
+ * portions or vice versa. */
+static const double truediffone = 26959535291011309493156476344723991336010898738574164086137773096960.0;
+static const double bits192 = 6277101735386680763835789423207666416102355444464034512896.0;
+static const double bits128 = 340282366920938463463374607431768211456.0;
+static const double bits64 = 18446744073709551616.0;
+
+/* Converts a little endian 256 bit value to a double */
+double le256todouble(const uchar *target)
+{
+	uint64_t *data64;
+	double dcut64;
+
+	data64 = (uint64_t *)(target + 24);
+	dcut64 = le64toh(*data64) * bits192;
+
+	data64 = (uint64_t *)(target + 16);
+	dcut64 += le64toh(*data64) * bits128;
+
+	data64 = (uint64_t *)(target + 8);
+	dcut64 += le64toh(*data64) * bits64;
+
+	data64 = (uint64_t *)(target);
+	dcut64 += le64toh(*data64);
+
+	return dcut64;
+}
+
+/* Return a difficulty from a binary target */
+double diff_from_target(uchar *target)
+{
+	double d64, dcut64;
+
+	d64 = truediffone;
+	dcut64 = le256todouble(target);
+	if (unlikely(!dcut64))
+		dcut64 = 1;
+	return d64 / dcut64;
+}
+
+/* Return the network difficulty from the block header which is in packed form,
+ * as a double. */
+double diff_from_header(uchar *header)
+{
+	double numerator;
+	uint32_t diff32;
+	uint8_t pow;
+	int powdiff;
+
+	pow = header[72];
+	powdiff = (8 * (0x1d - 3)) - (8 * (pow - 3));
+	diff32 = be32toh(*((uint32_t *)(header + 72))) & 0x00FFFFFF;
+	numerator = 0xFFFFULL << powdiff;
+	return numerator / (double)diff32;
+}
+
+void target_from_diff(uchar *target, double diff)
+{
+	uint64_t *data64, h64;
+	double d64, dcut64;
+
+	if (unlikely(diff == 0.0)) {
+		/* This shouldn't happen but best we check to prevent a crash */
+		memset(target, 0, 32);
+		return;
+	}
+
+	d64 = truediffone;
+	d64 /= diff;
+
+	dcut64 = d64 / bits192;
+	h64 = dcut64;
+	data64 = (uint64_t *)(target + 24);
+	*data64 = htole64(h64);
+	dcut64 = h64;
+	dcut64 *= bits192;
+	d64 -= dcut64;
+
+	dcut64 = d64 / bits128;
+	h64 = dcut64;
+	data64 = (uint64_t *)(target + 16);
+	*data64 = htole64(h64);
+	dcut64 = h64;
+	dcut64 *= bits128;
+	d64 -= dcut64;
+
+	dcut64 = d64 / bits64;
+	h64 = dcut64;
+	data64 = (uint64_t *)(target + 8);
+	*data64 = htole64(h64);
+	dcut64 = h64;
+	dcut64 *= bits64;
+	d64 -= dcut64;
+
+	h64 = d64;
+	data64 = (uint64_t *)(target);
+	*data64 = htole64(h64);
 }

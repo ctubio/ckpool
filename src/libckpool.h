@@ -139,5 +139,11 @@ void cksleep_us(int64_t us);
 double us_tvdiff(tv_t *end, tv_t *start);
 int ms_tvdiff(tv_t *end, tv_t *start);
 double tvdiff(tv_t *end, tv_t *start);
+void decay_time(double *f, double fadd, double fsecs, double interval);
+void suffix_string(double val, char *buf, size_t bufsiz, int sigdigits);
+double le256todouble(const uchar *target);
+double diff_from_target(uchar *target);
+double diff_from_header(uchar *header);
+void target_from_diff(uchar *target, double diff);
 
 #endif /* LIBCKPOOL_H */
