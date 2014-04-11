@@ -101,6 +101,7 @@ void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, cons
 void mutex_destroy(pthread_mutex_t *lock);
 void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
 void rwlock_destroy(pthread_rwlock_t *lock);
+
 void _cklock_init(cklock_t *lock, const char *file, const char *func, const int line);
 void cklock_destroy(cklock_t *lock);
 void _ck_rlock(cklock_t *lock, const char *file, const char *func, const int line);
@@ -132,19 +133,23 @@ static inline bool interrupted(void)
 	return (errno == EINTR);
 }
 
+bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);
 void keep_sockalive(int fd);
 void noblock_socket(int fd);
 void block_socket(int fd);
 bool sock_connecting(void);
+
 void align_len(size_t *len);
 void __bin2hex(uchar *s, const uchar *p, size_t len);
 void *bin2hex(const uchar *p, size_t len);
 bool hex2bin(uchar *p, const uchar *hexstr, size_t len);
 uchar *http_base64(const uchar *src);
 void b58tobin(uchar *b58bin, const uchar *b58);
+
 void address_to_pubkeytxn(uchar *pkh, const uchar *addr);
 int ser_number(uchar *s, int32_t val);
 bool fulltest(const uchar *hash, const uchar *target);
+
 void copy_tv(tv_t *dest, const tv_t *src);
 void ts_to_tv(tv_t *val, const ts_t *spec);
 void tv_to_ts(ts_t *spec, const tv_t *val);
@@ -154,6 +159,7 @@ void ms_to_ts(ts_t *spec, int64_t ms);
 void ms_to_tv(tv_t *val, int64_t ms);
 void tv_time(tv_t *tv);
 void ts_time(ts_t *ts);
+
 void cksleep_prepare_r(ts_t *ts);
 void nanosleep_abstime(ts_t *ts_end);
 void timeraddspec(ts_t *a, const ts_t *b);
@@ -161,11 +167,14 @@ void cksleep_ms_r(ts_t *ts_start, int ms);
 void cksleep_us_r(ts_t *ts_start, int64_t us);
 void cksleep_ms(int ms);
 void cksleep_us(int64_t us);
+
 double us_tvdiff(tv_t *end, tv_t *start);
 int ms_tvdiff(tv_t *end, tv_t *start);
 double tvdiff(tv_t *end, tv_t *start);
+
 void decay_time(double *f, double fadd, double fsecs, double interval);
 void suffix_string(double val, char *buf, size_t bufsiz, int sigdigits);
+
 double le256todouble(const uchar *target);
 double diff_from_target(uchar *target);
 double diff_from_header(uchar *header);

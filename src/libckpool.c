@@ -218,6 +218,71 @@ void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int l
 	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
+bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
+{
+	char *url_begin, *url_end, *ipv6_begin, *ipv6_end, *port_start = NULL;
+	int url_len, port_len = 0;
+	char *url_address, *port;
+	size_t hlen;
+
+	if (!url) {
+		LOGWARNING("Null length url string passed to extract_sockaddr");
+		return false;
+	}
+	*sockaddr_url = url;
+	url_begin = strstr(url, "//");
+	if (!url_begin)
+		url_begin = url;
+	else
+		url_begin += 2;
+
+	/* Look for numeric ipv6 entries */
+	ipv6_begin = strstr(url_begin, "[");
+	ipv6_end = strstr(url_begin, "]");
+	if (ipv6_begin && ipv6_end && ipv6_end > ipv6_begin)
+		url_end = strstr(ipv6_end, ":");
+	else
+		url_end = strstr(url_begin, ":");
+	if (url_end) {
+		url_len = url_end - url_begin;
+		port_len = strlen(url_begin) - url_len - 1;
+		if (port_len < 1)
+			return false;
+		port_start = url_end + 1;
+	} else
+		url_len = strlen(url_begin);
+
+	if (url_len < 1) {
+		LOGWARNING("Null length URL passed to extract_sockaddr");
+		return false;
+	}
+
+	hlen = url_len + 1;
+	align_len(&hlen);
+	url_address = malloc(hlen);
+	if (unlikely(!url_address))
+		quit(1, "Failed to malloc url_address of length %d in extract_sockaddr", (int)hlen);
+	sprintf(url_address, "%.*s", url_len, url_begin);
+
+	port = malloc(8);
+	if (unlikely(!port))
+		quit(1, "Failed to malloc port in extract_sockaddr");
+	if (port_len) {
+		char *slash;
+
+		snprintf(port, 6, "%.*s", port_len, port_start);
+		slash = strchr(port, '/');
+		if (slash)
+			*slash = '\0';
+	} else
+		strcpy(port, "80");
+
+	*sockaddr_port = port;
+	*sockaddr_url = url_address;
+
+	return true;
+}
+
 void keep_sockalive(int fd)
 {
 	const int tcp_one = 1;
