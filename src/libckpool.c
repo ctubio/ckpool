@@ -509,7 +509,7 @@ void realloc_strcat(char **ptr, const char *s)
 	sprintf(ofs, "%s", s);
 }
 
-void dealloc(void **ptr)
+void _dealloc(void **ptr)
 {
 	free(*ptr);
 	*ptr = NULL;
@@ -614,7 +614,7 @@ static const int b58tobin_tbl[] = {
 
 /* b58bin should always be at least 25 bytes long and already checked to be
  * valid. */
-void b58tobin(uchar *b58bin, const uchar *b58)
+void b58tobin(char *b58bin, const char *b58)
 {
 	uint32_t c, bin32[7];
 	int len, i, j;
@@ -641,9 +641,9 @@ void b58tobin(uchar *b58bin, const uchar *b58)
 static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /* Return a malloced string of *src encoded into mime base 64 */
-uchar *http_base64(const uchar *src)
+char *http_base64(const char *src)
 {
-	uchar *str, *dst;
+	char *str, *dst;
 	size_t l, hlen;
 	int t, r;
 
@@ -691,9 +691,9 @@ uchar *http_base64(const uchar *src)
 	return (str);
 }
 
-void address_to_pubkeytxn(uchar *pkh, const uchar *addr)
+void address_to_pubkeytxn(char *pkh, const char *addr)
 {
-	uchar b58bin[25];
+	char b58bin[25];
 
 	memset(b58bin, 0, 25);
 	b58tobin(b58bin, addr);

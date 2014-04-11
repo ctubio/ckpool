@@ -44,6 +44,8 @@
 #define ck_runlock(_lock) _ck_runlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_wunlock(_lock) _ck_wunlock(_lock, __FILE__, __func__, __LINE__)
 
+#define dealloc(ptr) _dealloc((void *)(ptr))
+
 /* Placeholders for when we have more comprehensive logging facilities */
 #define LOGERR(fmt, ...) do { \
 	if (fmt) { \
@@ -145,14 +147,14 @@ int read_socket_line(int fd, void **buf);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
-void dealloc(void **ptr);
+void _dealloc(void **ptr);
 void __bin2hex(uchar *s, const uchar *p, size_t len);
 void *bin2hex(const uchar *p, size_t len);
 bool hex2bin(uchar *p, const uchar *hexstr, size_t len);
-uchar *http_base64(const uchar *src);
-void b58tobin(uchar *b58bin, const uchar *b58);
+char *http_base64(const char *src);
+void b58tobin(char *b58bin, const char *b58);
 
-void address_to_pubkeytxn(uchar *pkh, const uchar *addr);
+void address_to_pubkeytxn(char *pkh, const char *addr);
 int ser_number(uchar *s, int32_t val);
 bool fulltest(const uchar *hash, const uchar *target);
 
