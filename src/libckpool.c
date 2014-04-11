@@ -279,7 +279,9 @@ void *bin2hex(const uchar *p, size_t len)
 	slen = len * 2 + 1;
 	align_len(&slen);
 	s = calloc(slen, 1);
-	if (likely(s))
+	if (unlikely(!s)) {
+		LOGERR("Failed to calloc s in bin2hex");
+	} else
 		__bin2hex(s, p, len);
 
 	/* Returns NULL if calloc failed. */
@@ -313,16 +315,20 @@ bool hex2bin(uchar *p, const uchar *hexstr, size_t len)
 	bool ret = false;
 
 	while (*hexstr && len) {
-		if (unlikely(!hexstr[1]))
+		if (unlikely(!hexstr[1])) {
+			LOGWARNING("Early end of string in hex2bin");
 			return ret;
+		}
 
 		idx = *hexstr++;
 		nibble1 = hex2bin_tbl[idx];
 		idx = *hexstr++;
 		nibble2 = hex2bin_tbl[idx];
 
-		if (unlikely((nibble1 < 0) || (nibble2 < 0)))
+		if (unlikely((nibble1 < 0) || (nibble2 < 0))) {
+			LOGWARNING("Invalid binary encoding in hex2bin");
 			return ret;
+		}
 
 		*p++ = (((uchar)nibble1) << 4) | ((uchar)nibble2);
 		--len;
@@ -330,6 +336,8 @@ bool hex2bin(uchar *p, const uchar *hexstr, size_t len)
 
 	if (likely(len == 0 && *hexstr == 0))
 		ret = true;
+	if (!ret)
+		LOGWARNING("Failed hex2bin decode");
 	return ret;
 }
 
@@ -384,7 +392,7 @@ uchar *http_base64(const uchar *src)
 	align_len(&hlen);
 	str = malloc(hlen);
 	if (unlikely(!str))
-		return str;
+		quit(1, "Failed to malloc string of length %d in http_base64", (int)hlen);
 	dst = str;
 	r = 0;
 

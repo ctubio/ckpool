@@ -68,6 +68,15 @@
 	exit(status); \
 } while (0)
 
+#define quit(status, fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+	exit(status); \
+} while (0)
+
 /* cgminer locks, a write biased variant of rwlocks */
 struct cklock {
 	pthread_mutex_t mutex;
