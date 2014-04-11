@@ -44,8 +44,21 @@ AC_CHECK_HEADERS(jansson.h)
 
 PTHREAD_LIBS="-lpthread"
 MATH_LIBS="-lm"
+RT_LIBS="-lrt"
 
 AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(MATH_LIBS)
+AC_SUBST(RT_LIBS)
 
 AC_OUTPUT([Makefile] [src/Makefile])
+
+echo
+echo "Compilation............: make (or gmake)"
+echo "  CPPFLAGS.............: $CPPFLAGS"
+echo "  CFLAGS...............: $CFLAGS"
+echo "  LDFLAGS..............: $LDFLAGS"
+echo "  LDADD................: $PTHREAD_LIBS $MATH_LIBS $RT_LIBS"
+echo
+echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
+echo "  prefix...............: $prefix"
+echo
