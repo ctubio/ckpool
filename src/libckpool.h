@@ -89,6 +89,16 @@ struct cklock {
 
 typedef struct cklock cklock_t;
 
+struct connsock {
+	int fd;
+	char *url;
+	char *port;
+	char *auth;
+	char *buf;
+};
+
+typedef struct connsock connsock_t;
+
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
@@ -143,7 +153,7 @@ void noblock_socket(int fd);
 void block_socket(int fd);
 int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
-int read_socket_line(int fd, void **buf);
+int read_socket_line(connsock_t *cs);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);

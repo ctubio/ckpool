@@ -416,7 +416,7 @@ out:
 
 /* Peek in a socket, and then receive only one line at a time, allocing enough
  * memory in *buf */
-int read_socket_line(int fd, void **buf)
+int read_socket_line(connsock_t *cs)
 {
 	char readbuf[PAGESIZE], *eom = NULL;
 	size_t buflen = 0, bufofs = 0;
@@ -424,11 +424,11 @@ int read_socket_line(int fd, void **buf)
 	int ret, bufsiz;
 	fd_set rd;
 
-	*buf = NULL;
+	cs->buf = NULL;
 retry:
 	FD_ZERO(&rd);
-	FD_SET(fd, &rd);
-	ret = select(fd + 1, &rd, NULL, NULL, &timeout);
+	FD_SET(cs->fd, &rd);
+	ret = select(cs->fd + 1, &rd, NULL, NULL, &timeout);
 	if (ret < 0 && interrupted())
 		goto retry;
 	if (ret < 1) {
@@ -443,7 +443,7 @@ retry:
 	while (!eom) {
 		int extralen;
 
-		ret = recv(fd, readbuf, bufsiz - 2, MSG_PEEK);
+		ret = recv(cs->fd, readbuf, bufsiz - 2, MSG_PEEK);
 		if (ret < 1) {
 			LOGNOTICE("Failed to recv in read_socket_line");
 			goto out;
@@ -455,10 +455,10 @@ retry:
 			extralen = ret;
 		buflen += extralen + 1;
 		align_len(&buflen);
-		*buf = realloc(*buf, buflen);
-		if (unlikely(!*buf))
+		cs->buf = realloc(cs->buf, buflen);
+		if (unlikely(!cs->buf))
 			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		ret = recv(fd, *buf + bufofs, extralen, 0);
+		ret = recv(cs->fd, cs->buf + bufofs, extralen, 0);
 		if (ret != extralen) {
 			LOGNOTICE("Failed to recv %d bytes in read_socket_line", (int)buflen);
 			ret = -1;
@@ -466,12 +466,12 @@ retry:
 		}
 		bufofs += ret;
 	}
-	eom = *buf + bufofs;
+	eom = cs->buf + bufofs;
 	eom[0] = '\0';
 	ret = bufofs + 1;
 out:
 	if (ret < 1)
-		dealloc(buf);
+		dealloc(cs->buf);
 	return ret;
 }
 
