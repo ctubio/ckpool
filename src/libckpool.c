@@ -395,6 +395,33 @@ void align_len(size_t *len)
 		*len += 4 - (*len % 4);
 }
 
+void realloc_strcat(char **ptr, const char *s)
+{
+	size_t old, new, len;
+	char *ofs;
+
+	if (unlikely(!*s)) {
+		LOGWARNING("Passed empty pointer to realloc_strcat");
+		return;
+	}
+	new = strlen(s);
+	if (unlikely(!new)) {
+		LOGWARNING("Passed empty string to realloc_strcat");
+		return;
+	}
+	if (!*ptr)
+		old = 0;
+	else
+		old = strlen(*ptr);
+	len = old + new + 1;
+	align_len(&len);
+	*ptr = realloc(*ptr, len);
+	if (!*ptr)
+		quit(1, "Failed to realloc ptr of size %d in realloc_strcat", (int)len);
+	ofs = *ptr + old;
+	sprintf(ofs, "%s", s);
+}
+
 /* Adequate size s==len*2 + 1 must be alloced to use this variant */
 void __bin2hex(uchar *s, const uchar *p, size_t len)
 {
