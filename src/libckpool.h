@@ -77,6 +77,8 @@
 	exit(status); \
 } while (0)
 
+#define PAGESIZE (4096)
+
 /* cgminer locks, a write biased variant of rwlocks */
 struct cklock {
 	pthread_mutex_t mutex;
@@ -139,6 +141,7 @@ void noblock_socket(int fd);
 void block_socket(int fd);
 int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
+int read_socket_line(int fd, void **buf);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);

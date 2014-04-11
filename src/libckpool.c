@@ -390,7 +390,7 @@ out:
 
 int write_socket(int fd, const void *buf, size_t nbyte)
 {
-	struct timeval tv_timeout = {1, 0};
+	tv_t tv_timeout = {1, 0};
 	fd_set writefds;
 	int ret;
 
@@ -411,6 +411,67 @@ retry:
 	if (ret < 0)
 		LOGWARNING("Failed to write in write_socket");
 out:
+	return ret;
+}
+
+/* Peek in a socket, and then receive only one line at a time, allocing enough
+ * memory in *buf */
+int read_socket_line(int fd, void **buf)
+{
+	char readbuf[PAGESIZE], *eom = NULL;
+	size_t buflen = 0, bufofs = 0;
+	tv_t timeout = {1, 0};
+	int ret, bufsiz;
+	fd_set rd;
+
+	*buf = NULL;
+retry:
+	FD_ZERO(&rd);
+	FD_SET(fd, &rd);
+	ret = select(fd + 1, &rd, NULL, NULL, &timeout);
+	if (ret < 0 && interrupted())
+		goto retry;
+	if (ret < 1) {
+		if (!ret)
+			LOGNOTICE("Select timed out in read_socket_line");
+		else
+			LOGNOTICE("Select failed in read_socket_line with errno %d", errno);
+		goto out;
+	}
+	bufsiz = PAGESIZE;
+	readbuf[bufsiz - 1] = '\0';
+	while (!eom) {
+		int extralen;
+
+		ret = recv(fd, readbuf, bufsiz - 2, MSG_PEEK);
+		if (ret < 1) {
+			LOGNOTICE("Failed to recv in read_socket_line");
+			goto out;
+		}
+		eom = strchr(readbuf, '\n');
+		if (eom)
+			extralen = eom - readbuf + 1;
+		else
+			extralen = ret;
+		buflen += extralen + 1;
+		align_len(&buflen);
+		*buf = realloc(*buf, buflen);
+		if (unlikely(!*buf))
+			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
+		ret = recv(fd, *buf + bufofs, extralen, 0);
+		if (ret != extralen) {
+			LOGNOTICE("Failed to recv %d bytes in read_socket_line", (int)buflen);
+			ret = -1;
+			goto out;
+		}
+		bufofs += ret;
+	}
+	eom = *buf + bufofs;
+	eom[0] = '\0';
+	ret = bufofs + 1;
+out:
+	if (ret < 1)
+		dealloc(buf);
 	return ret;
 }
 
