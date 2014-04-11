@@ -388,6 +388,32 @@ out:
 	return sockd;
 }
 
+int write_socket(int fd, const void *buf, size_t nbyte)
+{
+	struct timeval tv_timeout = {1, 0};
+	fd_set writefds;
+	int ret;
+
+retry:
+	FD_ZERO(&writefds);
+	FD_SET(fd, &writefds);
+	ret = select(fd + 1, NULL, &writefds, NULL, &tv_timeout);
+	if (ret < 0 && interrupted())
+		goto retry;
+	if (ret < 1) {
+		if (!ret)
+			LOGNOTICE("Select timed out in write_socket");
+		else
+			LOGNOTICE("Select failed in write_socket with errno %d", errno);
+		goto out;
+	}
+	ret = write(fd, buf, nbyte);
+	if (ret < 0)
+		LOGWARNING("Failed to write in write_socket");
+out:
+	return ret;
+}
+
 /* Align a size_t to 4 byte boundaries for fussy arches */
 void align_len(size_t *len)
 {
