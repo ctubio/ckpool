@@ -137,7 +137,7 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);
 void keep_sockalive(int fd);
 void noblock_socket(int fd);
 void block_socket(int fd);
-bool sock_connecting(void);
+int connect_socket(char *url, char *port);
 
 void align_len(size_t *len);
 void __bin2hex(uchar *s, const uchar *p, size_t len);

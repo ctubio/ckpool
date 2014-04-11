@@ -11,6 +11,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -311,6 +312,80 @@ void block_socket(int fd)
 	int flags = fcntl(fd, F_GETFL, 0);
 
 	fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+}
+
+int connect_socket(char *url, char *port)
+{
+	struct addrinfo servinfobase, *servinfo, hints, *p;
+	int sockd = -1;
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	servinfo = &servinfobase;
+
+	if (getaddrinfo(url, port, &hints, &servinfo) != 0) {
+		LOGWARNING("Failed to resolve (?wrong URL) %s:%s", url, port);
+		goto out;
+	}
+
+	for (p = servinfo; p != NULL; p = p->ai_next) {
+		sockd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+		if (sockd == -1) {
+			LOGDEBUG("Failed socket");
+			continue;
+		}
+
+		/* Iterate non blocking over entries returned by getaddrinfo
+		 * to cope with round robin DNS entries, finding the first one
+		 * we can connect to quickly. */
+		noblock_socket(sockd);
+		if (connect(sockd, p->ai_addr, p->ai_addrlen) == -1) {
+			struct timeval tv_timeout = {1, 0};
+			int selret;
+			fd_set rw;
+
+			if (!sock_connecting()) {
+				close(sockd);
+				LOGDEBUG("Failed sock connect");
+				continue;
+			}
+retry:
+			FD_ZERO(&rw);
+			FD_SET(sockd, &rw);
+			selret = select(sockd + 1, NULL, &rw, NULL, &tv_timeout);
+			if  (selret > 0 && FD_ISSET(sockd, &rw)) {
+				socklen_t len;
+				int err, n;
+
+				len = sizeof(err);
+				n = getsockopt(sockd, SOL_SOCKET, SO_ERROR, (void *)&err, &len);
+				if (!n && !err) {
+					LOGDEBUG("Succeeded delayed connect");
+					block_socket(sockd);
+					break;
+				}
+			}
+			if (selret < 0 && interrupted())
+				goto retry;
+			close(sockd);
+			sockd = -1;
+			LOGDEBUG("Select timeout/failed connect");
+			continue;
+		}
+		LOGDEBUG("Succeeded immediate connect");
+		if (sockd >= 0)
+			block_socket(sockd);
+
+		break;
+	}
+	if (p == NULL) {
+		LOGNOTICE("Failed to connect to %s:%s", url, port);
+		sockd = -1;
+	}
+	freeaddrinfo(servinfo);
+out:
+	return sockd;
 }
 
 /* Align a size_t to 4 byte boundaries for fussy arches */
