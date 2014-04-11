@@ -141,6 +141,7 @@ int connect_socket(char *url, char *port);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
+void dealloc(void **ptr);
 void __bin2hex(uchar *s, const uchar *p, size_t len);
 void *bin2hex(const uchar *p, size_t len);
 bool hex2bin(uchar *p, const uchar *hexstr, size_t len);

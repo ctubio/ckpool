@@ -422,6 +422,12 @@ void realloc_strcat(char **ptr, const char *s)
 	sprintf(ofs, "%s", s);
 }
 
+void dealloc(void **ptr)
+{
+	free(*ptr);
+	*ptr = NULL;
+}
+
 /* Adequate size s==len*2 + 1 must be alloced to use this variant */
 void __bin2hex(uchar *s, const uchar *p, size_t len)
 {
