@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <syslog.h>
 
 #define mutex_lock(_lock) _mutex_lock(_lock, __FILE__, __func__, __LINE__)
 #define mutex_unlock_noyield(_lock) _mutex_unlock_noyield(_lock, __FILE__, __func__, __LINE__)
@@ -42,6 +43,20 @@
 #define ck_dlock(_lock) _ck_dlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_runlock(_lock) _ck_runlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_wunlock(_lock) _ck_wunlock(_lock, __FILE__, __func__, __LINE__)
+
+/* Placeholders for when we have more comprehensive logging facilities */
+#define LOGERR(fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+} while (0)
+
+#define LOGWARNING(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
+#define LOGNOTICE(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
+#define LOGINFO(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
+#define LOGDEBUG(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
 
 #define IN_FMT_FFL " in %s %s():%d"
 #define quitfrom(status, _file, _func, _line, fmt, ...) do { \
