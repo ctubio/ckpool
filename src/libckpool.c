@@ -496,9 +496,9 @@ void empty_socket(int fd)
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
+	char http_req[PAGESIZE];
 	json_error_t err_val;
 	json_t *val = NULL;
-	char *http_req = NULL, base_req[PAGESIZE];
 	int len, ret;
 
 	if (unlikely(cs->fd < 0)) {
@@ -526,15 +526,13 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("Zero length rpc_req passed to json_rpc_call");
 		goto out;
 	}
-	snprintf(base_req, PAGESIZE,
+	snprintf(http_req, PAGESIZE,
 		 "POST / HTTP/1.1\n"
 		 "Authorization: Basic %s\n"
 		 "Host: %s:%s\n"
 		 "Content-type: application/json\n"
-		 "Content-Length: %d\n\n",
-		 cs->auth, cs->url, cs->port, len);
-	http_req = strdup(base_req);
-	realloc_strcat(&http_req, rpc_req);
+		 "Content-Length: %d\n\n%s",
+		 cs->auth, cs->url, cs->port, len, rpc_req);
 
 	len = strlen(http_req);
 	ret = write_socket(cs->fd, http_req, len);
@@ -567,7 +565,6 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
 out:
 	dealloc(&cs->buf);
-	free(http_req);
 	return val;
 }
 
