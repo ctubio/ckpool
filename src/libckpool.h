@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <syslog.h>
+#include <jansson.h>
 
 #define mutex_lock(_lock) _mutex_lock(_lock, __FILE__, __func__, __LINE__)
 #define mutex_unlock_noyield(_lock) _mutex_unlock_noyield(_lock, __FILE__, __func__, __LINE__)
@@ -154,6 +155,8 @@ void block_socket(int fd);
 int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
 int read_socket_line(connsock_t *cs);
+void empty_socket(int fd);
+json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);

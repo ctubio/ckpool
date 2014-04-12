@@ -424,7 +424,7 @@ int read_socket_line(connsock_t *cs)
 	int ret, bufsiz;
 	fd_set rd;
 
-	cs->buf = NULL;
+	dealloc(&cs->buf);
 retry:
 	FD_ZERO(&rd);
 	FD_SET(cs->fd, &rd);
@@ -471,8 +471,104 @@ retry:
 	ret = bufofs + 1;
 out:
 	if (ret < 1)
-		dealloc(cs->buf);
+		dealloc(&cs->buf);
 	return ret;
+}
+
+void empty_socket(int fd)
+{
+	int ret;
+
+	do {
+		char buf[PAGESIZE];
+		tv_t timeout = {1, 0};
+		fd_set rd;
+
+		FD_ZERO(&rd);
+		FD_SET(fd, &rd);
+		ret = select(fd + 1, &rd, NULL, NULL, &timeout);
+		if (ret < 0 && interrupted())
+			continue;
+		if (ret > 0)
+			ret = recv(fd, buf, PAGESIZE - 1, 0);
+	} while (ret > 0);
+}
+
+json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
+{
+	json_error_t err_val;
+	json_t *val = NULL;
+	char *http_req = NULL, base_req[PAGESIZE];
+	int len, ret;
+
+	if (unlikely(cs->fd < 0)) {
+		LOGWARNING("FD %d invalid in json_rpc_call", cs->fd);
+		goto out;
+	}
+	if (unlikely(!cs->url)) {
+		LOGWARNING("No URL in json_rpc_call");
+		goto out;
+	}
+	if (unlikely(!cs->port)) {
+		LOGWARNING("No port in json_rpc_call");
+		goto out;
+	}
+	if (unlikely(!cs->auth)) {
+		LOGWARNING("No auth in json_rpc_call");
+		goto out;
+	}
+	if (unlikely(!rpc_req)) {
+		LOGWARNING("Null rpc_req passed to json_rpc_call");
+		goto out;
+	}
+	len = strlen(rpc_req);
+	if (unlikely(!len)) {
+		LOGWARNING("Zero length rpc_req passed to json_rpc_call");
+		goto out;
+	}
+	snprintf(base_req, PAGESIZE,
+		 "POST / HTTP/1.1\n"
+		 "Authorization: Basic %s\n"
+		 "Host: %s:%s\n"
+		 "Content-type: application/json\n"
+		 "Content-Length: %d\n\n",
+		 cs->auth, cs->url, cs->port, len);
+	http_req = strdup(base_req);
+	realloc_strcat(&http_req, rpc_req);
+
+	len = strlen(http_req);
+	ret = write_socket(cs->fd, http_req, len);
+	if (ret != len) {
+		LOGWARNING("Failed to write to socket in json_rpc_call");
+		empty_socket(cs->fd);
+		goto out;
+	}
+	ret = read_socket_line(cs);
+	if (ret < 1) {
+		LOGWARNING("Failed to read socket line in json_rpc_call");
+		goto out;
+	}
+	if (strncasecmp(cs->buf, "HTTP/1.1 200 OK", 15)) {
+		LOGWARNING("HTTP response not ok: %s", cs->buf);
+		empty_socket(cs->fd);
+			goto out;
+	}
+	do {
+		ret = read_socket_line(cs);
+		if (ret < 1) {
+			LOGWARNING("Failed to read http socket lines in json_rpc_call");
+			goto out;
+		}
+		val = json_loads(cs->buf, 0, &err_val);
+	} while (strncmp(cs->buf, "{", 1));
+
+	val = json_loads(cs->buf, 0, &err_val);
+	if (!val)
+		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
+out:
+	dealloc(&cs->buf);
+	free(http_req);
+	return val;
 }
 
 /* Align a size_t to 4 byte boundaries for fussy arches */
