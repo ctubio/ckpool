@@ -85,7 +85,7 @@
 
 #define PAGESIZE (4096)
 
-/* cgminer locks, a write biased variant of rwlocks */
+/* ck locks, a write biased variant of rwlocks */
 struct cklock {
 	pthread_mutex_t mutex;
 	pthread_rwlock_t rwlock;
