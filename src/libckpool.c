@@ -24,6 +24,7 @@
 
 #include "ckpool.h"
 #include "libckpool.h"
+#include "sha2.h"
 
 /* Place holders for when we add lock debugging */
 #define GETLOCK(_lock, _file, _func, _line)
@@ -552,7 +553,6 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 			LOGWARNING("Failed to read http socket lines in json_rpc_call");
 			goto out;
 		}
-		val = json_loads(cs->buf, 0, &err_val);
 	} while (strncmp(cs->buf, "{", 1));
 
 	val = json_loads(cs->buf, 0, &err_val);
@@ -1162,4 +1162,12 @@ void target_from_diff(uchar *target, double diff)
 	h64 = d64;
 	data64 = (uint64_t *)(target);
 	*data64 = htole64(h64);
+}
+
+void gen_hash(uchar *data, uchar *hash, int len)
+{
+	uchar hash1[32];
+
+	sha256(data, len, hash1);
+	sha256(hash1, 32, hash);
 }

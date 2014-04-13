@@ -109,9 +109,10 @@ struct gbtbase {
 	double sdiff;
 	uint32_t version;
 	uint32_t curtime;
-	uchar ntime[12];
-	uchar bbversion[12];
-	uchar nbit[12];
+	uchar prev_hash[68];
+	char ntime[12];
+	char bbversion[12];
+	char nbit[12];
 	int nValue;
 	uint32_t bits;
 	int height;
@@ -234,5 +235,7 @@ double le256todouble(const uchar *target);
 double diff_from_target(uchar *target);
 double diff_from_header(uchar *header);
 void target_from_diff(uchar *target, double diff);
+
+void gen_hash(uchar *data, uchar *hash, int len);
 
 #endif /* LIBCKPOOL_H */

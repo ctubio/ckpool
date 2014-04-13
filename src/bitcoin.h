@@ -11,5 +11,6 @@
 #define BITCOIN_H
 
 bool validate_address(connsock_t *cs, const char *address);
+bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt);
 
 #endif /* BITCOIN_H */
