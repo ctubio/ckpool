@@ -116,14 +116,6 @@ struct gbtbase {
 	int nValue;
 	uint32_t bits;
 	int height;
-	char scriptsig_base[100];
-	int nonce2_offset;
-	size_t n1_len;
-	char *coinbase;
-	uint64_t nonce2;
-	int n2size;
-	int coinbase_len;
-	uchar header_bin[128];
 	char *txn_data;
 	uchar *txn_hashes;
 	int transactions;
