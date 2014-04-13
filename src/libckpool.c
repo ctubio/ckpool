@@ -259,15 +259,10 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 	}
 
 	hlen = url_len + 1;
-	align_len(&hlen);
-	url_address = malloc(hlen);
-	if (unlikely(!url_address))
-		quit(1, "Failed to malloc url_address of length %d in extract_sockaddr", (int)hlen);
+	url_address = ckalloc(hlen);
 	sprintf(url_address, "%.*s", url_len, url_begin);
 
-	port = malloc(8);
-	if (unlikely(!port))
-		quit(1, "Failed to malloc port in extract_sockaddr");
+	port = ckalloc(8);
 	if (port_len) {
 		char *slash;
 
@@ -424,7 +419,7 @@ int read_socket_line(connsock_t *cs)
 	int ret, bufsiz;
 	fd_set rd;
 
-	dealloc(&cs->buf);
+	dealloc(cs->buf);
 retry:
 	FD_ZERO(&rd);
 	FD_SET(cs->fd, &rd);
@@ -471,7 +466,7 @@ retry:
 	ret = bufofs + 1;
 out:
 	if (ret < 1)
-		dealloc(&cs->buf);
+		dealloc(cs->buf);
 	return ret;
 }
 
@@ -564,7 +559,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 	if (!val)
 		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
 out:
-	dealloc(&cs->buf);
+	dealloc(cs->buf);
 	return val;
 }
 
@@ -602,6 +597,28 @@ void realloc_strcat(char **ptr, const char *s)
 	sprintf(ofs, "%s", s);
 }
 
+void *_ckalloc(size_t len, const char *file, const char *func, const int line)
+{
+	void *ptr;
+
+	align_len(&len);
+	ptr = malloc(len);
+	if (unlikely(!ptr))
+		quitfrom(1, file, func, line, "Failed to ckalloc! errno=%d", errno);
+	return ptr;
+}
+
+void *_ckzalloc(size_t len, const char *file, const char *func, const int line)
+{
+	void *ptr;
+
+	align_len(&len);
+	ptr = calloc(len, 1);
+	if (unlikely(!ptr))
+		quitfrom(1, file, func, line, "Failed to ckalloc! errno=%d", errno);
+	return ptr;
+}
+
 void _dealloc(void **ptr)
 {
 	free(*ptr);
@@ -630,14 +647,9 @@ void *bin2hex(const uchar *p, size_t len)
 	uchar *s;
 
 	slen = len * 2 + 1;
-	align_len(&slen);
-	s = calloc(slen, 1);
-	if (unlikely(!s)) {
-		LOGERR("Failed to calloc s in bin2hex");
-	} else
-		__bin2hex(s, p, len);
+	s = ckzalloc(slen);
+	__bin2hex(s, p, len);
 
-	/* Returns NULL if calloc failed. */
 	return s;
 }
 
@@ -742,10 +754,7 @@ char *http_base64(const char *src)
 
 	l = strlen((const char *)src);
 	hlen = ((l + 2) / 3) * 4 + 1;
-	align_len(&hlen);
-	str = malloc(hlen);
-	if (unlikely(!str))
-		quit(1, "Failed to malloc string of length %d in http_base64", (int)hlen);
+	str = ckalloc(hlen);
 	dst = str;
 	r = 0;
 

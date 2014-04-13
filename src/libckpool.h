@@ -45,7 +45,10 @@
 #define ck_runlock(_lock) _ck_runlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_wunlock(_lock) _ck_wunlock(_lock, __FILE__, __func__, __LINE__)
 
-#define dealloc(ptr) _dealloc((void *)(ptr))
+#define ckalloc(len) _ckalloc(len, __FILE__, __func__, __LINE__)
+#define ckzalloc(len) _ckzalloc(len, __FILE__, __func__, __LINE__)
+
+#define dealloc(ptr) _dealloc((void *)&(ptr))
 
 /* Placeholders for when we have more comprehensive logging facilities */
 #define LOGERR(fmt, ...) do { \
@@ -189,6 +192,8 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
+void *_ckalloc(size_t len, const char *file, const char *func, const int line);
+void *_ckzalloc(size_t len, const char *file, const char *func, const int line);
 void _dealloc(void **ptr);
 void __bin2hex(uchar *s, const uchar *p, size_t len);
 void *bin2hex(const uchar *p, size_t len);
