@@ -1119,7 +1119,7 @@ void target_from_diff(uchar *target, double diff)
 
 	if (unlikely(diff == 0.0)) {
 		/* This shouldn't happen but best we check to prevent a crash */
-		memset(target, 0, 32);
+		memset(target, 0xff, 32);
 		return;
 	}
 
