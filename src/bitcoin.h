@@ -7,4 +7,9 @@
  * any later version.  See COPYING for more details.
  */
 
+#ifndef BITCOIN_H
+#define BITCOIN_H
+
 bool validate_address(connsock_t *cs, const char *address);
+
+#endif /* BITCOIN_H */
