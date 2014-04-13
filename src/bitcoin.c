@@ -78,9 +78,10 @@ out:
 
 static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 {
-	char hashhex[68], *hashbin;
 	int i, j, binleft, binlen;
+	char hashhex[68];
 	json_t *arr_val;
+	uchar *hashbin;
 
 	dealloc(gbt->txn_data);
 	gbt->transactions = 0;

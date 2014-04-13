@@ -626,9 +626,11 @@ void _dealloc(void **ptr)
 }
 
 /* Adequate size s==len*2 + 1 must be alloced to use this variant */
-void __bin2hex(uchar *s, const uchar *p, size_t len)
+void __bin2hex(void *vs, const void *vp, size_t len)
 {
 	static const char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+	const uchar *p = vp;
+	uchar *s = vs;
 	int i;
 
 	for (i = 0; i < (int)len; i++) {
@@ -641,8 +643,9 @@ void __bin2hex(uchar *s, const uchar *p, size_t len)
 /* Returns a malloced array string of a binary value of arbitrary length. The
  * array is rounded up to a 4 byte size to appease architectures that need
  * aligned array  sizes */
-void *bin2hex(const uchar *p, size_t len)
+void *bin2hex(const void *vp, size_t len)
 {
+	const uchar *p = vp;
 	size_t slen;
 	uchar *s;
 
@@ -673,11 +676,13 @@ static const int hex2bin_tbl[256] = {
 };
 
 /* Does the reverse of bin2hex but does not allocate any ram */
-bool hex2bin(uchar *p, const uchar *hexstr, size_t len)
+bool hex2bin(void *vp, const void *vhexstr, size_t len)
 {
+	const uchar *hexstr = vhexstr;
 	int nibble1, nibble2;
-	uchar idx;
 	bool ret = false;
+	uchar *p = vp;
+	uchar idx;
 
 	while (*hexstr && len) {
 		if (unlikely(!hexstr[1])) {

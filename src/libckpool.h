@@ -196,9 +196,9 @@ void realloc_strcat(char **ptr, const char *s);
 void *_ckalloc(size_t len, const char *file, const char *func, const int line);
 void *_ckzalloc(size_t len, const char *file, const char *func, const int line);
 void _dealloc(void **ptr);
-void __bin2hex(uchar *s, const uchar *p, size_t len);
-void *bin2hex(const uchar *p, size_t len);
-bool hex2bin(uchar *p, const uchar *hexstr, size_t len);
+void __bin2hex(void *vs, const void *vp, size_t len);
+void *bin2hex(const void *vp, size_t len);
+bool hex2bin(void *p, const void *vhexstr, size_t len);
 char *http_base64(const char *src);
 void b58tobin(char *b58bin, const char *b58);
 
