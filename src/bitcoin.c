@@ -260,13 +260,14 @@ out:
 	return ret;
 }
 
-/* Request getblockhash from bitcoind for height, returning a freshly allocated
- * string or NULL if it fails. */
-char *get_blockhash(connsock_t *cs, int height)
+/* Request getblockhash from bitcoind for height, writing the value into *hash
+ * which should be at least 65 bytes long since the hash is 64 chars. */
+bool get_blockhash(connsock_t *cs, int height, char *hash)
 {
-	char rpc_req[128], *ret = NULL;
 	json_t *val, *res_val;
 	const char *res_ret;
+	char rpc_req[128];
+	bool ret = false;
 
 	sprintf(rpc_req, "{\"method\": \"getblockhash\", \"params\": [%d]}\n", height);
 	val = json_rpc_call(cs, rpc_req);
@@ -284,7 +285,8 @@ char *get_blockhash(connsock_t *cs, int height)
 		LOGWARNING("Got null string in result to getblockhash");
 		goto out;
 	}
-	ret = strdup(res_ret);
+	strncpy(hash, res_ret, 65);
+	ret = true;
 out:
 	json_decref(val);
 	return ret;
@@ -292,13 +294,12 @@ out:
 
 static const char *bestblockhash_req = "{\"method\": \"getbestblockhash\"}\n";
 
-/* Request getbestblockhash from bitcoind, returning a freshly allocated
- * string or NULL if it fails. bitcoind 0.9+ only */
-char *get_bestblockhash(connsock_t *cs)
+/* Request getbestblockhash from bitcoind. bitcoind 0.9+ only */
+bool get_bestblockhash(connsock_t *cs, char *hash)
 {
 	json_t *val, *res_val;
 	const char *res_ret;
-	char *ret = NULL;
+	bool ret = false;
 
 	val = json_rpc_call(cs, bestblockhash_req);
 	if (!val) {
@@ -315,7 +316,8 @@ char *get_bestblockhash(connsock_t *cs)
 		LOGWARNING("Got null string in result to getbestblockhash");
 		goto out;
 	}
-	ret = strdup(res_ret);
+	strncpy(hash, res_ret, 65);
+	ret = true;
 out:
 	json_decref(val);
 	return ret;
