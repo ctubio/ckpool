@@ -16,6 +16,8 @@
 
 static const char *b58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
+/* Take a bitcoin address and do some sanity checks on it, then send it to
+ * bitcoind to see if it's a valid address */
 bool validate_address(connsock_t *cs, const char *address)
 {
 	json_t *val, *res_val, *valid_val;
@@ -76,6 +78,8 @@ out:
 	return ret;
 }
 
+/* Distill down a set of transactions into an efficient tree arrangement for
+ * stratum messages and fast work assembly. */
 static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 {
 	int i, j, binleft, binlen;
@@ -166,6 +170,9 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 
 static const char *gbt_req = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"]}]}\n";
 
+/* Request getblocktemplate from bitcoind already connected with a connsock_t
+ * and then summarise the information to the most efficient set of data
+ * required to assemble a mining template, storing it in a gbtbase_t structure */
 bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 {
 	json_t *transaction_arr, *coinbase_aux, *res_val, *val;
@@ -188,7 +195,7 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	res_val = json_object_get(val, "result");
 	if (!res_val) {
 		LOGWARNING("Failed to get result in json response to getblocktemplate");
-		return ret;
+		goto out;
 	}
 
 	previousblockhash = json_string_value(json_object_get(res_val, "previousblockhash"));
@@ -224,7 +231,92 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	gbt->height = height;
 
 out:
-	if (res_val)
-		json_decref(res_val);
+	json_decref(val);
+	return ret;
+}
+
+static const char *blockcount_req = "{\"method\": \"getblockcount\"}\n";
+
+/* Request getblockcount from bitcoind, returning the count or -1 if the call
+ * fails. */
+int get_blockcount(connsock_t *cs)
+{
+	json_t *val, *res_val;
+	int ret = -1;
+
+	val = json_rpc_call(cs, blockcount_req);
+	if (!val) {
+		LOGWARNING("Failed to get valid json response to getblockcount");
+		return ret;
+	}
+	res_val = json_object_get(val, "result");
+	if (!res_val) {
+		LOGWARNING("Failed to get result in json response to getblockcount");
+		goto out;
+	}
+	ret = json_integer_value(res_val);
+out:
+	json_decref(val);
+	return ret;
+}
+
+/* Request getblockhash from bitcoind for height, returning a freshly allocated
+ * string or NULL if it fails. */
+char *get_blockhash(connsock_t *cs, int height)
+{
+	char rpc_req[128], *ret = NULL;
+	json_t *val, *res_val;
+	const char *res_ret;
+
+	sprintf(rpc_req, "{\"method\": \"getblockhash\", \"params\": [%d]}\n", height);
+	val = json_rpc_call(cs, rpc_req);
+	if (!val) {
+		LOGWARNING("Failed to get valid json response to getblockhash");
+		return ret;
+	}
+	res_val = json_object_get(val, "result");
+	if (!res_val) {
+		LOGWARNING("Failed to get result in json response to getblockhash");
+		goto out;
+	}
+	res_ret = json_string_value(res_val);
+	if (!res_ret || !strlen(res_ret)) {
+		LOGWARNING("Got null string in result to getblockhash");
+		goto out;
+	}
+	ret = strdup(res_ret);
+out:
+	json_decref(val);
+	return ret;
+}
+
+static const char *bestblockhash_req = "{\"method\": \"getbestblockhash\"}\n";
+
+/* Request getbestblockhash from bitcoind, returning a freshly allocated
+ * string or NULL if it fails. bitcoind 0.9+ only */
+char *get_bestblockhash(connsock_t *cs)
+{
+	json_t *val, *res_val;
+	const char *res_ret;
+	char *ret = NULL;
+
+	val = json_rpc_call(cs, bestblockhash_req);
+	if (!val) {
+		LOGWARNING("Failed to get valid json response to getbestblockhash");
+		return ret;
+	}
+	res_val = json_object_get(val, "result");
+	if (!res_val) {
+		LOGWARNING("Failed to get result in json response to getbestblockhash");
+		goto out;
+	}
+	res_ret = json_string_value(res_val);
+	if (!res_ret || !strlen(res_ret)) {
+		LOGWARNING("Got null string in result to getbestblockhash");
+		goto out;
+	}
+	ret = strdup(res_ret);
+out:
+	json_decref(val);
 	return ret;
 }
