@@ -21,7 +21,7 @@ static const char *b58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopq
 bool validate_address(connsock_t *cs, const char *address)
 {
 	json_t *val, *res_val, *valid_val;
-	char rpc_req[256];
+	char rpc_req[128];
 	bool ret = false;
 	int len, i, j;
 
@@ -50,7 +50,7 @@ bool validate_address(connsock_t *cs, const char *address)
 		}
 	}
 
-	snprintf(rpc_req, 256, "{\"method\": \"validateaddress\", \"params\": [\"%s\"]}\n", address);
+	snprintf(rpc_req, 128, "{\"method\": \"validateaddress\", \"params\": [\"%s\"]}\n", address);
 	val = json_rpc_call(cs, rpc_req);
 	if (!val) {
 		LOGERR("Failed to get valid json response to validate_address");
