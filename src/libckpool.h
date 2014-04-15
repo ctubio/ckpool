@@ -120,7 +120,8 @@ struct gbtbase {
 	uchar *txn_hashes;
 	int transactions;
 	int merkles;
-	uchar merklebin[16 * 32];
+	uchar merklebin[16][32];
+	char merklehash[16][68];
 };
 
 typedef struct gbtbase gbtbase_t;

@@ -83,7 +83,6 @@ out:
 static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 {
 	int i, j, binleft, binlen;
-	char hashhex[68];
 	json_t *arr_val;
 	uchar *hashbin;
 
@@ -147,7 +146,7 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 		while (42) {
 			if (binleft == 1)
 				break;
-			memcpy(gbt->merklebin + (gbt->merkles * 32), hashbin + 32, 32);
+			memcpy(&gbt->merklebin[gbt->merkles][0], hashbin + 32, 32);
 			gbt->merkles++;
 			if (binleft % 2) {
 				memcpy(hashbin + binlen, hashbin + binlen - 32, 32);
@@ -161,8 +160,8 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 		}
 	}
 	for (i = 0; i < gbt->merkles; i++) {
-		__bin2hex(hashhex, gbt->merklebin + i * 32, 32);
-		LOGDEBUG("MH%d %s",i, hashhex);
+		__bin2hex(&gbt->merklehash[i][0], &gbt->merklebin[i][0], 32);
+		LOGDEBUG("MH%d %s",i, &gbt->merklehash[i][0]);
 	}
 	LOGINFO("Stored %d transactions", gbt->transactions);
 	return true;
