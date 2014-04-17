@@ -54,6 +54,8 @@
 #define LOGERR(fmt, ...) do { \
 	if (fmt) { \
 		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		if (errno)\
+			fprintf(stderr, " with errno %d:%s", errno, strerror(errno)); \
 		fprintf(stderr, "\n"); \
 		fflush(stderr); \
 	} \
@@ -77,6 +79,8 @@
 #define quit(status, fmt, ...) do { \
 	if (fmt) { \
 		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		if (status || errno)\
+			fprintf(stderr, " with errno %d:%s", errno, strerror(errno)); \
 		fprintf(stderr, "\n"); \
 		fflush(stderr); \
 	} \

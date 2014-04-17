@@ -47,14 +47,14 @@ void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, cons
 {
 	GETLOCK(lock, file, func, line);
 	if (unlikely(pthread_mutex_lock(lock)))
-		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK! errno=%d", errno);
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK!");
 	GOTLOCK(lock, file, func, line);
 }
 
 void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_unlock(lock)))
-		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK! errno=%d", errno);
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK!");
 	GUNLOCK(lock, file, func, line);
 }
 
@@ -76,7 +76,7 @@ void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const 
 {
 	GETLOCK(lock, file, func, line);
 	if (unlikely(pthread_rwlock_wrlock(lock)))
-		quitfrom(1, file, func, line, "WTF WRLOCK ERROR ON LOCK! errno=%d", errno);
+		quitfrom(1, file, func, line, "WTF WRLOCK ERROR ON LOCK!");
 	GOTLOCK(lock, file, func, line);
 }
 
@@ -92,14 +92,14 @@ void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const 
 {
 	GETLOCK(lock, file, func, line);
 	if (unlikely(pthread_rwlock_rdlock(lock)))
-		quitfrom(1, file, func, line, "WTF RDLOCK ERROR ON LOCK! errno=%d", errno);
+		quitfrom(1, file, func, line, "WTF RDLOCK ERROR ON LOCK!");
 	GOTLOCK(lock, file, func, line);
 }
 
 void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_unlock(lock)))
-		quitfrom(1, file, func, line, "WTF RWLOCK ERROR ON UNLOCK! errno=%d", errno);
+		quitfrom(1, file, func, line, "WTF RWLOCK ERROR ON UNLOCK!");
 	GUNLOCK(lock, file, func, line);
 }
 
@@ -128,7 +128,7 @@ void _wr_unlock(pthread_rwlock_t *lock, const char *file, const char *func, cons
 void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_init(lock, NULL)))
-		quitfrom(1, file, func, line, "Failed to pthread_mutex_init errno=%d", errno);
+		quitfrom(1, file, func, line, "Failed to pthread_mutex_init");
 	INITLOCK(lock, CGLOCK_MUTEX, file, func, line);
 }
 
@@ -142,7 +142,7 @@ void mutex_destroy(pthread_mutex_t *lock)
 void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_init(lock, NULL)))
-		quitfrom(1, file, func, line, "Failed to pthread_rwlock_init errno=%d", errno);
+		quitfrom(1, file, func, line, "Failed to pthread_rwlock_init");
 	INITLOCK(lock, CGLOCK_RW, file, func, line);
 }
 
@@ -410,7 +410,7 @@ retry:
 		if (!ret)
 			LOGNOTICE("Select timed out in write_socket");
 		else
-			LOGNOTICE("Select failed in write_socket with errno %d", errno);
+			LOGERR("Select failed in write_socket");
 		goto out;
 	}
 	ret = write(fd, buf, nbyte);
@@ -441,7 +441,7 @@ retry:
 		if (!ret)
 			LOGNOTICE("Select timed out in read_socket_line");
 		else
-			LOGNOTICE("Select failed in read_socket_line with errno %d", errno);
+			LOGERR("Select failed in read_socket_line");
 		goto out;
 	}
 	bufsiz = PAGESIZE;
@@ -518,7 +518,7 @@ int open_unix_server(const char *server_path)
 
 	sockd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (unlikely(sockd < 0)) {
-		LOGERR("Failed to open socket in open_unix_server with errno %d", errno);
+		LOGERR("Failed to open socket in open_unix_server");
 		goto out;
 	}
 	memset(&serveraddr, 0, sizeof(serveraddr));
@@ -527,7 +527,7 @@ int open_unix_server(const char *server_path)
 
 	ret = bind(sockd, (struct sockaddr *)&serveraddr, sizeof(&serveraddr));
 	if (unlikely(ret < 0)) {
-		LOGERR("Failed to bind to socket in open_unix_server with errno %d", errno);
+		LOGERR("Failed to bind to socket in open_unix_server");
 		close(sockd);
 		sockd = -1;
 		goto out;
@@ -535,7 +535,7 @@ int open_unix_server(const char *server_path)
 
 	ret = listen(sockd, 1);
 	if (unlikely(ret < 0)) {
-		LOGERR("Failed to listen to socket in open_unix_server with errno %d", errno);
+		LOGERR("Failed to listen to socket in open_unix_server");
 		close(sockd);
 		sockd = -1;
 		goto out;
@@ -661,7 +661,7 @@ void *_ckalloc(size_t len, const char *file, const char *func, const int line)
 	align_len(&len);
 	ptr = malloc(len);
 	if (unlikely(!ptr))
-		quitfrom(1, file, func, line, "Failed to ckalloc! errno=%d", errno);
+		quitfrom(1, file, func, line, "Failed to ckalloc!");
 	return ptr;
 }
 
@@ -672,7 +672,7 @@ void *_ckzalloc(size_t len, const char *file, const char *func, const int line)
 	align_len(&len);
 	ptr = calloc(len, 1);
 	if (unlikely(!ptr))
-		quitfrom(1, file, func, line, "Failed to ckalloc! errno=%d", errno);
+		quitfrom(1, file, func, line, "Failed to ckalloc!");
 	return ptr;
 }
 
