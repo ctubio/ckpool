@@ -182,6 +182,8 @@ int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
 int read_socket_line(connsock_t *cs);
 void empty_socket(int fd);
+int open_unix_server(const char *server_path);
+
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
 void align_len(size_t *len);

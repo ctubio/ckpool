@@ -11,6 +11,11 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#ifdef HAVE_LINUX_UN_H
+#include <linux/un.h>
+#else
+#include <sys/un.h>
+#endif
 #include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -25,6 +30,10 @@
 #include "ckpool.h"
 #include "libckpool.h"
 #include "sha2.h"
+
+#ifndef UNIX_PATH_MAX
+#define UNIX_PATH_MAX 108
+#endif
 
 /* Place holders for when we add lock debugging */
 #define GETLOCK(_lock, _file, _func, _line)
@@ -219,6 +228,7 @@ void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int l
 	_wr_unlock_noyield(&lock->rwlock, file, func, line);
 	_mutex_unlock(&lock->mutex, file, func, line);
 }
+
 
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 {
@@ -489,6 +499,53 @@ void empty_socket(int fd)
 			ret = recv(fd, buf, PAGESIZE - 1, 0);
 	} while (ret > 0);
 }
+
+int open_unix_server(const char *server_path)
+{
+	struct sockaddr_un serveraddr;
+	int sockd = -1, len, ret;
+
+	if (likely(server_path)) {
+		len = strlen(server_path);
+		if (unlikely(len < 1 || len > UNIX_PATH_MAX)) {
+			LOGERR("Invalid server path length %d in open_unix_server", len);
+			goto out;
+		}
+	} else {
+		LOGERR("Null passed as server_path to open_unix_server");
+		goto out;
+	}
+
+	sockd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (unlikely(sockd < 0)) {
+		LOGERR("Failed to open socket in open_unix_server with errno %d", errno);
+		goto out;
+	}
+	memset(&serveraddr, 0, sizeof(serveraddr));
+	serveraddr.sun_family = AF_UNIX;
+	strcpy(serveraddr.sun_path, server_path);
+
+	ret = bind(sockd, (struct sockaddr *)&serveraddr, sizeof(&serveraddr));
+	if (unlikely(ret < 0)) {
+		LOGERR("Failed to bind to socket in open_unix_server with errno %d", errno);
+		close(sockd);
+		sockd = -1;
+		goto out;
+	}
+
+	ret = listen(sockd, 1);
+	if (unlikely(ret < 0)) {
+		LOGERR("Failed to listen to socket in open_unix_server with errno %d", errno);
+		close(sockd);
+		sockd = -1;
+		goto out;
+	}
+
+	LOGDEBUG("Opened server path %s successfully on socket %d", server_path, sockd);
+out:
+	return sockd;
+}
+
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
