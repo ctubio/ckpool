@@ -61,10 +61,18 @@
 	} \
 } while (0)
 
-#define LOGWARNING(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
-#define LOGNOTICE(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
-#define LOGINFO(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
-#define LOGDEBUG(fmt, ...) LOGERR(fmt, ##__VA_ARGS__)
+#define LOGMSG(fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+} while (0)
+
+#define LOGWARNING(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
+#define LOGNOTICE(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
+#define LOGINFO(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
+#define LOGDEBUG(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
 
 #define IN_FMT_FFL " in %s %s():%d"
 #define quitfrom(status, _file, _func, _line, fmt, ...) do { \
