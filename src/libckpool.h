@@ -107,29 +107,6 @@ struct connsock {
 
 typedef struct connsock connsock_t;
 
-struct gbtbase {
-	uchar previousblockhash[32];
-	uchar target[32];
-	double sdiff;
-	uint32_t version;
-	uint32_t curtime;
-	uchar prev_hash[68];
-	char ntime[12];
-	char bbversion[12];
-	char nbit[12];
-	int nValue;
-	uint32_t bits;
-	int height;
-	char *txn_data;
-	uchar *txn_hashes;
-	int transactions;
-	int merkles;
-	uchar merklebin[16][32];
-	char merklehash[16][68];
-};
-
-typedef struct gbtbase gbtbase_t;
-
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line);

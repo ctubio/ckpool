@@ -13,6 +13,7 @@
 
 #include "ckpool.h"
 #include "libckpool.h"
+#include "bitcoin.h"
 
 static const char *b58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 

@@ -10,6 +10,29 @@
 #ifndef BITCOIN_H
 #define BITCOIN_H
 
+struct gbtbase {
+	uchar previousblockhash[32];
+	uchar target[32];
+	double sdiff;
+	uint32_t version;
+	uint32_t curtime;
+	uchar prev_hash[68];
+	char ntime[12];
+	char bbversion[12];
+	char nbit[12];
+	int nValue;
+	uint32_t bits;
+	int height;
+	char *txn_data;
+	uchar *txn_hashes;
+	int transactions;
+	int merkles;
+	uchar merklebin[16][32];
+	char merklehash[16][68];
+};
+
+typedef struct gbtbase gbtbase_t;
+
 bool validate_address(connsock_t *cs, const char *address);
 bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt);
 int get_blockcount(connsock_t *cs);
