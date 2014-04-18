@@ -16,6 +16,7 @@
 #else
 #include <sys/un.h>
 #endif
+#include <sys/stat.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -500,10 +501,23 @@ void empty_socket(int fd)
 	} while (ret > 0);
 }
 
+void close_unix_socket(const int sockd, const char *server_path)
+{
+	int ret;
+
+	ret = close(sockd);
+	if (unlikely(ret < 0))
+		LOGERR("Failed to close sock %d %s", sockd, server_path);
+	ret = unlink(server_path);
+	if (unlikely(ret < 0))
+		LOGERR("Failed to unlink %s", server_path);
+}
+
 int open_unix_server(const char *server_path)
 {
 	struct sockaddr_un serveraddr;
 	int sockd = -1, len, ret;
+	struct stat buf;
 
 	if (likely(server_path)) {
 		len = strlen(server_path);
@@ -514,6 +528,21 @@ int open_unix_server(const char *server_path)
 	} else {
 		LOGERR("Null passed as server_path to open_unix_server");
 		goto out;
+	}
+
+	if (!stat(server_path, &buf)) {
+		if ((buf.st_mode & S_IFMT) == S_IFSOCK) {
+			ret = unlink(server_path);
+			if (ret) {
+				LOGERR("Unlink of %s failed in open_unix_server", server_path);
+				goto out;
+			}
+			LOGDEBUG("Unlinked %s to recreate socket", server_path);
+		} else {
+			LOGWARNING("%s already exists and is not a socket, not removing",
+				   server_path);
+			goto out;
+		}
 	}
 
 	sockd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -528,7 +557,7 @@ int open_unix_server(const char *server_path)
 	ret = bind(sockd, (struct sockaddr *)&serveraddr, sizeof(&serveraddr));
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to bind to socket in open_unix_server");
-		close(sockd);
+		close_unix_socket(sockd, server_path);
 		sockd = -1;
 		goto out;
 	}
@@ -536,7 +565,7 @@ int open_unix_server(const char *server_path)
 	ret = listen(sockd, 1);
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to listen to socket in open_unix_server");
-		close(sockd);
+		close_unix_socket(sockd, server_path);
 		sockd = -1;
 		goto out;
 	}
@@ -546,6 +575,41 @@ out:
 	return sockd;
 }
 
+int open_unix_client(const char *server_path)
+{
+	struct sockaddr_un serveraddr;
+	int sockd = -1, len, ret;
+
+	if (likely(server_path)) {
+		len = strlen(server_path);
+		if (unlikely(len < 1 || len > UNIX_PATH_MAX)) {
+			LOGERR("Invalid server path length %d in open_unix_client", len);
+			goto out;
+		}
+	} else {
+		LOGERR("Null passed as server_path to open_unix_client");
+		goto out;
+	}
+
+	sockd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (unlikely(sockd < 0)) {
+		LOGERR("Failed to open socket in open_unix_client");
+		goto out;
+	}
+	memset(&serveraddr, 0, sizeof(serveraddr));
+	serveraddr.sun_family = AF_UNIX;
+	strcpy(serveraddr.sun_path, server_path);
+
+	ret = connect(sockd, (struct sockaddr *)&serveraddr, sizeof(&serveraddr));
+	if (unlikely(ret < 0)) {
+		LOGERR("Failed to bind to socket in open_unix_client");
+		close(sockd);
+		sockd = -1;
+		goto out;
+	}
+out:
+	return sockd;
+}
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
