@@ -145,9 +145,13 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 	}
 	if (binleft > 1) {
 		while (42) {
+			uchar merklebin[32];
+
 			if (binleft == 1)
 				break;
-			memcpy(&gbt->merklebin[gbt->merkles][0], hashbin + 32, 32);
+			memcpy(merklebin, hashbin + 32, 32);
+			__bin2hex(&gbt->merklehash[gbt->merkles][0], merklebin, 32);
+			LOGDEBUG("MH%d %s",gbt->merkles, &gbt->merklehash[gbt->merkles][0]);
 			gbt->merkles++;
 			if (binleft % 2) {
 				memcpy(hashbin + binlen, hashbin + binlen - 32, 32);
@@ -160,10 +164,6 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 			binlen = binleft * 32;
 		}
 	}
-	for (i = 0; i < gbt->merkles; i++) {
-		__bin2hex(&gbt->merklehash[i][0], &gbt->merklebin[i][0], 32);
-		LOGDEBUG("MH%d %s",i, &gbt->merklehash[i][0]);
-	}
 	LOGINFO("Stored %d transactions", gbt->transactions);
 	return true;
 }
@@ -175,16 +175,17 @@ static const char *gbt_req = "{\"method\": \"getblocktemplate\", \"params\": [{\
  * required to assemble a mining template, storing it in a gbtbase_t structure */
 bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 {
-	json_t *transaction_arr, *coinbase_aux, *res_val, *val;
+	json_t *transaction_arr, *coinbase_aux, *res_val, *val, *array;
 	const char *previousblockhash;
+	char hash_swap[32], tmp[32];
 	uint64_t coinbasevalue;
-	char hash_swap[32];
 	const char *target;
 	const char *flags;
 	const char *bits;
 	int version;
 	int curtime;
 	int height;
+	int i;
 	bool ret = false;
 
 	val = json_rpc_call(cs, gbt_req);
@@ -213,22 +214,54 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 		LOGERR("JSON failed to decode GBT %s %s %d %d %s %s", previousblockhash, target, version, curtime, bits, flags);
 		goto out;
 	}
-	hex2bin(hash_swap, previousblockhash, 32);
-	swap_256(gbt->previousblockhash, hash_swap);
-	__bin2hex(gbt->prev_hash, gbt->previousblockhash, 32);
-	hex2bin(hash_swap, target, 32);
-	bswap_256(gbt->target, hash_swap);
-	gbt->sdiff = diff_from_target(gbt->target);
 
-	gbt->version = htobe32(version);
-	gbt->curtime = htobe32(curtime);
+	gbt->json = json_object();
+
+	hex2bin(hash_swap, previousblockhash, 32);
+	swap_256(tmp, hash_swap);
+	__bin2hex(gbt->prevhash, tmp, 32);
+	json_object_set_new_nocheck(gbt->json, "prevhash", json_string_nocheck(gbt->prevhash));
+
+	strncpy(gbt->target, target, 65);
+	json_object_set_new_nocheck(gbt->json, "target", json_string_nocheck(gbt->target));
+
+	hex2bin(hash_swap, target, 32);
+	bswap_256(tmp, hash_swap);
+	gbt->diff = diff_from_target((uchar *)tmp);
+	json_object_set_new_nocheck(gbt->json, "diff", json_real(gbt->diff));
+
+	gbt->version = version;
+	json_object_set_new_nocheck(gbt->json, "version", json_integer(version));
+
+	gbt->curtime = curtime;
+	json_object_set_new_nocheck(gbt->json, "curtime", json_integer(curtime));
+
 	snprintf(gbt->ntime, 9, "%08x", curtime);
+	json_object_set_new_nocheck(gbt->json, "ntime", json_string_nocheck(gbt->ntime));
+
 	snprintf(gbt->bbversion, 9, "%08x", version);
+	json_object_set_new_nocheck(gbt->json, "bbversion", json_string_nocheck(gbt->bbversion));
+
 	snprintf(gbt->nbit, 9, "%s", bits);
-	gbt->nValue = coinbasevalue;
-	hex2bin(&gbt->bits, bits, 4);
-	gbt_merkle_bins(gbt, transaction_arr);
+	json_object_set_new_nocheck(gbt->json, "nbit", json_string_nocheck(gbt->nbit));
+
+	gbt->coinbasevalue = coinbasevalue;
+	json_object_set_new_nocheck(gbt->json, "coinbasevalue", json_integer(coinbasevalue));
+
 	gbt->height = height;
+	json_object_set_new_nocheck(gbt->json, "height", json_integer(height));
+
+	gbt_merkle_bins(gbt, transaction_arr);
+	json_object_set_new_nocheck(gbt->json, "transactions", json_integer(gbt->transactions));
+	if (gbt->transactions)
+		json_object_set_new_nocheck(gbt->json, "txn_data", json_string_nocheck(gbt->txn_data));
+	json_object_set_new_nocheck(gbt->json, "merkles", json_integer(gbt->merkles));
+	if (gbt->merkles) {
+		array = json_array();
+		for (i = 0; i < gbt->merkles; i++)
+			json_array_append_new(array, json_string_nocheck(&gbt->merklehash[i][0]));
+		json_object_set_new_nocheck(gbt->json, "merklehash", array);
+	}
 
 out:
 	json_decref(val);

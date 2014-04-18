@@ -11,24 +11,21 @@
 #define BITCOIN_H
 
 struct gbtbase {
-	uchar previousblockhash[32];
-	uchar target[32];
-	double sdiff;
+	char target[68];
+	double diff;
 	uint32_t version;
 	uint32_t curtime;
-	uchar prev_hash[68];
+	char prevhash[68];
 	char ntime[12];
 	char bbversion[12];
 	char nbit[12];
-	int nValue;
-	uint32_t bits;
+	int coinbasevalue;
 	int height;
 	char *txn_data;
-	uchar *txn_hashes;
 	int transactions;
 	int merkles;
-	uchar merklebin[16][32];
 	char merklehash[16][68];
+	json_t *json;
 };
 
 typedef struct gbtbase gbtbase_t;
