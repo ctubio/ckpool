@@ -145,10 +145,6 @@ struct ckpool_instance {
 	/* Process instances of child processes */
 	proc_instance_t main;
 	proc_instance_t generator;
-
-	/* Original signal handlers */
-	struct sigaction termhandler;
-	struct sigaction inthandler;
 };
 
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);

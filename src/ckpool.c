@@ -153,9 +153,6 @@ static void shutdown_children(ckpool_t *ckp, int sig)
 
 static void sighandler(int sig)
 {
-	/* Restore signal handlers so we can still quit if shutdown fails */
-	sigaction(SIGTERM, &global_ckp->termhandler, NULL);
-	sigaction(SIGINT, &global_ckp->inthandler, NULL);
 	shutdown_children(global_ckp, sig);
 	clean_up(global_ckp);
 	exit(0);
@@ -219,8 +216,8 @@ int main(int argc, char **argv)
 	handler.sa_handler = &sighandler;
 	handler.sa_flags = 0;
 	sigemptyset(&handler.sa_mask);
-	sigaction(SIGTERM, &handler, &ckp.termhandler);
-	sigaction(SIGINT, &handler, &ckp.inthandler);
+	sigaction(SIGTERM, &handler, NULL);
+	sigaction(SIGINT, &handler, NULL);
 
 	/* Shutdown from here */
 	join_pthread(pth_listener);
