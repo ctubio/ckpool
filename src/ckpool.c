@@ -140,18 +140,30 @@ static void launch_process(proc_instance_t *pi)
 	}
 }
 
-static void sighandler(int __maybe_unused sig)
+static void clean_up(ckpool_t *ckp)
+{
+	rm_namepid(&ckp->main);
+	dealloc(ckp->socket_dir);
+}
+
+static void shutdown_children(ckpool_t *ckp, int sig)
+{
+	kill(ckp->generator.pid, sig);
+}
+
+static void sighandler(int sig)
 {
 	/* Restore signal handlers so we can still quit if shutdown fails */
 	sigaction(SIGTERM, &global_ckp->termhandler, NULL);
 	sigaction(SIGINT, &global_ckp->inthandler, NULL);
+	shutdown_children(global_ckp, sig);
+	clean_up(global_ckp);
+	exit(0);
 }
 
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
-	proc_instance_t proc_main;
-	proc_instance_t proc_generator;
 	pthread_t pth_listener;
 	ckpool_t ckp;
 	int c, ret;
@@ -180,37 +192,41 @@ int main(int argc, char **argv)
 
 	realloc_strcat(&ckp.socket_dir, "/");
 
-	/* Install signal handlers to shut down all child processes */
-	handler.sa_handler = &sighandler;
-	handler.sa_flags = 0;
-	sigemptyset(&handler.sa_mask);
-	sigaction(SIGTERM, &handler, &ckp.termhandler);
-	sigaction(SIGINT, &handler, &ckp.inthandler);
+	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
 
 	ret = mkdir(ckp.socket_dir, 0700);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
 
-	proc_main.ckp = &ckp;
-	proc_main.processname = strdup("main");
-	proc_main.sockname = strdup("listener");
-	write_namepid(&proc_main);
-	create_process_unixsock(&proc_main);
+	ckp.main.ckp = &ckp;
+	ckp.main.processname = strdup("main");
+	ckp.main.sockname = strdup("listener");
+	write_namepid(&ckp.main);
+	create_process_unixsock(&ckp.main);
 
-	create_pthread(&pth_listener, listener, &proc_main);
+	create_pthread(&pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */
-	proc_generator.ckp = &ckp;
-	proc_generator.processname = strdup("generator");
-	proc_generator.sockname = proc_generator.processname;
-	proc_generator.process = &generator;
-	launch_process(&proc_generator);
+	ckp.generator.ckp = &ckp;
+	ckp.generator.processname = strdup("generator");
+	ckp.generator.sockname = ckp.generator.processname;
+	ckp.generator.process = &generator;
+	launch_process(&ckp.generator);
+
+	/* Install signal handlers only for the master process to be able to
+	 * shut down all child processes */
+	handler.sa_handler = &sighandler;
+	handler.sa_flags = 0;
+	sigemptyset(&handler.sa_mask);
+	sigaction(SIGTERM, &handler, &ckp.termhandler);
+	sigaction(SIGINT, &handler, &ckp.inthandler);
 
 	/* Shutdown from here */
 	join_pthread(pth_listener);
-	rm_namepid(&proc_main);
-	dealloc(ckp.socket_dir);
+
+	shutdown_children(&ckp, SIGTERM);
+	clean_up(&ckp);
 
 	return 0;
 }

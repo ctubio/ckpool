@@ -106,19 +106,6 @@ struct cklock {
 
 typedef struct cklock cklock_t;
 
-struct proc_instance;
-typedef struct proc_instance proc_instance_t;
-
-struct ckpool_instance {
-	char *socket_dir;
-	char *config;
-	char *name;
-	struct sigaction termhandler;
-	struct sigaction inthandler;
-};
-
-typedef struct ckpool_instance ckpool_t;
-
 struct connsock {
 	int fd;
 	char *url;
@@ -136,6 +123,11 @@ struct unixsock {
 
 typedef struct unixsock unixsock_t;
 
+struct proc_instance;
+typedef struct proc_instance proc_instance_t;
+struct ckpool_instance;
+typedef struct ckpool_instance ckpool_t;
+
 struct proc_instance {
 	ckpool_t *ckp;
 	unixsock_t us;
@@ -143,6 +135,20 @@ struct proc_instance {
 	char *sockname;
 	int pid;
 	int (*process)(proc_instance_t *);
+};
+
+struct ckpool_instance {
+	char *socket_dir;
+	char *config;
+	char *name;
+
+	/* Process instances of child processes */
+	proc_instance_t main;
+	proc_instance_t generator;
+
+	/* Original signal handlers */
+	struct sigaction termhandler;
+	struct sigaction inthandler;
 };
 
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);
