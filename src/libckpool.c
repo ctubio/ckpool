@@ -554,7 +554,7 @@ int open_unix_server(const char *server_path)
 	serveraddr.sun_family = AF_UNIX;
 	strcpy(serveraddr.sun_path, server_path);
 
-	ret = bind(sockd, (struct sockaddr *)&serveraddr, sizeof(&serveraddr));
+	ret = bind(sockd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to bind to socket in open_unix_server");
 		close_unix_socket(sockd, server_path);
@@ -600,7 +600,7 @@ int open_unix_client(const char *server_path)
 	serveraddr.sun_family = AF_UNIX;
 	strcpy(serveraddr.sun_path, server_path);
 
-	ret = connect(sockd, (struct sockaddr *)&serveraddr, sizeof(&serveraddr));
+	ret = connect(sockd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to bind to socket in open_unix_client");
 		close(sockd);
