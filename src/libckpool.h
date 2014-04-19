@@ -122,6 +122,17 @@ struct unixsock {
 
 typedef struct unixsock unixsock_t;
 
+struct proc_instance;
+typedef struct proc_instance proc_instance_t;
+
+struct proc_instance {
+	ckpool_t *ckp;
+	unixsock_t us;
+	char *processname;
+	char *sockname;
+	int (*process)(proc_instance_t *);
+};
+
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);
 void join_pthread(pthread_t thread);
 

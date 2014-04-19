@@ -22,7 +22,8 @@
 
 static void *listener(void *arg)
 {
-	unixsock_t *us = (unixsock_t *)arg;
+	proc_instance_t *pi = (proc_instance_t *)arg;
+	unixsock_t *us = &pi->us;
 	int sockd;
 
 retry:
@@ -76,39 +77,39 @@ static bool write_pid(const char *path, pid_t pid)
 	return true;
 }
 
-static void create_process_unixsock(ckpool_t *ckp, unixsock_t *us, const char *process)
+static void create_process_unixsock(proc_instance_t *pi)
 {
-	us->path = strdup(ckp->socket_dir);
-	realloc_strcat(&us->path, process);
+	unixsock_t *us = &pi->us;
+
+	us->path = strdup(pi->ckp->socket_dir);
+	realloc_strcat(&us->path, pi->sockname);
 	LOGDEBUG("Opening %s", us->path);
 	us->sockd = open_unix_server(us->path);
 	if (unlikely(us->sockd < 0))
-		quit(1, "Failed to open %s socket", process);
+		quit(1, "Failed to open %s socket", pi->sockname);
 }
 
-void write_namepid(ckpool_t *ckp, const char *process)
+void write_namepid(proc_instance_t *pi)
 {
 	int pid = getpid();
 	char s[1024];
 
-	sprintf(s, "%s%s.pid", ckp->socket_dir, process);
+	sprintf(s, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
 	if (!write_pid(s, pid))
-		quit(1, "Failed to write %s pid %d", process, pid);
+		quit(1, "Failed to write %s pid %d", pi->processname, pid);
 }
 
-int launch_generator(ckpool_t *ckp)
+int launch_process(proc_instance_t *pi)
 {
 	pid_t pid;
 
 	pid = fork();
 	if (pid < 0)
-		quit(1, "Failed to fork in launch_generator");
+		quit(1, "Failed to fork %s in launch_process", pi->processname);
 	if (!pid) {
-		unixsock_t us;
-
-		write_namepid(ckp, "generator");
-		create_process_unixsock(ckp, &us, "generator");
-		generator(&us);
+		write_namepid(pi);
+		create_process_unixsock(pi);
+		pi->process(pi);
 	}
 
 	return 0;
@@ -116,8 +117,9 @@ int launch_generator(ckpool_t *ckp)
 
 int main(int argc, char **argv)
 {
+	proc_instance_t proc_main;
+	proc_instance_t proc_generator;
 	pthread_t pth_listener;
-	unixsock_t uslistener;
 	ckpool_t ckp;
 	int c, ret;
 
@@ -147,12 +149,19 @@ int main(int argc, char **argv)
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
 
-	write_namepid(&ckp, "main");
-	create_process_unixsock(&ckp, &uslistener, "listener");
-	create_pthread(&pth_listener, listener, &uslistener);
+	proc_main.ckp = &ckp;
+	proc_main.processname = strdup("main");
+	proc_main.sockname = strdup("listener");
+	write_namepid(&proc_main);
+	create_process_unixsock(&proc_main);
+
+	create_pthread(&pth_listener, listener, &proc_main);
 
 	/* Launch separate processes from here */
-	launch_generator(&ckp);
+	proc_generator.ckp = &ckp;
+	proc_generator.processname = strdup("generator");
+	proc_generator.sockname = proc_generator.processname;
+	launch_process(&proc_generator);
 
 	/* Shutdown from here */
 	join_pthread(pth_listener);
