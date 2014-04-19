@@ -115,6 +115,13 @@ struct connsock {
 
 typedef struct connsock connsock_t;
 
+struct unixsock {
+	int sockd;
+	char *path;
+};
+
+typedef struct unixsock unixsock_t;
+
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
