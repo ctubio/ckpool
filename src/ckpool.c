@@ -76,15 +76,50 @@ static bool write_pid(const char *path, pid_t pid)
 	return true;
 }
 
+static void create_process_unixsock(ckpool_t *ckp, unixsock_t *us, const char *process)
+{
+	us->path = strdup(ckp->socket_dir);
+	realloc_strcat(&us->path, process);
+	LOGDEBUG("Opening %s", us->path);
+	us->sockd = open_unix_server(us->path);
+	if (unlikely(us->sockd < 0))
+		quit(1, "Failed to open %s socket", process);
+}
+
+void write_namepid(ckpool_t *ckp, const char *process)
+{
+	int pid = getpid();
+	char s[1024];
+
+	sprintf(s, "%s%s.pid", ckp->socket_dir, process);
+	if (!write_pid(s, pid))
+		quit(1, "Failed to write %s pid %d", process, pid);
+}
+
+int launch_generator(ckpool_t *ckp)
+{
+	pid_t pid;
+
+	pid = fork();
+	if (pid < 0)
+		quit(1, "Failed to fork in launch_generator");
+	if (!pid) {
+		unixsock_t us;
+
+		write_namepid(ckp, "generator");
+		create_process_unixsock(ckp, &us, "generator");
+		generator(&us);
+	}
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
-	char *socket_dir = NULL;
 	pthread_t pth_listener;
 	unixsock_t uslistener;
-	pid_t mainpid;
 	ckpool_t ckp;
 	int c, ret;
-	char *s;
 
 	memset(&ckp, 0, sizeof(ckp));
 	while ((c = getopt(argc, argv, "c:gn:s:")) != -1) {
@@ -99,36 +134,29 @@ int main(int argc, char **argv)
 				ckp.name = optarg;
 				break;
 			case 's':
-				socket_dir = strdup(optarg);
+				ckp.socket_dir = strdup(optarg);
 				break;
 		}
 	}
 
-	if (!socket_dir)
-		socket_dir = strdup("/tmp/ckpool");
+	if (!ckp.socket_dir)
+		ckp.socket_dir = strdup("/tmp/ckpool");
 
-	realloc_strcat(&socket_dir, "/");
-	ret = mkdir(socket_dir, 0700);
+	realloc_strcat(&ckp.socket_dir, "/");
+	ret = mkdir(ckp.socket_dir, 0700);
 	if (ret && errno != EEXIST)
-		quit(1, "Failed to make directory %s", socket_dir);
+		quit(1, "Failed to make directory %s", ckp.socket_dir);
 
-	mainpid = getpid();
-
-	s = strdup(socket_dir);
-	realloc_strcat(&s, "main.pid");
-	if (!write_pid(s, mainpid))
-		quit(1, "Failed to write pid");
-	dealloc(s);
-
-	uslistener.path = strdup(socket_dir);
-	realloc_strcat(&uslistener.path, "listener");
-	LOGDEBUG("Opening %s", uslistener.path);
-	uslistener.sockd = open_unix_server(uslistener.path);
-	if (unlikely(uslistener.sockd < 0))
-		quit(1, "Failed to open listener socket");
+	write_namepid(&ckp, "main");
+	create_process_unixsock(&ckp, &uslistener, "listener");
 	create_pthread(&pth_listener, listener, &uslistener);
 
+	/* Launch separate processes from here */
+	launch_generator(&ckp);
+
+	/* Shutdown from here */
 	join_pthread(pth_listener);
+	dealloc(ckp.socket_dir);
 
 	return 0;
 }

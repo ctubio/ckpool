@@ -122,6 +122,7 @@ static inline void flip_80(void *dest_p, const void *src_p)
 }
 
 struct ckpool_instance {
+	char *socket_dir;
 	char *config;
 	char *name;
 };
