@@ -101,12 +101,20 @@ static void create_process_unixsock(proc_instance_t *pi)
 
 static void write_namepid(proc_instance_t *pi)
 {
-	int pid = getpid();
-	char s[1024];
+	char s[256];
+
+	pi->pid = getpid();
+	sprintf(s, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
+	if (!write_pid(s, pi->pid))
+		quit(1, "Failed to write %s pid %d", pi->processname, pi->pid);
+}
+
+static void rm_namepid(proc_instance_t *pi)
+{
+	char s[256];
 
 	sprintf(s, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
-	if (!write_pid(s, pid))
-		quit(1, "Failed to write %s pid %d", pi->processname, pid);
+	unlink(s);
 }
 
 static void launch_process(proc_instance_t *pi)
@@ -117,10 +125,15 @@ static void launch_process(proc_instance_t *pi)
 	if (pid < 0)
 		quit(1, "Failed to fork %s in launch_process", pi->processname);
 	if (!pid) {
+		int ret;
+
 		rename_proc(pi->processname);
 		write_namepid(pi);
 		create_process_unixsock(pi);
-		exit(pi->process(pi));
+		ret = pi->process(pi);
+		close_unix_socket(pi->us.sockd, pi->us.path);
+		rm_namepid(pi);
+		exit(ret);
 	}
 }
 
@@ -175,6 +188,7 @@ int main(int argc, char **argv)
 
 	/* Shutdown from here */
 	join_pthread(pth_listener);
+	rm_namepid(&proc_main);
 	dealloc(ckp.socket_dir);
 
 	return 0;

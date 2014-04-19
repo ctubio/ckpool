@@ -130,6 +130,7 @@ struct proc_instance {
 	unixsock_t us;
 	char *processname;
 	char *sockname;
+	int pid;
 	int (*process)(proc_instance_t *);
 };
 
