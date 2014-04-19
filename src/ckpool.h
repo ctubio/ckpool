@@ -121,11 +121,4 @@ static inline void flip_80(void *dest_p, const void *src_p)
 		dest[i] = bswap_32(src[i]);
 }
 
-struct ckpool_instance {
-	char *socket_dir;
-	char *config;
-	char *name;
-};
-
-typedef struct ckpool_instance ckpool_t;
 #endif /* CKPOOL_H */

@@ -21,6 +21,9 @@
 #include "libckpool.h"
 #include "generator.h"
 
+/* Only global variable, to be used only by sighandler */
+static ckpool_t *global_ckp;
+
 static void rename_proc(const char *name)
 {
 	char buf[16];
@@ -137,14 +140,23 @@ static void launch_process(proc_instance_t *pi)
 	}
 }
 
+static void sighandler(int __maybe_unused sig)
+{
+	/* Restore signal handlers so we can still quit if shutdown fails */
+	sigaction(SIGTERM, &global_ckp->termhandler, NULL);
+	sigaction(SIGINT, &global_ckp->inthandler, NULL);
+}
+
 int main(int argc, char **argv)
 {
+	struct sigaction handler;
 	proc_instance_t proc_main;
 	proc_instance_t proc_generator;
 	pthread_t pth_listener;
 	ckpool_t ckp;
 	int c, ret;
 
+	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
 	while ((c = getopt(argc, argv, "c:gn:s:")) != -1) {
 		switch (c) {
@@ -167,6 +179,15 @@ int main(int argc, char **argv)
 		ckp.socket_dir = strdup("/tmp/ckpool");
 
 	realloc_strcat(&ckp.socket_dir, "/");
+
+	/* Install signal handlers to shut down all child processes */
+	handler.sa_handler = &sighandler;
+	handler.sa_flags = 0;
+	sigemptyset(&handler.sa_mask);
+	sigaction(SIGTERM, &handler, &ckp.termhandler);
+	sigaction(SIGINT, &handler, &ckp.inthandler);
+	signal(SIGPIPE, SIG_IGN);
+
 	ret = mkdir(ckp.socket_dir, 0700);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);

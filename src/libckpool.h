@@ -12,12 +12,13 @@
 #ifndef LIBCKPOOL_H
 #define LIBCKPOOL_H
 
-#include <stdbool.h>
 #include <errno.h>
+#include <jansson.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <syslog.h>
-#include <jansson.h>
 
 #define mutex_lock(_lock) _mutex_lock(_lock, __FILE__, __func__, __LINE__)
 #define mutex_unlock_noyield(_lock) _mutex_unlock_noyield(_lock, __FILE__, __func__, __LINE__)
@@ -105,6 +106,19 @@ struct cklock {
 
 typedef struct cklock cklock_t;
 
+struct proc_instance;
+typedef struct proc_instance proc_instance_t;
+
+struct ckpool_instance {
+	char *socket_dir;
+	char *config;
+	char *name;
+	struct sigaction termhandler;
+	struct sigaction inthandler;
+};
+
+typedef struct ckpool_instance ckpool_t;
+
 struct connsock {
 	int fd;
 	char *url;
@@ -121,9 +135,6 @@ struct unixsock {
 };
 
 typedef struct unixsock unixsock_t;
-
-struct proc_instance;
-typedef struct proc_instance proc_instance_t;
 
 struct proc_instance {
 	ckpool_t *ckp;
