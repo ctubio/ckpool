@@ -20,8 +20,6 @@
 #include "libckpool.h"
 #include "generator.h"
 
-static char *socket_dir = "/tmp/ckpool";
-
 static void *listener(void *arg)
 {
 	unixsock_t *us = (unixsock_t *)arg;
@@ -80,6 +78,7 @@ static bool write_pid(const char *path, pid_t pid)
 
 int main(int argc, char **argv)
 {
+	char *socket_dir = NULL;
 	pthread_t pth_listener;
 	unixsock_t uslistener;
 	pid_t mainpid;
@@ -100,11 +99,15 @@ int main(int argc, char **argv)
 				ckp.name = optarg;
 				break;
 			case 's':
-				socket_dir = optarg;
+				socket_dir = strdup(optarg);
 				break;
 		}
 	}
 
+	if (!socket_dir)
+		socket_dir = strdup("/tmp/ckpool");
+
+	realloc_strcat(&socket_dir, "/");
 	ret = mkdir(socket_dir, 0700);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", socket_dir);
