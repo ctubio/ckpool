@@ -12,6 +12,6 @@
 
 #include "config.h"
 
-int generator(unixsock_t *us);
+int generator(proc_instance_t *pi);
 
 #endif /* GENERATOR_H */

@@ -7,6 +7,7 @@
  * any later version.  See COPYING for more details.
  */
 
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -20,12 +21,21 @@
 #include "libckpool.h"
 #include "generator.h"
 
+static void rename_proc(const char *name)
+{
+	char buf[16];
+
+	snprintf(buf, 16, "ckp@%s", name);
+	prctl(PR_SET_NAME, buf, 0, 0, 0);
+}
+
 static void *listener(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	unixsock_t *us = &pi->us;
 	int sockd;
 
+	rename_proc(pi->sockname);
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
@@ -89,7 +99,7 @@ static void create_process_unixsock(proc_instance_t *pi)
 		quit(1, "Failed to open %s socket", pi->sockname);
 }
 
-void write_namepid(proc_instance_t *pi)
+static void write_namepid(proc_instance_t *pi)
 {
 	int pid = getpid();
 	char s[1024];
@@ -99,7 +109,7 @@ void write_namepid(proc_instance_t *pi)
 		quit(1, "Failed to write %s pid %d", pi->processname, pid);
 }
 
-int launch_process(proc_instance_t *pi)
+static void launch_process(proc_instance_t *pi)
 {
 	pid_t pid;
 
@@ -107,12 +117,11 @@ int launch_process(proc_instance_t *pi)
 	if (pid < 0)
 		quit(1, "Failed to fork %s in launch_process", pi->processname);
 	if (!pid) {
+		rename_proc(pi->processname);
 		write_namepid(pi);
 		create_process_unixsock(pi);
-		pi->process(pi);
+		exit(pi->process(pi));
 	}
-
-	return 0;
 }
 
 int main(int argc, char **argv)
@@ -161,6 +170,7 @@ int main(int argc, char **argv)
 	proc_generator.ckp = &ckp;
 	proc_generator.processname = strdup("generator");
 	proc_generator.sockname = proc_generator.processname;
+	proc_generator.process = &generator;
 	launch_process(&proc_generator);
 
 	/* Shutdown from here */

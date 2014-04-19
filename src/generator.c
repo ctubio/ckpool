@@ -11,7 +11,9 @@
 #include "libckpool.h"
 #include "generator.h"
 
-int generator(unixsock_t *us)
+int generator(proc_instance_t *pi)
 {
+	LOGDEBUG("Process %s started", pi->processname);
+
 	return 0;
 }
