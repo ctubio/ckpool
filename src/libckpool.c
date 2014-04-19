@@ -36,6 +36,23 @@
 #define UNIX_PATH_MAX 108
 #endif
 
+void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg)
+{
+	int ret = pthread_create(thread, NULL, start_routine,  arg);
+
+	if (unlikely(ret))
+		quit(1, "Failed to pthread_create");
+}
+
+void join_pthread(pthread_t thread)
+{
+	int ret = pthread_join(thread, NULL);
+
+	if (unlikely(ret))
+		quit(1, "Failed to pthread_join");
+}
+
+
 /* Place holders for when we add lock debugging */
 #define GETLOCK(_lock, _file, _func, _line)
 #define GOTLOCK(_lock, _file, _func, _line)

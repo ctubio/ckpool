@@ -7,8 +7,6 @@
  * any later version.  See COPYING for more details.
  */
 
-/* This file should contain all exported functions of libckpool */
-
 #ifndef CKPOOL_H
 #define CKPOOL_H
 
