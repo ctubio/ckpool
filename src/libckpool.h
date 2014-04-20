@@ -138,13 +138,21 @@ struct proc_instance {
 };
 
 struct ckpool_instance {
-	char *socket_dir;
-	char *config;
+	/* Main process name */
 	char *name;
+	/* Directory where sockets are created */
+	char *socket_dir;
+	/* Filename of config file */
+	char *config;
 
-	/* Process instances of child processes */
+	/* Process instance data of parent/child processes */
 	proc_instance_t main;
 	proc_instance_t generator;
+
+	/* Bitcoind data */
+	char *btcdurl;
+	char *btcdauth;
+	char *btcdpass;
 };
 
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);

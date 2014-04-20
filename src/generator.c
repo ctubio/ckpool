@@ -7,13 +7,18 @@
  * any later version.  See COPYING for more details.
  */
 
+#include "config.h"
+
+#include <string.h>
+
 #include "ckpool.h"
 #include "libckpool.h"
 #include "generator.h"
 
 int generator(proc_instance_t *pi)
 {
-	LOGDEBUG("Process %s started", pi->processname);
+	connsock_t cs;
 
+	memset(&cs, 0, sizeof(cs));
 	return 0;
 }

@@ -158,6 +158,42 @@ static void sighandler(int sig)
 	exit(0);
 }
 
+static void json_get_string(char **store, json_t *val, const char *res)
+{
+	json_t *entry = json_object_get(val, res);
+	const char *buf;
+
+	*store = NULL;
+	if (json_is_null(entry)) {
+		LOGDEBUG("Json did not find entry %s", res);
+		return;
+	}
+	if (!json_is_string(entry)) {
+		LOGWARNING("Json entry %s is not string", res);
+		return;
+	}
+	buf = json_string_value(entry);
+	LOGDEBUG("Json found entry %s: %s", res, buf);
+	*store = strdup(buf);
+}
+
+static void parse_config(ckpool_t *ckp)
+{
+	json_error_t err_val;
+	json_t *json_conf;
+
+	json_conf = json_load_file(ckp->config, JSON_DISABLE_EOF_CHECK, &err_val);
+	if (!json_conf) {
+		LOGWARNING("Json decode error for config file %s: (%d): %s", ckp->config,
+			   err_val.line, err_val.text);
+		return;
+	}
+	json_get_string(&ckp->btcdurl, json_conf, "btcdurl");
+	json_get_string(&ckp->btcdauth, json_conf, "btcdauth");
+	json_get_string(&ckp->btcdpass, json_conf, "btcdpass");
+	json_decref(json_conf);
+}
+
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
@@ -184,6 +220,10 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (!ckp.name)
+		ckp.name = strdup("ckpool");
+	if (!ckp.config)
+		ckp.config = strdup("ckpool.conf");
 	if (!ckp.socket_dir)
 		ckp.socket_dir = strdup("/tmp/ckpool");
 
@@ -195,6 +235,8 @@ int main(int argc, char **argv)
 	ret = mkdir(ckp.socket_dir, 0700);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
+
+	parse_config(&ckp);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
