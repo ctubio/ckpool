@@ -123,6 +123,7 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 			memcpy(gbt->txn_data + ofs, txn, len);
 			ofs += len;
 #if 0
+			/* In case we ever want to be a gbt poolproxy */
 			if (!hash) {
 				char *txn_bin;
 				int txn_len;

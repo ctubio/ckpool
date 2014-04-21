@@ -154,6 +154,8 @@ struct ckpool_instance {
 	char *btcdurl;
 	char *btcdauth;
 	char *btcdpass;
+	char *btcaddress;
+	char *btcsig;
 };
 
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);

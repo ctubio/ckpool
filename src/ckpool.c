@@ -166,7 +166,7 @@ static void json_get_string(char **store, json_t *val, const char *res)
 	const char *buf;
 
 	*store = NULL;
-	if (json_is_null(entry)) {
+	if (!entry || json_is_null(entry)) {
 		LOGDEBUG("Json did not find entry %s", res);
 		return;
 	}
@@ -193,6 +193,8 @@ static void parse_config(ckpool_t *ckp)
 	json_get_string(&ckp->btcdurl, json_conf, "btcdurl");
 	json_get_string(&ckp->btcdauth, json_conf, "btcdauth");
 	json_get_string(&ckp->btcdpass, json_conf, "btcdpass");
+	json_get_string(&ckp->btcaddress, json_conf, "btcaddress");
+	json_get_string(&ckp->btcsig, json_conf, "btcsig");
 	json_decref(json_conf);
 }
 
@@ -223,8 +225,8 @@ int main(int argc, char **argv)
 {
 	struct sigaction handler;
 	pthread_t pth_listener;
+	int len, c, ret;
 	ckpool_t ckp;
-	int c, ret;
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
@@ -247,12 +249,17 @@ int main(int argc, char **argv)
 
 	if (!ckp.name)
 		ckp.name = strdup("ckpool");
-	if (!ckp.config)
-		ckp.config = strdup("ckpool.conf");
-	if (!ckp.socket_dir)
-		ckp.socket_dir = strdup("/tmp/ckpool");
-
-	realloc_strcat(&ckp.socket_dir, "/");
+	if (!ckp.config) {
+		ckp.config = strdup(ckp.name);
+		realloc_strcat(&ckp.config, ".conf");
+	}
+	if (!ckp.socket_dir) {
+		ckp.socket_dir = strdup("/tmp/");
+		realloc_strcat(&ckp.socket_dir, ckp.name);
+	}
+	len = strlen(ckp.socket_dir);
+	if (memcmp(&ckp.socket_dir[len], "/", 1))
+		realloc_strcat(&ckp.socket_dir, "/");
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
