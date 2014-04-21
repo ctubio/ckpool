@@ -262,10 +262,18 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 			json_array_append_new(array, json_string_nocheck(&gbt->merklehash[i][0]));
 		json_object_set_new_nocheck(gbt->json, "merklehash", array);
 	}
+	ret = true;
 
 out:
 	json_decref(val);
 	return ret;
+}
+
+void clear_gbtbase(gbtbase_t *gbt)
+{
+	dealloc(gbt->txn_data);
+	json_decref(gbt->json);
+	gbt->json = NULL;
 }
 
 static const char *blockcount_req = "{\"method\": \"getblockcount\"}\n";

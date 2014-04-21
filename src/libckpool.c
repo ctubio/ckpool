@@ -468,10 +468,12 @@ retry:
 		int extralen;
 
 		ret = recv(cs->fd, readbuf, bufsiz - 2, MSG_PEEK);
-		if (ret < 1) {
-			LOGNOTICE("Failed to recv in read_socket_line");
+		if (ret < 0) {
+			LOGERR("Failed to recv in read_socket_line");
 			goto out;
 		}
+		if (!ret)
+			continue;
 		eom = strchr(readbuf, '\n');
 		if (eom)
 			extralen = eom - readbuf + 1;
@@ -483,9 +485,8 @@ retry:
 		if (unlikely(!cs->buf))
 			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
 		ret = recv(cs->fd, cs->buf + bufofs, extralen, 0);
-		if (ret != extralen) {
-			LOGNOTICE("Failed to recv %d bytes in read_socket_line", (int)buflen);
-			ret = -1;
+		if (ret < 0) {
+			LOGERR("Failed to recv %d bytes in read_socket_line", (int)buflen);
 			goto out;
 		}
 		bufofs += ret;
