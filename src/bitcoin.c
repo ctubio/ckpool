@@ -274,6 +274,7 @@ void clear_gbtbase(gbtbase_t *gbt)
 	dealloc(gbt->txn_data);
 	json_decref(gbt->json);
 	gbt->json = NULL;
+	memset(gbt, 0, sizeof(gbtbase_t));
 }
 
 static const char *blockcount_req = "{\"method\": \"getblockcount\"}\n";

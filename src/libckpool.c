@@ -629,6 +629,72 @@ out:
 	return sockd;
 }
 
+/* Use a standard message across the unix sockets:
+ * 4 byte length of message as little endian encoded uint32_t followed by the
+ * string.*/
+char *recv_unix_msg(int sockd)
+{
+	char *buf = NULL;
+	uint32_t msglen;
+	int ret, ofs;
+
+	/* Get message length */
+	ret = read(sockd, &msglen, 4);
+	if (ret < 4) {
+		LOGERR("Failed to read 4 byte length in recv_unix_msg");
+		goto out;
+	}
+	msglen = le32toh(msglen);
+	if (unlikely(msglen < 1)) {
+		LOGWARNING("Invalid message length zero sent to recv_unix_msg");
+		goto out;
+	}
+	buf = ckalloc(msglen);
+	ofs = 0;
+	while (msglen) {
+		ret = read(sockd, buf + ofs, msglen);
+		if (unlikely(ret < 0)) {
+			LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
+			ret = 1;
+			goto out;
+		}
+		ofs += ret;
+		msglen -= ret;
+	}
+out:
+	return buf;
+}
+
+bool send_unix_msg(int sockd, const char *buf)
+{
+	uint32_t msglen, len;
+	int ret, ofs;
+
+	len = strlen(buf);
+	if (unlikely(!len)) {
+		LOGWARNING("Zero length message sent to send_unix_msg");
+		return false;
+	}
+	msglen = htole32(len);
+	ret = write(sockd, &msglen, 4);
+	if (unlikely(ret < 4)) {
+		LOGERR("Failed to write 4 byte length in send_unix_msg");
+		return false;
+	}
+	ofs = 0;
+	while (len) {
+		ret = write(sockd, buf + ofs, len);
+		if (unlikely(ret < 0)) {
+			LOGERR("Failed to write %d bytes in send_unix_msg", len);
+			return false;
+		}
+		ofs += ret;
+		len -= ret;
+	}
+	return true;
+}
+
+
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
 	char http_req[PAGESIZE];

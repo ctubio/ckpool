@@ -217,6 +217,8 @@ void empty_socket(int fd);
 void close_unix_socket(const int sockd, const char *server_path);
 int open_unix_server(const char *server_path);
 int open_unix_client(const char *server_path);
+char *recv_unix_msg(int sockd);
+bool send_unix_msg(int sockd, const char *buf);
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
