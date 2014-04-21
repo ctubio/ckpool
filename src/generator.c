@@ -18,12 +18,12 @@
 #include "generator.h"
 #include "bitcoin.h"
 
-static int gen_loop(proc_instance_t *pi)
+static int gen_loop(proc_instance_t *pi, connsock_t *cs)
 {
 	unixsock_t *us = &pi->us;
 	int sockd, ret = 0;
+	char *buf = NULL;
 	gbtbase_t gbt;
-	char *buf;
 
 	memset(&gbt, 0, sizeof(gbt));
 retry:
@@ -36,6 +36,7 @@ retry:
 		goto out;
 	}
 
+	dealloc(buf);
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in gen_loop");
@@ -43,13 +44,26 @@ retry:
 		goto retry;
 	}
 	LOGDEBUG("Generator received request: %s", buf);
-	if (!strncmp(buf, "shutdown", 8))
+	if (!strncasecmp(buf, "shutdown", 8))
 		goto out;
-	dealloc(buf);
+	if (!strncasecmp(buf, "getbase", 7)) {
+		if (!gen_gbtbase(cs, &gbt)) {
+			LOGWARNING("Failed to get block template from %s:%s",
+				   cs->url, cs->port);
+			send_unix_msg(sockd, "Failed");
+		} else {
+			char *s = json_dumps(gbt.json, 0);
+
+			send_unix_msg(sockd, s);
+			free(s);
+			clear_gbtbase(&gbt);
+		}
+	}
 	close(sockd);
 	goto retry;
 
 out:
+	dealloc(buf);
 	return ret;
 }
 
@@ -102,7 +116,7 @@ int generator(proc_instance_t *pi)
 	}
 	clear_gbtbase(&gbt);
 
-	ret = gen_loop(pi);
+	ret = gen_loop(pi, &cs);
 out:
 	/* Clean up here */
 	dealloc(cs.url);

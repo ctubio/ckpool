@@ -196,7 +196,7 @@ static void parse_config(ckpool_t *ckp)
 
 static void test_functions(ckpool_t *ckp)
 {
-	char *path = ckp->generator.us.path;
+	char *path = ckp->generator.us.path, *buf;
 	int genfd;
 
 	genfd = open_unix_client(ckp->generator.us.path);
@@ -204,8 +204,17 @@ static void test_functions(ckpool_t *ckp)
 		LOGWARNING("Failed to open generator socket %s", path);
 		return;
 	}
+	send_unix_msg(genfd, "getbase");
+	buf = recv_unix_msg(genfd);
+	LOGWARNING("getbase response: %s", buf);
+	dealloc(buf);
+
+	genfd = open_unix_client(ckp->generator.us.path);
+	if (genfd < 0) {
+		LOGWARNING("Failed to open generator socket %s", path);
+		return;
+	}
 	send_unix_msg(genfd, "shutdown");
-	close(genfd);
 }
 
 int main(int argc, char **argv)

@@ -649,7 +649,8 @@ char *recv_unix_msg(int sockd)
 		LOGWARNING("Invalid message length zero sent to recv_unix_msg");
 		goto out;
 	}
-	buf = ckalloc(msglen);
+	buf = ckalloc(msglen + 1);
+	buf[msglen] = 0;
 	ofs = 0;
 	while (msglen) {
 		ret = read(sockd, buf + ofs, msglen);
