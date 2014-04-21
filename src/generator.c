@@ -9,12 +9,49 @@
 
 #include "config.h"
 
+#include <sys/socket.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
 #include "generator.h"
 #include "bitcoin.h"
+
+static int gen_loop(proc_instance_t *pi)
+{
+	unixsock_t *us = &pi->us;
+	int sockd, ret = 0;
+	gbtbase_t gbt;
+	char *buf;
+
+	memset(&gbt, 0, sizeof(gbt));
+retry:
+	sockd = accept(us->sockd, NULL, NULL);
+	if (sockd < 0) {
+		if (interrupted())
+			goto retry;
+		LOGERR("Failed to accept on generator socket");
+		ret = 1;
+		goto out;
+	}
+
+	buf = recv_unix_msg(sockd);
+	if (!buf) {
+		LOGWARNING("Failed to get message in gen_loop");
+		close(sockd);
+		goto retry;
+	}
+	LOGDEBUG("Generator received request: %s", buf);
+	if (!strncmp(buf, "shutdown", 8))
+		goto out;
+	dealloc(buf);
+	close(sockd);
+	goto retry;
+
+out:
+	return ret;
+}
 
 int generator(proc_instance_t *pi)
 {
@@ -64,6 +101,8 @@ int generator(proc_instance_t *pi)
 		goto out;
 	}
 	clear_gbtbase(&gbt);
+
+	ret = gen_loop(pi);
 out:
 	/* Clean up here */
 	dealloc(cs.url);

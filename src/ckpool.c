@@ -124,6 +124,7 @@ static void launch_process(proc_instance_t *pi)
 {
 	pid_t pid;
 
+	create_process_unixsock(pi);
 	pid = fork();
 	if (pid < 0)
 		quit(1, "Failed to fork %s in launch_process", pi->processname);
@@ -132,7 +133,6 @@ static void launch_process(proc_instance_t *pi)
 
 		rename_proc(pi->processname);
 		write_namepid(pi);
-		create_process_unixsock(pi);
 		ret = pi->process(pi);
 		close_unix_socket(pi->us.sockd, pi->us.path);
 		rm_namepid(pi);
@@ -192,6 +192,20 @@ static void parse_config(ckpool_t *ckp)
 	json_get_string(&ckp->btcdauth, json_conf, "btcdauth");
 	json_get_string(&ckp->btcdpass, json_conf, "btcdpass");
 	json_decref(json_conf);
+}
+
+static void test_functions(ckpool_t *ckp)
+{
+	char *path = ckp->generator.us.path;
+	int genfd;
+
+	genfd = open_unix_client(ckp->generator.us.path);
+	if (genfd < 0) {
+		LOGWARNING("Failed to open generator socket %s", path);
+		return;
+	}
+	send_unix_msg(genfd, "shutdown");
+	close(genfd);
 }
 
 int main(int argc, char **argv)
@@ -260,6 +274,8 @@ int main(int argc, char **argv)
 	sigemptyset(&handler.sa_mask);
 	sigaction(SIGTERM, &handler, NULL);
 	sigaction(SIGINT, &handler, NULL);
+
+	test_functions(&ckp);
 
 	/* Shutdown from here */
 	join_pthread(pth_listener);
