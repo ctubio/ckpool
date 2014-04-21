@@ -150,6 +150,10 @@ struct ckpool_instance {
 	proc_instance_t generator;
 	proc_instance_t stratifier;
 
+	/* Threads of main process */
+	pthread_t pth_listener;
+	pthread_t pth_watchdog;
+
 	/* Bitcoind data */
 	char *btcdurl;
 	char *btcdauth;

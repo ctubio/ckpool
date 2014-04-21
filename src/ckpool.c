@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -139,6 +140,7 @@ static void launch_process(proc_instance_t *pi)
 		rm_namepid(pi);
 		exit(ret);
 	}
+	pi->pid = pid;
 }
 
 static void clean_up(ckpool_t *ckp)
@@ -149,15 +151,10 @@ static void clean_up(ckpool_t *ckp)
 
 static void shutdown_children(ckpool_t *ckp, int sig)
 {
+	pthread_cancel(ckp->pth_watchdog);
+	join_pthread(ckp->pth_watchdog);
 	kill(ckp->generator.pid, sig);
 	kill(ckp->stratifier.pid, sig);
-}
-
-static void sighandler(int sig)
-{
-	shutdown_children(global_ckp, sig);
-	clean_up(global_ckp);
-	exit(0);
 }
 
 static void json_get_string(char **store, json_t *val, const char *res)
@@ -221,22 +218,59 @@ static void test_functions(ckpool_t *ckp)
 #endif
 }
 
+static void launch_generator(ckpool_t *ckp)
+{
+	proc_instance_t *pi = &ckp->generator;
+
+	pi->ckp = ckp;
+	pi->processname = strdup("generator");
+	pi->sockname = pi->processname;
+	pi->process = &generator;
+	launch_process(pi);
+}
+
+static void launch_stratifier(ckpool_t *ckp)
+{
+	proc_instance_t *pi = &ckp->stratifier;
+
+	pi->ckp = ckp;
+	pi->processname = strdup("stratifier");
+	pi->sockname = pi->processname;
+	pi->process = &stratifier;
+	launch_process(pi);
+}
+
+static void *watchdog(void *arg)
+{
+	ckpool_t *ckp = (ckpool_t *)arg;
+
+	rename_proc("watchdog");
+	while (42) {
+		int pid, status;
+
+		pid = wait(&status);
+		if (pid == ckp->generator.pid) {
+			LOGERR("Generator process dead! Relaunching");
+			launch_generator(ckp);
+		} else if (pid == ckp->stratifier.pid) {
+			LOGERR("Stratifier process dead! Relaunching");
+			launch_stratifier(ckp);
+		}
+	}
+	return NULL;
+}
+
 int main(int argc, char **argv)
 {
-	struct sigaction handler;
-	pthread_t pth_listener;
 	int len, c, ret;
 	ckpool_t ckp;
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
-	while ((c = getopt(argc, argv, "c:gn:s:")) != -1) {
+	while ((c = getopt(argc, argv, "c:n:s:")) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
-				break;
-			case 'g':
-				/* Launch generator only */
 				break;
 			case 'n':
 				ckp.name = optarg;
@@ -276,33 +310,18 @@ int main(int argc, char **argv)
 	write_namepid(&ckp.main);
 	create_process_unixsock(&ckp.main);
 
-	create_pthread(&pth_listener, listener, &ckp.main);
+	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */
-	ckp.generator.ckp = &ckp;
-	ckp.generator.processname = strdup("generator");
-	ckp.generator.sockname = ckp.generator.processname;
-	ckp.generator.process = &generator;
-	launch_process(&ckp.generator);
-
-	ckp.stratifier.ckp = &ckp;
-	ckp.stratifier.processname = strdup("stratifier");
-	ckp.stratifier.sockname = ckp.stratifier.processname;
-	ckp.stratifier.process = &stratifier;
-	launch_process(&ckp.stratifier);
-
-	/* Install signal handlers only for the master process to be able to
-	 * shut down all child processes */
-	handler.sa_handler = &sighandler;
-	handler.sa_flags = 0;
-	sigemptyset(&handler.sa_mask);
-	sigaction(SIGTERM, &handler, NULL);
-	sigaction(SIGINT, &handler, NULL);
+	launch_generator(&ckp);
+	launch_stratifier(&ckp);
 
 	test_functions(&ckp);
 
-	/* Shutdown from here */
-	join_pthread(pth_listener);
+	create_pthread(&ckp.pth_watchdog, watchdog, &ckp);
+
+	/* Shutdown from here if the listener is sent a shutdown message */
+	join_pthread(ckp.pth_listener);
 
 	shutdown_children(&ckp, SIGTERM);
 	clean_up(&ckp);

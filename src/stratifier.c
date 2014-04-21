@@ -27,7 +27,11 @@ static void update_base(ckpool_t *ckp)
 		LOGWARNING("Failed to open generator socket %s", path);
 		return;
 	}
-	send_unix_msg(genfd, "getbase");
+	if (!send_unix_msg(genfd, "getbase")) {
+		LOGWARNING("Failed to send getbase to generator socket");
+		close(genfd);
+		return;
+	}
 	buf = recv_unix_msg(genfd);
 	/* Do something with this buffer here */
 	dealloc(buf);
