@@ -148,6 +148,7 @@ struct ckpool_instance {
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;
 	proc_instance_t generator;
+	proc_instance_t stratifier;
 
 	/* Bitcoind data */
 	char *btcdurl;

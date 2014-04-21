@@ -20,6 +20,7 @@
 #include "ckpool.h"
 #include "libckpool.h"
 #include "generator.h"
+#include "stratifier.h"
 
 /* Only global variable, to be used only by sighandler */
 static ckpool_t *global_ckp;
@@ -149,6 +150,7 @@ static void clean_up(ckpool_t *ckp)
 static void shutdown_children(ckpool_t *ckp, int sig)
 {
 	kill(ckp->generator.pid, sig);
+	kill(ckp->stratifier.pid, sig);
 }
 
 static void sighandler(int sig)
@@ -206,15 +208,15 @@ static void test_functions(ckpool_t *ckp)
 	}
 	send_unix_msg(genfd, "getbase");
 	buf = recv_unix_msg(genfd);
-	LOGWARNING("getbase response: %s", buf);
 	dealloc(buf);
-
+#if 0
 	genfd = open_unix_client(ckp->generator.us.path);
 	if (genfd < 0) {
 		LOGWARNING("Failed to open generator socket %s", path);
 		return;
 	}
 	send_unix_msg(genfd, "shutdown");
+#endif
 }
 
 int main(int argc, char **argv)
@@ -275,6 +277,12 @@ int main(int argc, char **argv)
 	ckp.generator.sockname = ckp.generator.processname;
 	ckp.generator.process = &generator;
 	launch_process(&ckp.generator);
+
+	ckp.stratifier.ckp = &ckp;
+	ckp.stratifier.processname = strdup("stratifier");
+	ckp.stratifier.sockname = ckp.stratifier.processname;
+	ckp.stratifier.process = &stratifier;
+	launch_process(&ckp.stratifier);
 
 	/* Install signal handlers only for the master process to be able to
 	 * shut down all child processes */
