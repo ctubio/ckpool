@@ -828,6 +828,7 @@ out:
 	return val;
 }
 
+
 /* Align a size_t to 4 byte boundaries for fussy arches */
 void align_len(size_t *len)
 {

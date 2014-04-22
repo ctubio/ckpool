@@ -21,8 +21,8 @@ struct gbtbase {
 	char nbit[12];
 	int coinbasevalue;
 	int height;
-	char *txn_data;
 	int transactions;
+	char *txn_data;
 	int merkles;
 	char merklehash[16][68];
 	json_t *json;
