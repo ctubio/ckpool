@@ -115,6 +115,10 @@ int generator(proc_instance_t *pi)
 		goto out;
 	}
 	clear_gbtbase(&gbt);
+	if (!validate_address(&cs, ckp->btcaddress)) {
+		LOGWARNING("Invalid btcaddress: %s, unable to start!", ckp->btcaddress);
+		goto out;
+	}
 
 	ret = gen_loop(pi, &cs);
 out:
