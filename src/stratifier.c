@@ -283,8 +283,36 @@ out:
 	return ret;
 }
 
+static void *blockupdate(void *arg)
+{
+	ckpool_t *ckp = (ckpool_t *)arg;
+	char *buf = NULL, hash[68];
+	char request[8];
+
+	rename_proc("blockupdate");
+	buf = send_recv_proc(&ckp->generator, "getbest");
+	if (buf && strncasecmp(buf, "Failed", 6))
+		sprintf(request, "getbest");
+	else
+		sprintf(request, "getlast");
+
+	memset(hash, 0, 68);
+	while (42) {
+		dealloc(buf);
+		buf = send_recv_proc(&ckp->generator, request);
+		if (buf && strcmp(buf, hash) && strncasecmp(buf, "Failed", 6)) {
+			strcpy(hash, buf);
+			LOGINFO("Detected hash change to %s", hash);
+			send_proc(&ckp->stratifier, "update");
+		} else
+			cksleep_ms(ckp->blockpoll);
+	}
+	return NULL;
+}
+
 int stratifier(proc_instance_t *pi)
 {
+	pthread_t pth_blockupdate;
 	ckpool_t *ckp = pi->ckp;
 	int ret = 0;
 
@@ -292,6 +320,8 @@ int stratifier(proc_instance_t *pi)
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
+
+	create_pthread(&pth_blockupdate, blockupdate, ckp);
 	strat_loop(ckp, pi);
 	return ret;
 }

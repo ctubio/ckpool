@@ -168,6 +168,7 @@ struct ckpool_instance {
 	int update_interval; // Seconds between stratum updates
 };
 
+void rename_proc(const char *name);
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);
 void join_pthread(pthread_t thread);
 

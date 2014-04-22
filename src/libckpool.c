@@ -16,6 +16,7 @@
 #else
 #include <sys/un.h>
 #endif
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -35,6 +36,15 @@
 #ifndef UNIX_PATH_MAX
 #define UNIX_PATH_MAX 108
 #endif
+
+void rename_proc(const char *name)
+{
+	char buf[16];
+
+	snprintf(buf, 15, "ckp@%s", name);
+	buf[15] = '\0';
+	prctl(PR_SET_NAME, buf, 0, 0, 0);
+}
 
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg)
 {
@@ -506,7 +516,7 @@ void empty_socket(int fd)
 
 	do {
 		char buf[PAGESIZE];
-		tv_t timeout = {1, 0};
+		tv_t timeout = {0, 0};
 		fd_set rd;
 
 		FD_ZERO(&rd);
@@ -514,8 +524,11 @@ void empty_socket(int fd)
 		ret = select(fd + 1, &rd, NULL, NULL, &timeout);
 		if (ret < 0 && interrupted())
 			continue;
-		if (ret > 0)
+		if (ret > 0) {
 			ret = recv(fd, buf, PAGESIZE - 1, 0);
+			buf[ret] = 0;
+			LOGDEBUG("Discarding: %s", buf);
+		}
 	} while (ret > 0);
 }
 
@@ -634,10 +647,19 @@ out:
  * string.*/
 char *recv_unix_msg(int sockd)
 {
+	tv_t tv_timeout = {1, 0};
 	char *buf = NULL;
 	uint32_t msglen;
+	fd_set readfs;
 	int ret, ofs;
 
+	FD_ZERO(&readfs);
+	FD_SET(sockd, &readfs);
+	ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
+	if (ret < 1) {
+		LOGERR("Select1 failed in recv_unix_msg");
+		return false;
+	}
 	/* Get message length */
 	ret = read(sockd, &msglen, 4);
 	if (ret < 4) {
@@ -653,6 +675,16 @@ char *recv_unix_msg(int sockd)
 	buf[msglen] = 0;
 	ofs = 0;
 	while (msglen) {
+		tv_timeout.tv_sec = 1;
+		tv_timeout.tv_usec = 0;
+
+		FD_ZERO(&readfs);
+		FD_SET(sockd, &readfs);
+		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
+		if (ret < 1) {
+			LOGERR("Select2 failed in recv_unix_msg");
+			return false;
+		}
 		ret = read(sockd, buf + ofs, msglen);
 		if (unlikely(ret < 0)) {
 			LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
@@ -668,7 +700,9 @@ out:
 
 bool send_unix_msg(int sockd, const char *buf)
 {
+	tv_t tv_timeout = {1, 0};
 	uint32_t msglen, len;
+	fd_set writefds;
 	int ret, ofs;
 
 	len = strlen(buf);
@@ -677,6 +711,13 @@ bool send_unix_msg(int sockd, const char *buf)
 		return false;
 	}
 	msglen = htole32(len);
+	FD_ZERO(&writefds);
+	FD_SET(sockd, &writefds);
+	ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
+	if (ret < 1) {
+		LOGERR("Select1 failed in send_unix_msg");
+		return false;
+	}
 	ret = write(sockd, &msglen, 4);
 	if (unlikely(ret < 4)) {
 		LOGERR("Failed to write 4 byte length in send_unix_msg");
@@ -684,6 +725,16 @@ bool send_unix_msg(int sockd, const char *buf)
 	}
 	ofs = 0;
 	while (len) {
+		tv_timeout.tv_sec = 1;
+		tv_timeout.tv_usec = 0;
+
+		FD_ZERO(&writefds);
+		FD_SET(sockd, &writefds);
+		ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
+		if (ret < 1) {
+			LOGERR("Select2 failed in send_unix_msg");
+			return false;
+		}
 		ret = write(sockd, buf + ofs, len);
 		if (unlikely(ret < 0)) {
 			LOGERR("Failed to write %d bytes in send_unix_msg", len);
@@ -704,7 +755,7 @@ bool send_proc(proc_instance_t *pi, const char *msg)
 	int sockd;
 
 	if (unlikely(!path || !strlen(path))) {
-		LOGERR("Attempted to send message to null path in send_proc");
+		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
 		goto out;
 	}
 	if (unlikely(!msg || !strlen(msg))) {
@@ -733,7 +784,7 @@ char *send_recv_proc(proc_instance_t *pi, const char *msg)
 	int sockd;
 
 	if (unlikely(!path || !strlen(path))) {
-		LOGERR("Attempted to send message to null path in send_proc");
+		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
 		goto out;
 	}
 	if (unlikely(!msg || !strlen(msg))) {
@@ -799,30 +850,37 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 	ret = write_socket(cs->fd, http_req, len);
 	if (ret != len) {
 		LOGWARNING("Failed to write to socket in json_rpc_call");
-		empty_socket(cs->fd);
-		goto out;
+		goto out_empty;
 	}
 	ret = read_socket_line(cs);
 	if (ret < 1) {
 		LOGWARNING("Failed to read socket line in json_rpc_call");
-		goto out;
+		goto out_empty;
 	}
 	if (strncasecmp(cs->buf, "HTTP/1.1 200 OK", 15)) {
 		LOGWARNING("HTTP response not ok: %s", cs->buf);
-		empty_socket(cs->fd);
-			goto out;
+		goto out_empty;
 	}
 	do {
 		ret = read_socket_line(cs);
 		if (ret < 1) {
 			LOGWARNING("Failed to read http socket lines in json_rpc_call");
-			goto out;
+			goto out_empty;
 		}
 	} while (strncmp(cs->buf, "{", 1));
 
 	val = json_loads(cs->buf, 0, &err_val);
 	if (!val)
 		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
+out_empty:
+	empty_socket(cs->fd);
+	if (!val) {
+		/* Assume that a failed request means the socket will be closed
+		 * and reopen it */
+		LOGWARNING("Reopening socket to %s:%s", cs->url, cs->port);
+		close(cs->fd);
+		cs->fd = connect_socket(cs->url, cs->port);
+	}
 out:
 	dealloc(cs->buf);
 	return val;

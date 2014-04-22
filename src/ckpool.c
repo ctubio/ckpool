@@ -7,7 +7,6 @@
  * any later version.  See COPYING for more details.
  */
 
-#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -25,14 +24,6 @@
 
 /* Only global variable, to be used only by sighandler */
 static ckpool_t *global_ckp;
-
-static void rename_proc(const char *name)
-{
-	char buf[16];
-
-	snprintf(buf, 16, "ckp@%s", name);
-	prctl(PR_SET_NAME, buf, 0, 0, 0);
-}
 
 static void *listener(void *arg)
 {

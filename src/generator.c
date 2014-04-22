@@ -24,6 +24,7 @@ static int gen_loop(proc_instance_t *pi, connsock_t *cs)
 	int sockd, ret = 0;
 	char *buf = NULL;
 	gbtbase_t gbt;
+	char hash[68];
 
 	memset(&gbt, 0, sizeof(gbt));
 retry:
@@ -57,6 +58,30 @@ retry:
 			send_unix_msg(sockd, s);
 			free(s);
 			clear_gbtbase(&gbt);
+		}
+	}
+	if (!strncasecmp(buf, "getbest", 7)) {
+		if (!get_bestblockhash(cs, hash)) {
+			LOGWARNING("No best block hash support from %s:%s",
+				   cs->url, cs->port);
+			send_unix_msg(sockd, "Failed");
+		} else {
+			send_unix_msg(sockd, hash);
+		}
+	}
+	if (!strncasecmp(buf, "getlast", 7)) {
+		int height = get_blockcount(cs);
+
+		if (height == -1)
+			send_unix_msg(sockd,  "Failed");
+		else {
+			LOGDEBUG("Height: %d", height);
+			if (!get_blockhash(cs, height, hash))
+				send_unix_msg(sockd, "Failed");
+			else {
+				send_unix_msg(sockd, hash);
+				LOGDEBUG("Hash: %s", hash);
+			}
 		}
 	}
 	close(sockd);
