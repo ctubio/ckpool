@@ -17,6 +17,8 @@
 #include "libckpool.h"
 #include "bitcoin.h"
 
+static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
+
 static const char *scriptsig_header = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff";
 static uchar scriptsig_header_bin[41];
 
@@ -59,6 +61,9 @@ struct workbase {
 	char coinb2[128]; // coinbase2
 	uchar coinb2bin[64];
 	int coinb2len; // length of above
+
+	/* Cached header binary */
+	char headerbin[112];
 };
 
 typedef struct workbase workbase_t;
@@ -95,6 +100,7 @@ static inline void json_strdup(char **buf, json_t *val, const char *key)
 
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 {
+	char header[228];
 	int len, ofs = 0;
 	uint64_t *u64;
 	tv_t now;
@@ -166,6 +172,15 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	__bin2hex(wb->coinb2, wb->coinb2bin, wb->coinb2len);
 	LOGDEBUG("Coinb2: %s", wb->coinb2);
 	/* Coinbase 2 complete */
+
+	snprintf(header, 225, "%08x%s%s%s%s%s%s",
+		 wb->version, wb->prevhash,
+		 "0000000000000000000000000000000000000000000000000000000000000000",
+		 wb->ntime, wb->nbit,
+		 "00000000", /* nonce */
+		 workpadding);
+	LOGDEBUG("Header: %s", header);
+	hex2bin(wb->headerbin, header, 112);
 }
 
 /* This function assumes it will only receive a valid json gbt base template
