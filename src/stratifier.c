@@ -237,7 +237,7 @@ static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
 	tv_t timeout;
 
 reset:
-	timeout.tv_sec = 60;
+	timeout.tv_sec = ckp->update_interval;
 retry:
 	FD_ZERO(&readfds);
 	FD_SET(us->sockd, &readfds);
@@ -250,7 +250,7 @@ retry:
 		goto out;
 	}
 	if (!selret) {
-		LOGDEBUG("60s elapsed in strat_loop, updating gbt base");
+		LOGDEBUG("%ds elapsed in strat_loop, updating gbt base", ckp->update_interval);
 		update_base(ckp);
 		goto reset;
 	}

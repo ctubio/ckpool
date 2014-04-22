@@ -158,8 +158,14 @@ struct ckpool_instance {
 	char *btcdurl;
 	char *btcdauth;
 	char *btcdpass;
-	char *btcaddress;
-	char *btcsig;
+	int blockpoll; // How frequently in ms to poll bitcoind for block updates
+
+	/* Coinbase data */
+	char *btcaddress; // Address to mine to
+	char *btcsig; // Optional signature to add to coinbase
+
+	/* Stratum options */
+	int update_interval; // Seconds between stratum updates
 };
 
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);

@@ -78,12 +78,6 @@ int generator(proc_instance_t *pi)
 	memset(&cs, 0, sizeof(cs));
 	memset(&gbt, 0, sizeof(gbt));
 
-	if (!ckp->btcdurl)
-		ckp->btcdurl = strdup("localhost:8332");
-	if (!ckp->btcdauth)
-		ckp->btcdauth = strdup("user");
-	if (!ckp->btcdpass)
-		ckp->btcdpass = strdup("pass");
 	if (!extract_sockaddr(ckp->btcdurl, &cs.url, &cs.port)) {
 		LOGWARNING("Failed to extract address from %s", ckp->btcdurl);
 		ret = 1;

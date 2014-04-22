@@ -168,12 +168,27 @@ static void json_get_string(char **store, json_t *val, const char *res)
 		return;
 	}
 	if (!json_is_string(entry)) {
-		LOGWARNING("Json entry %s is not string", res);
+		LOGWARNING("Json entry %s is not a string", res);
 		return;
 	}
 	buf = json_string_value(entry);
 	LOGDEBUG("Json found entry %s: %s", res, buf);
 	*store = strdup(buf);
+}
+
+static void json_get_int(int *store, json_t *val, const char *res)
+{
+	json_t *entry = json_object_get(val, res);
+
+	if (!entry) {
+		LOGDEBUG("Json did not find entry %s", res);
+		return;
+	}
+	if (!json_is_integer(entry)) {
+		LOGWARNING("Json entry %s is not an integer", res);
+		return;
+	}
+	*store = json_integer_value(entry);
 }
 
 static void parse_config(ckpool_t *ckp)
@@ -192,6 +207,8 @@ static void parse_config(ckpool_t *ckp)
 	json_get_string(&ckp->btcdpass, json_conf, "btcdpass");
 	json_get_string(&ckp->btcaddress, json_conf, "btcaddress");
 	json_get_string(&ckp->btcsig, json_conf, "btcsig");
+	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
+	json_get_int(&ckp->update_interval, json_conf, "update_interval");
 	json_decref(json_conf);
 }
 
@@ -303,6 +320,19 @@ int main(int argc, char **argv)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
 
 	parse_config(&ckp);
+	/* Set defaults if not found in config file */
+	if (!ckp.btcdurl)
+		ckp.btcdurl = strdup("localhost:8332");
+	if (!ckp.btcdauth)
+		ckp.btcdauth = strdup("user");
+	if (!ckp.btcdpass)
+		ckp.btcdpass = strdup("pass");
+	if (!ckp.btcaddress)
+		ckp.btcaddress = strdup("15qSxP1SQcUX3o4nhkfdbgyoWEFMomJ4rZ");
+	if (!ckp.blockpoll)
+		ckp.blockpoll = 500;
+	if (!ckp.update_interval)
+		ckp.update_interval = 30;
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
