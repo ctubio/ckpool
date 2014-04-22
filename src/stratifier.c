@@ -90,6 +90,7 @@ static void update_base(ckpool_t *ckp)
 	json_strcpy(wb.prevhash, val, "prevhash");
 	json_strcpy(wb.ntime, val, "ntime");
 	json_strcpy(wb.bbversion, val, "bbversion");
+	json_strcpy(wb.nbit, val, "nbit");
 	json_intcpy(&wb.coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb.height, val, "height");
 	json_intcpy(&wb.transactions, val, "transactions");
