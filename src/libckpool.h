@@ -226,6 +226,8 @@ int open_unix_server(const char *server_path);
 int open_unix_client(const char *server_path);
 char *recv_unix_msg(int sockd);
 bool send_unix_msg(int sockd, const char *buf);
+bool send_proc(proc_instance_t *pi, const char *msg);
+char *send_recv_proc(proc_instance_t *pi, const char *msg);
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 

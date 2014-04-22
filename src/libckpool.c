@@ -695,6 +695,65 @@ bool send_unix_msg(int sockd, const char *buf)
 	return true;
 }
 
+/* Send a single message to a process instance when there will be no response,
+ * closing the socket immediately. */
+bool send_proc(proc_instance_t *pi, const char *msg)
+{
+	char *path = pi->us.path;
+	bool ret = false;
+	int sockd;
+
+	if (unlikely(!path || !strlen(path))) {
+		LOGERR("Attempted to send message to null path in send_proc");
+		goto out;
+	}
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to socket %s in send_proc", path);
+		goto out;
+	}
+	sockd = open_unix_client(path);
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Failed to open socket %s", path);
+		goto out;
+	}
+	if (unlikely(!send_unix_msg(sockd, msg)))
+		LOGWARNING("Failed to send %s to socket %s", msg, path);
+	else
+		ret = true;
+	close(sockd);
+out:
+	return ret;
+}
+
+/* Send a single message to a process instance and retrieve the response, then
+ * close the socket. */
+char *send_recv_proc(proc_instance_t *pi, const char *msg)
+{
+	char *path = pi->us.path, *buf = NULL;
+	int sockd;
+
+	if (unlikely(!path || !strlen(path))) {
+		LOGERR("Attempted to send message to null path in send_proc");
+		goto out;
+	}
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to socket %s in send_proc", path);
+		goto out;
+	}
+	sockd = open_unix_client(path);
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Failed to open socket %s", path);
+		goto out;
+	}
+	if (unlikely(!send_unix_msg(sockd, msg)))
+		LOGWARNING("Failed to send %s to socket %s", msg, path);
+	else
+		buf = recv_unix_msg(sockd);
+	close(sockd);
+out:
+	return buf;
+}
+
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
