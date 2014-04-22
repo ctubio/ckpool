@@ -19,8 +19,9 @@ struct gbtbase {
 	char ntime[12];
 	char bbversion[12];
 	char nbit[12];
-	int coinbasevalue;
+	uint64_t coinbasevalue;
 	int height;
+	char *flags;
 	int transactions;
 	char *txn_data;
 	int merkles;

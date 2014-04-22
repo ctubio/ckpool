@@ -252,6 +252,9 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	gbt->height = height;
 	json_object_set_new_nocheck(gbt->json, "height", json_integer(height));
 
+	gbt->flags = strdup(flags);
+	json_object_set_new_nocheck(gbt->json, "flags", json_string_nocheck(gbt->flags));
+
 	gbt_merkle_bins(gbt, transaction_arr);
 	json_object_set_new_nocheck(gbt->json, "transactions", json_integer(gbt->transactions));
 	if (gbt->transactions)
@@ -272,6 +275,7 @@ out:
 
 void clear_gbtbase(gbtbase_t *gbt)
 {
+	dealloc(gbt->flags);
 	dealloc(gbt->txn_data);
 	json_decref(gbt->json);
 	gbt->json = NULL;
