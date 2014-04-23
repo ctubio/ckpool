@@ -454,7 +454,7 @@ int read_socket_line(connsock_t *cs)
 {
 	char readbuf[PAGESIZE], *eom = NULL;
 	size_t buflen = 0, bufofs = 0;
-	tv_t timeout = {1, 0};
+	tv_t timeout = {5, 0};
 	int ret, bufsiz;
 	fd_set rd;
 
@@ -467,9 +467,9 @@ retry:
 		goto retry;
 	if (ret < 1) {
 		if (!ret)
-			LOGNOTICE("Select timed out in read_socket_line");
+			LOGNOTICE("Select1 timed out in read_socket_line");
 		else
-			LOGERR("Select failed in read_socket_line");
+			LOGERR("Select1 failed in read_socket_line");
 		goto out;
 	}
 	bufsiz = PAGESIZE;
@@ -477,6 +477,20 @@ retry:
 	while (!eom) {
 		int extralen;
 
+		FD_ZERO(&rd);
+		FD_SET(cs->fd, &rd);
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		ret = select(cs->fd + 1, &rd, NULL, NULL, &timeout);
+		if (ret < 0 && interrupted())
+			continue;
+		if (ret < 1) {
+			if (!ret)
+				LOGNOTICE("Select2 timed out in read_socket_line");
+			else
+				LOGERR("Select2 failed in read_socket_line");
+			goto out;
+		}
 		ret = recv(cs->fd, readbuf, bufsiz - 2, MSG_PEEK);
 		if (ret < 0) {
 			LOGERR("Failed to recv in read_socket_line");
