@@ -18,11 +18,60 @@
 #include "ckpool.h"
 #include "libckpool.h"
 
+struct connector_instance {
+	cklock_t lock;
+	proc_instance_t *pi;
+	int serverfd;
+	int clients;
+};
+
+typedef struct connector_instance conn_instance_t;
+
+struct client_instance {
+	connsock_t cs;
+	struct sockaddr address;
+	socklen_t address_len;
+};
+
+typedef struct client_instance client_instance_t;
+
+void *acceptor(void *arg)
+{
+	conn_instance_t *ci = (conn_instance_t *)arg;
+	proc_instance_t *pi = ci->pi;
+	unixsock_t *us = &pi->us;
+	ckpool_t *ckp = pi->ckp;
+	client_instance_t cli;
+
+	rename_proc("acceptor");
+
+retry:
+	cli.address_len = sizeof(cli.address);
+	cli.cs.fd = accept(ci->serverfd, &cli.address, &cli.address_len);
+	if (unlikely(cli.cs.fd < 0)) {
+		if (interrupted())
+			goto retry;
+		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
+		goto out;
+	}
+	/* Do something here with the client instance instead of just reading
+	 * a line. */
+	if (read_socket_line(&cli.cs))
+		LOGWARNING("Received %s", cli.cs.buf);
+	dealloc(cli.cs.buf);
+	close(cli.cs.fd);
+	goto retry;
+out:
+	return NULL;
+}
+
 int connector(proc_instance_t *pi)
 {
 	char *url = NULL, *port = NULL;
 	ckpool_t *ckp = pi->ckp;
+	pthread_t pth_acceptor;
 	int sockd, ret = 0;
+	conn_instance_t ci;
 
 	if (ckp->serverurl) {
 		if (!extract_sockaddr(ckp->serverurl, &url, &port)) {
@@ -54,12 +103,24 @@ int connector(proc_instance_t *pi)
 		ret = bind(sockd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 		if (ret < 0) {
 			LOGERR("Connector failed to bind to socket");
-			ret = 1;
 			close(sockd);
 			goto out;
 		}
 	}
 
+	ret = listen(sockd, 10);
+	if (ret < 0) {
+		LOGERR("Connector failed to listen on socket");
+		close(sockd);
+		goto out;
+	}
+	cklock_init(&ci.lock);
+	ci.pi = pi;
+	ci.serverfd = sockd;
+	ci.clients = 0;
+	create_pthread(&pth_acceptor, acceptor, &ci);
+
+	join_pthread(pth_acceptor);
 out:
 	LOGINFO("%s connector exiting with return code %d", ckp->name, ret);
 	if (ret) {
