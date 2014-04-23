@@ -29,10 +29,12 @@ static void *listener(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	unixsock_t *us = &pi->us;
+	char *buf = NULL;
 	int sockd;
 
 	rename_proc(pi->sockname);
 retry:
+	dealloc(buf);
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		if (interrupted())
@@ -41,9 +43,16 @@ retry:
 		goto out;
 	}
 	/* Insert parsing and repeat code here */
-out:
-	if (sockd >= 0)
+	buf = recv_unix_msg(sockd);
+	if (!strncasecmp(buf, "shutdown", 8)) {
+		LOGWARNING("Listener received shutdown message, terminating ckpool");
 		close(sockd);
+		goto out;
+	}
+	close(sockd);
+	goto retry;
+out:
+	dealloc(buf);
 	close_unix_socket(us->sockd, us->path);
 	return NULL;
 }

@@ -147,5 +147,9 @@ out:
 	dealloc(userpass);
 
 	LOGINFO("%s generator exiting with return code %d", ckp->name, ret);
+	if (ret) {
+		send_proc(&ckp->main, "shutdown");
+		sleep(1);
+	}
 	return ret;
 }
