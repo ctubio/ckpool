@@ -348,6 +348,41 @@ void block_socket(int fd)
 	fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
+int bind_socket(char *url, char *port)
+{
+	struct addrinfo servinfobase, *servinfo, hints, *p;
+	int ret, sockd = -1;
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	servinfo = &servinfobase;
+
+	if (getaddrinfo(url, port, &hints, &servinfo) != 0) {
+		LOGWARNING("Failed to resolve (?wrong URL) %s:%s", url, port);
+		goto out;
+	}
+	for (p = servinfo; p != NULL; p = p->ai_next) {
+		sockd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+		if (sockd > 0)
+			break;
+	}
+	if (sockd < 0) {
+		LOGWARNING("Failed to open socket for %s:%s", url, port);
+		goto out;
+	}
+	ret = bind(sockd, p->ai_addr, p->ai_addrlen);
+	if (ret < 0) {
+		LOGWARNING("Failed to bind socket for %s:%s", url, port);
+		close(sockd);
+		sockd = -1;
+		goto out;
+	}
+
+out:
+	return sockd;
+}
+
 int connect_socket(char *url, char *port)
 {
 	struct addrinfo servinfobase, *servinfo, hints, *p;

@@ -149,6 +149,7 @@ struct ckpool_instance {
 	proc_instance_t main;
 	proc_instance_t generator;
 	proc_instance_t stratifier;
+	proc_instance_t connector;
 
 	/* Threads of main process */
 	pthread_t pth_listener;
@@ -166,6 +167,7 @@ struct ckpool_instance {
 
 	/* Stratum options */
 	int update_interval; // Seconds between stratum updates
+	char *serverurl;
 };
 
 void rename_proc(const char *name);
@@ -224,6 +226,7 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);
 void keep_sockalive(int fd);
 void noblock_socket(int fd);
 void block_socket(int fd);
+int bind_socket(char *url, char *port);
 int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
 int read_socket_line(connsock_t *cs);

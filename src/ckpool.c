@@ -21,6 +21,7 @@
 #include "libckpool.h"
 #include "generator.h"
 #include "stratifier.h"
+#include "connector.h"
 
 /* Only global variable, to be used only by sighandler */
 static ckpool_t *global_ckp;
@@ -209,6 +210,7 @@ static void parse_config(ckpool_t *ckp)
 	json_get_string(&ckp->btcsig, json_conf, "btcsig");
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
+	json_get_string(&ckp->serverurl, json_conf, "serverurl");
 	json_decref(json_conf);
 }
 
@@ -257,6 +259,17 @@ static void launch_stratifier(ckpool_t *ckp)
 	launch_process(pi);
 }
 
+static void launch_connector(ckpool_t *ckp)
+{
+	proc_instance_t *pi = &ckp->connector;
+
+	pi->ckp = ckp;
+	pi->processname = strdup("connector");
+	pi->sockname = pi->processname;
+	pi->process = &connector;
+	launch_process(pi);
+}
+
 static void *watchdog(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
@@ -272,6 +285,9 @@ static void *watchdog(void *arg)
 		} else if (pid == ckp->stratifier.pid) {
 			LOGERR("Stratifier process dead! Relaunching");
 			launch_stratifier(ckp);
+		} else if (pid == ckp->connector.pid) {
+			LOGERR("Connector process dead! Relaunching");
+			launch_connector(ckp);
 		}
 	}
 	return NULL;
@@ -345,6 +361,7 @@ int main(int argc, char **argv)
 	/* Launch separate processes from here */
 	launch_generator(&ckp);
 	launch_stratifier(&ckp);
+	launch_connector(&ckp);
 
 	test_functions(&ckp);
 
