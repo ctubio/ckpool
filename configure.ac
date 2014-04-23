@@ -36,7 +36,7 @@ AC_CHECK_LIB(jansson, json_loads, ,
 
 AC_CHECK_HEADERS(stdio.h stdlib.h fcntl.h sys/time.h unistd.h)
 AC_CHECK_HEADERS(ctype.h errno.h byteswap.h string.h time.h)
-AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h syslog.h)
+AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h sys/poll.h syslog.h)
 AC_CHECK_HEADERS(alloca.h pthread.h stdio.h math.h signal.h sys/prctl.h)
 AC_CHECK_HEADERS(sys/types.h sys/socket.h sys/stat.h linux/un.h netdb.h)
 AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h)
