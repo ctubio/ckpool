@@ -38,12 +38,14 @@ struct client_instance {
 	char buf[PAGESIZE];
 	int bufofs;
 	int fd;
+	int id;
 };
 
 typedef struct client_instance client_instance_t;
 
 /* For the hashtable of all clients */
 static client_instance_t *clients;
+static int client_id;
 
 /* Accepts incoming connections to the server socket and generates client
  * instances */
@@ -72,7 +74,8 @@ retry:
 	client->fd = fd;
 
 	ck_wlock(&ci->lock);
-	HASH_ADD_INT(clients, fd, client);
+	client->id = client_id++;
+	HASH_ADD_INT(clients, id, client);
 	ci->nfds++;
 	ck_wunlock(&ci->lock);
 
@@ -148,7 +151,7 @@ reparse:
 void *receiver(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
-	client_instance_t *client, *tmp;
+	client_instance_t *client, *tmp, *tmpa;
 	struct pollfd fds[65536];
 	int ret, nfds, i;
 
@@ -179,20 +182,25 @@ retry:
 	if (!ret)
 		goto retry;
 	for (i = 0; i < nfds; i++) {
-		int fd;
 
 		if (!(fds[i].revents & POLLIN))
 			continue;
 
-		fd = fds[i].fd;
+		client = NULL;
 
 		ck_rlock(&ci->lock);
-		HASH_FIND_INT(clients, &fd, client);
+		HASH_ITER(hh, clients, tmp, tmpa) {
+			if (tmp->fd == fds[i].fd) {
+				client = tmp;
+				break;
+			}
+		}
+		ck_runlock(&ci->lock);
+
 		if (!client)
-			LOGWARNING("Failed to find client with fd %d in hashtable!", fd);
+			LOGWARNING("Failed to find client with fd %d in hashtable!", fds[i].fd);
 		else
 			parse_client_msg(ci, client);
-		ck_runlock(&ci->lock);
 
 		if (--ret < 1)
 			break;
