@@ -18,30 +18,37 @@
 
 #include "ckpool.h"
 #include "libckpool.h"
+#include "uthash.h"
 
 struct connector_instance {
 	cklock_t lock;
 	proc_instance_t *pi;
 	int serverfd;
 	int nfds;
-	struct pollfd fds[65536];
 };
 
 typedef struct connector_instance conn_instance_t;
 
 struct client_instance {
+	UT_hash_handle hh;
 	struct sockaddr address;
 	socklen_t address_len;
+	char buf[PAGESIZE];
+	int bufofs;
+	int fd;
+	int id;
 };
 
 typedef struct client_instance client_instance_t;
+
+static client_instance_t *clients;
 
 /* Accepts incoming connections to the server socket and generates client
  * instances */
 void *acceptor(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
-	client_instance_t cli;
+	client_instance_t cli, *client;
 	int fd;
 
 	rename_proc("acceptor");
@@ -58,12 +65,14 @@ retry:
 
 	LOGINFO("Connected new client %d on socket %d", ci->nfds, fd);
 
+	client = ckalloc(sizeof(client_instance_t));
+	memcpy(client, &cli, sizeof(client_instance_t));
+	client->fd = fd;
+
 	ck_wlock(&ci->lock);
-	ci->fds[ci->nfds].fd = fd;
-	ci->fds[ci->nfds].events = POLLIN;
+	HASH_ADD_INT(clients, id, client);
 	ci->nfds++;
 	ck_wunlock(&ci->lock);
-
 
 	goto retry;
 out:
@@ -75,6 +84,7 @@ out:
 void *receiver(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
+	client_instance_t *client, *tmp;
 	struct pollfd fds[65536];
 	int ret, nfds, i;
 	connsock_t cs;
@@ -85,9 +95,15 @@ void *receiver(void *arg)
 retry:
 	dealloc(cs.buf);
 
+	memset(fds, 0, sizeof(fds));
+	nfds = 0;
+
 	ck_rlock(&ci->lock);
-	memcpy(&fds, ci->fds, sizeof(fds));
-	nfds = ci->nfds;
+	HASH_ITER(hh, clients, client, tmp) {
+		fds[nfds].fd = client->fd;
+		fds[nfds].events = POLLIN;
+		nfds++;
+	}
 	ck_runlock(&ci->lock);
 
 	ret = poll(fds, nfds, 1);
