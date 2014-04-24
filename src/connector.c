@@ -42,6 +42,7 @@ struct client_instance {
 
 typedef struct client_instance client_instance_t;
 
+/* For the hashtable of all clients */
 static client_instance_t *clients;
 
 /* Accepts incoming connections to the server socket and generates client
@@ -66,7 +67,7 @@ retry:
 
 	LOGINFO("Connected new client %d on socket %d", ci->nfds, fd);
 
-	client = ckalloc(sizeof(client_instance_t));
+	client = ckzalloc(sizeof(client_instance_t));
 	memcpy(client, &cli, sizeof(client_instance_t));
 	client->fd = fd;
 
@@ -87,7 +88,7 @@ static void invalidate_client(client_instance_t *client)
 	client->fd = -1;
 }
 
-void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
+static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
 	char msg[PAGESIZE], *eol;
 	int buflen, ret;

@@ -16,6 +16,7 @@
 #include "ckpool.h"
 #include "libckpool.h"
 #include "bitcoin.h"
+#include "uthash.h"
 
 static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
 
@@ -26,6 +27,12 @@ static char pubkeytxnbin[25];
 static char pubkeytxn[52];
 
 struct workbase {
+	/* Hash table data */
+	UT_hash_handle hh;
+	int id;
+
+	time_t gentime;
+
 	/* GBT/shared variables */
 	char target[68];
 	double diff;
@@ -67,6 +74,13 @@ struct workbase {
 };
 
 typedef struct workbase workbase_t;
+
+/* For protecting the hashtable data */
+cklock_t workbase_lock;
+
+/* For the hashtable of all workbases */
+workbase_t *workbases;
+static int workbase_id;
 
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
@@ -188,11 +202,11 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
  * for generating work templates. */
 static void update_base(ckpool_t *ckp)
 {
-	workbase_t wb;
+	workbase_t *wb, *tmp, *tmpa;
 	json_t *val;
 	char *buf;
 
-	memset(&wb, 0, sizeof(wb));
+	wb = ckzalloc(sizeof(workbase_t));
 	buf = send_recv_proc(&ckp->generator, "getbase");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get base from generator in update_base");
@@ -201,31 +215,42 @@ static void update_base(ckpool_t *ckp)
 	val = json_loads(buf, 0, NULL);
 	dealloc(buf);
 
-	json_strcpy(wb.target, val, "target");
-	json_dblcpy(&wb.diff, val, "diff");
-	json_uintcpy(&wb.version, val, "version");
-	json_uintcpy(&wb.curtime, val, "curtime");
-	json_strcpy(wb.prevhash, val, "prevhash");
-	json_strcpy(wb.ntime, val, "ntime");
-	json_strcpy(wb.bbversion, val, "bbversion");
-	json_strcpy(wb.nbit, val, "nbit");
-	json_uint64cpy(&wb.coinbasevalue, val, "coinbasevalue");
-	json_intcpy(&wb.height, val, "height");
-	json_strdup(&wb.flags, val, "flags");
-	json_intcpy(&wb.transactions, val, "transactions");
-	if (wb.transactions)
-		json_strdup(&wb.txn_data, val, "txn_data");
-	json_intcpy(&wb.merkles, val, "merkles");
-	if (wb.merkles) {
+	json_strcpy(wb->target, val, "target");
+	json_dblcpy(&wb->diff, val, "diff");
+	json_uintcpy(&wb->version, val, "version");
+	json_uintcpy(&wb->curtime, val, "curtime");
+	json_strcpy(wb->prevhash, val, "prevhash");
+	json_strcpy(wb->ntime, val, "ntime");
+	json_strcpy(wb->bbversion, val, "bbversion");
+	json_strcpy(wb->nbit, val, "nbit");
+	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
+	json_intcpy(&wb->height, val, "height");
+	json_strdup(&wb->flags, val, "flags");
+	json_intcpy(&wb->transactions, val, "transactions");
+	if (wb->transactions)
+		json_strdup(&wb->txn_data, val, "txn_data");
+	json_intcpy(&wb->merkles, val, "merkles");
+	if (wb->merkles) {
 		json_t *arr;
 		int i;
 
 		arr = json_object_get(val, "merklehash");
-		for (i = 0; i < wb.merkles; i++)
-			strcpy(&wb.merklehash[i][0], json_string_value(json_array_get(arr, i)));
+		for (i = 0; i < wb->merkles; i++)
+			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(arr, i)));
 	}
 	json_decref(val);
-	generate_coinbase(ckp, &wb);
+	generate_coinbase(ckp, wb);
+	wb->gentime = time(NULL);
+
+	ck_wlock(&workbase_lock);
+	wb->id = workbase_id++;
+	HASH_ITER(hh, workbases, tmp, tmpa) {
+		/*  Age old workbases older than 10 minutes old */
+		if (tmp->gentime < wb->gentime - 600)
+			HASH_DEL(workbases, tmp);
+	}
+	HASH_ADD_INT(workbases, id, wb);
+	ck_wunlock(&workbase_lock);
 }
 
 static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -320,6 +345,7 @@ int stratifier(proc_instance_t *pi)
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
+	cklock_init(&workbase_lock);
 
 	create_pthread(&pth_blockupdate, blockupdate, ckp);
 	strat_loop(ckp, pi);
