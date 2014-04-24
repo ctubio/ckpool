@@ -298,9 +298,12 @@ retry:
 	LOGDEBUG("Stratifier received request: %s", buf);
 	if (!strncasecmp(buf, "shutdown", 8))
 		goto out;
-	if (!strncasecmp(buf, "update", 6)) {
+	else if (!strncasecmp(buf, "update", 6)) {
 		update_base(ckp);
 		goto reset;
+	} else {
+		LOGDEBUG("Received unrecognised message: %s", buf);
+		goto retry;
 	}
 
 out:

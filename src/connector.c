@@ -93,9 +93,11 @@ static void invalidate_client(client_instance_t *client)
 
 static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
+	ckpool_t *ckp = ci->pi->ckp;
 	char msg[PAGESIZE], *eol;
 	int buflen, ret;
 	bool moredata;
+	json_t *val;
 
 retry:
 	buflen = PAGESIZE - client->bufofs;
@@ -141,7 +143,19 @@ reparse:
 	msg[buflen] = 0;
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
-	LOGWARNING("Client fd %d sent message %s", client->fd, msg);
+	val = json_loads(msg, 0, NULL);
+	if (!val)
+		LOGWARNING("Client fd %d sent invalid json message %s", client->fd, msg);
+	else {
+		char *s;
+
+		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
+		s = json_dumps(val, 0);
+		send_proc(&ckp->stratifier, s);
+		free(s);
+		json_decref(val);
+	}
+
 	if (client->bufofs)
 		goto reparse;
 }
