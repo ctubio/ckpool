@@ -179,6 +179,12 @@ void rwlock_destroy(pthread_rwlock_t *lock)
 	pthread_rwlock_destroy(lock);
 }
 
+void _cond_init(pthread_cond_t *cond, const char *file, const char *func, const int line)
+{
+	if (unlikely(pthread_cond_init(cond, NULL)))
+		quitfrom(1, file, func, line, "Failed to pthread_cond_init!");
+}
+
 void _cklock_init(cklock_t *lock, const char *file, const char *func, const int line)
 {
 	_mutex_init(&lock->mutex, file, func, line);

@@ -76,11 +76,35 @@ struct workbase {
 typedef struct workbase workbase_t;
 
 /* For protecting the hashtable data */
-cklock_t workbase_lock;
+static cklock_t workbase_lock;
 
 /* For the hashtable of all workbases */
-workbase_t *workbases;
+static workbase_t *workbases;
 static int workbase_id;
+
+struct stratum_msg {
+	UT_hash_handle hh;
+	int id;
+
+	char *msg;
+};
+
+typedef struct stratum_msg stratum_msg_t;
+
+/* For protecting the stratum msg data */
+static pthread_mutex_t stratum_recv_lock;
+static pthread_mutex_t stratum_send_lock;
+
+/* For signalling the threads to wake up and do work */
+static pthread_cond_t stratum_recv_cond;
+static pthread_cond_t stratum_send_cond;
+
+/* For the hashtable of all queued messages */
+static stratum_msg_t *stratum_recvs;
+static stratum_msg_t *stratum_sends;
+
+static int stratum_recv_id;
+static int stratum_send_id;
 
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
@@ -338,9 +362,23 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
+static void *stratum_receiver(void *arg)
+{
+	ckpool_t *ckp = (ckpool_t *)arg;
+
+	return NULL;
+}
+
+static void *stratum_sender(void *arg)
+{
+	ckpool_t *ckp = (ckpool_t *)arg;
+
+	return NULL;
+}
+
 int stratifier(proc_instance_t *pi)
 {
-	pthread_t pth_blockupdate;
+	pthread_t pth_blockupdate, pth_stratum_receiver, pth_stratum_sender;
 	ckpool_t *ckp = pi->ckp;
 	int ret = 0;
 
@@ -348,9 +386,19 @@ int stratifier(proc_instance_t *pi)
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
-	cklock_init(&workbase_lock);
 
+	mutex_init(&stratum_recv_lock);
+	cond_init(&stratum_recv_cond);
+	create_pthread(&pth_stratum_receiver, stratum_receiver, ckp);
+
+	mutex_init(&stratum_send_lock);
+	cond_init(&stratum_send_cond);
+	create_pthread(&pth_stratum_sender, stratum_sender, ckp);
+
+	cklock_init(&workbase_lock);
 	create_pthread(&pth_blockupdate, blockupdate, ckp);
+
 	strat_loop(ckp, pi);
+
 	return ret;
 }

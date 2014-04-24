@@ -34,6 +34,8 @@
 #define wr_unlock(_lock) _wr_unlock(_lock, __FILE__, __func__, __LINE__)
 #define mutex_init(_lock) _mutex_init(_lock, __FILE__, __func__, __LINE__)
 #define rwlock_init(_lock) _rwlock_init(_lock, __FILE__, __func__, __LINE__)
+#define cond_init(_cond) _cond_init(_cond, __FILE__, __func__, __LINE__)
+
 #define cklock_init(_lock) _cklock_init(_lock, __FILE__, __func__, __LINE__)
 #define ck_rlock(_lock) _ck_rlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_ilock(_lock) _ck_ilock(_lock, __FILE__, __func__, __LINE__)
@@ -190,6 +192,7 @@ void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, cons
 void mutex_destroy(pthread_mutex_t *lock);
 void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
 void rwlock_destroy(pthread_rwlock_t *lock);
+void _cond_init(pthread_cond_t *cond, const char *file, const char *func, const int line);
 
 void _cklock_init(cklock_t *lock, const char *file, const char *func, const int line);
 void cklock_destroy(cklock_t *lock);
