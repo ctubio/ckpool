@@ -612,6 +612,11 @@ out:
 	return json_boolean(ret);
 }
 
+static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json_t **err_val)
+{
+	return json_boolean(true);
+}
+
 /* We should have already determined all the values passed to this are valid
  * by now. Set update if we should also send the latest stratum parameters */
 static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params_val,
@@ -641,6 +646,9 @@ static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params
 	/* We should only accept authorised requests from here on */
 	if (!client->authorised)
 		return json_string("Unauthorised");
+
+	if (!strncasecmp(method, "mining.submit", 13))
+		return parse_submit(client, params_val, err_val);
 
 	return json_string("Empty");
 }
