@@ -125,7 +125,6 @@ int generator(proc_instance_t *pi)
 		goto out;
 	}
 	keep_sockalive(cs.fd);
-	block_socket(cs.fd);
 
 	/* Test we can connect, authorise and get a block template */
 	if (!gen_gbtbase(&cs, &gbt)) {

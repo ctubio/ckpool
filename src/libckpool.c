@@ -329,9 +329,6 @@ void keep_sockalive(int fd)
 	const int tcp_one = 1;
 	const int tcp_keepidle = 45;
 	const int tcp_keepintvl = 30;
-	int flags = fcntl(fd, F_GETFL, 0);
-
-	fcntl(fd, F_SETFL, O_NONBLOCK | flags);
 
 	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const void *)&tcp_one, sizeof(tcp_one));
 	setsockopt(fd, SOL_TCP, TCP_NODELAY, (const void *)&tcp_one, sizeof(tcp_one));
@@ -358,6 +355,7 @@ int bind_socket(char *url, char *port)
 {
 	struct addrinfo servinfobase, *servinfo, hints, *p;
 	int ret, sockd = -1;
+	const int on = 1;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
@@ -377,6 +375,7 @@ int bind_socket(char *url, char *port)
 		LOGWARNING("Failed to open socket for %s:%s", url, port);
 		goto out;
 	}
+	setsockopt(sockd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	ret = bind(sockd, p->ai_addr, p->ai_addrlen);
 	if (ret < 0) {
 		LOGWARNING("Failed to bind socket for %s:%s", url, port);

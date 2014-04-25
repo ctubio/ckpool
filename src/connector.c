@@ -66,6 +66,7 @@ retry:
 		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
 		goto out;
 	}
+	keep_sockalive(fd);
 
 	LOGINFO("Connected new client %d on socket %d", ci->nfds, fd);
 
@@ -333,6 +334,7 @@ int connector(proc_instance_t *pi)
 	ckpool_t *ckp = pi->ckp;
 	int sockd, ret = 0;
 	conn_instance_t ci;
+	const int on = 1;
 	int tries = 0;
 
 	if (ckp->serverurl) {
@@ -365,6 +367,7 @@ int connector(proc_instance_t *pi)
 			ret = 1;
 			goto out;
 		}
+		setsockopt(sockd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 		memset(&serv_addr, 0, sizeof(serv_addr));
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -391,6 +394,7 @@ int connector(proc_instance_t *pi)
 		close(sockd);
 		goto out;
 	}
+
 	cklock_init(&ci.lock);
 	memset(&ci, 0, sizeof(ci));
 	ci.pi = pi;
