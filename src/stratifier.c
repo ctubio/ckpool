@@ -115,7 +115,7 @@ struct stratum_instance {
 	char enonce1[20];
 	double diff;
 	bool authorised;
-	char *packagever;
+	char *name;
 };
 
 typedef struct stratum_instance stratum_instance_t;
@@ -439,15 +439,83 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-static json_t *gen_json_result(int client_id, json_t *method, json_t *params)
+static json_t *parse_subscribe(int client_id, json_t *params_val)
 {
+	stratum_instance_t *client = NULL;
+	char *enonce1;
+	int arr_size;
+	json_t *ret;
+
+	if (unlikely(!json_is_array(params_val)))
+		return json_string("params not an array");
+
+	ck_rlock(&instance_lock);
+	client = __instance_by_id(client_id);
+	if (unlikely(!client)) {
+		ck_runlock(&instance_lock);
+		LOGERR("Failed to find client id %d in hashtable!", client_id);
+		return NULL;
+	}
+	arr_size = json_array_size(params_val);
+	if (arr_size > 0) {
+		const char *buf;
+
+		buf = json_string_value(json_array_get(params_val, 0));
+		if (buf && strlen(buf))
+			client->name = strdup(buf);
+		if (arr_size > 1) {
+			/* This would be the session id for reconnect */
+			buf = json_string_value(json_array_get(params_val, 1));
+			LOGDEBUG("Found old session id %s", buf);
+			/* Add matching here */
+		}
+	}
+	enonce1 = strdup(client->enonce1);
+	ck_runlock(&instance_lock);
+
+	ck_rlock(&workbase_lock);
+	ret = json_pack("[[s,s],s,i]", "mining.notify", enonce1, enonce1, workbases->enonce2varlen);
+	ck_runlock(&workbase_lock);
+
+	free(enonce1);
+
+	return ret;
+}
+
+/* We should have already determined all the values passed to this are valid
+ * by now. Set update if we should also send the latest stratum parameters */
+static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params_val, bool *update)
+{
+	stratum_instance_t *client = NULL;
+	const char *method;
+
+	method = json_string_value(method_val);
+	if (!strncasecmp(method, "mining.subscribe", 16)) {
+		*update = true;
+		return parse_subscribe(client_id, params_val);
+	}
+
+	/* We should only accept authorised requests from here on */
+	ck_rlock(&instance_lock);
+	client = __instance_by_id(client_id);
+	if (unlikely(!client)) {
+		ck_runlock(&instance_lock);
+		LOGERR("Failed to find client id %d in hashtable!", client_id);
+		return NULL;
+	}
+	ck_runlock(&instance_lock);
+
+	if (!client->authorised)
+		return json_string("Unauthorised");
+
 	return json_string("Empty");
 }
 
 static void parse_instance_msg(int client_id, json_t *msg)
 {
 	json_t *result_val = NULL, *err_val = NULL, *id_val = NULL;
-	json_t *method, *msg_id, *params;
+	json_t *method, *params;
+	bool update = false;
 	json_t *json_msg;
 
 	json_msg = json_object();
@@ -475,7 +543,7 @@ static void parse_instance_msg(int client_id, json_t *msg)
 		goto out;
 	}
 	err_val = json_null();
-	result_val = gen_json_result(client_id, method, params);
+	result_val = gen_json_result(client_id, method, params, &update);
 out:
 	json_object_set_nocheck(json_msg, "id", id_val);
 	json_object_set_nocheck(json_msg, "error", err_val);
