@@ -113,6 +113,9 @@ struct stratum_instance {
 	UT_hash_handle hh;
 	int id;
 	char enonce1[20];
+	double diff;
+	bool authorised;
+	char *packagever;
 };
 
 typedef struct stratum_instance stratum_instance_t;
@@ -311,7 +314,10 @@ static stratum_instance_t *__stratum_add_instance(int id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 
+	sprintf(instance->enonce1, "%016lx", enonce1_64++);
 	instance->id = id;
+	instance->diff = 1.0;
+	LOGDEBUG("Added instance %d with enonce1 %s", id, instance->enonce1);
 	HASH_ADD_INT(stratum_instances, id, instance);
 	return instance;
 }
@@ -329,12 +335,13 @@ static void stratum_add_recvd(json_t *val)
 	mutex_unlock(&stratum_recv_lock);
 }
 
-static void stratum_add_sending(json_t *val)
+static void stratum_add_send(json_t *val, int client_id)
 {
 	stratum_msg_t *msg;
 
 	msg = ckzalloc(sizeof(stratum_msg_t));
 	msg->json_msg = val;
+	msg->client_id = client_id;
 
 	mutex_lock(&stratum_send_lock);
 	LL_APPEND(stratum_sends, msg);
@@ -432,6 +439,51 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
+static json_t *gen_json_result(int client_id, json_t *method, json_t *params)
+{
+	return json_string("Empty");
+}
+
+static void parse_instance_msg(int client_id, json_t *msg)
+{
+	json_t *result_val = NULL, *err_val = NULL, *id_val = NULL;
+	json_t *method, *msg_id, *params;
+	json_t *json_msg;
+
+	json_msg = json_object();
+	id_val = json_object_get(msg, "id");
+	if (unlikely(!id_val)) {
+		err_val = json_string("-1:id not found");
+		goto out;
+	}
+	if (unlikely(!json_is_integer(id_val))) {
+		err_val = json_string("-1:id is not integer");
+		goto out;
+	}
+	method = json_object_get(msg, "method");
+	if (unlikely(!method)) {
+		err_val = json_string("-3:method not found");
+		goto out;
+	}
+	if (unlikely(!json_is_string(method))) {
+		err_val = json_string("-1:method is not string");
+		goto out;
+	}
+	params = json_object_get(msg, "params");
+	if (unlikely(!params)) {
+		err_val = json_string("-1:params not found");
+		goto out;
+	}
+	err_val = json_null();
+	result_val = gen_json_result(client_id, method, params);
+out:
+	json_object_set_nocheck(json_msg, "id", id_val);
+	json_object_set_nocheck(json_msg, "error", err_val);
+	json_object_set_nocheck(json_msg, "result", result_val);
+
+	stratum_add_send(json_msg, client_id);
+}
+
 static void *stratum_receiver(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
@@ -469,9 +521,7 @@ static void *stratum_receiver(void *arg)
 		}
 		ck_uilock(&instance_lock);
 
-		char *s = json_dumps(msg->json_msg, 0);
-		LOGERR("Client %d sent message %s", msg->client_id, s);
-		free(s);
+		parse_instance_msg(msg->client_id, msg->json_msg);
 
 		json_decref(msg->json_msg);
 		free(msg);
@@ -483,11 +533,11 @@ static void *stratum_receiver(void *arg)
 static void *stratum_sender(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	stratum_msg_t *msg;
 
 	rename_proc("sender");
 
 	while (42) {
+		stratum_msg_t *msg;
 		char *s;
 
 		mutex_lock(&stratum_send_lock);

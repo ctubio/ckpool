@@ -127,7 +127,6 @@ static void launch_process(proc_instance_t *pi)
 {
 	pid_t pid;
 
-	create_process_unixsock(pi);
 	pid = fork();
 	if (pid < 0)
 		quit(1, "Failed to fork %s in launch_process", pi->processname);
@@ -237,7 +236,7 @@ static void test_functions(ckpool_t *ckp)
 #endif
 }
 
-static void launch_generator(ckpool_t *ckp)
+static void prepare_generator(ckpool_t *ckp)
 {
 	proc_instance_t *pi = &ckp->generator;
 
@@ -245,10 +244,10 @@ static void launch_generator(ckpool_t *ckp)
 	pi->processname = strdup("generator");
 	pi->sockname = pi->processname;
 	pi->process = &generator;
-	launch_process(pi);
+	create_process_unixsock(pi);
 }
 
-static void launch_stratifier(ckpool_t *ckp)
+static void prepare_stratifier(ckpool_t *ckp)
 {
 	proc_instance_t *pi = &ckp->stratifier;
 
@@ -256,10 +255,10 @@ static void launch_stratifier(ckpool_t *ckp)
 	pi->processname = strdup("stratifier");
 	pi->sockname = pi->processname;
 	pi->process = &stratifier;
-	launch_process(pi);
+	create_process_unixsock(pi);
 }
 
-static void launch_connector(ckpool_t *ckp)
+static void prepare_connector(ckpool_t *ckp)
 {
 	proc_instance_t *pi = &ckp->connector;
 
@@ -267,7 +266,7 @@ static void launch_connector(ckpool_t *ckp)
 	pi->processname = strdup("connector");
 	pi->sockname = pi->processname;
 	pi->process = &connector;
-	launch_process(pi);
+	create_process_unixsock(pi);
 }
 
 static void *watchdog(void *arg)
@@ -281,13 +280,13 @@ static void *watchdog(void *arg)
 		pid = wait(&status);
 		if (pid == ckp->generator.pid) {
 			LOGERR("Generator process dead! Relaunching");
-			launch_generator(ckp);
+			launch_process(&ckp->generator);
 		} else if (pid == ckp->stratifier.pid) {
 			LOGERR("Stratifier process dead! Relaunching");
-			launch_stratifier(ckp);
+			launch_process(&ckp->stratifier);
 		} else if (pid == ckp->connector.pid) {
 			LOGERR("Connector process dead! Relaunching");
-			launch_connector(ckp);
+			launch_process(&ckp->connector);
 		}
 	}
 	return NULL;
@@ -359,9 +358,12 @@ int main(int argc, char **argv)
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */
-	launch_generator(&ckp);
-	launch_stratifier(&ckp);
-	launch_connector(&ckp);
+	prepare_generator(&ckp);
+	prepare_stratifier(&ckp);
+	prepare_connector(&ckp);
+	launch_process(&ckp.generator);
+	launch_process(&ckp.stratifier);
+	launch_process(&ckp.connector);
 
 	test_functions(&ckp);
 
