@@ -291,15 +291,15 @@ retry:
 	if (sockd < 0) {
 		if (interrupted())
 			goto retry;
-		LOGERR("Failed to accept on connector socket");
-		ret = 1;
-		goto out;
+		LOGERR("Failed to accept on connector socket, retrying in 5s");
+		sleep(5);
+		goto retry;
 	}
 
 	buf = recv_unix_msg(sockd);
+	close(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in connector_loop");
-		close(sockd);
 		goto retry;
 	}
 	LOGDEBUG("Connector received message: %s", buf);
@@ -319,7 +319,6 @@ retry:
 	realloc_strcat(&buf, "\n");
 	send_client(ckp, ci, client_id, buf);
 	json_decref(json_msg);
-	close(sockd);
 
 	goto retry;
 out:

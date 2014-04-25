@@ -447,7 +447,8 @@ retry:
 	if (selret < 0) {
 		if (interrupted())
 			goto retry;
-		LOGERR("Select failed in strat_loop");
+		LOGERR("Select failed in strat_loop, killing stratifier!");
+		sleep(5);
 		ret = 1;
 		goto out;
 	}
@@ -460,16 +461,16 @@ retry:
 	if (sockd < 0) {
 		if (interrupted())
 			goto retry;
-		LOGERR("Failed to accept on stratifier socket");
-		ret = 1;
-		goto out;
+		LOGERR("Failed to accept on stratifier socket, retrying in 5s");
+		sleep(5);
+		goto retry;
 	}
 
 	dealloc(buf);
 	buf = recv_unix_msg(sockd);
+	close(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in strat_loop");
-		close(sockd);
 		goto retry;
 	}
 	LOGDEBUG("Stratifier received request: %s", buf);
