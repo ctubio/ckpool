@@ -27,6 +27,8 @@ static uchar scriptsig_header_bin[41];
 static char pubkeytxnbin[25];
 static char pubkeytxn[52];
 
+static uint64_t enonce1_64;
+
 struct workbase {
 	/* Hash table data */
 	UT_hash_handle hh;
@@ -105,6 +107,19 @@ static pthread_cond_t stratum_send_cond;
 /* For the linked list of all queued messages */
 static stratum_msg_t *stratum_recvs;
 static stratum_msg_t *stratum_sends;
+
+/* Per client stratum instance, to be further expanded */
+struct stratum_instance {
+	UT_hash_handle hh;
+	int id;
+	char enonce1[20];
+};
+
+typedef struct stratum_instance stratum_instance_t;
+
+static stratum_instance_t *stratum_instances;
+
+static cklock_t instance_lock;
 
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
@@ -282,6 +297,25 @@ static void update_base(ckpool_t *ckp)
 	ck_wunlock(&workbase_lock);
 }
 
+/* Enter with instance_lock held */
+static stratum_instance_t *__instance_by_id(int id)
+{
+	stratum_instance_t *instance;
+
+	HASH_FIND_INT(stratum_instances, &id, instance);
+	return instance;
+}
+
+/* Enter with write instance_lock held */
+static stratum_instance_t *__stratum_add_instance(int id)
+{
+	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
+
+	instance->id = id;
+	HASH_ADD_INT(stratum_instances, id, instance);
+	return instance;
+}
+
 static void stratum_add_recvd(json_t *val)
 {
 	stratum_msg_t *msg;
@@ -406,6 +440,8 @@ static void *stratum_receiver(void *arg)
 	rename_proc("receiver");
 
 	while (42) {
+		stratum_instance_t *instance;
+
 		/* Pop the head off the list if it exists or wait for a conditional
 		* signal telling us there is work */
 		mutex_lock(&stratum_recv_lock);
@@ -423,6 +459,16 @@ static void *stratum_receiver(void *arg)
 		json_object_del(msg->json_msg, "client_id");
 
 		/* Parse the message here */
+		ck_ilock(&instance_lock);
+		instance = __instance_by_id(msg->client_id);
+		if (!instance) {
+			/* client_id instance doesn't exist yet, create one */
+			ck_ulock(&instance_lock);
+			instance = __stratum_add_instance(msg->client_id);
+			ck_dwilock(&instance_lock);
+		}
+		ck_uilock(&instance_lock);
+
 		char *s = json_dumps(msg->json_msg, 0);
 		LOGERR("Client %d sent message %s", msg->client_id, s);
 		free(s);
@@ -479,6 +525,8 @@ int stratifier(proc_instance_t *pi)
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
+
+	cklock_init(&instance_lock);
 
 	mutex_init(&stratum_recv_lock);
 	cond_init(&stratum_recv_cond);
