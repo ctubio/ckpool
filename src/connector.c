@@ -110,11 +110,8 @@ retry:
 	buflen = PAGESIZE - client->bufofs;
 	ret = recv(client->fd, client->buf + client->bufofs, buflen, MSG_DONTWAIT);
 	if (ret < 1) {
-		/* If we're reading on the first pass, there is supposed to be
-		 * data waiting for us according to poll() so no data implies
-		 * a lost connection. On repeat reads may have just read all
-		 * the data */
-		if (moredata)
+		/* Nothing else ready to be read */
+		if (!ret)
 			return;
 
 		LOGINFO("Client fd %d disconnected", client->fd);
