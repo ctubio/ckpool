@@ -247,6 +247,14 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 
 static void stratum_broadcast_update(bool clean);
 
+static void clear_workbase(workbase_t *wb)
+{
+	free(wb->flags);
+	free(wb->txn_data);
+	json_decref(wb->merkle_array);
+	free(wb);
+}
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
@@ -305,8 +313,10 @@ static void update_base(ckpool_t *ckp)
 	sprintf(wb->idstring, "%08x", wb->id);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		/*  Age old workbases older than 10 minutes old */
-		if (tmp->gentime < wb->gentime - 600)
+		if (tmp->gentime < wb->gentime - 600) {
 			HASH_DEL(workbases, tmp);
+			clear_workbase(tmp);
+		}
 	}
 	HASH_ADD_INT(workbases, id, wb);
 	current_workbase = wb;
@@ -614,7 +624,52 @@ out:
 
 static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json_t **err_val)
 {
-	return json_boolean(true);
+	const char *user, *job_id, *nonce2, *ntime, *nonce;
+	bool ret = false;
+	int wb_id;
+
+	if (unlikely(!json_is_array(params_val))) {
+		*err_val = json_string("params not an array");
+		goto out;
+	}
+	if (unlikely(json_array_size(params_val) != 5)) {
+		*err_val = json_string("Invalid array size");
+		goto out;
+	}
+	user = json_string_value(json_array_get(params_val, 0));
+	if (unlikely(!user || !strlen(user))) {
+		*err_val = json_string("No username");
+		goto out;
+	}
+	job_id = json_string_value(json_array_get(params_val, 1));
+	if (unlikely(!job_id || !strlen(job_id))) {
+		*err_val = json_string("No job_id");
+		goto out;
+	}
+	nonce2 = json_string_value(json_array_get(params_val, 2));
+	if (unlikely(!nonce2 || !strlen(nonce2))) {
+		*err_val = json_string("No nonce2");
+		goto out;
+	}
+	ntime = json_string_value(json_array_get(params_val, 3));
+	if (unlikely(!ntime || !strlen(ntime))) {
+		*err_val = json_string("No ntime");
+		goto out;
+	}
+	nonce = json_string_value(json_array_get(params_val, 4));
+	if (unlikely(!nonce || !strlen(nonce))) {
+		*err_val = json_string("No nonce");
+		goto out;
+	}
+	if (strcmp(user, client->workername)) {
+		*err_val = json_string("Worker mismatch");
+		goto out;
+	}
+	sscanf(job_id, "%08x", &wb_id);
+
+	ret = true;
+out:
+	return json_boolean(ret);
 }
 
 /* We should have already determined all the values passed to this are valid
