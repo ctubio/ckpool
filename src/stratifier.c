@@ -118,6 +118,7 @@ struct stratum_instance {
 	char enonce1[20];
 	double diff;
 	bool authorised;
+	bool disconnected;
 	char *useragent;
 	char *workername;
 	int user_id;
@@ -368,6 +369,8 @@ static void stratum_broadcast(json_t *val)
 
 		if (!instance->authorised)
 			continue;
+		if (instance->disconnected)
+			continue;
 		msg = ckzalloc(sizeof(stratum_msg_t));
 		msg->json_msg = json_deep_copy(val);
 		msg->client_id = instance->id;
@@ -401,6 +404,20 @@ static void stratum_add_send(json_t *val, int client_id)
 	LL_APPEND(stratum_sends, msg);
 	pthread_cond_signal(&stratum_send_cond);
 	mutex_unlock(&stratum_send_lock);
+}
+
+static void drop_client(int client_id)
+{
+	stratum_instance_t *client;
+
+	ck_rlock(&instance_lock);
+	client = __instance_by_id(client_id);
+	ck_runlock(&instance_lock);
+
+	/* May never have been a stratum instance */
+	if (unlikely(!client))
+		return;
+	client->disconnected = true;
 }
 
 static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -451,6 +468,15 @@ retry:
 	else if (!strncasecmp(buf, "update", 6)) {
 		update_base(ckp);
 		goto reset;
+	} else if (!strncasecmp(buf, "dropclient", 10)) {
+		int client_id;
+
+		ret = sscanf(buf, "dropclient=%d", &client_id);
+		if (ret < 0)
+			LOGDEBUG("Failed to parse dropclient command: %s", buf);
+		else
+			drop_client(client_id);
+		goto retry;
 	} else {
 		json_t *val = json_loads(buf, 0, NULL);
 
