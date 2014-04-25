@@ -329,6 +329,7 @@ int connector(proc_instance_t *pi)
 	ckpool_t *ckp = pi->ckp;
 	int sockd, ret = 0;
 	conn_instance_t ci;
+	int tries = 0;
 
 	if (ckp->serverurl) {
 		if (!extract_sockaddr(ckp->serverurl, &url, &port)) {
@@ -336,11 +337,18 @@ int connector(proc_instance_t *pi)
 			ret = 1;
 			goto out;
 		}
-		sockd = bind_socket(url, port);
+		do {
+			sockd = bind_socket(url, port);
+			if (sockd > 0)
+				break;
+			LOGWARNING("Connector failed to bind to socket, retrying in 5s");
+			sleep(5);
+		} while (++tries < 25);
+
 		dealloc(url);
 		dealloc(port);
 		if (sockd < 0) {
-			LOGERR("Connector failed to bind to socket");
+			LOGERR("Connector failed to bind to socket for 2 minutes");
 			ret = 1;
 			goto out;
 		}
@@ -357,13 +365,21 @@ int connector(proc_instance_t *pi)
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 		serv_addr.sin_port = htons(3333);
-		ret = bind(sockd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+		do {
+			ret = bind(sockd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+			if (!ret)
+				break;
+			LOGWARNING("Connector failed to bind to socket, retrying in 5s");
+			sleep(5);
+		} while (++tries < 25);
 		if (ret < 0) {
-			LOGERR("Connector failed to bind to socket");
+			LOGERR("Connector failed to bind to socket for 2 minutes");
 			close(sockd);
 			goto out;
 		}
 	}
+	if (tries)
+		LOGWARNING("Connector successfully bound to socket");
 
 	ret = listen(sockd, 10);
 	if (ret < 0) {
