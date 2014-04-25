@@ -118,7 +118,9 @@ struct stratum_instance {
 	char enonce1[20];
 	double diff;
 	bool authorised;
-	char *name;
+	char *useragent;
+	char *workername;
+	int user_id;
 };
 
 typedef struct stratum_instance stratum_instance_t;
@@ -465,13 +467,15 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		LOGERR("Failed to find client id %d in hashtable!", client_id);
 		return NULL;
 	}
+	ck_runlock(&instance_lock);
+
 	arr_size = json_array_size(params_val);
 	if (arr_size > 0) {
 		const char *buf;
 
 		buf = json_string_value(json_array_get(params_val, 0));
 		if (buf && strlen(buf))
-			client->name = strdup(buf);
+			client->useragent = strdup(buf);
 		if (arr_size > 1) {
 			/* This would be the session id for reconnect */
 			buf = json_string_value(json_array_get(params_val, 1));
@@ -480,14 +484,13 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		}
 	}
 	enonce1 = strdup(client->enonce1);
-	ck_runlock(&instance_lock);
 
 	ck_rlock(&workbase_lock);
 	if (likely(workbases))
 		n2len = workbases->enonce2varlen;
 	else
 		n2len = 8;
-	ret = json_pack("[[s,s],s,i]", "mining.notify", enonce1, enonce1, n2len);
+	ret = json_pack("[[[s,s]],s,i]", "mining.notify", enonce1, enonce1, n2len);
 	ck_runlock(&workbase_lock);
 
 	free(enonce1);
@@ -495,9 +498,53 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	return ret;
 }
 
+static int authorise_user(const char __maybe_unused *workername)
+{
+	/* Talk to database here and return user_id or -1 if invalid */
+	return 1;
+}
+
+static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, json_t **err_val)
+{
+	int arr_size, user_id;
+	bool ret = false;
+	const char *buf;
+
+	if (unlikely(!json_is_array(params_val))) {
+		*err_val = json_string("params not an array");
+		goto out;
+	}
+	arr_size = json_array_size(params_val);
+	if (unlikely(arr_size < 1)) {
+		*err_val = json_string("params missing array entries");
+		goto out;
+	}
+	buf = json_string_value(json_array_get(params_val, 0));
+	if (!buf) {
+		*err_val = json_string("Invalid workername parameter");
+		goto out;
+	}
+	if (!strlen(buf)) {
+		*err_val = json_string("Empty workername parameter");
+		goto out;
+	}
+	user_id = authorise_user(buf);
+	if (user_id < 0) {
+		*err_val = json_string("User not found");
+		goto out;
+	}
+	client->workername = strdup(buf);
+	client->user_id = user_id;
+	client->authorised = true;
+	ret = true;
+out:
+	return json_boolean(ret);
+}
+
 /* We should have already determined all the values passed to this are valid
  * by now. Set update if we should also send the latest stratum parameters */
-static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params_val, bool *update)
+static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params_val,
+			       json_t **err_val, bool *update)
 {
 	stratum_instance_t *client = NULL;
 	const char *method;
@@ -508,7 +555,6 @@ static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params
 		return parse_subscribe(client_id, params_val);
 	}
 
-	/* We should only accept authorised requests from here on */
 	ck_rlock(&instance_lock);
 	client = __instance_by_id(client_id);
 	if (unlikely(!client)) {
@@ -518,6 +564,10 @@ static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params
 	}
 	ck_runlock(&instance_lock);
 
+	if (!strncasecmp(method, "mining.authorize", 16))
+		return parse_authorize(client, params_val, err_val);
+
+	/* We should only accept authorised requests from here on */
 	if (!client->authorised)
 		return json_string("Unauthorised");
 
@@ -533,6 +583,7 @@ static void stratum_send_update(int client_id, bool clean)
 	val = json_pack("{s:[sss[o]sssb],s:o,s:s}",
 			"params",
 			current_workbase->idstring,
+			current_workbase->prevhash,
 			current_workbase->coinb1,
 			current_workbase->coinb2,
 			json_copy(current_workbase->merkle_array),
@@ -578,8 +629,9 @@ static void parse_instance_msg(int client_id, json_t *msg)
 		err_val = json_string("-1:params not found");
 		goto out;
 	}
-	err_val = json_null();
-	result_val = gen_json_result(client_id, method, params, &update);
+	result_val = gen_json_result(client_id, method, params, &err_val, &update);
+	if (!err_val)
+		err_val = json_null();
 out:
 	json_object_set_nocheck(json_msg, "id", id_val);
 	json_object_set_nocheck(json_msg, "error", err_val);
