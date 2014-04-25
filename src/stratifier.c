@@ -295,6 +295,19 @@ static void stratum_add_recvd(json_t *val)
 	mutex_unlock(&stratum_recv_lock);
 }
 
+static void stratum_add_sending(json_t *val)
+{
+	stratum_msg_t *msg;
+
+	msg = ckzalloc(sizeof(stratum_msg_t));
+	msg->json_msg = val;
+
+	mutex_lock(&stratum_send_lock);
+	LL_APPEND(stratum_sends, msg);
+	pthread_cond_signal(&stratum_send_cond);
+	mutex_unlock(&stratum_send_lock);
+}
+
 static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret;
