@@ -6,5 +6,6 @@ libckpool_la_LIBADD = @PTHREAD_LIBS@ @MATH_LIBS@ @RT_LIBS@ @JANSSON_LIBS@
 
 bin_PROGRAMS = ckpool
 ckpool_SOURCES = ckpool.c ckpool.h generator.c generator.h bitcoin.c bitcoin.h \
-		 stratifier.c stratifier.h connector.c connector.h uthash.h
+		 stratifier.c stratifier.h connector.c connector.h uthash.h \
+		 utlist.h
 ckpool_LDADD = libckpool.la

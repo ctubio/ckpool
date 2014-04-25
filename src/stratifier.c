@@ -17,6 +17,7 @@
 #include "libckpool.h"
 #include "bitcoin.h"
 #include "uthash.h"
+#include "utlist.h"
 
 static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
 
@@ -83,10 +84,11 @@ static workbase_t *workbases;
 static int workbase_id;
 
 struct stratum_msg {
-	UT_hash_handle hh;
-	int id;
+	struct stratum_msg *next;
+	struct stratum_msg *prev;
 
-	char *msg;
+	json_t *json_msg;
+	int client_id;
 };
 
 typedef struct stratum_msg stratum_msg_t;
@@ -99,12 +101,9 @@ static pthread_mutex_t stratum_send_lock;
 static pthread_cond_t stratum_recv_cond;
 static pthread_cond_t stratum_send_cond;
 
-/* For the hashtable of all queued messages */
+/* For the linked list of all queued messages */
 static stratum_msg_t *stratum_recvs;
 static stratum_msg_t *stratum_sends;
-
-static int stratum_recv_id;
-static int stratum_send_id;
 
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
@@ -277,6 +276,19 @@ static void update_base(ckpool_t *ckp)
 	ck_wunlock(&workbase_lock);
 }
 
+static void stratum_add_recvd(json_t *val)
+{
+	stratum_msg_t *msg;
+
+	msg = ckzalloc(sizeof(stratum_msg_t));
+	msg->json_msg = val;
+
+	mutex_lock(&stratum_recv_lock);
+	LL_APPEND(stratum_recvs, msg);
+	pthread_cond_signal(&stratum_recv_cond);
+	mutex_unlock(&stratum_recv_lock);
+}
+
 static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret;
@@ -326,7 +338,12 @@ retry:
 		update_base(ckp);
 		goto reset;
 	} else {
-		LOGDEBUG("Received unrecognised message: %s", buf);
+		json_t *val = json_loads(buf, 0, NULL);
+
+		if (!val) {
+			LOGDEBUG("Received unrecognised message: %s", buf);
+		}  else
+			stratum_add_recvd(val);
 		goto retry;
 	}
 
@@ -365,6 +382,35 @@ static void *blockupdate(void *arg)
 static void *stratum_receiver(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
+	stratum_msg_t *msg;
+
+	rename_proc("receiver");
+
+	while (42) {
+		/* Pop the head off the list if it exists or wait for a conditional
+		* signal telling us there is work */
+		mutex_lock(&stratum_recv_lock);
+		if (!stratum_recvs)
+			pthread_cond_wait(&stratum_recv_cond, &stratum_recv_lock);
+		msg = stratum_recvs;
+		if (likely(msg))
+			LL_DELETE(stratum_recvs, msg);
+		mutex_unlock(&stratum_recv_lock);
+
+		if (unlikely(!msg))
+			continue;
+
+		msg->client_id = json_integer_value(json_object_get(msg->json_msg, "client_id"));
+		json_object_del(msg->json_msg, "client_id");
+
+		/* Parse the message here */
+		char *s = json_dumps(msg->json_msg, 0);
+		LOGERR("Client %d sent message %s", msg->client_id, s);
+		free(s);
+
+		json_decref(msg->json_msg);
+		free(msg);
+	}
 
 	return NULL;
 }
@@ -372,6 +418,34 @@ static void *stratum_receiver(void *arg)
 static void *stratum_sender(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
+	stratum_msg_t *msg;
+
+	rename_proc("sender");
+
+	while (42) {
+		char *s;
+
+		mutex_lock(&stratum_send_lock);
+		if (!stratum_sends)
+			pthread_cond_wait(&stratum_send_cond, &stratum_send_lock);
+		msg = stratum_sends;
+		if (likely(msg))
+			LL_DELETE(stratum_sends, msg);
+		mutex_unlock(&stratum_send_lock);
+
+		if (unlikely(!msg))
+			continue;
+
+		/* Add client_id to the json message and send it to the
+		 * connector process to be delivered */
+		json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
+		s = json_dumps(msg->json_msg, 0);
+		send_proc(&ckp->connector, s);
+		free(s);
+
+		json_decref(msg->json_msg);
+		free(msg);
+	}
 
 	return NULL;
 }
