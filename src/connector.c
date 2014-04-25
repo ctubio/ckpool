@@ -91,6 +91,8 @@ static void invalidate_client(client_instance_t *client)
 	client->fd = -1;
 }
 
+static void send_client(conn_instance_t *ci, int id, const char *buf);
+
 static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
 	ckpool_t *ckp = ci->pi->ckp;
@@ -144,9 +146,12 @@ reparse:
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
 	val = json_loads(msg, 0, NULL);
-	if (!val)
-		LOGWARNING("Client fd %d sent invalid json message %s", client->fd, msg);
-	else {
+	if (!val) {
+		LOGINFO("Client id %d sent invalid json message %s", client->id, msg);
+		send_client(ci, client->id, "Invalid JSON, disconnecting\n");
+		invalidate_client(client);
+		return;
+	} else {
 		char *s;
 
 		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
