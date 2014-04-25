@@ -33,6 +33,7 @@ struct workbase {
 	/* Hash table data */
 	UT_hash_handle hh;
 	int id;
+	char idstring[12];
 
 	time_t gentime;
 
@@ -52,6 +53,7 @@ struct workbase {
 	char *txn_data;
 	int merkles;
 	char merklehash[16][68];
+	json_t *merkle_array;
 
 	/* Template variables, lengths are binary lengths! */
 	char coinb1[256]; // coinbase1
@@ -83,6 +85,7 @@ static cklock_t workbase_lock;
 
 /* For the hashtable of all workbases */
 static workbase_t *workbases;
+static workbase_t *current_workbase;
 static int workbase_id;
 static char lasthash[68];
 
@@ -273,13 +276,16 @@ static void update_base(ckpool_t *ckp)
 	if (wb->transactions)
 		json_strdup(&wb->txn_data, val, "txn_data");
 	json_intcpy(&wb->merkles, val, "merkles");
+	wb->merkle_array = json_array();
 	if (wb->merkles) {
 		json_t *arr;
 		int i;
 
 		arr = json_object_get(val, "merklehash");
-		for (i = 0; i < wb->merkles; i++)
+		for (i = 0; i < wb->merkles; i++) {
 			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(arr, i)));
+			json_array_append(wb->merkle_array, json_string(&wb->merklehash[i][0]));
+		}
 	}
 	json_decref(val);
 	generate_coinbase(ckp, wb);
@@ -291,12 +297,14 @@ static void update_base(ckpool_t *ckp)
 		memcpy(lasthash, wb->prevhash, 65);
 	}
 	wb->id = workbase_id++;
+	sprintf(wb->idstring, "%08x", wb->id);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime < wb->gentime - 600)
 			HASH_DEL(workbases, tmp);
 	}
 	HASH_ADD_INT(workbases, id, wb);
+	current_workbase = wb;
 	ck_wunlock(&workbase_lock);
 }
 
@@ -516,6 +524,29 @@ static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params
 	return json_string("Empty");
 }
 
+/* For sending a single stratum template update */
+static void stratum_send_update(int client_id, bool clean)
+{
+	json_t *val;
+
+	ck_rlock(&workbase_lock);
+	val = json_pack("{s:[sss[o]sssb],s:o,s:s}",
+			"params",
+			current_workbase->idstring,
+			current_workbase->coinb1,
+			current_workbase->coinb2,
+			json_copy(current_workbase->merkle_array),
+			current_workbase->bbversion,
+			current_workbase->nbit,
+			current_workbase->ntime,
+			json_boolean(clean),
+			"id", json_null(),
+			"method", "mining.notify");
+	ck_runlock(&workbase_lock);
+
+	stratum_add_send(val, client_id);
+}
+
 static void parse_instance_msg(int client_id, json_t *msg)
 {
 	json_t *result_val = NULL, *err_val = NULL, *id_val = NULL;
@@ -555,6 +586,8 @@ out:
 	json_object_set_nocheck(json_msg, "result", result_val);
 
 	stratum_add_send(json_msg, client_id);
+	if (update)
+		stratum_send_update(client_id, true);
 }
 
 static void *stratum_receiver(void *arg)
