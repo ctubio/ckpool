@@ -82,6 +82,7 @@ static cklock_t workbase_lock;
 /* For the hashtable of all workbases */
 static workbase_t *workbases;
 static int workbase_id;
+static char lasthash[68];
 
 struct stratum_msg {
 	struct stratum_msg *next;
@@ -226,6 +227,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 static void update_base(ckpool_t *ckp)
 {
 	workbase_t *wb, *tmp, *tmpa;
+	bool new_block = false;
 	json_t *val;
 	char *buf;
 
@@ -266,6 +268,10 @@ static void update_base(ckpool_t *ckp)
 	wb->gentime = time(NULL);
 
 	ck_wlock(&workbase_lock);
+	if (strncmp(wb->prevhash, lasthash, 64)) {
+		new_block = true;
+		memcpy(lasthash, wb->prevhash, 65);
+	}
 	wb->id = workbase_id++;
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		/*  Age old workbases older than 10 minutes old */
