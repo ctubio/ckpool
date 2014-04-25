@@ -244,6 +244,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	hex2bin(wb->headerbin, header, 112);
 }
 
+static void stratum_broadcast_update(bool clean);
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
@@ -308,6 +310,8 @@ static void update_base(ckpool_t *ckp)
 	HASH_ADD_INT(workbases, id, wb);
 	current_workbase = wb;
 	ck_wunlock(&workbase_lock);
+
+	stratum_broadcast_update(new_block);
 }
 
 /* Enter with instance_lock held */
@@ -343,6 +347,46 @@ static void stratum_add_recvd(json_t *val)
 	LL_APPEND(stratum_recvs, msg);
 	pthread_cond_signal(&stratum_recv_cond);
 	mutex_unlock(&stratum_recv_lock);
+}
+
+/* For creating a list of sends without locking that can then be concatenated
+ * to the stratum_sends list. Minimises locking and avoids taking recursive
+ * locks. */
+static void stratum_broadcast(json_t *val)
+{
+	stratum_instance_t *instance, *tmp;
+	stratum_msg_t *bulk_send = NULL;
+
+	if (unlikely(!val)) {
+		LOGERR("Sent null json to stratum_broadcast");
+		return;
+	}
+
+	ck_rlock(&instance_lock);
+	HASH_ITER(hh, stratum_instances, instance, tmp) {
+		stratum_msg_t *msg;
+
+		if (!instance->authorised)
+			continue;
+		msg = ckzalloc(sizeof(stratum_msg_t));
+		msg->json_msg = json_deep_copy(val);
+		msg->client_id = instance->id;
+		LL_APPEND(bulk_send, msg);
+	}
+	ck_runlock(&instance_lock);
+
+	json_decref(val);
+
+	if (!bulk_send)
+		return;
+
+	mutex_lock(&stratum_send_lock);
+	if (stratum_sends)
+		LL_CONCAT(stratum_sends, bulk_send);
+	else
+		stratum_sends = bulk_send;
+	pthread_cond_signal(&stratum_send_cond);
+	mutex_unlock(&stratum_send_lock);
 }
 
 static void stratum_add_send(json_t *val, int client_id)
@@ -533,6 +577,7 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("User not found");
 		goto out;
 	}
+	LOGINFO("Authorised user %s", buf);
 	client->workername = strdup(buf);
 	client->user_id = user_id;
 	client->authorised = true;
@@ -574,13 +619,12 @@ static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params
 	return json_string("Empty");
 }
 
-/* For sending a single stratum template update */
-static void stratum_send_update(int client_id, bool clean)
+/* Must enter with workbase_lock held */
+static json_t *__stratum_notify(bool clean)
 {
 	json_t *val;
 
-	ck_rlock(&workbase_lock);
-	val = json_pack("{s:[sss[o]sssb],s:o,s:s}",
+	val = json_pack("{s:[ssssosssb],s:o,s:s}",
 			"params",
 			current_workbase->idstring,
 			current_workbase->prevhash,
@@ -590,12 +634,33 @@ static void stratum_send_update(int client_id, bool clean)
 			current_workbase->bbversion,
 			current_workbase->nbit,
 			current_workbase->ntime,
-			json_boolean(clean),
+			clean,
 			"id", json_null(),
 			"method", "mining.notify");
+	return val;
+}
+
+static void stratum_broadcast_update(bool clean)
+{
+	json_t *json_msg;
+
+	ck_rlock(&workbase_lock);
+	json_msg = __stratum_notify(clean);
 	ck_runlock(&workbase_lock);
 
-	stratum_add_send(val, client_id);
+	stratum_broadcast(json_msg);
+}
+
+/* For sending a single stratum template update */
+static void stratum_send_update(int client_id, bool clean)
+{
+	json_t *json_msg;
+
+	ck_rlock(&workbase_lock);
+	json_msg = __stratum_notify(clean);
+	ck_runlock(&workbase_lock);
+
+	stratum_add_send(json_msg, client_id);
 }
 
 static void parse_instance_msg(int client_id, json_t *msg)
@@ -708,6 +773,12 @@ static void *stratum_sender(void *arg)
 
 		if (unlikely(!msg))
 			continue;
+
+		if (unlikely(!msg->json_msg)) {
+			LOGERR("Sent null json msg to stratum_sender");
+			free(msg);
+			continue;
+		}
 
 		/* Add client_id to the json message and send it to the
 		 * connector process to be delivered */
