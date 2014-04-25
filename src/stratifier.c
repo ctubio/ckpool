@@ -445,6 +445,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	char *enonce1;
 	int arr_size;
 	json_t *ret;
+	int n2len;
 
 	if (unlikely(!json_is_array(params_val)))
 		return json_string("params not an array");
@@ -474,7 +475,11 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	ck_runlock(&instance_lock);
 
 	ck_rlock(&workbase_lock);
-	ret = json_pack("[[s,s],s,i]", "mining.notify", enonce1, enonce1, workbases->enonce2varlen);
+	if (likely(workbases))
+		n2len = workbases->enonce2varlen;
+	else
+		n2len = 8;
+	ret = json_pack("[[s,s],s,i]", "mining.notify", enonce1, enonce1, n2len);
 	ck_runlock(&workbase_lock);
 
 	free(enonce1);
