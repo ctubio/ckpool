@@ -115,11 +115,24 @@ static stratum_msg_t *stratum_sends;
 struct stratum_instance {
 	UT_hash_handle hh;
 	int id;
+
 	char enonce1[20];
 	char enonce1bin[8];
-	double diff;
+
+	int diff; /* Current diff */
+	int old_diff; /* Previous diff */
+	int diff_change_job_id; /* Last job_id we changed diff */
+	double dsps; /* Diff shares per second */
+	tv_t ldc; /* Last diff change */
+	int ssdc; /* Shares since diff change */
+	tv_t last_share;
+	int absolute_shares;
+	int diff_shares;
+
+	tv_t connect_time;
 	bool authorised;
 	bool disconnected;
+
 	char *useragent;
 	char *workername;
 	int user_id;
@@ -349,7 +362,9 @@ static stratum_instance_t *__stratum_add_instance(int id)
 	*u64 = htobe64(enonce1_64++);
 	__bin2hex(instance->enonce1, instance->enonce1bin, 8);
 	instance->id = id;
-	instance->diff = 1.0;
+	instance->diff = instance->old_diff = 1;
+	tv_time(&instance->connect_time);
+	copy_tv(&instance->ldc, &instance->connect_time);
 	LOGDEBUG("Added instance %d with enonce1 %s", id, instance->enonce1);
 	HASH_ADD_INT(stratum_instances, id, instance);
 	return instance;
@@ -631,6 +646,76 @@ out:
 	return json_boolean(ret);
 }
 
+static void add_submit(stratum_instance_t *client, int diff)
+{
+	int next_blockid, optimal, connect_duration;
+	double tdiff, drp, dsps;
+	json_t *json_msg;
+	tv_t now_t;
+
+	tv_time(&now_t);
+	tdiff = tvdiff(&now_t, &client->last_share);
+	copy_tv(&client->last_share, &now_t);
+	client->ssdc++;
+	decay_time(&client->dsps, diff, tdiff, 300);
+	tdiff = tvdiff(&now_t, &client->ldc);
+	connect_duration = tvdiff(&now_t, &client->connect_time);
+
+	/* During the initial 5 minutes we work off the average shares per
+	 * second and thereafter from the rolling average */
+	if (connect_duration < 300)
+		dsps = client->diff_shares / connect_duration;
+	else
+		dsps = client->dsps;
+
+	/* Diff rate product */
+	drp = dsps / (double)client->diff;
+	/* Optimal rate product is 3, allow some hysteresis */
+	if (drp > 2 && drp < 4)
+		return;
+	/* Check the difficulty every 300 seconds or as many shares as we
+	 * should have had in that time, whichever comes first. */
+	if (client->ssdc < 100 && tdiff < 300)
+		return;
+
+	optimal = dsps * 3;
+	if (optimal <= 1 && client->diff == 1)
+		return;
+
+	ck_rlock(&workbase_lock);
+	next_blockid = workbase_id + 1;
+	ck_runlock(&workbase_lock);
+
+	client->ssdc = 0;
+
+	/* We have the effect of a change pending */
+	if (client->diff_change_job_id >= next_blockid)
+		return;
+
+	LOGDEBUG("Client %d dsps %.1f adjust diff to: %d ", client->id, dsps, optimal);
+
+	copy_tv(&client->ldc, &now_t);
+	client->diff_change_job_id = next_blockid;
+	client->old_diff = client->diff;
+	client->diff = optimal;
+	json_msg = json_pack("{s[i]soss}", "params", client->diff, "id", json_null(),
+			     "method", "mining.set_difficulty");
+	stratum_add_send(json_msg, client->id);
+}
+
+/* FIXME Add logging of these as well */
+static void add_submit_success(stratum_instance_t *client, int diff)
+{
+	client->absolute_shares++;
+	client->diff_shares += diff;
+	add_submit(client, diff);
+}
+
+static void add_submit_fail(stratum_instance_t *client, int diff)
+{
+	add_submit(client, diff);
+}
+
 static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
@@ -681,12 +766,24 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
 		ck_runlock(&workbase_lock);
+		/* FIXME add reject reason */
 		goto out;
 	}
 	ck_runlock(&workbase_lock);
 
 	ret = true;
 out:
+	if (ret) {
+		int diff;
+
+		if (id < client->diff_change_job_id)
+			diff = client->old_diff;
+		else
+			diff = client->diff;
+		add_submit_success(client, diff);
+	} else
+		add_submit_fail(client, client->diff);
+
 	return json_boolean(ret);
 }
 
@@ -816,7 +913,7 @@ out:
 
 static void *stratum_receiver(void *arg)
 {
-	ckpool_t *ckp = (ckpool_t *)arg;
+	ckpool_t __maybe_unused *ckp = (ckpool_t *)arg;
 	stratum_msg_t *msg;
 
 	rename_proc("receiver");
@@ -911,6 +1008,9 @@ int stratifier(proc_instance_t *pi)
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
+
+	/* Set the initial id to time to not send the same id on restarts */
+	workbase_id = time(NULL);
 
 	cklock_init(&instance_lock);
 
