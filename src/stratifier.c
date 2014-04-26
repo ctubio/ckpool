@@ -116,6 +116,7 @@ struct stratum_instance {
 	UT_hash_handle hh;
 	int id;
 	char enonce1[20];
+	char enonce1bin[8];
 	double diff;
 	bool authorised;
 	bool disconnected;
@@ -316,6 +317,10 @@ static void update_base(ckpool_t *ckp)
 		if (tmp->gentime < wb->gentime - 600) {
 			HASH_DEL(workbases, tmp);
 			clear_workbase(tmp);
+		/* Remove all workbases from old blocks/orphans */
+		} else if (strncmp(tmp->prevhash, lasthash, 64)) {
+			HASH_DEL(workbases, tmp);
+			clear_workbase(tmp);
 		}
 	}
 	HASH_ADD_INT(workbases, id, wb);
@@ -338,8 +343,11 @@ static stratum_instance_t *__instance_by_id(int id)
 static stratum_instance_t *__stratum_add_instance(int id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
+	uint64_t *u64;
 
-	sprintf(instance->enonce1, "%016lx", enonce1_64++);
+	u64 = (uint64_t *)instance->enonce1bin;
+	*u64 = htobe64(enonce1_64++);
+	__bin2hex(instance->enonce1, instance->enonce1bin, 8);
 	instance->id = id;
 	instance->diff = 1.0;
 	LOGDEBUG("Added instance %d with enonce1 %s", id, instance->enonce1);
@@ -627,7 +635,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	bool ret = false;
-	int wb_id;
+	workbase_t *wb;
+	int id;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -666,7 +675,15 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json
 		*err_val = json_string("Worker mismatch");
 		goto out;
 	}
-	sscanf(job_id, "%08x", &wb_id);
+	sscanf(job_id, "%08x", &id);
+
+	ck_rlock(&workbase_lock);
+	HASH_FIND_INT(workbases, &id, wb);
+	if (unlikely(!wb)) {
+		ck_runlock(&workbase_lock);
+		goto out;
+	}
+	ck_runlock(&workbase_lock);
 
 	ret = true;
 out:
