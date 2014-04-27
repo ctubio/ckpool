@@ -19,6 +19,7 @@
 #include "bitcoin.h"
 #include "uthash.h"
 #include "utlist.h"
+#include "sha2.h"
 
 static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
 
@@ -45,6 +46,7 @@ struct workbase {
 	uint32_t curtime;
 	char prevhash[68];
 	char ntime[12];
+	uint32_t ntime32;
 	char bbversion[12];
 	char nbit[12];
 	uint64_t coinbasevalue;
@@ -252,8 +254,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	LOGDEBUG("Coinb2: %s", wb->coinb2);
 	/* Coinbase 2 complete */
 
-	snprintf(header, 225, "%08x%s%s%s%s%s%s",
-		 wb->version, wb->prevhash,
+	snprintf(header, 225, "%s%s%s%s%s%s%s",
+		 wb->bbversion, wb->prevhash,
 		 "0000000000000000000000000000000000000000000000000000000000000000",
 		 wb->ntime, wb->nbit,
 		 "00000000", /* nonce */
@@ -302,6 +304,7 @@ static void update_base(ckpool_t *ckp)
 	json_uintcpy(&wb->curtime, val, "curtime");
 	json_strcpy(wb->prevhash, val, "prevhash");
 	json_strcpy(wb->ntime, val, "ntime");
+	sscanf(wb->ntime, "%x", &wb->ntime32);
 	json_strcpy(wb->bbversion, val, "bbversion");
 	json_strcpy(wb->nbit, val, "nbit");
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
@@ -728,15 +731,15 @@ static void add_submit_fail(stratum_instance_t *client, int diff)
 	add_submit(client, diff);
 }
 
-static double submit_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
-			  const char *ntime, const char *nonce)
+static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
+			      uint32_t ntime32, const char *nonce)
 {
+	uchar coinbase[256], swap[80], hash[32], hash1[32];
 	unsigned char merkle_root[32], merkle_sha[64];
-	uint32_t *data32, *swap32;
-	uchar coinbase[256];
-	double ret = 0.0;
+	uint32_t *data32, *swap32, nonce32;
+	char data[80], share[68];
 	int cblen = 0, i;
-	char data[112];
+	double ret;
 
 	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
 	cblen += wb->coinb1len;
@@ -758,9 +761,35 @@ static double submit_diff(stratum_instance_t *client, workbase_t *wb, const char
 	swap32 = (uint32_t *)merkle_root;
 	flip_32(swap32, data32);
 
-	memcpy(data, wb->headerbin, 112);
+	/* Copy the cached header binary and insert the merkle root */
+	memcpy(data, wb->headerbin, 80);
 	memcpy(data + 36, merkle_root, 32);
 
+	/* Insert the nonce value into the data */
+	sscanf(nonce, "%x", &nonce32);
+	data32 = (uint32_t *)(data + 64 + 12);
+	*data32 = htobe32(nonce32);
+
+	/* Insert the ntime value into the data */
+	data32 = (uint32_t *)(data + 68);
+	*data32 = htobe32(ntime32);
+
+	/* Hash the share */
+	data32 = (uint32_t *)data;
+	swap32 = (uint32_t *)swap;
+	flip_80(swap32, data32);
+	sha256(swap, 80, hash1);
+	sha256(hash1, 32, hash);
+
+	data32 = (uint32_t *)hash1;
+	bswap_256(hash1, hash);
+	__bin2hex(share, hash1, 32);
+
+	ret = diff_from_target(hash);
+
+	LOGINFO("Client %d share diff %.1f : %s", client->id, ret, share);
+
+	/* FIXME: Log share here */
 	return ret;
 }
 
@@ -768,10 +797,11 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
+	uint32_t ntime32;
 	bool ret = false;
 	workbase_t *wb;
-	double diff;
-	int id;
+	double sdiff;
+	int diff, id;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -810,7 +840,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = json_string("Worker mismatch");
 		goto out;
 	}
-	sscanf(job_id, "%08x", &id);
+	sscanf(job_id, "%x", &id);
+	sscanf(ntime, "%x", &ntime32);
 
 	ck_rlock(&workbase_lock);
 	HASH_FIND_INT(workbases, &id, wb);
@@ -826,23 +857,27 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = json_string("Invalid nonce2 length");
 		goto out_unlock;
 	}
-	diff = submit_diff(client, wb, nonce2, ntime, nonce);
-	ret = true;
+	/* Ntime cannot be less, but allow forward ntime rolling up to max */
+	if (ntime32 < wb->ntime32 || ntime32 > wb->ntime32 + 7000) {
+		json_object_set_nocheck(json_msg, "reject-reason", json_string("Ntime out of range"));
+		goto out_unlock;
+	}
+	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce);
 out_unlock:
 	ck_runlock(&workbase_lock);
 
-out:
-	if (ret) {
-		int diff;
-
-		if (id < client->diff_change_job_id)
-			diff = client->old_diff;
-		else
-			diff = client->diff;
+	if (id < client->diff_change_job_id)
+		diff = client->old_diff;
+	else
+		diff = client->diff;
+	if (sdiff >= diff) {
 		add_submit_success(client, diff);
-	} else
-		add_submit_fail(client, client->diff);
-
+		ret = true;
+	} else {
+		add_submit_fail(client, diff);
+		json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
+	}
+out:
 	return json_boolean(ret);
 }
 
