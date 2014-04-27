@@ -728,7 +728,8 @@ static void add_submit_fail(stratum_instance_t *client, int diff)
 	add_submit(client, diff);
 }
 
-static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json_t **err_val)
+static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
+			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	bool ret = false;
@@ -778,7 +779,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *params_val, json
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
 		ck_runlock(&workbase_lock);
-		/* FIXME add reject reason */
+		json_object_set_nocheck(json_msg, "reject-reason",
+					json_string("Invalid/stale JobID"));
 		goto out;
 	}
 	ck_runlock(&workbase_lock);
@@ -801,16 +803,18 @@ out:
 
 /* We should have already determined all the values passed to this are valid
  * by now. Set update if we should also send the latest stratum parameters */
-static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params_val,
-			       json_t **err_val, bool *update)
+static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_val,
+			       json_t *params_val, json_t **err_val, bool *update)
 {
 	stratum_instance_t *client = NULL;
 	const char *method;
+	json_t *ret = NULL;
 
 	method = json_string_value(method_val);
 	if (!strncasecmp(method, "mining.subscribe", 16)) {
 		*update = true;
-		return parse_subscribe(client_id, params_val);
+		ret = parse_subscribe(client_id, params_val);
+		goto out;
 	}
 
 	ck_rlock(&instance_lock);
@@ -818,21 +822,28 @@ static json_t *gen_json_result(int client_id, json_t *method_val, json_t *params
 	if (unlikely(!client)) {
 		ck_runlock(&instance_lock);
 		LOGERR("Failed to find client id %d in hashtable!", client_id);
-		return NULL;
+		goto out;
 	}
 	ck_runlock(&instance_lock);
 
-	if (!strncasecmp(method, "mining.authorize", 16))
-		return parse_authorize(client, params_val, err_val);
+	if (!strncasecmp(method, "mining.authorize", 16)) {
+		ret = parse_authorize(client, params_val, err_val);
+		goto out;
+	}
 
 	/* We should only accept authorised requests from here on */
-	if (!client->authorised)
-		return json_string("Unauthorised");
+	if (!client->authorised) {
+		ret = json_string("Unauthorised");
+		goto out;
+	}
 
-	if (!strncasecmp(method, "mining.submit", 13))
-		return parse_submit(client, params_val, err_val);
+	if (!strncasecmp(method, "mining.submit", 13)) {
+		ret = parse_submit(client, json_msg, params_val, err_val);
+		goto out;
+	}
 
-	return json_string("Empty");
+out:
+	return ret;
 }
 
 /* Must enter with workbase_lock held */
@@ -910,7 +921,8 @@ static void parse_instance_msg(int client_id, json_t *msg)
 		err_val = json_string("-1:params not found");
 		goto out;
 	}
-	result_val = gen_json_result(client_id, method, params, &err_val, &update);
+	result_val = gen_json_result(client_id, json_msg, method, params,
+				     &err_val, &update);
 	if (!err_val)
 		err_val = json_null();
 out:
