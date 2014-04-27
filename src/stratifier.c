@@ -88,6 +88,7 @@ static cklock_t workbase_lock;
 static workbase_t *workbases;
 static workbase_t *current_workbase;
 static int workbase_id;
+static int blockchange_id;
 static char lasthash[68];
 
 struct stratum_msg {
@@ -325,19 +326,16 @@ static void update_base(ckpool_t *ckp)
 	wb->gentime = time(NULL);
 
 	ck_wlock(&workbase_lock);
+	wb->id = workbase_id++;
 	if (strncmp(wb->prevhash, lasthash, 64)) {
 		new_block = true;
 		memcpy(lasthash, wb->prevhash, 65);
+		blockchange_id = wb->id;
 	}
-	wb->id = workbase_id++;
 	sprintf(wb->idstring, "%08x", wb->id);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime < wb->gentime - 600) {
-			HASH_DEL(workbases, tmp);
-			clear_workbase(tmp);
-		/* Remove all workbases from old blocks/orphans */
-		} else if (strncmp(tmp->prevhash, lasthash, 64)) {
 			HASH_DEL(workbases, tmp);
 			clear_workbase(tmp);
 		}
@@ -779,8 +777,12 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
 		ck_runlock(&workbase_lock);
-		json_object_set_nocheck(json_msg, "reject-reason",
-					json_string("Invalid/stale JobID"));
+		json_object_set_nocheck(json_msg, "reject-reason", json_string("Invalid JobID"));
+		goto out;
+	}
+	if (id < blockchange_id) {
+		ck_runlock(&workbase_lock);
+		json_object_set_nocheck(json_msg, "reject-reason", json_string("Stale"));
 		goto out;
 	}
 	ck_runlock(&workbase_lock);
@@ -1034,7 +1036,7 @@ int stratifier(proc_instance_t *pi)
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
 
 	/* Set the initial id to time to not send the same id on restarts */
-	workbase_id = time(NULL);
+	blockchange_id = workbase_id = time(NULL);
 
 	cklock_init(&instance_lock);
 
