@@ -369,3 +369,40 @@ out:
 	json_decref(val);
 	return ret;
 }
+
+bool submit_block(connsock_t *cs, char *params)
+{
+	json_t *val, *res_val;
+	const char *res_ret;
+	bool ret = false;
+	char *rpc_req;
+	int len;
+	char *s;
+
+	len = strlen(params) + 50;
+	rpc_req = ckalloc(len);
+	sprintf(rpc_req, "{\"method\": \"submitblock\", \"params\": [\"%s\"]}\n", params);
+	LOGWARNING("SUBMITTING: %s", rpc_req);
+	val = json_rpc_call(cs, rpc_req);
+	if (!val) {
+		LOGWARNING("Failed to get valid json response to getbestblockhash");
+		return ret;
+	}
+	res_val = json_object_get(val, "result");
+	if (!res_val) {
+		LOGWARNING("Failed to get result in json response to getbestblockhash");
+		goto out;
+	}
+	res_ret = json_string_value(res_val);
+	if (!res_ret || !strlen(res_ret)) {
+		LOGWARNING("Got null string in result to getbestblockhash");
+		goto out;
+	}
+	ret = true;
+out:
+	s = json_dumps(val, 0);
+	LOGWARNING("SUBMIT RESULT: %s", s);
+	free(s);
+	json_decref(val);
+	return ret;
+}

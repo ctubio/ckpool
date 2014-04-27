@@ -206,14 +206,16 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	tv_time(&now);
 	ofs += ser_number(wb->coinb1bin + ofs, now.tv_sec);
 
+	/* Leave enonce1/2varlen constant at 8 bytes for bitcoind sources */
+	wb->enonce1varlen = 8;
+	wb->enonce2varlen = 8;
+	wb->coinb1bin[ofs++] = wb->enonce1varlen + wb->enonce2varlen;
+
 	wb->coinb1len = ofs;
 
 	len = wb->coinb1len - 41;
 
-	/* Leave enonce1/2varlen constant at 8 bytes for bitcoind sources */
-	wb->enonce1varlen = 8;
 	len += wb->enonce1varlen;
-	wb->enonce2varlen = 8;
 	len += wb->enonce2varlen;
 
 	memcpy(wb->coinb2bin, "\x0a\x2f\x63\x6b\x70\x6f\x6f\x6c\x34\x32\x2f", 11);
@@ -230,7 +232,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	}
 	len += wb->coinb2len;
 
-	wb->coinb1bin[41] = len; /* Set the length now */
+	wb->coinb1bin[41] = len - 1; /* Set the length now */
 	__bin2hex(wb->coinb1, wb->coinb1bin, wb->coinb1len);
 	LOGDEBUG("Coinb1: %s", wb->coinb1);
 	/* Coinbase 1 complete */
@@ -738,13 +740,54 @@ static void add_submit_fail(stratum_instance_t *client, int diff)
 	add_submit(client, diff);
 }
 
+extern ckpool_t *global_ckp;
+
+/* We should already be holding the workbase_lock */
+static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, const char *coinbase,
+			    int cblen)
+{
+	int transactions = wb->transactions + 1;
+	char *gbt_block, varint[12];
+	char hexcoinbase[512];
+
+	/* Submit anything over 95% of the diff in case of rounding errors */
+	if (diff < current_workbase->diff * 0.95)
+		return;
+
+	gbt_block = ckalloc(512);
+	sprintf(gbt_block, "submitblock:");
+	__bin2hex(gbt_block + 12, data, 80);
+	if (transactions < 0xfd) {
+		uint8_t val8 = transactions;
+
+		__bin2hex(varint, (const unsigned char *)&val8, 1);
+	} else if (transactions <= 0xffff) {
+		uint16_t val16 = htole16(transactions);
+
+		strcat(gbt_block, "fd");
+		__bin2hex(varint, (const unsigned char *)&val16, 2);
+	} else {
+		uint32_t val32 = htole32(transactions);
+
+		strcat(gbt_block, "fe");
+		__bin2hex(varint, (const unsigned char *)&val32, 4);
+	}
+	strcat(gbt_block, varint);
+	__bin2hex(hexcoinbase, coinbase, cblen);
+	strcat(gbt_block, hexcoinbase);
+	if (wb->transactions)
+		realloc_strcat(&gbt_block, wb->txn_data);
+	send_proc(&global_ckp->generator, gbt_block);
+	free(gbt_block);
+}
+
 static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
 			      uint32_t ntime32, const char *nonce)
 {
-	uchar coinbase[256], swap[80], hash[32], hash1[32];
 	unsigned char merkle_root[32], merkle_sha[64];
+	char coinbase[256], data[80], share[68];
+	uchar swap[80], hash[32], hash1[32];
 	uint32_t *data32, *swap32, nonce32;
-	char data[80], share[68];
 	int cblen = 0, i;
 	double ret;
 
@@ -757,7 +800,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	memcpy(coinbase + cblen, wb->coinb2bin, wb->coinb2len);
 	cblen += wb->coinb2len;
 
-	gen_hash(coinbase, merkle_root, cblen);
+	gen_hash((uchar *)coinbase, merkle_root, cblen);
 	memcpy(merkle_sha, merkle_root, 32);
 	for (i = 0; i < wb->merkles; i++) {
 		memcpy(merkle_sha + 32, &wb->merklebin[i], 32);
@@ -788,11 +831,16 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	sha256(swap, 80, hash1);
 	sha256(hash1, 32, hash);
 
+	/* Calculate the diff of the share here */
+	ret = diff_from_target(hash);
+
+	/* Test we haven't solved a block */
+	test_blocksolve(wb, swap, ret, coinbase, cblen);
+
+	/* Generate hex string of hash for logging */
 	data32 = (uint32_t *)hash1;
 	bswap_256(hash1, hash);
 	__bin2hex(share, hash1, 32);
-
-	ret = diff_from_target(hash);
 
 	LOGINFO("Client %d share diff %.1f : %s", client->id, ret, share);
 

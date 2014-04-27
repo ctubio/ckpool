@@ -81,6 +81,9 @@ retry:
 				LOGDEBUG("Hash: %s", hash);
 			}
 		}
+	} else if (!strncasecmp(buf, "submitblock:", 12)) {
+		LOGDEBUG("Submitting block data!");
+		submit_block(cs, buf + 12);
 	}
 	close(sockd);
 	goto retry;
