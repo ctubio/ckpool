@@ -852,10 +852,10 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
+	double sdiff = -1;
 	uint32_t ntime32;
 	bool ret = false;
 	workbase_t *wb;
-	double sdiff;
 	int diff, id;
 
 	if (unlikely(!json_is_array(params_val))) {
@@ -931,7 +931,8 @@ out_unlock:
 		ret = true;
 	} else {
 		add_submit_fail(client, diff);
-		json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
+		if (sdiff >= 0)
+			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
 	}
 out:
 	return json_boolean(ret);
