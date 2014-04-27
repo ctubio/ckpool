@@ -657,7 +657,7 @@ out:
 static void add_submit(stratum_instance_t *client, int diff)
 {
 	int next_blockid, optimal, share_duration;
-	double tdiff, drp, dsps;
+	double tdiff, drp, dsps, network_diff;
 	json_t *json_msg;
 	tv_t now_t;
 
@@ -698,8 +698,15 @@ static void add_submit(stratum_instance_t *client, int diff)
 
 	ck_rlock(&workbase_lock);
 	next_blockid = workbase_id + 1;
+	network_diff = current_workbase->diff;
 	ck_runlock(&workbase_lock);
 
+	if (optimal > network_diff) {
+		/* Intentionall round down here */
+		optimal = network_diff;
+		if (client->diff == optimal)
+			return;
+	}
 	client->ssdc = 0;
 
 	/* We have the effect of a change pending */
