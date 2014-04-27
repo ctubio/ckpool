@@ -54,6 +54,7 @@ struct workbase {
 	char *txn_data;
 	int merkles;
 	char merklehash[16][68];
+	char merklebin[16][32];
 	json_t *merkle_array;
 
 	/* Template variables, lengths are binary lengths! */
@@ -318,6 +319,7 @@ static void update_base(ckpool_t *ckp)
 		arr = json_object_get(val, "merklehash");
 		for (i = 0; i < wb->merkles; i++) {
 			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(arr, i)));
+			hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
 			json_array_append(wb->merkle_array, json_string(&wb->merklehash[i][0]));
 		}
 	}
@@ -726,12 +728,49 @@ static void add_submit_fail(stratum_instance_t *client, int diff)
 	add_submit(client, diff);
 }
 
+static double submit_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
+			  const char *ntime, const char *nonce)
+{
+	unsigned char merkle_root[32], merkle_sha[64];
+	uint32_t *data32, *swap32;
+	uchar coinbase[256];
+	double ret = 0.0;
+	int cblen = 0, i;
+	char data[112];
+
+	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
+	cblen += wb->coinb1len;
+	memcpy(coinbase + cblen, client->enonce1bin, wb->enonce1varlen);
+	cblen += wb->enonce1varlen;
+	hex2bin(coinbase + cblen, nonce2, wb->enonce2varlen);
+	cblen += wb->enonce2varlen;
+	memcpy(coinbase + cblen, wb->coinb2bin, wb->coinb2len);
+	cblen += wb->coinb2len;
+
+	gen_hash(coinbase, merkle_root, cblen);
+	memcpy(merkle_sha, merkle_root, 32);
+	for (i = 0; i < wb->merkles; i++) {
+		memcpy(merkle_sha + 32, &wb->merklebin[i], 32);
+		gen_hash(merkle_sha, merkle_root, 64);
+		memcpy(merkle_sha, merkle_root, 32);
+	}
+	data32 = (uint32_t *)merkle_sha;
+	swap32 = (uint32_t *)merkle_root;
+	flip_32(swap32, data32);
+
+	memcpy(data, wb->headerbin, 112);
+	memcpy(data + 36, merkle_root, 32);
+
+	return ret;
+}
+
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	bool ret = false;
 	workbase_t *wb;
+	double diff;
 	int id;
 
 	if (unlikely(!json_is_array(params_val))) {
@@ -776,18 +815,22 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&workbase_lock);
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
-		ck_runlock(&workbase_lock);
 		json_object_set_nocheck(json_msg, "reject-reason", json_string("Invalid JobID"));
-		goto out;
+		goto out_unlock;
 	}
 	if (id < blockchange_id) {
-		ck_runlock(&workbase_lock);
 		json_object_set_nocheck(json_msg, "reject-reason", json_string("Stale"));
-		goto out;
+		goto out_unlock;
 	}
+	if ((int)strlen(nonce2) != wb->enonce2varlen * 2) {
+		*err_val = json_string("Invalid nonce2 length");
+		goto out_unlock;
+	}
+	diff = submit_diff(client, wb, nonce2, ntime, nonce);
+	ret = true;
+out_unlock:
 	ck_runlock(&workbase_lock);
 
-	ret = true;
 out:
 	if (ret) {
 		int diff;
