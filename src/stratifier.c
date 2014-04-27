@@ -129,7 +129,7 @@ struct stratum_instance {
 	int absolute_shares;
 	int diff_shares;
 
-	tv_t connect_time;
+	tv_t first_share;
 	bool authorised;
 	bool disconnected;
 
@@ -368,8 +368,7 @@ static stratum_instance_t *__stratum_add_instance(int id)
 	__bin2hex(instance->enonce1, instance->enonce1bin, 8);
 	instance->id = id;
 	instance->diff = instance->old_diff = 1;
-	tv_time(&instance->connect_time);
-	copy_tv(&instance->ldc, &instance->connect_time);
+	tv_time(&instance->ldc);
 	LOGDEBUG("Added instance %d with enonce1 %s", id, instance->enonce1);
 	HASH_ADD_INT(stratum_instances, id, instance);
 	return instance;
@@ -653,7 +652,7 @@ out:
 
 static void add_submit(stratum_instance_t *client, int diff)
 {
-	int next_blockid, optimal, connect_duration;
+	int next_blockid, optimal, share_duration;
 	double tdiff, drp, dsps;
 	json_t *json_msg;
 	tv_t now_t;
@@ -664,26 +663,29 @@ static void add_submit(stratum_instance_t *client, int diff)
 	client->ssdc++;
 	decay_time(&client->dsps, diff, tdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
-	connect_duration = tvdiff(&now_t, &client->connect_time);
 
-	/* During the initial 5 minutes we work off the average shares per
-	 * second and thereafter from the rolling average */
-	if (connect_duration < 300)
-		dsps = client->diff_shares / connect_duration;
-	else
-		dsps = client->dsps;
-
-	/* Diff rate product */
-	drp = dsps / (double)client->diff;
-	/* Optimal rate product is 3, allow some hysteresis */
-	if (drp > 2 && drp < 4)
-		return;
 	/* Check the difficulty every 300 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
 	if (client->ssdc < 100 && tdiff < 300)
 		return;
 
-	optimal = dsps * 3;
+	/* During the initial 5 minutes we work off the average shares per
+	 * second and thereafter from the rolling average */
+	share_duration = tvdiff(&now_t, &client->first_share);
+	if (share_duration < 300) {
+		if (unlikely(share_duration < 0.1))
+			share_duration = 0.1;
+		dsps = client->diff_shares / share_duration;
+	} else
+		dsps = client->dsps;
+
+	/* Diff rate product */
+	drp = dsps / (double)client->diff;
+	/* Optimal rate product is 3.33, allow some hysteresis */
+	if (drp > 2.22 && drp < 4.44)
+		return;
+
+	optimal = dsps * 3.33;
 	if (optimal <= 1) {
 		if (client->diff == 1)
 			return;
@@ -714,7 +716,8 @@ static void add_submit(stratum_instance_t *client, int diff)
 /* FIXME Add logging of these as well */
 static void add_submit_success(stratum_instance_t *client, int diff)
 {
-	client->absolute_shares++;
+	if (unlikely(!client->absolute_shares++))
+		tv_time(&client->first_share);
 	client->diff_shares += diff;
 	add_submit(client, diff);
 }
