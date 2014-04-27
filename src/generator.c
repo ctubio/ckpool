@@ -59,8 +59,7 @@ retry:
 			free(s);
 			clear_gbtbase(&gbt);
 		}
-	}
-	if (!strncasecmp(buf, "getbest", 7)) {
+	} else if (!strncasecmp(buf, "getbest", 7)) {
 		if (!get_bestblockhash(cs, hash)) {
 			LOGWARNING("No best block hash support from %s:%s",
 				   cs->url, cs->port);
@@ -68,8 +67,7 @@ retry:
 		} else {
 			send_unix_msg(sockd, hash);
 		}
-	}
-	if (!strncasecmp(buf, "getlast", 7)) {
+	} else if (!strncasecmp(buf, "getlast", 7)) {
 		int height = get_blockcount(cs);
 
 		if (height == -1)

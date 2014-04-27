@@ -279,12 +279,17 @@ static void update_base(ckpool_t *ckp)
 	json_t *val;
 	char *buf;
 
-	wb = ckzalloc(sizeof(workbase_t));
 	buf = send_recv_proc(&ckp->generator, "getbase");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get base from generator in update_base");
 		return;
 	}
+	if (unlikely(!strncasecmp(buf, "failed", 6))) {
+		LOGWARNING("Generator returned failure in update_base");
+		return;
+	}
+
+	wb = ckzalloc(sizeof(workbase_t));
 	val = json_loads(buf, 0, NULL);
 	dealloc(buf);
 
@@ -679,8 +684,11 @@ static void add_submit(stratum_instance_t *client, int diff)
 		return;
 
 	optimal = dsps * 3;
-	if (optimal <= 1 && client->diff == 1)
-		return;
+	if (optimal <= 1) {
+		if (client->diff == 1)
+			return;
+		optimal = 1;
+	}
 
 	ck_rlock(&workbase_lock);
 	next_blockid = workbase_id + 1;
