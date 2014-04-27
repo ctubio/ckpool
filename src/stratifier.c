@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -685,7 +686,7 @@ static void add_submit(stratum_instance_t *client, int diff)
 	if (drp > 2.22 && drp < 4.44)
 		return;
 
-	optimal = dsps * 3.33;
+	optimal = round(dsps * 3.33);
 	if (optimal <= 1) {
 		if (client->diff == 1)
 			return;
