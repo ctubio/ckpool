@@ -921,7 +921,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 out_unlock:
 	ck_runlock(&workbase_lock);
 
-	if (id < client->diff_change_job_id)
+	/* Accept the lower of new and old diffs until the next update */
+	if (id < client->diff_change_job_id && client->old_diff < client->diff)
 		diff = client->old_diff;
 	else
 		diff = client->diff;
