@@ -21,6 +21,7 @@
 static int gen_loop(proc_instance_t *pi, connsock_t *cs)
 {
 	unixsock_t *us = &pi->us;
+	ckpool_t *ckp = pi->ckp;
 	int sockd, ret = 0;
 	char *buf = NULL;
 	gbtbase_t gbt;
@@ -82,8 +83,10 @@ retry:
 			}
 		}
 	} else if (!strncasecmp(buf, "submitblock:", 12)) {
-		LOGDEBUG("Submitting block data!");
-		submit_block(cs, buf + 12);
+		LOGNOTICE("Submitting block data!");
+		if (submit_block(cs, buf + 12))
+			send_proc(&ckp->stratifier, "update");
+		/* FIXME Add logging of block solves */
 	}
 	close(sockd);
 	goto retry;
