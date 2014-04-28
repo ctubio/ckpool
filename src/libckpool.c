@@ -698,7 +698,7 @@ out:
 
 /* Use a standard message across the unix sockets:
  * 4 byte length of message as little endian encoded uint32_t followed by the
- * string.*/
+ * string. Return NULL in case of failure. */
 char *recv_unix_msg(int sockd)
 {
 	tv_t tv_timeout = {60, 0};
@@ -712,7 +712,7 @@ char *recv_unix_msg(int sockd)
 	ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
 	if (ret < 1) {
 		LOGERR("Select1 failed in recv_unix_msg");
-		return false;
+		goto out;
 	}
 	/* Get message length */
 	ret = read(sockd, &msglen, 4);
@@ -737,12 +737,13 @@ char *recv_unix_msg(int sockd)
 		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
 		if (ret < 1) {
 			LOGERR("Select2 failed in recv_unix_msg");
-			return false;
+			dealloc(buf);
+			goto out;
 		}
 		ret = read(sockd, buf + ofs, msglen);
 		if (unlikely(ret < 0)) {
 			LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
-			ret = 1;
+			dealloc(buf);
 			goto out;
 		}
 		ofs += ret;
