@@ -701,7 +701,7 @@ out:
  * string.*/
 char *recv_unix_msg(int sockd)
 {
-	tv_t tv_timeout = {1, 0};
+	tv_t tv_timeout = {60, 0};
 	char *buf = NULL;
 	uint32_t msglen;
 	fd_set readfs;
@@ -729,7 +729,7 @@ char *recv_unix_msg(int sockd)
 	buf[msglen] = 0;
 	ofs = 0;
 	while (msglen) {
-		tv_timeout.tv_sec = 1;
+		tv_timeout.tv_sec = 60;
 		tv_timeout.tv_usec = 0;
 
 		FD_ZERO(&readfs);
