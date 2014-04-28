@@ -52,26 +52,27 @@ static int client_id;
 void *acceptor(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
-	client_instance_t cli, *client;
+	client_instance_t *client;
 	int fd;
 
 	rename_proc("acceptor");
 
 retry:
-	cli.address_len = sizeof(cli.address);
-	fd = accept(ci->serverfd, &cli.address, &cli.address_len);
+	client = ckzalloc(sizeof(client_instance_t));
+	client->address_len = sizeof(client->address);
+reaccept:
+	fd = accept(ci->serverfd, &client->address, &client->address_len);
 	if (unlikely(fd < 0)) {
 		if (interrupted())
-			goto retry;
+			goto reaccept;
 		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
+		dealloc(client);
 		goto out;
 	}
 	keep_sockalive(fd);
 
 	LOGINFO("Connected new client %d on socket %d", ci->nfds, fd);
 
-	client = ckzalloc(sizeof(client_instance_t));
-	memcpy(client, &cli, sizeof(client_instance_t));
 	client->fd = fd;
 
 	ck_wlock(&ci->lock);
