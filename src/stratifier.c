@@ -687,8 +687,9 @@ static void add_submit(stratum_instance_t *client, int diff)
 
 	/* Diff rate product */
 	drp = dsps / (double)client->diff;
-	/* Optimal rate product is 3.33, allow some hysteresis */
-	if (drp > 2.22 && drp < 4.44)
+	/* Optimal rate product is 3.33, allow some hysteresis, clamping more
+	 * aggressively high share rates than low. */
+	if (drp > 3 && drp < 4)
 		return;
 
 	optimal = round(dsps * 3.33);
