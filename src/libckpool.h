@@ -53,6 +53,19 @@
 
 #define dealloc(ptr) _dealloc((void *)&(ptr))
 
+/* Should be defined in syslog, but keeping them here is a reminder of their
+ * values. */
+#ifndef LOG_ERR
+#define	LOG_EMERG	0	/* system is unusable */
+#define	LOG_ALERT	1	/* action must be taken immediately */
+#define	LOG_CRIT	2	/* critical conditions */
+#define	LOG_ERR		3	/* error conditions */
+#define	LOG_WARNING	4	/* warning conditions */
+#define	LOG_NOTICE	5	/* normal but significant condition */
+#define	LOG_INFO	6	/* informational */
+#define	LOG_DEBUG	7	/* debug-level messages */
+#endif
+
 /* Placeholders for when we have more comprehensive logging facilities */
 #define LOGERR(fmt, ...) do { \
 	if (fmt) { \
@@ -72,6 +85,9 @@
 	} \
 } while (0)
 
+#define LOGEMERG(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
+#define LOGALERT(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
+#define LOGCRIT(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
 #define LOGWARNING(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
 #define LOGNOTICE(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
 #define LOGINFO(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
@@ -146,6 +162,8 @@ struct ckpool_instance {
 	char *socket_dir;
 	/* Filename of config file */
 	char *config;
+	/* Logging level */
+	int loglevel;
 
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;
