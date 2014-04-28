@@ -341,6 +341,8 @@ static void update_base(ckpool_t *ckp)
 	}
 	sprintf(wb->idstring, "%08x", wb->id);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
+		if (HASH_COUNT(workbases) < 3)
+			break;
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime < wb->gentime - 600) {
 			HASH_DEL(workbases, tmp);
