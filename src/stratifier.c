@@ -218,8 +218,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len += wb->enonce1varlen;
 	len += wb->enonce2varlen;
 
-	memcpy(wb->coinb2bin, "\x0a\x2f\x63\x6b\x70\x6f\x6f\x6c\x34\x32\x2f", 11);
-	wb->coinb2len = 11;
+	memcpy(wb->coinb2bin, "\x0a\x63\x6b\x70\x6f\x6f\x6c", 7);
+	wb->coinb2len = 7;
 	if (ckp->btcsig) {
 		int siglen = strlen(ckp->btcsig);
 
@@ -679,8 +679,8 @@ static void add_submit(stratum_instance_t *client, int diff)
 	 * second and thereafter from the rolling average */
 	share_duration = tvdiff(&now_t, &client->first_share);
 	if (share_duration < 300) {
-		if (unlikely(share_duration < 0.1))
-			share_duration = 0.1;
+		if (unlikely(share_duration < 1))
+			return;
 		dsps = client->diff_shares / share_duration;
 	} else
 		dsps = client->dsps;
