@@ -23,7 +23,6 @@
 #include "stratifier.h"
 #include "connector.h"
 
-/* Only global variable, to be used only by sighandler */
 ckpool_t *global_ckp;
 
 static void *listener(void *arg)

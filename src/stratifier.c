@@ -743,8 +743,6 @@ static void add_submit_fail(stratum_instance_t *client, int diff)
 	add_submit(client, diff);
 }
 
-extern ckpool_t *global_ckp;
-
 /* We should already be holding the workbase_lock */
 static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, const char *coinbase,
 			    int cblen)

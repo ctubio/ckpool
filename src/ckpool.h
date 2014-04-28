@@ -12,113 +12,57 @@
 
 #include "config.h"
 
-#include <stdint.h>
+#include "libckpool.h"
 
-#if HAVE_BYTESWAP_H
-# include <byteswap.h>
-#endif
+struct proc_instance;
+typedef struct proc_instance proc_instance_t;
+struct ckpool_instance;
+typedef struct ckpool_instance ckpool_t;
 
-#if HAVE_ENDIAN_H
-# include <endian.h>
-#elif HAVE_SYS_ENDIAN_H
-# include <sys/endian.h>
-#endif
+struct proc_instance {
+	ckpool_t *ckp;
+	unixsock_t us;
+	char *processname;
+	char *sockname;
+	int pid;
+	int (*process)(proc_instance_t *);
+};
 
-#ifndef bswap_16
- #define bswap_16 __builtin_bswap16
- #define bswap_32 __builtin_bswap32
- #define bswap_64 __builtin_bswap64
-#endif
+struct ckpool_instance {
+	/* Main process name */
+	char *name;
+	/* Directory where sockets are created */
+	char *socket_dir;
+	/* Filename of config file */
+	char *config;
+	/* Logging level */
+	int loglevel;
 
-/* This assumes htobe32 is a macro in endian.h, and if it doesn't exist, then
- * htobe64 also won't exist */
-#ifndef htobe32
-# if __BYTE_ORDER == __LITTLE_ENDIAN
-#  define htole16(x) (x)
-#  define le16toh(x) (x)
-#  define htole32(x) (x)
-#  define htole64(x) (x)
-#  define le32toh(x) (x)
-#  define le64toh(x) (x)
-#  define be32toh(x) bswap_32(x)
-#  define be64toh(x) bswap_64(x)
-#  define htobe16(x) bswap_16(x)
-#  define htobe32(x) bswap_32(x)
-#  define htobe64(x) bswap_64(x)
-# elif __BYTE_ORDER == __BIG_ENDIAN
-#  define htole16(x) bswap_16(x)
-#  define le16toh(x) bswap_16(x)
-#  define htole32(x) bswap_32(x)
-#  define le32toh(x) bswap_32(x)
-#  define le64toh(x) bswap_64(x)
-#  define htole64(x) bswap_64(x)
-#  define be32toh(x) (x)
-#  define be64toh(x) (x)
-#  define htobe16(x) (x)
-#  define htobe32(x) (x)
-#  define htobe64(x) (x)
-# endif
-#endif
+	/* Process instance data of parent/child processes */
+	proc_instance_t main;
+	proc_instance_t generator;
+	proc_instance_t stratifier;
+	proc_instance_t connector;
 
-#define unlikely(expr) (__builtin_expect(!!(expr), 0))
-#define likely(expr) (__builtin_expect(!!(expr), 1))
-#define __maybe_unused		__attribute__((unused))
-#define uninitialised_var(x) x = x
+	/* Threads of main process */
+	pthread_t pth_listener;
+	pthread_t pth_watchdog;
 
-/* Typedefs are evil but we use this one so often... */
-typedef unsigned char uchar;
+	/* Bitcoind data */
+	char *btcdurl;
+	char *btcdauth;
+	char *btcdpass;
+	int blockpoll; // How frequently in ms to poll bitcoind for block updates
 
-typedef struct timeval tv_t;
-typedef struct timespec ts_t;
+	/* Coinbase data */
+	char *btcaddress; // Address to mine to
+	char *btcsig; // Optional signature to add to coinbase
 
-static inline void swap_256(void *dest_p, const void *src_p)
-{
-	uint32_t *dest = dest_p;
-	const uint32_t *src = src_p;
+	/* Stratum options */
+	int update_interval; // Seconds between stratum updates
+	char *serverurl;
+};
 
-	dest[0] = src[7];
-	dest[1] = src[6];
-	dest[2] = src[5];
-	dest[3] = src[4];
-	dest[4] = src[3];
-	dest[5] = src[2];
-	dest[6] = src[1];
-	dest[7] = src[0];
-}
-
-static inline void bswap_256(void *dest_p, const void *src_p)
-{
-	uint32_t *dest = dest_p;
-	const uint32_t *src = src_p;
-
-	dest[0] = bswap_32(src[7]);
-	dest[1] = bswap_32(src[6]);
-	dest[2] = bswap_32(src[5]);
-	dest[3] = bswap_32(src[4]);
-	dest[4] = bswap_32(src[3]);
-	dest[5] = bswap_32(src[2]);
-	dest[6] = bswap_32(src[1]);
-	dest[7] = bswap_32(src[0]);
-}
-
-static inline void flip_32(void *dest_p, const void *src_p)
-{
-	uint32_t *dest = dest_p;
-	const uint32_t *src = src_p;
-	int i;
-
-	for (i = 0; i < 8; i++)
-		dest[i] = bswap_32(src[i]);
-}
-
-static inline void flip_80(void *dest_p, const void *src_p)
-{
-	uint32_t *dest = dest_p;
-	const uint32_t *src = src_p;
-	int i;
-
-	for (i = 0; i < 20; i++)
-		dest[i] = bswap_32(src[i]);
-}
+ckpool_t *global_ckp;
 
 #endif /* CKPOOL_H */
