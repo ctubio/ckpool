@@ -193,7 +193,11 @@ retry:
 	}
 	ck_runlock(&ci->lock);
 
-	ret = poll(fds, nfds, 60000);
+	if (!nfds) {
+		cksleep_ms(100);
+		goto retry;
+	}
+	ret = poll(fds, nfds, 1000);
 	if (ret < 0) {
 		if (interrupted())
 			goto retry;
