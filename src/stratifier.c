@@ -288,6 +288,24 @@ static void clear_workbase(workbase_t *wb)
 	free(wb);
 }
 
+static void purge_share_hashtable(int wb_id)
+{
+	share_t *share, *tmp;
+	int purged = 0;
+
+	ck_wlock(&share_lock);
+	HASH_ITER(hh, shares, share, tmp) {
+		if (share->workbase_id < wb_id) {
+			HASH_DEL(shares, share);
+			free(share);
+			purged++;
+		}
+	}
+	ck_wunlock(&share_lock);
+
+	LOGINFO("Cleared %d shares from share hashtable", purged);
+}
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
@@ -364,6 +382,9 @@ static void update_base(ckpool_t *ckp)
 	HASH_ADD_INT(workbases, id, wb);
 	current_workbase = wb;
 	ck_wunlock(&workbase_lock);
+
+	if (new_block)
+		purge_share_hashtable(wb->id);
 
 	stratum_broadcast_update(new_block);
 }
@@ -996,7 +1017,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 out_unlock:
-	wb_id = workbase_id;
+	wb_id = wb->id;
 	ck_runlock(&workbase_lock);
 
 	/* Accept the lower of new and old diffs until the next update */
