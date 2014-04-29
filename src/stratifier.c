@@ -122,7 +122,7 @@ struct stratum_instance {
 	int id;
 
 	char enonce1[20];
-	char enonce1bin[8];
+	uint64_t enonce1_64;
 
 	int diff; /* Current diff */
 	int old_diff; /* Previous diff */
@@ -369,17 +369,41 @@ static stratum_instance_t *__instance_by_id(int id)
 static stratum_instance_t *__stratum_add_instance(int id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
-	uint64_t *u64;
 
-	u64 = (uint64_t *)instance->enonce1bin;
-	*u64 = htobe64(enonce1_64++);
-	__bin2hex(instance->enonce1, instance->enonce1bin, 8);
 	instance->id = id;
 	instance->diff = instance->old_diff = 1;
 	tv_time(&instance->ldc);
-	LOGDEBUG("Added instance %d with enonce1 %s", id, instance->enonce1);
+	LOGINFO("Added instance %d", id);
 	HASH_ADD_INT(stratum_instances, id, instance);
 	return instance;
+}
+
+static bool sessionid_exists(const char *sessionid, int id)
+{
+	stratum_instance_t *instance, *tmp;
+	uint64_t session64;
+	bool ret = false;
+
+	if (!sessionid)
+		goto out;
+	if (strlen(sessionid) != 16)
+		goto out;
+	/* Number is in BE but we don't swap either of them */
+	hex2bin(&session64, sessionid, 8);
+
+	ck_rlock(&instance_lock);
+	HASH_ITER(hh, stratum_instances, instance, tmp) {
+		if (instance->id == id)
+			continue;
+		if (instance->enonce1_64 == session64) {
+			ret = true;
+			break;
+		}
+	}
+	ck_runlock(&instance_lock);
+
+out:
+	return ret;
 }
 
 static void stratum_add_recvd(json_t *val)
@@ -527,7 +551,7 @@ retry:
 		json_t *val = json_loads(buf, 0, NULL);
 
 		if (!val) {
-			LOGDEBUG("Received unrecognised message: %s", buf);
+			LOGWARNING("Received unrecognised message: %s", buf);
 		}  else
 			stratum_add_recvd(val);
 		goto retry;
@@ -557,7 +581,7 @@ static void *blockupdate(void *arg)
 		buf = send_recv_proc(&ckp->generator, request);
 		if (buf && strcmp(buf, hash) && strncasecmp(buf, "Failed", 6)) {
 			strcpy(hash, buf);
-			LOGINFO("Detected hash change to %s", hash);
+			LOGNOTICE("Block hash changed to %s", hash);
 			send_proc(&ckp->stratifier, "update");
 		} else
 			cksleep_ms(ckp->blockpoll);
@@ -565,10 +589,11 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
+/* Extranonce1 must be set here */
 static json_t *parse_subscribe(int client_id, json_t *params_val)
 {
 	stratum_instance_t *client = NULL;
-	char *enonce1;
+	bool old_match = false;
 	int arr_size;
 	json_t *ret;
 	int n2len;
@@ -597,19 +622,36 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 			buf = json_string_value(json_array_get(params_val, 1));
 			LOGDEBUG("Found old session id %s", buf);
 			/* Add matching here */
+			if (sessionid_exists(buf, client_id)) {
+				hex2bin(&client->enonce1_64, buf, 8);
+				strcpy(client->enonce1, buf);
+				old_match = true;
+			}
 		}
 	}
-	enonce1 = strdup(client->enonce1);
+	if (!old_match) {
+		/* Create a new extranonce1 based on non-endian swapped
+		 * uint64_t pointer */
+		ck_wlock(&instance_lock);
+		client->enonce1_64 = enonce1_64++;
+		ck_wunlock(&instance_lock);
+
+		__bin2hex(client->enonce1, &client->enonce1_64, 8);
+		LOGNOTICE("Set new subscription %d to new enonce1 %s", client->id,
+			  client->enonce1);
+	} else {
+		LOGNOTICE("Set new subscription %d to old matched enonce1 %s", client->id,
+			  client->enonce1);
+	}
 
 	ck_rlock(&workbase_lock);
 	if (likely(workbases))
 		n2len = workbases->enonce2varlen;
 	else
 		n2len = 8;
-	ret = json_pack("[[[s,s]],s,i]", "mining.notify", enonce1, enonce1, n2len);
+	ret = json_pack("[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
+			n2len);
 	ck_runlock(&workbase_lock);
-
-	free(enonce1);
 
 	return ret;
 }
@@ -649,7 +691,7 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("User not found");
 		goto out;
 	}
-	LOGINFO("Authorised user %s", buf);
+	LOGNOTICE("Authorised user %s", buf);
 	client->workername = strdup(buf);
 	client->user_id = user_id;
 	client->authorised = true;
@@ -794,7 +836,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 
 	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
 	cblen += wb->coinb1len;
-	memcpy(coinbase + cblen, client->enonce1bin, wb->enonce1varlen);
+	memcpy(coinbase + cblen, &client->enonce1_64, wb->enonce1varlen);
 	cblen += wb->enonce1varlen;
 	hex2bin(coinbase + cblen, nonce2, wb->enonce2varlen);
 	cblen += wb->enonce2varlen;
