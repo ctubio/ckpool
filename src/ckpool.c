@@ -326,6 +326,7 @@ int main(int argc, char **argv)
 					quit(1, "Invalid loglevel (range %d - %d): %d",
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
+				break;
 			case 'n':
 				ckp.name = optarg;
 				break;
