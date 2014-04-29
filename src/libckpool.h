@@ -173,54 +173,6 @@ static inline void flip_80(void *dest_p, const void *src_p)
 #define	LOG_DEBUG	7	/* debug-level messages */
 #endif
 
-/* Placeholders for when we have more comprehensive logging facilities */
-#define LOGERR(fmt, ...) do { \
-	if (fmt) { \
-		fprintf(stderr, fmt, ##__VA_ARGS__); \
-		if (errno)\
-			fprintf(stderr, " with errno %d:%s", errno, strerror(errno)); \
-		fprintf(stderr, "\n"); \
-		fflush(stderr); \
-	} \
-} while (0)
-
-#define LOGMSG(fmt, ...) do { \
-	if (fmt) { \
-		fprintf(stderr, fmt, ##__VA_ARGS__); \
-		fprintf(stderr, "\n"); \
-		fflush(stderr); \
-	} \
-} while (0)
-
-#define LOGEMERG(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-#define LOGALERT(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-#define LOGCRIT(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-#define LOGWARNING(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-#define LOGNOTICE(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-#define LOGINFO(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-#define LOGDEBUG(fmt, ...) LOGMSG(fmt, ##__VA_ARGS__)
-
-#define IN_FMT_FFL " in %s %s():%d"
-#define quitfrom(status, _file, _func, _line, fmt, ...) do { \
-	if (fmt) { \
-		fprintf(stderr, fmt IN_FMT_FFL, ##__VA_ARGS__, _file, _func, _line); \
-		fprintf(stderr, "\n"); \
-		fflush(stderr); \
-	} \
-	exit(status); \
-} while (0)
-
-#define quit(status, fmt, ...) do { \
-	if (fmt) { \
-		fprintf(stderr, fmt, ##__VA_ARGS__); \
-		if (status || errno)\
-			fprintf(stderr, " with errno %d:%s", errno, strerror(errno)); \
-		fprintf(stderr, "\n"); \
-		fflush(stderr); \
-	} \
-	exit(status); \
-} while (0)
-
 #define PAGESIZE (4096)
 
 /* ck locks, a write biased variant of rwlocks */

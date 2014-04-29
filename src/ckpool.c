@@ -303,7 +303,9 @@ int main(int argc, char **argv)
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
-	while ((c = getopt(argc, argv, "c:n:s:")) != -1) {
+	ckp.loglevel = LOG_NOTICE;
+
+	while ((c = getopt(argc, argv, "c:n:s:l:")) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
@@ -313,6 +315,13 @@ int main(int argc, char **argv)
 				break;
 			case 's':
 				ckp.socket_dir = strdup(optarg);
+				break;
+			case 'l':
+				ckp.loglevel = atoi(optarg);
+				if (ckp.loglevel < LOG_EMERG || ckp.loglevel > LOG_DEBUG) {
+					quit(1, "Invalid loglevel (range %d - %d): %d",
+					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
+				}
 				break;
 		}
 	}

@@ -65,4 +65,44 @@ struct ckpool_instance {
 
 ckpool_t *global_ckp;
 
+/* Placeholders for when we have more comprehensive logging facilities */
+
+#define LOGMSG(_loglevel, fmt, ...) do { \
+	if (global_ckp->loglevel >= _loglevel && fmt) { \
+		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		fprintf(stderr, "\n"); \
+		if (_loglevel <= LOG_ERR) \
+			fprintf(stderr, " with errno %d: %s", errno, strerror(errno)); \
+		fflush(stderr); \
+	} \
+} while (0)
+
+#define LOGEMERG(fmt, ...) LOGMSG(LOG_EMERG, fmt, ##__VA_ARGS__)
+#define LOGALERT(fmt, ...) LOGMSG(LOG_ALERT, fmt, ##__VA_ARGS__)
+#define LOGCRIT(fmt, ...) LOGMSG(LOG_CRIT, fmt, ##__VA_ARGS__)
+#define LOGERR(fmt, ...) LOGMSG(LOG_ERR, fmt, ##__VA_ARGS__)
+#define LOGWARNING(fmt, ...) LOGMSG(LOG_WARNING, fmt, ##__VA_ARGS__)
+#define LOGNOTICE(fmt, ...) LOGMSG(LOG_NOTICE, fmt, ##__VA_ARGS__)
+#define LOGINFO(fmt, ...) LOGMSG(LOG_INFO, fmt, ##__VA_ARGS__)
+#define LOGDEBUG(fmt, ...) LOGMSG(LOG_DEBUG, fmt, ##__VA_ARGS__)
+
+#define IN_FMT_FFL " in %s %s():%d"
+#define quitfrom(status, _file, _func, _line, fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt IN_FMT_FFL, ##__VA_ARGS__, _file, _func, _line); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+	exit(status); \
+} while (0)
+
+#define quit(status, fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+	exit(status); \
+} while (0)
+
 #endif /* CKPOOL_H */
