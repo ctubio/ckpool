@@ -64,7 +64,7 @@ out:
 
 /* Open the file in path, check if there is a pid in there that still exists
  * and if not, write the pid into that file. */
-static bool write_pid(const char *path, pid_t pid)
+static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 {
 	struct stat statbuf;
 	FILE *fp;
@@ -76,14 +76,21 @@ static bool write_pid(const char *path, pid_t pid)
 		LOGWARNING("File %s exists", path);
 		fp = fopen(path, "r");
 		if (!fp) {
-			LOGERR("Failed to open file %s", path);
+			LOGEMERG("Failed to open file %s", path);
 			return false;
 		}
 		ret = fscanf(fp, "%d", &oldpid);
 		fclose(fp);
 		if (ret == 1 && !(kill(oldpid, 0))) {
-			LOGWARNING("Process %s pid %d still exists", path, oldpid);
-			return false;
+			if (!ckp->killold) {
+				LOGEMERG("Process %s pid %d still exists", path, oldpid);
+				return false;
+			}
+			if (kill(oldpid, 9)) {
+				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				return false;
+			}
+			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
 		}
 	}
 	fp = fopen(path, "w");
@@ -115,7 +122,7 @@ static void write_namepid(proc_instance_t *pi)
 
 	pi->pid = getpid();
 	sprintf(s, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
-	if (!write_pid(s, pi->pid))
+	if (!write_pid(pi->ckp, s, pi->pid))
 		quit(1, "Failed to write %s pid %d", pi->processname, pi->pid);
 }
 
@@ -305,16 +312,13 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:n:s:l:")) != -1) {
+	while ((c = getopt(argc, argv, "c:kl:n:s:")) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
 				break;
-			case 'n':
-				ckp.name = optarg;
-				break;
-			case 's':
-				ckp.socket_dir = strdup(optarg);
+			case 'k':
+				ckp.killold = true;
 				break;
 			case 'l':
 				ckp.loglevel = atoi(optarg);
@@ -322,6 +326,12 @@ int main(int argc, char **argv)
 					quit(1, "Invalid loglevel (range %d - %d): %d",
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
+			case 'n':
+				ckp.name = optarg;
+				break;
+			case 's':
+				ckp.socket_dir = strdup(optarg);
+				break;
 				break;
 		}
 	}

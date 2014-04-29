@@ -29,14 +29,16 @@ struct proc_instance {
 };
 
 struct ckpool_instance {
+	/* Filename of config file */
+	char *config;
+	/* Kill old instance with same name */
+	bool killold;
+	/* Logging level */
+	int loglevel;
 	/* Main process name */
 	char *name;
 	/* Directory where sockets are created */
 	char *socket_dir;
-	/* Filename of config file */
-	char *config;
-	/* Logging level */
-	int loglevel;
 
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;
@@ -81,9 +83,9 @@ ckpool_t *global_ckp;
 			tm->tm_min, \
 			tm->tm_sec); \
 		fprintf(stderr, fmt, ##__VA_ARGS__); \
-		fprintf(stderr, "\n"); \
 		if (_loglevel <= LOG_ERR) \
 			fprintf(stderr, " with errno %d: %s", errno, strerror(errno)); \
+		fprintf(stderr, "\n"); \
 		fflush(stderr); \
 	} \
 } while (0)
