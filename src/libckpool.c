@@ -494,7 +494,7 @@ int read_socket_line(connsock_t *cs)
 {
 	char readbuf[PAGESIZE], *eom = NULL;
 	size_t buflen = 0, bufofs = 0;
-	tv_t timeout = {5, 0};
+	tv_t timeout = {60, 0};
 	int ret, bufsiz;
 	fd_set rd;
 
@@ -519,7 +519,7 @@ retry:
 
 		FD_ZERO(&rd);
 		FD_SET(cs->fd, &rd);
-		timeout.tv_sec = 1;
+		timeout.tv_sec = 5;
 		timeout.tv_usec = 0;
 		ret = select(cs->fd + 1, &rd, NULL, NULL, &timeout);
 		if (ret < 0 && interrupted())
