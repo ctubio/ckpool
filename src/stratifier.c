@@ -429,7 +429,9 @@ static bool sessionid_exists(const char *sessionid, int id)
 		if (instance->id == id)
 			continue;
 		if (instance->enonce1_64 == session64) {
-			ret = true;
+			/* Only allow one connected instance per enonce1 */
+			if (instance->disconnected)
+				ret = true;
 			break;
 		}
 	}
