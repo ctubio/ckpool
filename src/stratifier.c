@@ -149,6 +149,18 @@ static stratum_instance_t *stratum_instances;
 
 static cklock_t instance_lock;
 
+struct share {
+	UT_hash_handle hh;
+	char hash[32];
+	int workbase_id;
+};
+
+typedef struct share share_t;
+
+static share_t *shares;
+
+static cklock_t share_lock;
+
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
 {
@@ -780,9 +792,9 @@ static void add_submit_success(stratum_instance_t *client, int diff)
 	add_submit(client, diff);
 }
 
-static void add_submit_fail(stratum_instance_t *client, int diff)
+static void add_submit_fail(stratum_instance_t __maybe_unused *client)
 {
-	add_submit(client, diff);
+	/* FIXME Do something here? */
 }
 
 /* We should already be holding the workbase_lock */
@@ -825,7 +837,7 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 }
 
 static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
-			      uint32_t ntime32, const char *nonce)
+			      uint32_t ntime32, const char *nonce, char *return_hash)
 {
 	unsigned char merkle_root[32], merkle_sha[64];
 	char coinbase[256], data[80], share[68];
@@ -881,9 +893,8 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	test_blocksolve(wb, swap, ret, coinbase, cblen);
 
 	/* Generate hex string of hash for logging */
-	data32 = (uint32_t *)hash1;
-	bswap_256(hash1, hash);
-	__bin2hex(share, hash1, 32);
+	bswap_256(return_hash, hash);
+	__bin2hex(share, return_hash, 32);
 
 	LOGINFO("Client %d share diff %.1f : %s", client->id, ret, share);
 
@@ -891,15 +902,38 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	return ret;
 }
 
+static bool new_share(const char *hash, int  wb_id)
+{
+	share_t *share, *match = NULL;
+	bool ret = false;
+
+	ck_ilock(&share_lock);
+	HASH_FIND(hh, shares, hash, 32, match);
+	if (match)
+		goto out_unlock;
+	share = ckzalloc(sizeof(share_t));
+	memcpy(share->hash, hash, 32);
+	share->workbase_id = wb_id;
+	ck_ulock(&share_lock);
+	HASH_ADD(hh, shares, hash, 32, share);
+	ck_dwilock(&share_lock);
+	ret = true;
+out_unlock:
+	ck_uilock(&share_lock);
+
+	return ret;
+}
+
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
+	int diff, id, wb_id = 0;
 	double sdiff = -1;
 	uint32_t ntime32;
 	bool ret = false;
 	workbase_t *wb;
-	int diff, id;
+	char hash[32];
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -960,8 +994,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		json_object_set_nocheck(json_msg, "reject-reason", json_string("Ntime out of range"));
 		goto out_unlock;
 	}
-	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce);
+	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 out_unlock:
+	wb_id = workbase_id;
 	ck_runlock(&workbase_lock);
 
 	/* Accept the lower of new and old diffs until the next update */
@@ -970,10 +1005,15 @@ out_unlock:
 	else
 		diff = client->diff;
 	if (sdiff >= diff) {
-		add_submit_success(client, diff);
-		ret = true;
+		if (new_share(hash, wb_id)) {
+			add_submit_success(client, diff);
+			ret = true;
+		} else {
+			add_submit_fail(client);
+			json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
+		}
 	} else {
-		add_submit_fail(client, diff);
+		add_submit_fail(client);
 		if (sdiff >= 0)
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
 	}
@@ -1228,6 +1268,8 @@ int stratifier(proc_instance_t *pi)
 
 	cklock_init(&workbase_lock);
 	create_pthread(&pth_blockupdate, blockupdate, ckp);
+
+	cklock_init(&share_lock);
 
 	strat_loop(ckp, pi);
 
