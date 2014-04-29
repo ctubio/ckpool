@@ -726,7 +726,7 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("User not found");
 		goto out;
 	}
-	LOGNOTICE("Authorised user %s", buf);
+	LOGNOTICE("Authorised client %d as user %s", client->id, buf);
 	client->workername = strdup(buf);
 	client->user_id = user_id;
 	client->authorised = true;
