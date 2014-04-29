@@ -1016,8 +1016,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		goto out_unlock;
 	}
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
-out_unlock:
 	wb_id = wb->id;
+out_unlock:
 	ck_runlock(&workbase_lock);
 
 	/* Accept the lower of new and old diffs until the next update */
