@@ -127,7 +127,8 @@ struct stratum_instance {
 	int diff; /* Current diff */
 	int old_diff; /* Previous diff */
 	int diff_change_job_id; /* Last job_id we changed diff */
-	double dsps; /* Diff shares per second */
+	double dsps1; /* Diff shares per second, 1 minute rolling average */
+	double dsps5; /* 5 minute */
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
 	tv_t last_share;
@@ -746,29 +747,39 @@ static void add_submit(stratum_instance_t *client, int diff)
 	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
-	decay_time(&client->dsps, diff, tdiff, 300);
+	decay_time(&client->dsps1, diff, tdiff, 60);
+	decay_time(&client->dsps5, diff, tdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
-	/* Check the difficulty every 300 seconds or as many shares as we
+	/* Check the difficulty every 240 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
-	if (client->ssdc < 100 && tdiff < 300)
+	if (client->ssdc < 72 && tdiff < 240)
 		return;
 
-	/* During the initial 5 minutes we work off the average shares per
-	 * second and thereafter from the rolling average */
+	/* During the initial 4 minutes we work off the average shares per
+	 * second and thereafter from the rolling averages */
 	share_duration = tvdiff(&now_t, &client->first_share);
-	if (share_duration < 300) {
-		if (unlikely(share_duration < 1))
-			return;
-		dsps = client->diff_shares / share_duration;
-	} else
-		dsps = client->dsps;
+	if (share_duration < 240)
+		dsps = (double)client->diff_shares / share_duration;
+	else if (share_duration < 1200)
+		dsps = client->dsps1;
+	else
+		dsps = client->dsps5;
 
 	/* Diff rate ratio */
 	drr = dsps / (double)client->diff;
-	/* Optimal rate product is 0.3, allow some hysteresis. */
-	if (drr > 0.2 && drr < 0.4)
+	/* Optimal rate product is 0.3, allow some hysteresis, clamping high
+	 * share rates more aggressively than low to account for hashrate
+	 * calculation being an exponential function. */
+	if (drr > 0.15 && drr < 0.33) {
+		/* FIXME For now show the hashrate every ~1m when the diff is
+		 * stable */
+		if (!(client->ssdc % 18)) {
+			LOGNOTICE("Client %d worker %s hashrate %.1fGH/s", client->id,
+				  client->workername, dsps * 4.294967296);
+		}
 		return;
+	}
 
 	optimal = round(dsps * 3.33);
 	if (optimal <= 1) {
