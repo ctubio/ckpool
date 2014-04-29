@@ -738,7 +738,7 @@ out:
 static void add_submit(stratum_instance_t *client, int diff)
 {
 	int next_blockid, optimal, share_duration;
-	double tdiff, drp, dsps, network_diff;
+	double tdiff, drr, dsps, network_diff;
 	json_t *json_msg;
 	tv_t now_t;
 
@@ -764,11 +764,10 @@ static void add_submit(stratum_instance_t *client, int diff)
 	} else
 		dsps = client->dsps;
 
-	/* Diff rate product */
-	drp = dsps / (double)client->diff;
-	/* Optimal rate product is 3.33, allow some hysteresis, clamping more
-	 * aggressively high share rates than low. */
-	if (drp > 3 && drp < 4)
+	/* Diff rate ratio */
+	drr = dsps / (double)client->diff;
+	/* Optimal rate product is 0.3, allow some hysteresis. */
+	if (drr > 0.2 && drr < 0.4)
 		return;
 
 	optimal = round(dsps * 3.33);
@@ -784,7 +783,7 @@ static void add_submit(stratum_instance_t *client, int diff)
 	ck_runlock(&workbase_lock);
 
 	if (optimal > network_diff) {
-		/* Intentionall round down here */
+		/* Intentionally round down here */
 		optimal = network_diff;
 		if (client->diff == optimal)
 			return;
@@ -795,7 +794,8 @@ static void add_submit(stratum_instance_t *client, int diff)
 	if (client->diff_change_job_id >= next_blockid)
 		return;
 
-	LOGDEBUG("Client %d dsps %.1f adjust diff to: %d ", client->id, dsps, optimal);
+	LOGINFO("Client %d dsps %.1f drr %.2f adjust diff from %d to: %d ", client->id,
+		dsps, drr, client->diff, optimal);
 
 	copy_tv(&client->ldc, &now_t);
 	client->diff_change_job_id = next_blockid;
