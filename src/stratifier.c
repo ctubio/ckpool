@@ -1150,10 +1150,14 @@ static void parse_instance_msg(int client_id, json_t *msg)
 		err_val = json_string("-1:id not found");
 		goto out;
 	}
+#if 0
+	/* Random broken clients send something not an integer so just use the
+	 * json object, whatever it is. */
 	if (unlikely(!json_is_integer(id_val))) {
 		err_val = json_string("-1:id is not integer");
 		goto out;
 	}
+#endif
 	method = json_object_get(msg, "method");
 	if (unlikely(!method)) {
 		err_val = json_string("-3:method not found");
