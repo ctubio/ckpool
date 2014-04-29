@@ -14,8 +14,6 @@
 
 #include "libckpool.h"
 
-struct proc_instance;
-typedef struct proc_instance proc_instance_t;
 struct ckpool_instance;
 typedef struct ckpool_instance ckpool_t;
 
