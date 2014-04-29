@@ -173,18 +173,17 @@ reparse:
 void *receiver(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
-	client_instance_t *client, *tmp, *tmpa;
+	client_instance_t *client;
 	struct pollfd fds[65536];
 	int ret, nfds, i;
 
 	rename_proc("receiver");
 
 retry:
-	memset(fds, 0, sizeof(fds));
 	nfds = 0;
 
 	ck_rlock(&ci->lock);
-	HASH_ITER(hh, clients, client, tmp) {
+	for (client = clients; client != NULL; client = client->hh.next) {
 		/* Invalid client */
 		if (client->fd == -1)
 			continue;
@@ -198,10 +197,11 @@ retry:
 		cksleep_ms(100);
 		goto retry;
 	}
+repoll:
 	ret = poll(fds, nfds, 1000);
 	if (ret < 0) {
 		if (interrupted())
-			goto retry;
+			goto repoll;
 		LOGERR("Failed to poll in receiver");
 		goto out;
 	}
@@ -215,11 +215,9 @@ retry:
 		client = NULL;
 
 		ck_rlock(&ci->lock);
-		HASH_ITER(hh, clients, tmp, tmpa) {
-			if (tmp->fd == fds[i].fd) {
-				client = tmp;
+		for (client = clients; client != NULL; client = client->hh.next) {
+			if (client->fd == fds[i].fd)
 				break;
-			}
 		}
 		ck_runlock(&ci->lock);
 
