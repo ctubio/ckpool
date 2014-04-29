@@ -69,6 +69,17 @@ ckpool_t *global_ckp;
 
 #define LOGMSG(_loglevel, fmt, ...) do { \
 	if (global_ckp->loglevel >= _loglevel && fmt) { \
+		struct tm *tm; \
+		time_t now_t; \
+		now_t = time(NULL); \
+		tm = localtime(&now_t); \
+		fprintf(stderr, "[%d-%02d-%02d %02d:%02d:%02d] ", \
+			tm->tm_year + 1900, \
+			tm->tm_mon + 1, \
+			tm->tm_mday, \
+			tm->tm_hour, \
+			tm->tm_min, \
+			tm->tm_sec); \
 		fprintf(stderr, fmt, ##__VA_ARGS__); \
 		fprintf(stderr, "\n"); \
 		if (_loglevel <= LOG_ERR) \
