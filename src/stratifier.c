@@ -151,7 +151,7 @@ static cklock_t instance_lock;
 
 struct share {
 	UT_hash_handle hh;
-	char hash[32];
+	uchar hash[32];
 	int workbase_id;
 };
 
@@ -858,12 +858,12 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 }
 
 static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
-			      uint32_t ntime32, const char *nonce, char *return_hash)
+			      uint32_t ntime32, const char *nonce, uchar *hash)
 {
 	unsigned char merkle_root[32], merkle_sha[64];
-	char coinbase[256], data[80], share[68];
-	uchar swap[80], hash[32], hash1[32];
 	uint32_t *data32, *swap32, nonce32;
+	char coinbase[256], data[80];
+	uchar swap[80], hash1[32];
 	int cblen = 0, i;
 	double ret;
 
@@ -910,20 +910,14 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	/* Calculate the diff of the share here */
 	ret = diff_from_target(hash);
 
-	/* Test we haven't solved a block */
+	/* Test we haven't solved a block regardless of share status */
 	test_blocksolve(wb, swap, ret, coinbase, cblen);
-
-	/* Generate hex string of hash for logging */
-	bswap_256(return_hash, hash);
-	__bin2hex(share, return_hash, 32);
-
-	LOGINFO("Client %d share diff %.1f : %s", client->id, ret, share);
 
 	/* FIXME: Log share here */
 	return ret;
 }
 
-static bool new_share(const char *hash, int  wb_id)
+static bool new_share(const uchar *hash, int  wb_id)
 {
 	share_t *share, *match = NULL;
 	bool ret = false;
@@ -949,12 +943,13 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
+	char hexhash[68], sharehash[32];
 	int diff, id, wb_id = 0;
 	double sdiff = -1;
 	uint32_t ntime32;
 	bool ret = false;
 	workbase_t *wb;
-	char hash[32];
+	uchar hash[32];
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -1026,17 +1021,26 @@ out_unlock:
 	else
 		diff = client->diff;
 	if (sdiff >= diff) {
+		bswap_256(sharehash, hash);
+		__bin2hex(hexhash, sharehash, 32);
 		if (new_share(hash, wb_id)) {
+			LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
 			add_submit_success(client, diff);
 			ret = true;
 		} else {
 			add_submit_fail(client);
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
+			LOGINFO("Rejected client %d dupe diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
 		}
 	} else {
 		add_submit_fail(client);
-		if (sdiff >= 0)
+		if (sdiff >= 0) {
+			bswap_256(sharehash, hash);
+			__bin2hex(hexhash, sharehash, 32);
+			LOGINFO("Rejected client %d high diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
+		} else
+			LOGINFO("Rejected client %d invalid share", client->id);
 	}
 out:
 	return json_boolean(ret);
