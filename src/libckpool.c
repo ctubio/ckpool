@@ -494,24 +494,11 @@ int read_socket_line(connsock_t *cs)
 {
 	char readbuf[PAGESIZE], *eom = NULL;
 	size_t buflen = 0, bufofs = 0;
-	tv_t timeout = {60, 0};
+	tv_t timeout = {5, 0};
 	int ret, bufsiz;
 	fd_set rd;
 
 	dealloc(cs->buf);
-retry:
-	FD_ZERO(&rd);
-	FD_SET(cs->fd, &rd);
-	ret = select(cs->fd + 1, &rd, NULL, NULL, &timeout);
-	if (ret < 0 && interrupted())
-		goto retry;
-	if (ret < 1) {
-		if (!ret)
-			LOGNOTICE("Select1 timed out in read_socket_line");
-		else
-			LOGERR("Select1 failed in read_socket_line");
-		goto out;
-	}
 	bufsiz = PAGESIZE;
 	readbuf[bufsiz - 1] = '\0';
 	while (!eom) {
@@ -526,9 +513,9 @@ retry:
 			continue;
 		if (ret < 1) {
 			if (!ret)
-				LOGNOTICE("Select2 timed out in read_socket_line");
+				LOGNOTICE("Select timed out in read_socket_line");
 			else
-				LOGERR("Select2 failed in read_socket_line");
+				LOGERR("Select failed in read_socket_line");
 			goto out;
 		}
 		ret = recv(cs->fd, readbuf, bufsiz - 2, MSG_PEEK);
@@ -863,7 +850,7 @@ out:
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
-	char http_req[PAGESIZE];
+	char *http_req = NULL;
 	json_error_t err_val;
 	json_t *val = NULL;
 	int len, ret;
@@ -893,7 +880,8 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("Zero length rpc_req passed to json_rpc_call");
 		goto out;
 	}
-	snprintf(http_req, PAGESIZE,
+	http_req = ckalloc(len + 256); // Leave room for headers
+	sprintf(http_req,
 		 "POST / HTTP/1.1\n"
 		 "Authorization: Basic %s\n"
 		 "Host: %s:%s\n"
@@ -937,6 +925,7 @@ out_empty:
 		cs->fd = connect_socket(cs->url, cs->port);
 	}
 out:
+	free(http_req);
 	dealloc(cs->buf);
 	return val;
 }
