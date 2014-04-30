@@ -10,6 +10,7 @@
 #include "config.h"
 
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
@@ -28,6 +29,41 @@ static uchar scriptsig_header_bin[41];
 
 static char pubkeytxnbin[25];
 static char pubkeytxn[52];
+
+/* Add unaccounted shares when they arrive, remove them with each update of
+ * rolling stats. */
+struct pool_stats {
+	tv_t start_time;
+	ts_t last_update;
+
+	int live_clients;
+	int dead_clients;
+	int reused_clients;
+
+	/* Absolute shares stats */
+	int unaccounted_shares;
+	int accounted_shares;
+	/* Shares per second for 1/5/15/60 minute rolling averages */
+	double sps1;
+	double sps5;
+	double sps15;
+	double sps60;
+
+	/* Diff shares stats */
+	int64_t unaccounted_diff_shares;
+	int64_t accounted_diff_shares;
+	/* Diff shares per second for 1/5/15/60 minute rolling averages */
+	double dsps1;
+	double dsps5;
+	double dsps15;
+	double dsps60;
+};
+
+typedef struct pool_stats pool_stats_t;
+
+static pool_stats_t stats;
+
+static pthread_mutex_t stats_lock;
 
 static uint64_t enonce1_64;
 
@@ -404,6 +440,7 @@ static stratum_instance_t *__stratum_add_instance(int id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 
+	stats.live_clients++;
 	instance->id = id;
 	instance->diff = instance->old_diff = 1;
 	tv_time(&instance->ldc);
@@ -514,6 +551,9 @@ static void stratum_add_send(json_t *val, int client_id)
 static void drop_client(int client_id)
 {
 	stratum_instance_t *client;
+
+	stats.live_clients--;
+	stats.dead_clients++;
 
 	ck_rlock(&instance_lock);
 	client = __instance_by_id(client_id);
@@ -662,6 +702,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 				hex2bin(&client->enonce1_64, buf, 8);
 				strcpy(client->enonce1, buf);
 				old_match = true;
+				stats.reused_clients++;
 			}
 		}
 	}
@@ -673,11 +714,11 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		ck_wunlock(&instance_lock);
 
 		__bin2hex(client->enonce1, &client->enonce1_64, 8);
-		LOGNOTICE("Set new subscription %d to new enonce1 %s", client->id,
-			  client->enonce1);
+		LOGINFO("Set new subscription %d to new enonce1 %s", client->id,
+			client->enonce1);
 	} else {
-		LOGNOTICE("Set new subscription %d to old matched enonce1 %s", client->id,
-			  client->enonce1);
+		LOGINFO("Set new subscription %d to old matched enonce1 %s", client->id,
+			 client->enonce1);
 	}
 
 	ck_rlock(&workbase_lock);
@@ -751,9 +792,17 @@ static void add_submit(stratum_instance_t *client, int diff)
 	decay_time(&client->dsps5, diff, tdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
+	mutex_lock(&stats_lock);
+	stats.unaccounted_shares++;
+	stats.unaccounted_diff_shares += diff;
+	mutex_unlock(&stats_lock);
+
 	/* Check the difficulty every 240 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
 	if (client->ssdc < 72 && tdiff < 240)
+		return;
+
+	if (diff != client->diff)
 		return;
 
 	/* During the initial 4 minutes we work off the average shares per
@@ -799,11 +848,11 @@ static void add_submit(stratum_instance_t *client, int diff)
 		if (client->diff == optimal)
 			return;
 	}
-	client->ssdc = 0;
-
 	/* We have the effect of a change pending */
 	if (client->diff_change_job_id >= next_blockid)
 		return;
+
+	client->ssdc = 0;
 
 	LOGINFO("Client %d dsps %.1f drr %.2f adjust diff from %d to: %d ", client->id,
 		dsps, drr, client->diff, optimal);
@@ -1079,7 +1128,7 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 	client = __instance_by_id(client_id);
 	if (unlikely(!client)) {
 		ck_runlock(&instance_lock);
-		LOGERR("Failed to find client id %d in hashtable!", client_id);
+		LOGINFO("Failed to find client id %d in hashtable!", client_id);
 		goto out;
 	}
 	ck_runlock(&instance_lock);
@@ -1284,9 +1333,67 @@ static void *stratum_sender(void *arg)
 	return NULL;
 }
 
+static void *statsupdate(void *arg)
+{
+	ckpool_t __maybe_unused *ckp = (ckpool_t *)arg;
+
+	rename_proc("statsupdate");
+
+	tv_time(&stats.start_time);
+	cksleep_prepare_r(&stats.last_update);
+
+	while (42) {
+		char suffix1[16], suffix5[16], suffix15[16], suffix60[16];
+		double ghs;
+		tv_t diff;
+		int i;
+
+		tv_time(&diff);
+		timersub(&diff, &stats.start_time, &diff);
+		/* Update stats 4 times per minute for smooth values, displaying
+		 * status every minute. */
+		for (i = 0; i < 4; i++) {
+			cksleep_ms_r(&stats.last_update, 15000);
+			cksleep_prepare_r(&stats.last_update);
+
+			mutex_lock(&stats_lock);
+			stats.accounted_shares += stats.unaccounted_shares;
+			stats.accounted_diff_shares += stats.unaccounted_diff_shares;
+
+			decay_time(&stats.sps1, stats.unaccounted_shares, 15, 60);
+			decay_time(&stats.sps5, stats.unaccounted_shares, 15, 300);
+			decay_time(&stats.sps15, stats.unaccounted_shares, 15, 900);
+			decay_time(&stats.sps60, stats.unaccounted_shares, 15, 3600);
+
+			decay_time(&stats.dsps1, stats.unaccounted_diff_shares, 15, 60);
+			decay_time(&stats.dsps5, stats.unaccounted_diff_shares, 15, 300);
+			decay_time(&stats.dsps15, stats.unaccounted_diff_shares, 15, 900);
+			decay_time(&stats.dsps60, stats.unaccounted_diff_shares, 15, 3600);
+
+			stats.unaccounted_shares = stats.unaccounted_diff_shares = 0;
+			mutex_unlock(&stats_lock);
+		}
+		ghs = stats.dsps1 * (double)4294967296;
+		suffix_string(ghs, suffix1, 16, 0);
+		ghs = stats.dsps5 * (double)4294967296;
+		suffix_string(ghs, suffix5, 16, 0);
+		ghs = stats.dsps15 * (double)4294967296;
+		suffix_string(ghs, suffix15, 16, 0);
+		ghs = stats.dsps60 * (double)4294967296;
+		suffix_string(ghs, suffix60, 16, 0);
+		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  Reused clients: %d",
+			  diff.tv_sec, stats.live_clients, stats.dead_clients, stats.reused_clients);
+		LOGNOTICE("Pool hashrate (1m):%s  (5m):%s  (15m):%s  (60m):%s",
+			  suffix1, suffix5, suffix15, suffix60);
+	}
+
+	return NULL;
+}
+
 int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_stratum_receiver, pth_stratum_sender;
+	pthread_t pth_statsupdate;
 	ckpool_t *ckp = pi->ckp;
 	int ret = 0;
 
@@ -1310,6 +1417,9 @@ int stratifier(proc_instance_t *pi)
 
 	cklock_init(&workbase_lock);
 	create_pthread(&pth_blockupdate, blockupdate, ckp);
+
+	mutex_init(&stats_lock);
+	create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	cklock_init(&share_lock);
 

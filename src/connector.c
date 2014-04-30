@@ -221,9 +221,11 @@ repoll:
 		}
 		ck_runlock(&ci->lock);
 
-		if (!client)
-			LOGWARNING("Failed to find client with fd %d in hashtable!", fds[i].fd);
-		else
+		if (!client) {
+			/* Not yet invalidated */
+			LOGDEBUG("Failed to find client with fd %d in hashtable!", fds[i].fd);
+			close(fds[i].fd);
+		} else
 			parse_client_msg(ci, client);
 
 		if (--ret < 1)
