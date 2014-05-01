@@ -292,7 +292,7 @@ void *sender(void *arg)
 	conn_instance_t *ci = (conn_instance_t *)arg;
 	ckpool_t *ckp = ci->pi->ckp;
 
-	rename_proc("creceiver");
+	rename_proc("csender");
 
 	while (42) {
 		sender_send_t *sender_send;
