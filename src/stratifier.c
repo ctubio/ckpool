@@ -10,10 +10,12 @@
 #include "config.h"
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <fcntl.h>
+#include <math.h>
 #include <string.h>
 #include <unistd.h>
-#include <math.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -231,6 +233,16 @@ static inline void json_intcpy(int *i, json_t *val, const char *key)
 static inline void json_strdup(char **buf, json_t *val, const char *key)
 {
 	*buf = strdup(json_string_value(json_object_get(val, key)));
+}
+
+static inline void json_set_string(json_t *val, const char *key, const char *str)
+{
+	json_object_set_nocheck(val, key, json_string(str));
+}
+
+static inline void json_set_int(json_t *val, const char *key, int integer)
+{
+	json_object_set_new_nocheck(val, key, json_integer(integer));
 }
 
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
@@ -885,12 +897,43 @@ static void add_submit(stratum_instance_t *client, int diff)
 }
 
 /* FIXME Add logging of these as well */
-static void add_submit_success(stratum_instance_t *client, int diff)
+static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id,
+			       const char *nonce2, uint32_t ntime, int diff,
+			       const char *hash)
 {
+	char *fname, *s;
+	json_t *val;
+	FILE *fp;
+	int len;
+
 	if (unlikely(!client->absolute_shares++))
 		tv_time(&client->first_share);
 	client->diff_shares += diff;
 	add_submit(client, diff);
+	len = strlen(client->workername) + 10;
+	fname = alloca(len);
+	sprintf(fname, "%s.sharelog", client->workername);
+	fp = fopen(fname, "a");
+	if (unlikely(!fp < 0)) {
+		LOGERR("Failed to fopen %s", fname);
+		return;
+	}
+
+	val = json_object();
+	json_set_int(val, "jobid", job_id);
+	json_set_int(val, "wbid", wb_id);
+	json_set_string(val, "nonce2", nonce2);
+	json_set_int(val, "ntime", ntime);
+	json_set_int(val, "diff", diff);
+	json_set_string(val, "hash", hash);
+	s = json_dumps(val, 0);
+	json_decref(val);
+	len = strlen(s);
+	len = fprintf(fp, "%s\n", s);
+	free(s);
+	fclose(fp);
+	if (unlikely(len < 0))
+		LOGERR("Failed to fwrite to %s", fname);
 }
 
 static void add_submit_fail(stratum_instance_t __maybe_unused *client)
@@ -1105,7 +1148,7 @@ out_unlock:
 		__bin2hex(hexhash, sharehash, 32);
 		if (new_share(hash, wb_id)) {
 			LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
-			add_submit_success(client, diff);
+			add_submit_success(client, id, wb_id, nonce2, ntime32, diff, hexhash);
 			ret = true;
 		} else {
 			add_submit_fail(client);
