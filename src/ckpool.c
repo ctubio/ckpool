@@ -166,6 +166,19 @@ static void shutdown_children(ckpool_t *ckp, int sig)
 	join_pthread(ckp->pth_watchdog);
 	kill(ckp->generator.pid, sig);
 	kill(ckp->stratifier.pid, sig);
+	kill(ckp->connector.pid, sig);
+}
+
+static void sighandler(int sig)
+{
+	if (sig != 9) {
+		shutdown_children(global_ckp, 15);
+		pthread_cancel(global_ckp->pth_listener);
+		sleep(1);
+	} else {
+		shutdown_children(global_ckp, 9);
+		exit(1);
+	}
 }
 
 static void json_get_string(char **store, json_t *val, const char *res)
@@ -305,6 +318,7 @@ static void *watchdog(void *arg)
 
 int main(int argc, char **argv)
 {
+	struct sigaction handler;
 	int len, c, ret;
 	ckpool_t ckp;
 
@@ -353,6 +367,11 @@ int main(int argc, char **argv)
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
+	handler.sa_handler = &sighandler;
+	handler.sa_flags = 0;
+	sigemptyset(&handler.sa_mask);
+	sigaction(SIGTERM, &handler, NULL);
+	sigaction(SIGINT, &handler, NULL);
 
 	ret = mkdir(ckp.socket_dir, 0700);
 	if (ret && errno != EEXIST)
