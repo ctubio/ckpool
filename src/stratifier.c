@@ -39,6 +39,7 @@ struct pool_stats {
 	int live_clients;
 	int dead_clients;
 	int reused_clients;
+	int reusable_clients;
 
 	/* Absolute shares stats */
 	int unaccounted_shares;
@@ -173,7 +174,6 @@ struct stratum_instance {
 
 	tv_t first_share;
 	bool authorised;
-	bool disconnected;
 
 	char *useragent;
 	char *workername;
@@ -182,7 +182,10 @@ struct stratum_instance {
 
 typedef struct stratum_instance stratum_instance_t;
 
+/* Stratum_instances hashlist is stored by id, whereas disconnected_instances
+ * is sorted by enonce1_64. */
 static stratum_instance_t *stratum_instances;
+static stratum_instance_t *disconnected_instances;
 
 static cklock_t instance_lock;
 
@@ -449,11 +452,11 @@ static stratum_instance_t *__stratum_add_instance(int id)
 	return instance;
 }
 
-static bool sessionid_exists(const char *sessionid, int id)
+static bool disconnected_sessionid_exists(const char *sessionid, int id)
 {
+	bool connected_exists = false, ret = false;
 	stratum_instance_t *instance, *tmp;
 	uint64_t session64;
-	bool ret = false;
 
 	if (!sessionid)
 		goto out;
@@ -468,13 +471,18 @@ static bool sessionid_exists(const char *sessionid, int id)
 			continue;
 		if (instance->enonce1_64 == session64) {
 			/* Only allow one connected instance per enonce1 */
-			if (instance->disconnected)
-				ret = true;
+			connected_exists = true;
 			break;
 		}
 	}
+	if (connected_exists)
+		goto out_unlock;
+	instance = NULL;
+	HASH_FIND(hh, disconnected_instances, &session64, sizeof(uint64_t), instance);
+	if (instance)
+		ret = true;
+out_unlock:
 	ck_runlock(&instance_lock);
-
 out:
 	return ret;
 }
@@ -511,8 +519,6 @@ static void stratum_broadcast(json_t *val)
 
 		if (!instance->authorised)
 			continue;
-		if (instance->disconnected)
-			continue;
 		msg = ckzalloc(sizeof(stratum_msg_t));
 		msg->json_msg = json_deep_copy(val);
 		msg->client_id = instance->id;
@@ -548,21 +554,30 @@ static void stratum_add_send(json_t *val, int client_id)
 	mutex_unlock(&stratum_send_lock);
 }
 
-static void drop_client(int client_id)
+static void drop_client(int id)
 {
-	stratum_instance_t *client;
+	stratum_instance_t *client = NULL;
 
-	stats.live_clients--;
-	stats.dead_clients++;
+	ck_ilock(&instance_lock);
+	client = __instance_by_id(id);
+	if (client) {
+		stratum_instance_t *old_client = NULL;
 
-	ck_rlock(&instance_lock);
-	client = __instance_by_id(client_id);
-	ck_runlock(&instance_lock);
+		stats.live_clients--;
+		stats.dead_clients++;
 
-	/* May never have been a stratum instance */
-	if (unlikely(!client))
-		return;
-	client->disconnected = true;
+		ck_ulock(&instance_lock);
+		HASH_DEL(stratum_instances, client);
+		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
+		/* Only keep around one copy of the old client */
+		if (!old_client) {
+			stats.reusable_clients++;
+			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
+		} else
+			free(client);
+		ck_dwilock(&instance_lock);
+	}
+	ck_uilock(&instance_lock);
 }
 
 static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -698,7 +713,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 			buf = json_string_value(json_array_get(params_val, 1));
 			LOGDEBUG("Found old session id %s", buf);
 			/* Add matching here */
-			if (sessionid_exists(buf, client_id)) {
+			if (disconnected_sessionid_exists(buf, client_id)) {
 				hex2bin(&client->enonce1_64, buf, 8);
 				strcpy(client->enonce1, buf);
 				old_match = true;
@@ -1381,8 +1396,10 @@ static void *statsupdate(void *arg)
 		suffix_string(ghs, suffix15, 16, 0);
 		ghs = stats.dsps60 * (double)4294967296;
 		suffix_string(ghs, suffix60, 16, 0);
-		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  Reused clients: %d",
-			  diff.tv_sec, stats.live_clients, stats.dead_clients, stats.reused_clients);
+		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  "
+			  "Reusable clients: %d  Reused clients: %d",
+			  diff.tv_sec, stats.live_clients, stats.dead_clients,
+			  stats.reusable_clients, stats.reused_clients);
 		LOGNOTICE("Pool hashrate (1m):%s  (5m):%s  (15m):%s  (60m):%s",
 			  suffix1, suffix5, suffix15, suffix60);
 	}
