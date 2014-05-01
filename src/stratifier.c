@@ -497,7 +497,7 @@ static void stratum_add_recvd(json_t *val)
 	msg->json_msg = val;
 
 	mutex_lock(&stratum_recv_lock);
-	LL_APPEND(stratum_recvs, msg);
+	DL_APPEND(stratum_recvs, msg);
 	pthread_cond_signal(&stratum_recv_cond);
 	mutex_unlock(&stratum_recv_lock);
 }
@@ -524,7 +524,7 @@ static void stratum_broadcast(json_t *val)
 		msg = ckzalloc(sizeof(stratum_msg_t));
 		msg->json_msg = json_deep_copy(val);
 		msg->client_id = instance->id;
-		LL_APPEND(bulk_send, msg);
+		DL_APPEND(bulk_send, msg);
 	}
 	ck_runlock(&instance_lock);
 
@@ -535,7 +535,7 @@ static void stratum_broadcast(json_t *val)
 
 	mutex_lock(&stratum_send_lock);
 	if (stratum_sends)
-		LL_CONCAT(stratum_sends, bulk_send);
+		DL_CONCAT(stratum_sends, bulk_send);
 	else
 		stratum_sends = bulk_send;
 	pthread_cond_signal(&stratum_send_cond);
@@ -551,7 +551,7 @@ static void stratum_add_send(json_t *val, int client_id)
 	msg->client_id = client_id;
 
 	mutex_lock(&stratum_send_lock);
-	LL_APPEND(stratum_sends, msg);
+	DL_APPEND(stratum_sends, msg);
 	pthread_cond_signal(&stratum_send_cond);
 	mutex_unlock(&stratum_send_lock);
 }
@@ -1280,7 +1280,7 @@ static void *stratum_receiver(void *arg)
 			pthread_cond_wait(&stratum_recv_cond, &stratum_recv_lock);
 		msg = stratum_recvs;
 		if (likely(msg))
-			LL_DELETE(stratum_recvs, msg);
+			DL_DELETE(stratum_recvs, msg);
 		mutex_unlock(&stratum_recv_lock);
 
 		if (unlikely(!msg))
@@ -1324,7 +1324,7 @@ static void *stratum_sender(void *arg)
 			pthread_cond_wait(&stratum_send_cond, &stratum_send_lock);
 		msg = stratum_sends;
 		if (likely(msg))
-			LL_DELETE(stratum_sends, msg);
+			DL_DELETE(stratum_sends, msg);
 		mutex_unlock(&stratum_send_lock);
 
 		if (unlikely(!msg))
