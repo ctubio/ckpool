@@ -162,9 +162,12 @@ retry:
 	ret = recv(client->fd, client->buf + client->bufofs, buflen, flags);
 	if (ret < 1) {
 		/* Nothing else ready to be read */
-		if (!ret)
+		if (!ret && flags)
 			return;
 
+		/* We should have something to read if called since poll set
+		 * this fd's revents status so if there's nothing it means the
+		 * client has disconnected. */
 		LOGINFO("Client fd %d disconnected", client->fd);
 		invalidate_client(ckp, ci, client);
 		return;
@@ -260,7 +263,7 @@ repoll:
 	for (i = 0; i < nfds; i++) {
 		int fd;
 
-		if (!(fds[i].revents & POLLIN))
+		if (!fds[i].revents)
 			continue;
 
 		client = NULL;
