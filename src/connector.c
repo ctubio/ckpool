@@ -238,6 +238,7 @@ retry:
 	HASH_ITER(fdhh, fdclients, client, tmp) {
 		fds[nfds].fd = client->fd;
 		fds[nfds].events = POLLIN;
+		fds[nfds].revents = 0;
 		nfds++;
 	}
 	ck_runlock(&ci->lock);
