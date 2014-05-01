@@ -34,11 +34,16 @@ struct connector_instance {
 typedef struct connector_instance conn_instance_t;
 
 struct client_instance {
+	/* For clients hashtable */
 	UT_hash_handle hh;
 	int id;
 
+	/* For fdclients hashtable */
 	UT_hash_handle fdhh;
 	int fd;
+
+	/* For dead_clients list */
+	struct client_instance *next;
 
 	struct sockaddr address;
 	socklen_t address_len;
@@ -52,6 +57,8 @@ typedef struct client_instance client_instance_t;
 static client_instance_t *clients;
 /* A hashtable of the clients sorted by fd */
 static client_instance_t *fdclients;
+/* Linked list of dead clients no longer in use but may still have references */
+static client_instance_t *dead_clients;
 
 static int client_id;
 
@@ -113,7 +120,9 @@ out:
 	return NULL;
 }
 
-/* Invalidate this instance */
+/* Invalidate this instance. Remove them from the hashtables we look up
+ * regularly but keep the instances in a linked list indefinitely in case we
+ * still reference any of its members. */
 static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instance_t *client)
 {
 	char buf[256];
@@ -123,7 +132,9 @@ static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instanc
 	fd = client->fd;
 	if (fd != -1) {
 		close(fd);
+		HASH_DEL(clients, client);
 		HASH_DELETE(fdhh, fdclients, client);
+		LL_PREPEND(dead_clients, client);
 		client->fd = -1;
 	}
 	ck_wunlock(&ci->lock);
@@ -139,14 +150,16 @@ static void send_client(conn_instance_t *ci, int id, char *buf);
 static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
 	ckpool_t *ckp = ci->pi->ckp;
+	int buflen, ret, flags = 0;
 	char msg[PAGESIZE], *eol;
-	int buflen, ret;
-	bool moredata;
+	bool moredata = false;
 	json_t *val;
 
 retry:
 	buflen = PAGESIZE - client->bufofs;
-	ret = recv(client->fd, client->buf + client->bufofs, buflen, MSG_DONTWAIT);
+	if (moredata)
+		flags = MSG_DONTWAIT;
+	ret = recv(client->fd, client->buf + client->bufofs, buflen, flags);
 	if (ret < 1) {
 		/* Nothing else ready to be read */
 		if (!ret)
