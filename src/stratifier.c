@@ -1268,7 +1268,7 @@ static void *stratum_receiver(void *arg)
 	ckpool_t __maybe_unused *ckp = (ckpool_t *)arg;
 	stratum_msg_t *msg;
 
-	rename_proc("receiver");
+	rename_proc("sreceiver");
 
 	while (42) {
 		stratum_instance_t *instance;
@@ -1313,7 +1313,7 @@ static void *stratum_sender(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
 
-	rename_proc("sender");
+	rename_proc("ssender");
 
 	while (42) {
 		stratum_msg_t *msg;

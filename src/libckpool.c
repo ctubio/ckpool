@@ -1277,14 +1277,14 @@ void tv_time(tv_t *tv)
 	gettimeofday(tv, NULL);
 }
 
-void ts_time(ts_t *ts)
+void ts_realtime(ts_t *ts)
 {
-	clock_gettime(CLOCK_MONOTONIC, ts);
+	clock_gettime(CLOCK_REALTIME, ts);
 }
 
 void cksleep_prepare_r(ts_t *ts)
 {
-	ts_time(ts);
+	clock_gettime(CLOCK_MONOTONIC, ts);
 }
 
 void nanosleep_abstime(ts_t *ts_end)

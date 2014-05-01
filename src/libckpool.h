@@ -297,7 +297,7 @@ void us_to_ts(ts_t *spec, int64_t us);
 void ms_to_ts(ts_t *spec, int64_t ms);
 void ms_to_tv(tv_t *val, int64_t ms);
 void tv_time(tv_t *tv);
-void ts_time(ts_t *ts);
+void ts_realtime(ts_t *ts);
 
 void cksleep_prepare_r(ts_t *ts);
 void nanosleep_abstime(ts_t *ts_end);
