@@ -53,11 +53,13 @@ struct pool_stats {
 	/* Diff shares stats */
 	int64_t unaccounted_diff_shares;
 	int64_t accounted_diff_shares;
-	/* Diff shares per second for 1/5/15/60 minute rolling averages */
+	/* Diff shares per second for 1/5/15... minute rolling averages */
 	double dsps1;
 	double dsps5;
 	double dsps15;
 	double dsps60;
+	double dsps360;
+	double dsps1440;
 };
 
 typedef struct pool_stats pool_stats_t;
@@ -1359,6 +1361,7 @@ static void *statsupdate(void *arg)
 
 	while (42) {
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16];
+		char suffix360[16], suffix1440[16];
 		double ghs;
 		tv_t diff;
 		int i;
@@ -1384,6 +1387,8 @@ static void *statsupdate(void *arg)
 			decay_time(&stats.dsps5, stats.unaccounted_diff_shares, 15, 300);
 			decay_time(&stats.dsps15, stats.unaccounted_diff_shares, 15, 900);
 			decay_time(&stats.dsps60, stats.unaccounted_diff_shares, 15, 3600);
+			decay_time(&stats.dsps360, stats.unaccounted_diff_shares, 15, 21600);
+			decay_time(&stats.dsps1440, stats.unaccounted_diff_shares, 15, 86400);
 
 			stats.unaccounted_shares = stats.unaccounted_diff_shares = 0;
 			mutex_unlock(&stats_lock);
@@ -1396,12 +1401,17 @@ static void *statsupdate(void *arg)
 		suffix_string(ghs, suffix15, 16, 0);
 		ghs = stats.dsps60 * (double)4294967296;
 		suffix_string(ghs, suffix60, 16, 0);
+		ghs = stats.dsps360 * (double)4294967296;
+		suffix_string(ghs, suffix360, 16, 0);
+		ghs = stats.dsps1440 * (double)4294967296;
+		suffix_string(ghs, suffix1440, 16, 0);
 		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  "
 			  "Reusable clients: %d  Reused clients: %d",
 			  diff.tv_sec, stats.live_clients, stats.dead_clients,
 			  stats.reusable_clients, stats.reused_clients);
-		LOGNOTICE("Pool hashrate (1m):%s  (5m):%s  (15m):%s  (60m):%s",
-			  suffix1, suffix5, suffix15, suffix60);
+		LOGNOTICE("Pool hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  "
+			  "(6h):%s  (1d):%s",
+			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 	}
 
 	return NULL;
