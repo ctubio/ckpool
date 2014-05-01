@@ -134,6 +134,15 @@ static void rm_namepid(proc_instance_t *pi)
 	unlink(s);
 }
 
+/* Disable signal handlers for child processes, but simply pass them onto the
+ * parent process to shut down cleanly. */
+static void childsighandler(int sig)
+{
+	pid_t ppid = getppid();
+
+	kill(ppid, sig);
+}
+
 static void launch_process(proc_instance_t *pi)
 {
 	pid_t pid;
@@ -142,7 +151,14 @@ static void launch_process(proc_instance_t *pi)
 	if (pid < 0)
 		quit(1, "Failed to fork %s in launch_process", pi->processname);
 	if (!pid) {
+		struct sigaction handler;
 		int ret;
+
+		handler.sa_handler = &childsighandler;
+		handler.sa_flags = 0;
+		sigemptyset(&handler.sa_mask);
+		sigaction(SIGTERM, &handler, NULL);
+		sigaction(SIGINT, &handler, NULL);
 
 		rename_proc(pi->processname);
 		write_namepid(pi);
@@ -160,23 +176,47 @@ static void clean_up(ckpool_t *ckp)
 	dealloc(ckp->socket_dir);
 }
 
+static void __shutdown_children(ckpool_t *ckp, int sig)
+{
+	pthread_cancel(ckp->pth_watchdog);
+	join_pthread(ckp->pth_watchdog);
+
+	if (!kill(ckp->generator.pid, 0))
+		kill(ckp->generator.pid, sig);
+	if (!kill(ckp->stratifier.pid, 0))
+		kill(ckp->stratifier.pid, sig);
+	if (!kill(ckp->connector.pid, 0))
+		kill(ckp->connector.pid, sig);
+}
+
 static void shutdown_children(ckpool_t *ckp, int sig)
 {
 	pthread_cancel(ckp->pth_watchdog);
 	join_pthread(ckp->pth_watchdog);
-	kill(ckp->generator.pid, sig);
-	kill(ckp->stratifier.pid, sig);
-	kill(ckp->connector.pid, sig);
+
+	__shutdown_children(ckp, sig);
 }
 
 static void sighandler(int sig)
 {
+	pthread_cancel(global_ckp->pth_watchdog);
+	join_pthread(global_ckp->pth_watchdog);
+
+	/* First attempt, send a shutdown message */
+	send_proc(&global_ckp->generator, "shutdown");
+	send_proc(&global_ckp->stratifier, "shutdown");
+	send_proc(&global_ckp->connector, "shutdown");
+
 	if (sig != 9) {
-		shutdown_children(global_ckp, 15);
-		pthread_cancel(global_ckp->pth_listener);
+		/* Wait a second, then send SIGTERM */
 		sleep(1);
+		__shutdown_children(global_ckp, SIGTERM);
+		/* Wait another second, then send SIGKILL */
+		sleep(1);
+		__shutdown_children(global_ckp, SIGKILL);
+		pthread_cancel(global_ckp->pth_listener);
 	} else {
-		shutdown_children(global_ckp, 9);
+		__shutdown_children(global_ckp, SIGKILL);
 		exit(1);
 	}
 }
@@ -367,11 +407,6 @@ int main(int argc, char **argv)
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
-	handler.sa_handler = &sighandler;
-	handler.sa_flags = 0;
-	sigemptyset(&handler.sa_mask);
-	sigaction(SIGTERM, &handler, NULL);
-	sigaction(SIGINT, &handler, NULL);
 
 	ret = mkdir(ckp.socket_dir, 0700);
 	if (ret && errno != EEXIST)
@@ -407,6 +442,12 @@ int main(int argc, char **argv)
 	launch_process(&ckp.generator);
 	launch_process(&ckp.stratifier);
 	launch_process(&ckp.connector);
+
+	handler.sa_handler = &sighandler;
+	handler.sa_flags = 0;
+	sigemptyset(&handler.sa_mask);
+	sigaction(SIGTERM, &handler, NULL);
+	sigaction(SIGINT, &handler, NULL);
 
 	test_functions(&ckp);
 

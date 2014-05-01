@@ -582,7 +582,7 @@ static void drop_client(int id)
 	ck_uilock(&instance_lock);
 }
 
-static int strat_loop(ckpool_t *ckp, proc_instance_t *pi)
+static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret;
 	unixsock_t *us = &pi->us;
@@ -626,9 +626,10 @@ retry:
 		goto retry;
 	}
 	LOGDEBUG("Stratifier received request: %s", buf);
-	if (!strncasecmp(buf, "shutdown", 8))
+	if (!strncasecmp(buf, "shutdown", 8)) {
+		ret = 0;
 		goto out;
-	else if (!strncasecmp(buf, "update", 6)) {
+	} else if (!strncasecmp(buf, "update", 6)) {
 		update_base(ckp);
 		goto reset;
 	} else if (!strncasecmp(buf, "dropclient", 10)) {
@@ -1422,7 +1423,7 @@ int stratifier(proc_instance_t *pi)
 	pthread_t pth_blockupdate, pth_stratum_receiver, pth_stratum_sender;
 	pthread_t pth_statsupdate;
 	ckpool_t *ckp = pi->ckp;
-	int ret = 0;
+	int ret;
 
 	/* Store this for use elsewhere */
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
@@ -1450,7 +1451,12 @@ int stratifier(proc_instance_t *pi)
 
 	cklock_init(&share_lock);
 
-	strat_loop(ckp, pi);
+	ret = stratum_loop(ckp, pi);
+	LOGINFO("%s stratifier exiting with return code %d", ckp->name, ret);
+	if (ret) {
+		send_proc(&ckp->main, "shutdown");
+		sleep(1);
+	}
 
-	return ret;
+	exit(ret);
 }

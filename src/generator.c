@@ -46,8 +46,10 @@ retry:
 		goto retry;
 	}
 	LOGDEBUG("Generator received request: %s", buf);
-	if (!strncasecmp(buf, "shutdown", 8))
+	if (!strncasecmp(buf, "shutdown", 8)) {
+		ret = 0;
 		goto out;
+	}
 	if (!strncasecmp(buf, "getbase", 7)) {
 		if (!gen_gbtbase(cs, &gbt)) {
 			LOGWARNING("Failed to get block template from %s:%s",
@@ -154,5 +156,5 @@ out:
 		send_proc(&ckp->main, "shutdown");
 		sleep(1);
 	}
-	return ret;
+	exit(ret);
 }

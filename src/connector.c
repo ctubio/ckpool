@@ -512,5 +512,5 @@ out:
 		send_proc(&ckp->main, "shutdown");
 		sleep(1);
 	}
-	return ret;
+	exit(ret);
 }

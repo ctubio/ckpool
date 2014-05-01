@@ -56,10 +56,7 @@ void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg
 
 void join_pthread(pthread_t thread)
 {
-	int ret = pthread_join(thread, NULL);
-
-	if (unlikely(ret))
-		quit(1, "Failed to pthread_join");
+	pthread_join(thread, NULL);
 }
 
 
