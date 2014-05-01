@@ -76,17 +76,11 @@ void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, cons
 	GOTLOCK(lock, file, func, line);
 }
 
-void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_unlock(lock)))
 		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK!");
 	GUNLOCK(lock, file, func, line);
-}
-
-void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
-{
-	_mutex_unlock_noyield(lock, file, func, line);
-	sched_yield();
 }
 
 int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
@@ -128,26 +122,14 @@ void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, cons
 	GUNLOCK(lock, file, func, line);
 }
 
-void _rd_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
-{
-	_rw_unlock(lock, file, func, line);
-}
-
-void _wr_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
-{
-	_rw_unlock(lock, file, func, line);
-}
-
 void _rd_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	_rw_unlock(lock, file, func, line);
-	sched_yield();
 }
 
 void _wr_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	_rw_unlock(lock, file, func, line);
-	sched_yield();
 }
 
 void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, const int line)
@@ -199,7 +181,7 @@ void _ck_rlock(cklock_t *lock, const char *file, const char *func, const int lin
 {
 	_mutex_lock(&lock->mutex, file, func, line);
 	_rd_lock(&lock->rwlock, file, func, line);
-	_mutex_unlock_noyield(&lock->mutex, file, func, line);
+	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
 /* Intermediate variant of cklock - behaves as a read lock but can be promoted
@@ -231,9 +213,9 @@ void _ck_wlock(cklock_t *lock, const char *file, const char *func, const int lin
 /* Downgrade write variant to a read lock */
 void _ck_dwlock(cklock_t *lock, const char *file, const char *func, const int line)
 {
-	_wr_unlock_noyield(&lock->rwlock, file, func, line);
+	_wr_unlock(&lock->rwlock, file, func, line);
 	_rd_lock(&lock->rwlock, file, func, line);
-	_mutex_unlock_noyield(&lock->mutex, file, func, line);
+	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
 /* Demote a write variant to an intermediate variant */
@@ -246,7 +228,7 @@ void _ck_dwilock(cklock_t *lock, const char *file, const char *func, const int l
 void _ck_dlock(cklock_t *lock, const char *file, const char *func, const int line)
 {
 	_rd_lock(&lock->rwlock, file, func, line);
-	_mutex_unlock_noyield(&lock->mutex, file, func, line);
+	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
 void _ck_runlock(cklock_t *lock, const char *file, const char *func, const int line)
@@ -256,7 +238,7 @@ void _ck_runlock(cklock_t *lock, const char *file, const char *func, const int l
 
 void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int line)
 {
-	_wr_unlock_noyield(&lock->rwlock, file, func, line);
+	_wr_unlock(&lock->rwlock, file, func, line);
 	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
