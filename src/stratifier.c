@@ -55,6 +55,7 @@ struct pool_stats {
 	/* Diff shares stats */
 	int64_t unaccounted_diff_shares;
 	int64_t accounted_diff_shares;
+
 	/* Diff shares per second for 1/5/15... minute rolling averages */
 	double dsps1;
 	double dsps5;
@@ -168,15 +169,14 @@ struct stratum_instance {
 	int diff; /* Current diff */
 	int old_diff; /* Previous diff */
 	int diff_change_job_id; /* Last job_id we changed diff */
-	double dsps1; /* Diff shares per second, 1 minute rolling average */
-	double dsps5; /* 5 minute */
+	double dsps5; /* Diff shares per second, 5 minute rolling average */
+	double bias; /* Bias for earlier shares */
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
 	tv_t last_share;
 	int absolute_shares;
 	int diff_shares;
 
-	tv_t first_share;
 	bool authorised;
 
 	char *useragent;
@@ -819,16 +819,16 @@ static void stratum_send_diff(stratum_instance_t *client)
 
 static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
-	int next_blockid, optimal, share_duration;
-	double tdiff, drr, dsps, network_diff;
+	double tdiff, dsps, drr, network_diff;
+	int next_blockid, optimal;
 	tv_t now_t;
 
 	tv_time(&now_t);
 	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
-	decay_time(&client->dsps1, diff, tdiff, 60);
 	decay_time(&client->dsps5, diff, tdiff, 300);
+	decay_time(&client->bias, 0, tdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
 	if (valid) {
@@ -846,27 +846,16 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	if (diff != client->diff)
 		return;
 
-	/* During the initial 4 minutes we work off the average shares per
-	 * second and thereafter from the rolling averages */
-	share_duration = tvdiff(&now_t, &client->first_share);
-	if (share_duration < 240)
-		dsps = (double)client->diff_shares / share_duration;
-	else if (share_duration < 1200)
-		dsps = client->dsps1;
-	else
-		dsps = client->dsps5;
-
 	/* Diff rate ratio */
+	dsps = client->dsps5 * exp(client->bias);
 	drr = dsps / (double)client->diff;
-	/* Optimal rate product is 0.3, allow some hysteresis, clamping high
-	 * share rates more aggressively than low to account for hashrate
-	 * calculation being an exponential function. */
-	if (drr > 0.15 && drr < 0.33) {
+	/* Optimal rate product is 0.3, allow some hysteresis. */
+	if (drr > 0.2 && drr < 0.4) {
 		/* FIXME For now show the hashrate every ~1m when the diff is
 		 * stable */
 		if (!(client->ssdc % 18)) {
 			LOGNOTICE("Client %d worker %s hashrate %.1fGH/s", client->id,
-				  client->workername, dsps * 4.294967296);
+				  client->workername, client->dsps5 * 4.294967296);
 		}
 		return;
 	}
@@ -896,7 +885,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	client->ssdc = 0;
 
 	LOGINFO("Client %d dsps %.1f drr %.2f adjust diff from %d to: %d ", client->id,
-		dsps, drr, client->diff, optimal);
+		client->dsps5, drr, client->diff, optimal);
 
 	copy_tv(&client->ldc, &now_t);
 	client->diff_change_job_id = next_blockid;
@@ -915,8 +904,8 @@ static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id
 	FILE *fp;
 	int len;
 
-	if (unlikely(!client->absolute_shares++))
-		tv_time(&client->first_share);
+	if (!client->absolute_shares++)
+		client->bias = 3;
 	client->diff_shares += diff;
 	add_submit(client, diff, true);
 	len = strlen(client->workername) + 10;
