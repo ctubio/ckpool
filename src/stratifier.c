@@ -357,7 +357,8 @@ static void purge_share_hashtable(int wb_id)
 	}
 	ck_wunlock(&share_lock);
 
-	LOGINFO("Cleared %d shares from share hashtable", purged);
+	if (purged)
+		LOGINFO("Cleared %d shares from share hashtable", purged);
 }
 
 /* This function assumes it will only receive a valid json gbt base template
@@ -807,7 +808,7 @@ out:
 	return json_boolean(ret);
 }
 
-static void add_submit(stratum_instance_t *client, int diff)
+static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
 	int next_blockid, optimal, share_duration;
 	double tdiff, drr, dsps, network_diff;
@@ -822,10 +823,12 @@ static void add_submit(stratum_instance_t *client, int diff)
 	decay_time(&client->dsps5, diff, tdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
-	mutex_lock(&stats_lock);
-	stats.unaccounted_shares++;
-	stats.unaccounted_diff_shares += diff;
-	mutex_unlock(&stats_lock);
+	if (valid) {
+		mutex_lock(&stats_lock);
+		stats.unaccounted_shares++;
+		stats.unaccounted_diff_shares += diff;
+		mutex_unlock(&stats_lock);
+	}
 
 	/* Check the difficulty every 240 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
@@ -909,7 +912,7 @@ static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id
 	if (unlikely(!client->absolute_shares++))
 		tv_time(&client->first_share);
 	client->diff_shares += diff;
-	add_submit(client, diff);
+	add_submit(client, diff, true);
 	len = strlen(client->workername) + 10;
 	fname = alloca(len);
 	sprintf(fname, "%s.sharelog", client->workername);
@@ -936,9 +939,11 @@ static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id
 		LOGERR("Failed to fwrite to %s", fname);
 }
 
-static void add_submit_fail(stratum_instance_t __maybe_unused *client)
+static void add_submit_fail(stratum_instance_t *client, int diff, bool share)
 {
-	/* FIXME Do something here? */
+	/* FIXME Do something else here? */
+	if (share)
+		add_submit(client, diff, false);
 }
 
 /* We should already be holding the workbase_lock */
@@ -1067,10 +1072,10 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	char hexhash[68], sharehash[32];
+	bool share = false, ret = false;
 	int diff, id, wb_id = 0;
 	double sdiff = -1;
 	uint32_t ntime32;
-	bool ret = false;
 	workbase_t *wb;
 	uchar hash[32];
 
@@ -1114,6 +1119,10 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	sscanf(job_id, "%x", &id);
 	sscanf(ntime, "%x", &ntime32);
 
+	/* Decide whether this submit request should count towards share diff
+	 * management or not. */
+	share = true;
+
 	ck_rlock(&workbase_lock);
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
@@ -1151,12 +1160,12 @@ out_unlock:
 			add_submit_success(client, id, wb_id, nonce2, ntime32, diff, hexhash);
 			ret = true;
 		} else {
-			add_submit_fail(client);
+			add_submit_fail(client, diff, share);
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
 			LOGINFO("Rejected client %d dupe diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
 		}
 	} else {
-		add_submit_fail(client);
+		add_submit_fail(client, diff, share);
 		if (sdiff >= 0) {
 			bswap_256(sharehash, hash);
 			__bin2hex(hexhash, sharehash, 32);
