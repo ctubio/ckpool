@@ -460,7 +460,7 @@ static stratum_instance_t *__stratum_add_instance(int id)
 
 	stats.live_clients++;
 	instance->id = id;
-	instance->diff = instance->old_diff = 1;
+	instance->diff = instance->old_diff = global_ckp->startdiff;
 	tv_time(&instance->ldc);
 	LOGINFO("Added instance %d", id);
 	HASH_ADD_INT(stratum_instances, id, instance);
@@ -808,11 +808,19 @@ out:
 	return json_boolean(ret);
 }
 
+static void stratum_send_diff(stratum_instance_t *client)
+{
+	json_t *json_msg;
+
+	json_msg = json_pack("{s[i]soss}", "params", client->diff, "id", json_null(),
+			     "method", "mining.set_difficulty");
+	stratum_add_send(json_msg, client->id);
+}
+
 static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
 	int next_blockid, optimal, share_duration;
 	double tdiff, drr, dsps, network_diff;
-	json_t *json_msg;
 	tv_t now_t;
 
 	tv_time(&now_t);
@@ -864,10 +872,10 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	}
 
 	optimal = round(dsps * 3.33);
-	if (optimal <= 1) {
-		if (client->diff == 1)
+	if (optimal <= global_ckp->mindiff) {
+		if (client->diff == global_ckp->mindiff)
 			return;
-		optimal = 1;
+		optimal = global_ckp->mindiff;
 	}
 
 	ck_rlock(&workbase_lock);
@@ -894,9 +902,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	client->diff_change_job_id = next_blockid;
 	client->old_diff = client->diff;
 	client->diff = optimal;
-	json_msg = json_pack("{s[i]soss}", "params", client->diff, "id", json_null(),
-			     "method", "mining.set_difficulty");
-	stratum_add_send(json_msg, client->id);
+	stratum_send_diff(client);
 }
 
 /* FIXME Add logging of these as well */
@@ -1312,8 +1318,18 @@ out:
 	json_object_set_nocheck(json_msg, "result", result_val);
 
 	stratum_add_send(json_msg, client_id);
-	if (update)
+	if (update) {
+		stratum_instance_t *client;
+
 		stratum_send_update(client_id, true);
+
+		ck_rlock(&instance_lock);
+		client = __instance_by_id(client_id);
+		ck_runlock(&instance_lock);
+
+		if (likely(client))
+			stratum_send_diff(client);
+	}
 }
 
 static void *stratum_receiver(void *arg)

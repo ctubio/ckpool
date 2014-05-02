@@ -54,6 +54,10 @@ struct ckpool_instance {
 	char *btcdpass;
 	int blockpoll; // How frequently in ms to poll bitcoind for block updates
 
+	/* Difficulty settings */
+	int mindiff; // Default 1
+	int startdiff; // Default 42
+
 	/* Coinbase data */
 	char *btcaddress; // Address to mine to
 	char *btcsig; // Optional signature to add to coinbase

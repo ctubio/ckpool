@@ -274,6 +274,8 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
 	json_get_string(&ckp->serverurl, json_conf, "serverurl");
+	json_get_int(&ckp->mindiff, json_conf, "mindiff");
+	json_get_int(&ckp->startdiff, json_conf, "startdiff");
 	json_decref(json_conf);
 }
 
@@ -426,6 +428,10 @@ int main(int argc, char **argv)
 		ckp.blockpoll = 500;
 	if (!ckp.update_interval)
 		ckp.update_interval = 30;
+	if (!ckp.mindiff)
+		ckp.mindiff = 1;
+	if (!ckp.startdiff)
+		ckp.startdiff = 42;
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
