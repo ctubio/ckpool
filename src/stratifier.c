@@ -76,8 +76,8 @@ static uint64_t enonce1_64;
 struct workbase {
 	/* Hash table data */
 	UT_hash_handle hh;
-	int id;
-	char idstring[12];
+	uint64_t id;
+	char idstring[20];
 
 	time_t gentime;
 
@@ -132,8 +132,8 @@ static cklock_t workbase_lock;
 /* For the hashtable of all workbases */
 static workbase_t *workbases;
 static workbase_t *current_workbase;
-static int workbase_id;
-static int blockchange_id;
+static uint64_t workbase_id;
+static uint64_t blockchange_id;
 static char lasthash[68];
 
 struct stratum_msg {
@@ -168,7 +168,7 @@ struct stratum_instance {
 
 	int diff; /* Current diff */
 	int old_diff; /* Previous diff */
-	int diff_change_job_id; /* Last job_id we changed diff */
+	uint64_t diff_change_job_id; /* Last job_id we changed diff */
 	double dsps5; /* Diff shares per second, 5 minute rolling average */
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
@@ -196,7 +196,7 @@ static cklock_t instance_lock;
 struct share {
 	UT_hash_handle hh;
 	uchar hash[32];
-	int workbase_id;
+	int64_t workbase_id;
 };
 
 typedef struct share share_t;
@@ -424,7 +424,7 @@ static void update_base(ckpool_t *ckp)
 		memcpy(lasthash, wb->prevhash, 65);
 		blockchange_id = wb->id;
 	}
-	sprintf(wb->idstring, "%08x", wb->id);
+	sprintf(wb->idstring, "%016lx", wb->id);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		if (HASH_COUNT(workbases) < 3)
 			break;
@@ -834,7 +834,8 @@ static double time_bias(double tdiff, double period)
 static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
-	int next_blockid, optimal;
+	uint64_t next_blockid;
+	int optimal;
 	tv_t now_t;
 
 	tv_time(&now_t);
@@ -911,7 +912,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 }
 
 /* FIXME Add logging of these as well */
-static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id,
+static void add_submit_success(stratum_instance_t *client, char *idstring,
 			       const char *nonce2, uint32_t ntime, int diff,
 			       const char *hash)
 {
@@ -934,8 +935,7 @@ static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id
 	}
 
 	val = json_object();
-	json_set_int(val, "jobid", job_id);
-	json_set_int(val, "wbid", wb_id);
+	json_set_string(val, "wbid", idstring);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_int(val, "ntime", ntime);
 	json_set_int(val, "diff", diff);
@@ -1056,7 +1056,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	return ret;
 }
 
-static bool new_share(const uchar *hash, int  wb_id)
+static bool new_share(const uchar *hash, uint64_t  wb_id)
 {
 	share_t *share, *match = NULL;
 	bool ret = false;
@@ -1084,11 +1084,13 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	char hexhash[68], sharehash[32];
 	bool share = false, ret = false;
-	int diff, id, wb_id = 0;
+	uint64_t wb_id = 0, id;
 	double sdiff = -1;
+	char idstring[20];
 	uint32_t ntime32;
 	workbase_t *wb;
 	uchar hash[32];
+	int diff;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -1127,7 +1129,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = json_string("Worker mismatch");
 		goto out;
 	}
-	sscanf(job_id, "%x", &id);
+	sscanf(job_id, "%lx", &id);
 	sscanf(ntime, "%x", &ntime32);
 
 	/* Decide whether this submit request should count towards share diff
@@ -1155,6 +1157,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 	wb_id = wb->id;
+	strcpy(idstring, wb->idstring);
 out_unlock:
 	ck_runlock(&workbase_lock);
 
@@ -1168,7 +1171,7 @@ out_unlock:
 		__bin2hex(hexhash, sharehash, 32);
 		if (new_share(hash, wb_id)) {
 			LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
-			add_submit_success(client, id, wb_id, nonce2, ntime32, diff, hexhash);
+			add_submit_success(client, idstring, nonce2, ntime32, diff, hexhash);
 			ret = true;
 		} else {
 			add_submit_fail(client, diff, share);
@@ -1521,8 +1524,9 @@ int stratifier(proc_instance_t *pi)
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
 
-	/* Set the initial id to time to not send the same id on restarts */
-	blockchange_id = workbase_id = time(NULL);
+	/* Set the initial id to time as high bits so as to not send the same
+	 * id on restarts */
+	blockchange_id = workbase_id = ((int64_t)time(NULL)) << 32;
 
 	cklock_init(&instance_lock);
 
