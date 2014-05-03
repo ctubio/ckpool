@@ -1127,7 +1127,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
-	char hexhash[68], sharehash[32], *logdir;
+	char hexhash[68], sharehash[32], *logdir = NULL;
 	bool share = false, ret = false;
 	uint64_t wb_id = 0, id;
 	double sdiff = -1;
