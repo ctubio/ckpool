@@ -1533,7 +1533,7 @@ static void *statsupdate(void *arg)
 			  "(6h):%s  (1d):%s",
 			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 		LOGNOTICE("Pool shares difftotal: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
-			  stats.accounted_shares, sps1, sps5, sps15, sps60);
+			  stats.accounted_diff_shares, sps1, sps5, sps15, sps60);
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
