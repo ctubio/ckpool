@@ -196,7 +196,7 @@ static cklock_t instance_lock;
 struct share {
 	UT_hash_handle hh;
 	uchar hash[32];
-	int64_t workbase_id;
+	uint64_t workbase_id;
 };
 
 typedef struct share share_t;
@@ -342,7 +342,7 @@ static void clear_workbase(workbase_t *wb)
 	free(wb);
 }
 
-static void purge_share_hashtable(int wb_id)
+static void purge_share_hashtable(uint64_t wb_id)
 {
 	share_t *share, *tmp;
 	int purged = 0;
