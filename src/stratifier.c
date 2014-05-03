@@ -817,6 +817,15 @@ static void stratum_send_diff(stratum_instance_t *client)
 	stratum_add_send(json_msg, client->id);
 }
 
+static void stratum_send_message(stratum_instance_t *client, const char *msg)
+{
+	json_t *json_msg;
+
+	json_msg = json_pack("{sosss[s]}", "id", json_null(), "method", "client.show_message",
+			     "params", msg);
+	stratum_add_send(json_msg, client->id);
+}
+
 static double time_bias(double tdiff, double period)
 {
 	return 1.0 - 1.0 / exp(tdiff / period);
@@ -1205,8 +1214,10 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 	}
 	ck_runlock(&instance_lock);
 
-	if (!strncasecmp(method, "mining.authorize", 16)) {
+	if (!strncasecmp(method, "mining.auth", 11)) {
 		ret = parse_authorize(client, params_val, err_val);
+		if (ret)
+			stratum_send_message(client, "Authorised, welcome to ckpool!");
 		goto out;
 	}
 
