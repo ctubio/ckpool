@@ -44,8 +44,9 @@ struct pool_stats {
 	int reusable_clients;
 
 	/* Absolute shares stats */
-	int unaccounted_shares;
-	int accounted_shares;
+	int64_t unaccounted_shares;
+	int64_t accounted_shares;
+
 	/* Shares per second for 1/5/15/60 minute rolling averages */
 	double sps1;
 	double sps5;
@@ -1447,6 +1448,7 @@ static void *statsupdate(void *arg)
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16];
 		char suffix360[16], suffix1440[16];
 		const double nonces = 4294967296;
+		double sps1, sps5, sps15, sps60;
 		double ghs, tdiff, bias;
 		tv_t diff;
 		int i;
@@ -1458,18 +1460,22 @@ static void *statsupdate(void *arg)
 		bias = time_bias(tdiff, 60);
 		ghs = stats.dsps1 * nonces / bias;
 		suffix_string(ghs, suffix1, 16, 0);
+		sps1 = stats.sps1 / bias;
 
 		bias = time_bias(tdiff, 300);
 		ghs = stats.dsps5 * nonces / bias;
 		suffix_string(ghs, suffix5, 16, 0);
+		sps5 = stats.sps5 / bias;
 
 		bias = time_bias(tdiff, 900);
 		ghs = stats.dsps15 * nonces / bias;
 		suffix_string(ghs, suffix15, 16, 0);
+		sps15 = stats.sps15 / bias;
 
 		bias = time_bias(tdiff, 3600);
 		ghs = stats.dsps60 * nonces / bias;
 		suffix_string(ghs, suffix60, 16, 0);
+		sps60 = stats.sps60 / bias;
 
 		bias = time_bias(tdiff, 21600);
 		ghs = stats.dsps360 * nonces / bias;
@@ -1486,6 +1492,8 @@ static void *statsupdate(void *arg)
 		LOGNOTICE("Pool hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  "
 			  "(6h):%s  (1d):%s",
 			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+		LOGNOTICE("Pool shares difftotal: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
+			  stats.accounted_shares, sps1, sps5, sps15, sps60);
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
