@@ -817,6 +817,11 @@ static void stratum_send_diff(stratum_instance_t *client)
 	stratum_add_send(json_msg, client->id);
 }
 
+static double time_bias(double tdiff, double period)
+{
+	return 1.0 - 1.0 / exp(tdiff / period);
+}
+
 static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
@@ -829,7 +834,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	client->ssdc++;
 	decay_time(&client->dsps5, diff, tdiff, 300);
 	bdiff = tvdiff(&now_t, &client->first_share);
-	bias = 1.0 - 1.0 / exp(bdiff / 300.0);
+	bias = time_bias(bdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
 	if (valid) {
@@ -857,7 +862,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 		 * stable */
 		if (!(client->ssdc % 18)) {
 			LOGNOTICE("Client %d worker %s hashrate %.1fGH/s", client->id,
-				  client->workername, client->dsps5 * 4.294967296);
+				  client->workername, dsps * 4.294967296);
 		}
 		return;
 	}
@@ -1422,12 +1427,47 @@ static void *statsupdate(void *arg)
 	while (42) {
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16];
 		char suffix360[16], suffix1440[16];
-		double ghs;
+		const double nonces = 4294967296;
+		double ghs, tdiff, bias;
 		tv_t diff;
 		int i;
 
 		tv_time(&diff);
 		timersub(&diff, &stats.start_time, &diff);
+		tdiff = diff.tv_sec + (double)diff.tv_usec / 1000000;
+
+		bias = time_bias(tdiff, 60);
+		ghs = stats.dsps1 * nonces / bias;
+		suffix_string(ghs, suffix1, 16, 0);
+
+		bias = time_bias(tdiff, 300);
+		ghs = stats.dsps5 * nonces / bias;
+		suffix_string(ghs, suffix5, 16, 0);
+
+		bias = time_bias(tdiff, 900);
+		ghs = stats.dsps15 * nonces / bias;
+		suffix_string(ghs, suffix15, 16, 0);
+
+		bias = time_bias(tdiff, 3600);
+		ghs = stats.dsps60 * nonces / bias;
+		suffix_string(ghs, suffix60, 16, 0);
+
+		bias = time_bias(tdiff, 21600);
+		ghs = stats.dsps360 * nonces / bias;
+		suffix_string(ghs, suffix360, 16, 0);
+
+		bias = time_bias(tdiff, 86400);
+		ghs = stats.dsps1440 * nonces / bias;
+		suffix_string(ghs, suffix1440, 16, 0);
+
+		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  "
+			  "Reusable clients: %d  Reused clients: %d",
+			  diff.tv_sec, stats.live_clients, stats.dead_clients,
+			  stats.reusable_clients, stats.reused_clients);
+		LOGNOTICE("Pool hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  "
+			  "(6h):%s  (1d):%s",
+			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
 		for (i = 0; i < 4; i++) {
@@ -1453,25 +1493,6 @@ static void *statsupdate(void *arg)
 			stats.unaccounted_shares = stats.unaccounted_diff_shares = 0;
 			mutex_unlock(&stats_lock);
 		}
-		ghs = stats.dsps1 * (double)4294967296;
-		suffix_string(ghs, suffix1, 16, 0);
-		ghs = stats.dsps5 * (double)4294967296;
-		suffix_string(ghs, suffix5, 16, 0);
-		ghs = stats.dsps15 * (double)4294967296;
-		suffix_string(ghs, suffix15, 16, 0);
-		ghs = stats.dsps60 * (double)4294967296;
-		suffix_string(ghs, suffix60, 16, 0);
-		ghs = stats.dsps360 * (double)4294967296;
-		suffix_string(ghs, suffix360, 16, 0);
-		ghs = stats.dsps1440 * (double)4294967296;
-		suffix_string(ghs, suffix1440, 16, 0);
-		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  "
-			  "Reusable clients: %d  Reused clients: %d",
-			  diff.tv_sec, stats.live_clients, stats.dead_clients,
-			  stats.reusable_clients, stats.reused_clients);
-		LOGNOTICE("Pool hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  "
-			  "(6h):%s  (1d):%s",
-			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 	}
 
 	return NULL;
