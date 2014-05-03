@@ -170,9 +170,9 @@ struct stratum_instance {
 	int old_diff; /* Previous diff */
 	int diff_change_job_id; /* Last job_id we changed diff */
 	double dsps5; /* Diff shares per second, 5 minute rolling average */
-	double bias; /* Bias for earlier shares */
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
+	tv_t first_share;
 	tv_t last_share;
 	int absolute_shares;
 	int diff_shares;
@@ -819,7 +819,7 @@ static void stratum_send_diff(stratum_instance_t *client)
 
 static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
-	double tdiff, dsps, drr, network_diff;
+	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	int next_blockid, optimal;
 	tv_t now_t;
 
@@ -828,7 +828,8 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
 	decay_time(&client->dsps5, diff, tdiff, 300);
-	decay_time(&client->bias, 0, tdiff, 300);
+	bdiff = tvdiff(&now_t, &client->first_share);
+	bias = 1.0 - 1.0 / exp(bdiff / 300.0);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
 	if (valid) {
@@ -847,8 +848,9 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 		return;
 
 	/* Diff rate ratio */
-	dsps = client->dsps5 * exp(client->bias);
+	dsps = client->dsps5 / bias;
 	drr = dsps / (double)client->diff;
+
 	/* Optimal rate product is 0.3, allow some hysteresis. */
 	if (drr > 0.2 && drr < 0.4) {
 		/* FIXME For now show the hashrate every ~1m when the diff is
@@ -884,8 +886,8 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 
 	client->ssdc = 0;
 
-	LOGINFO("Client %d dsps %.1f drr %.2f adjust diff from %d to: %d ", client->id,
-		client->dsps5, drr, client->diff, optimal);
+	LOGINFO("Client %d biased dsps %.2f dsps %.2f drr %.2f adjust diff from %d to: %d ",
+		client->id, dsps, client->dsps5, drr, client->diff, optimal);
 
 	copy_tv(&client->ldc, &now_t);
 	client->diff_change_job_id = next_blockid;
@@ -904,8 +906,8 @@ static void add_submit_success(stratum_instance_t *client, int job_id, int wb_id
 	FILE *fp;
 	int len;
 
-	if (!client->absolute_shares++)
-		client->bias = 3;
+	if (unlikely(!client->absolute_shares++))
+		tv_time(&client->first_share);
 	client->diff_shares += diff;
 	add_submit(client, diff, true);
 	len = strlen(client->workername) + 10;
