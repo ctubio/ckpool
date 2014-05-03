@@ -123,6 +123,8 @@ struct workbase {
 
 	/* Cached header binary */
 	char headerbin[112];
+
+	char *logdir;
 };
 
 typedef struct workbase workbase_t;
@@ -344,6 +346,7 @@ static void clear_workbase(workbase_t *wb)
 {
 	free(wb->flags);
 	free(wb->txn_data);
+	free(wb->logdir);
 	json_decref(wb->merkle_array);
 	free(wb);
 }
@@ -374,6 +377,7 @@ static void update_base(ckpool_t *ckp)
 {
 	workbase_t *wb, *tmp, *tmpa;
 	bool new_block = false;
+	int len, ret;
 	json_t *val;
 	char *buf;
 
@@ -423,14 +427,29 @@ static void update_base(ckpool_t *ckp)
 	generate_coinbase(ckp, wb);
 	wb->gentime = time(NULL);
 
+	len = strlen(ckp->logdir) + 8 + 1 + 16;
+	wb->logdir = ckalloc(len);
+
 	ck_wlock(&workbase_lock);
 	wb->id = workbase_id++;
+
 	if (strncmp(wb->prevhash, lasthash, 64)) {
 		new_block = true;
 		memcpy(lasthash, wb->prevhash, 65);
 		blockchange_id = wb->id;
 	}
+	if (new_block) {
+		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
+		ret = mkdir(wb->logdir, 0700);
+		if (unlikely(ret && errno != EEXIST))
+			quit(1, "Failed to create log directory %s", wb->logdir);
+	}
 	sprintf(wb->idstring, "%016lx", wb->id);
+	/* Do not store the trailing slash for the subdir */
+	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
+	ret = mkdir(wb->logdir, 0700);
+	if (unlikely(ret && errno != EEXIST))
+		quit(1, "Failed to create log directory %s", wb->logdir);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		if (HASH_COUNT(workbases) < 3)
 			break;
@@ -917,8 +936,9 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	stratum_send_diff(client);
 }
 
-static void add_submit_success(stratum_instance_t *client, char *idstring,
-			       const char *nonce2, uint32_t ntime, int diff,
+static void add_submit_success(stratum_instance_t *client, const char *logdir,
+			       const char *idstring, const char *nonce2,
+			       const uint32_t ntime, const int diff,
 			       double sdiff, const char *hash)
 {
 	char *fname, *s;
@@ -930,9 +950,11 @@ static void add_submit_success(stratum_instance_t *client, char *idstring,
 		tv_time(&client->first_share);
 	client->diff_shares += diff;
 	add_submit(client, diff, true);
-	len = strlen(client->workername) + 10;
+	len = strlen(logdir) + strlen(client->workername) + 12;
 	fname = alloca(len);
-	sprintf(fname, "%s.sharelog", client->workername);
+
+	/* First write to the user's sharelog */
+	sprintf(fname, "%s/%s.sharelog", logdir, client->workername);
 	fp = fopen(fname, "a");
 	if (unlikely(!fp < 0)) {
 		LOGERR("Failed to fopen %s", fname);
@@ -947,13 +969,30 @@ static void add_submit_success(stratum_instance_t *client, char *idstring,
 	json_set_double(val, "sdiff", sdiff);
 	json_set_string(val, "hash", hash);
 	s = json_dumps(val, 0);
-	json_decref(val);
 	len = strlen(s);
 	len = fprintf(fp, "%s\n", s);
 	free(s);
 	fclose(fp);
 	if (unlikely(len < 0))
 		LOGERR("Failed to fwrite to %s", fname);
+
+	/* Now write to the pool's sharelog, adding workername to json */
+	sprintf(fname, "%s.sharelog", logdir);
+	fp = fopen(fname, "a");
+	if (unlikely(!fp < 0)) {
+		LOGERR("Failed to fopen %s", fname);
+		return;
+	}
+	json_set_string(val, "worker", client->workername);
+	s = json_dumps(val, 0);
+	len = strlen(s);
+	len = fprintf(fp, "%s\n", s);
+	free(s);
+	fclose(fp);
+	if (unlikely(len < 0))
+		LOGERR("Failed to fwrite to %s", fname);
+
+	json_decref(val);
 }
 
 static void add_submit_fail(stratum_instance_t *client, int diff, bool share)
@@ -1088,7 +1127,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
-	char hexhash[68], sharehash[32];
+	char hexhash[68], sharehash[32], *logdir;
 	bool share = false, ret = false;
 	uint64_t wb_id = 0, id;
 	double sdiff = -1;
@@ -1164,6 +1203,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 	wb_id = wb->id;
 	strcpy(idstring, wb->idstring);
+	logdir = strdupa(wb->logdir);
 out_unlock:
 	ck_runlock(&workbase_lock);
 
@@ -1177,7 +1217,7 @@ out_unlock:
 		__bin2hex(hexhash, sharehash, 32);
 		if (new_share(hash, wb_id)) {
 			LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
-			add_submit_success(client, idstring, nonce2, ntime32, diff, sdiff, hexhash);
+			add_submit_success(client, logdir, idstring, nonce2, ntime32, diff, sdiff, hexhash);
 			ret = true;
 		} else {
 			add_submit_fail(client, diff, share);

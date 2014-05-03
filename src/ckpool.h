@@ -37,6 +37,8 @@ struct ckpool_instance {
 	char *name;
 	/* Directory where sockets are created */
 	char *socket_dir;
+	/* Directory where logs are written */
+	char *logdir;
 
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;

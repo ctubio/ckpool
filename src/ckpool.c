@@ -276,6 +276,7 @@ static void parse_config(ckpool_t *ckp)
 	json_get_string(&ckp->serverurl, json_conf, "serverurl");
 	json_get_int(&ckp->mindiff, json_conf, "mindiff");
 	json_get_int(&ckp->startdiff, json_conf, "startdiff");
+	json_get_string(&ckp->logdir, json_conf, "logdir");
 	json_decref(json_conf);
 }
 
@@ -432,6 +433,15 @@ int main(int argc, char **argv)
 		ckp.mindiff = 1;
 	if (!ckp.startdiff)
 		ckp.startdiff = 42;
+	if (!ckp.logdir)
+		ckp.logdir = strdup("logs");
+
+	len = strlen(ckp.logdir);
+	if (memcmp(&ckp.logdir[len], "/", 1))
+		realloc_strcat(&ckp.logdir, "/");
+	ret = mkdir(ckp.logdir, 0700);
+	if (ret && errno != EEXIST)
+		quit(1, "Failed to make log directory %s", ckp.logdir);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
