@@ -710,12 +710,12 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 
 	ck_rlock(&instance_lock);
 	client = __instance_by_id(client_id);
+	ck_runlock(&instance_lock);
+
 	if (unlikely(!client)) {
-		ck_runlock(&instance_lock);
 		LOGERR("Failed to find client id %d in hashtable!", client_id);
 		return NULL;
 	}
-	ck_runlock(&instance_lock);
 
 	arr_size = json_array_size(params_val);
 	if (arr_size > 0) {
@@ -1207,12 +1207,12 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 
 	ck_rlock(&instance_lock);
 	client = __instance_by_id(client_id);
+	ck_runlock(&instance_lock);
+
 	if (unlikely(!client)) {
-		ck_runlock(&instance_lock);
 		LOGINFO("Failed to find client id %d in hashtable!", client_id);
 		goto out;
 	}
-	ck_runlock(&instance_lock);
 
 	if (!strncasecmp(method, "mining.auth", 11)) {
 		ret = parse_authorize(client, params_val, err_val);
