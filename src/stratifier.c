@@ -245,6 +245,11 @@ static inline void json_set_int(json_t *val, const char *key, int integer)
 	json_object_set_new_nocheck(val, key, json_integer(integer));
 }
 
+static inline void json_set_double(json_t *val, const char *key, double real)
+{
+	json_object_set_new_nocheck(val, key, json_real(real));
+}
+
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 {
 	char header[228];
@@ -911,10 +916,9 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	stratum_send_diff(client);
 }
 
-/* FIXME Add logging of these as well */
 static void add_submit_success(stratum_instance_t *client, char *idstring,
 			       const char *nonce2, uint32_t ntime, int diff,
-			       const char *hash)
+			       double sdiff, const char *hash)
 {
 	char *fname, *s;
 	json_t *val;
@@ -939,6 +943,7 @@ static void add_submit_success(stratum_instance_t *client, char *idstring,
 	json_set_string(val, "nonce2", nonce2);
 	json_set_int(val, "ntime", ntime);
 	json_set_int(val, "diff", diff);
+	json_set_double(val, "sdiff", sdiff);
 	json_set_string(val, "hash", hash);
 	s = json_dumps(val, 0);
 	json_decref(val);
@@ -1171,7 +1176,7 @@ out_unlock:
 		__bin2hex(hexhash, sharehash, 32);
 		if (new_share(hash, wb_id)) {
 			LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
-			add_submit_success(client, idstring, nonce2, ntime32, diff, hexhash);
+			add_submit_success(client, idstring, nonce2, ntime32, diff, sdiff, hexhash);
 			ret = true;
 		} else {
 			add_submit_fail(client, diff, share);
