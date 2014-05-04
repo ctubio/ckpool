@@ -686,7 +686,7 @@ retry:
 
 		ret = sscanf(buf, "dropclient=%d", &client_id);
 		if (ret < 0)
-			LOGDEBUG("Failed to parse dropclient command: %s", buf);
+			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
 			drop_client(client_id);
 		goto retry;

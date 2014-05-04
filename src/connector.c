@@ -120,12 +120,8 @@ out:
 	return NULL;
 }
 
-/* Invalidate this instance. Remove them from the hashtables we look up
- * regularly but keep the instances in a linked list indefinitely in case we
- * still reference any of its members. */
-static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instance_t *client)
+static int drop_client(conn_instance_t *ci, client_instance_t *client)
 {
-	char buf[256];
 	int fd;
 
 	ck_wlock(&ci->lock);
@@ -139,6 +135,18 @@ static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instanc
 	}
 	ck_wunlock(&ci->lock);
 
+	return fd;
+}
+
+/* Invalidate this instance. Remove them from the hashtables we look up
+ * regularly but keep the instances in a linked list indefinitely in case we
+ * still reference any of its members. */
+static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instance_t *client)
+{
+	char buf[256];
+	int fd;
+
+	fd = drop_client(ci, client);
 	if (fd == -1)
 		return;
 	sprintf(buf, "dropclient=%d", client->id);
@@ -409,6 +417,17 @@ static void send_client(conn_instance_t *ci, int id, char *buf)
 	mutex_unlock(&sender_lock);
 }
 
+static client_instance_t *client_by_id(conn_instance_t *ci, int id)
+{
+	client_instance_t *client;
+
+	ck_rlock(&ci->lock);
+	HASH_FIND_INT(clients, &id, client);
+	ck_runlock(&ci->lock);
+
+	return client;
+}
+
 static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 {
 	int sockd, client_id, ret = 0;
@@ -435,6 +454,27 @@ retry:
 	LOGDEBUG("Connector received message: %s", buf);
 	if (!strncasecmp(buf, "shutdown", 8))
 		goto out;
+	if (!strncasecmp(buf, "dropclient", 10)) {
+		client_instance_t *client;
+		int client_id;
+
+		ret = sscanf(buf, "dropclient=%d", &client_id);
+		if (ret < 0) {
+			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
+			goto retry;
+		}
+		client = client_by_id(ci, client_id);
+		if (unlikely(!client)) {
+			LOGWARNING("Connector failed to find client id: %d", client_id);
+			goto retry;
+		}
+		ret = drop_client(ci, client);
+		if (ret >= 0)
+			LOGINFO("Connector dropped client id: %d", client_id);
+		goto retry;
+	}
+
+	/* Anything else should be a json message to send to a client */
 	json_msg = json_loads(buf, 0, NULL);
 	if (unlikely(!json_msg)) {
 		LOGWARNING("Invalid json message: %s", buf);
