@@ -125,6 +125,8 @@ struct workbase {
 	char headerbin[112];
 
 	char *logdir;
+
+	ckpool_t *ckp;
 };
 
 typedef struct workbase workbase_t;
@@ -185,6 +187,8 @@ struct stratum_instance {
 	char *useragent;
 	char *workername;
 	int user_id;
+
+	ckpool_t *ckp;
 };
 
 typedef struct stratum_instance stratum_instance_t;
@@ -397,6 +401,7 @@ static void update_base(ckpool_t *ckp)
 	}
 
 	wb = ckzalloc(sizeof(workbase_t));
+	wb->ckp = ckp;
 	val = json_loads(buf, 0, NULL);
 	dealloc(buf);
 
@@ -484,13 +489,14 @@ static stratum_instance_t *__instance_by_id(int id)
 }
 
 /* Enter with write instance_lock held */
-static stratum_instance_t *__stratum_add_instance(int id)
+static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 
 	stats.live_clients++;
 	instance->id = id;
-	instance->diff = instance->old_diff = global_ckp->startdiff;
+	instance->diff = instance->old_diff = ckp->startdiff;
+	instance->ckp = ckp;
 	tv_time(&instance->ldc);
 	LOGINFO("Added instance %d", id);
 	HASH_ADD_INT(stratum_instances, id, instance);
@@ -914,10 +920,10 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	}
 
 	optimal = round(dsps * 3.33);
-	if (optimal <= global_ckp->mindiff) {
-		if (client->diff == global_ckp->mindiff)
+	if (optimal <= client->ckp->mindiff) {
+		if (client->diff == client->ckp->mindiff)
 			return;
-		optimal = global_ckp->mindiff;
+		optimal = client->ckp->mindiff;
 	}
 
 	ck_rlock(&workbase_lock);
@@ -982,7 +988,7 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 	strcat(gbt_block, hexcoinbase);
 	if (wb->transactions)
 		realloc_strcat(&gbt_block, wb->txn_data);
-	send_proc(&global_ckp->generator, gbt_block);
+	send_proc(&wb->ckp->generator, gbt_block);
 	free(gbt_block);
 }
 
@@ -1385,7 +1391,7 @@ out:
 
 static void *stratum_receiver(void *arg)
 {
-	ckpool_t __maybe_unused *ckp = (ckpool_t *)arg;
+	ckpool_t *ckp = (ckpool_t *)arg;
 	stratum_msg_t *msg;
 
 	rename_proc("sreceiver");
@@ -1415,7 +1421,7 @@ static void *stratum_receiver(void *arg)
 		if (!instance) {
 			/* client_id instance doesn't exist yet, create one */
 			ck_ulock(&instance_lock);
-			instance = __stratum_add_instance(msg->client_id);
+			instance = __stratum_add_instance(ckp, msg->client_id);
 			ck_dwilock(&instance_lock);
 		}
 		ck_uilock(&instance_lock);
