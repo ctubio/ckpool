@@ -253,6 +253,11 @@ static inline void json_set_double(json_t *val, const char *key, double real)
 	json_object_set_new_nocheck(val, key, json_real(real));
 }
 
+static inline void json_set_bool(json_t *val, const char *key, bool boolean)
+{
+	json_object_set_new_nocheck(val, key, json_boolean(boolean));
+}
+
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 {
 	char header[228];
@@ -863,6 +868,12 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	int optimal;
 	tv_t now_t;
 
+	if (valid) {
+		if (unlikely(!client->absolute_shares++))
+			tv_time(&client->first_share);
+		client->diff_shares += diff;
+	}
+
 	tv_time(&now_t);
 	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
@@ -934,72 +945,6 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	client->old_diff = client->diff;
 	client->diff = optimal;
 	stratum_send_diff(client);
-}
-
-static void add_submit_success(stratum_instance_t *client, const char *logdir,
-			       const char *idstring, const char *nonce2,
-			       const uint32_t ntime, const int diff,
-			       double sdiff, const char *hash)
-{
-	char *fname, *s;
-	json_t *val;
-	FILE *fp;
-	int len;
-
-	if (unlikely(!client->absolute_shares++))
-		tv_time(&client->first_share);
-	client->diff_shares += diff;
-	add_submit(client, diff, true);
-	len = strlen(logdir) + strlen(client->workername) + 12;
-	fname = alloca(len);
-
-	/* First write to the user's sharelog */
-	sprintf(fname, "%s/%s.sharelog", logdir, client->workername);
-	fp = fopen(fname, "a");
-	if (unlikely(!fp < 0)) {
-		LOGERR("Failed to fopen %s", fname);
-		return;
-	}
-
-	val = json_object();
-	json_set_string(val, "wbid", idstring);
-	json_set_string(val, "nonce2", nonce2);
-	json_set_int(val, "ntime", ntime);
-	json_set_int(val, "diff", diff);
-	json_set_double(val, "sdiff", sdiff);
-	json_set_string(val, "hash", hash);
-	s = json_dumps(val, 0);
-	len = strlen(s);
-	len = fprintf(fp, "%s\n", s);
-	free(s);
-	fclose(fp);
-	if (unlikely(len < 0))
-		LOGERR("Failed to fwrite to %s", fname);
-
-	/* Now write to the pool's sharelog, adding workername to json */
-	sprintf(fname, "%s.sharelog", logdir);
-	fp = fopen(fname, "a");
-	if (unlikely(!fp < 0)) {
-		LOGERR("Failed to fopen %s", fname);
-		return;
-	}
-	json_set_string(val, "worker", client->workername);
-	s = json_dumps(val, 0);
-	len = strlen(s);
-	len = fprintf(fp, "%s\n", s);
-	free(s);
-	fclose(fp);
-	if (unlikely(len < 0))
-		LOGERR("Failed to fwrite to %s", fname);
-
-	json_decref(val);
-}
-
-static void add_submit_fail(stratum_instance_t *client, int diff, bool share)
-{
-	/* FIXME Do something else here? */
-	if (share)
-		add_submit(client, diff, false);
 }
 
 /* We should already be holding the workbase_lock */
@@ -1126,16 +1071,21 @@ out_unlock:
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
+	bool share = false, result = false, invalid = true;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
-	char hexhash[68], sharehash[32], *logdir = NULL;
-	bool share = false, ret = false;
-	uint64_t wb_id = 0, id;
+	char hexhash[68], sharehash[32], *logdir;
 	double sdiff = -1;
 	char idstring[20];
 	uint32_t ntime32;
+	char *fname, *s;
 	workbase_t *wb;
 	uchar hash[32];
-	int diff;
+	int len, diff;
+	uint64_t id;
+	json_t *val;
+	FILE *fp;
+
+	memset(hexhash, 0, 68);
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -1177,16 +1127,22 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	sscanf(job_id, "%lx", &id);
 	sscanf(ntime, "%x", &ntime32);
 
-	/* Decide whether this submit request should count towards share diff
-	 * management or not. */
 	share = true;
 
 	ck_rlock(&workbase_lock);
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
 		json_object_set_nocheck(json_msg, "reject-reason", json_string("Invalid JobID"));
+		strcpy(idstring, job_id);
+		logdir = current_workbase->logdir;
 		goto out_unlock;
 	}
+	strcpy(idstring, wb->idstring);
+	logdir = strdupa(wb->logdir);
+	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
+	bswap_256(sharehash, hash);
+	__bin2hex(hexhash, sharehash, 32);
+
 	if (id < blockchange_id) {
 		json_object_set_nocheck(json_msg, "reject-reason", json_string("Stale"));
 		goto out_unlock;
@@ -1200,10 +1156,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		json_object_set_nocheck(json_msg, "reject-reason", json_string("Ntime out of range"));
 		goto out_unlock;
 	}
-	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
-	wb_id = wb->id;
-	strcpy(idstring, wb->idstring);
-	logdir = strdupa(wb->logdir);
+	invalid = false;
 out_unlock:
 	ck_runlock(&workbase_lock);
 
@@ -1212,30 +1165,72 @@ out_unlock:
 		diff = client->old_diff;
 	else
 		diff = client->diff;
-	if (sdiff >= diff) {
-		bswap_256(sharehash, hash);
-		__bin2hex(hexhash, sharehash, 32);
-		if (new_share(hash, wb_id)) {
-			LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
-			add_submit_success(client, logdir, idstring, nonce2, ntime32, diff, sdiff, hexhash);
-			ret = true;
+	if (!invalid) {
+		if (sdiff >= diff) {
+			if (new_share(hash, id)) {
+				LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
+				result = true;
+			} else {
+				json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
+				LOGINFO("Rejected client %d dupe diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
+			}
 		} else {
-			add_submit_fail(client, diff, share);
-			json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
-			LOGINFO("Rejected client %d dupe diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
-		}
-	} else {
-		add_submit_fail(client, diff, share);
-		if (sdiff >= 0) {
-			bswap_256(sharehash, hash);
-			__bin2hex(hexhash, sharehash, 32);
 			LOGINFO("Rejected client %d high diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
-		} else
-			LOGINFO("Rejected client %d invalid share", client->id);
+		}
+	}  else
+		LOGINFO("Rejected client %d invalid share", client->id);
+	add_submit(client, diff, result);
+
+	/* Log shares here */
+	len = strlen(logdir) + strlen(client->workername) + 12;
+	fname = alloca(len);
+
+	/* First write to the user's sharelog */
+	sprintf(fname, "%s/%s.sharelog", logdir, client->workername);
+	fp = fopen(fname, "a");
+	if (unlikely(!fp)) {
+		LOGERR("Failed to fopen %s", fname);
+		goto out;
 	}
+
+	val = json_object();
+	json_set_string(val, "wbid", idstring);
+	json_set_string(val, "nonce2", nonce2);
+	json_set_int(val, "ntime", ntime32);
+	json_set_int(val, "diff", diff);
+	json_set_double(val, "sdiff", sdiff);
+	json_set_string(val, "hash", hexhash);
+	json_set_bool(val, "result", result);
+	json_object_set(val, "reject-reason", json_object_get(json_msg, "reject-reason"));
+	json_object_set(val, "error", *err_val);
+	s = json_dumps(val, 0);
+	len = strlen(s);
+	len = fprintf(fp, "%s\n", s);
+	free(s);
+	fclose(fp);
+	if (unlikely(len < 0))
+		LOGERR("Failed to fwrite to %s", fname);
+
+	/* Now write to the pool's sharelog, adding workername to json */
+	sprintf(fname, "%s.sharelog", logdir);
+	fp = fopen(fname, "a");
+	if (likely(fp)) {
+		json_set_string(val, "worker", client->workername);
+		s = json_dumps(val, 0);
+		len = strlen(s);
+		len = fprintf(fp, "%s\n", s);
+		free(s);
+		fclose(fp);
+		if (unlikely(len < 0))
+			LOGERR("Failed to fwrite to %s", fname);
+	} else
+		LOGERR("Failed to fopen %s", fname);
+	json_decref(val);
 out:
-	return json_boolean(ret);
+	if (!share)
+		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
+	return json_boolean(result);
 }
 
 /* We should have already determined all the values passed to this are valid
