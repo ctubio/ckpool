@@ -1273,7 +1273,15 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 
 	/* We should only accept authorised requests from here on */
 	if (!client->authorised) {
+		char buf[128];
+
+		/* Dropping unauthorised clients here also allows the
+		 * stratifier process to restart since it will have lost all
+		 * the stratum instance data. Clients will just reconnect. */
 		ret = json_string("Unauthorised");
+		LOGINFO("Dropping unauthorised client %d", client->id);
+		sprintf(buf, "dropclient=%d", client->id);
+		send_proc(&client->ckp->connector, buf);
 		goto out;
 	}
 
