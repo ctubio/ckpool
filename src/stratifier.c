@@ -1247,6 +1247,7 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 	stratum_instance_t *client = NULL;
 	const char *method;
 	json_t *ret = NULL;
+	char buf[128];
 
 	method = json_string_value(method_val);
 	if (!strncasecmp(method, "mining.subscribe", 16)) {
@@ -1266,19 +1267,18 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 
 	if (!strncasecmp(method, "mining.auth", 11)) {
 		ret = parse_authorize(client, params_val, err_val);
-		if (ret)
-			stratum_send_message(client, "Authorised, welcome to ckpool!");
+		if (ret) {
+			snprintf(buf, 128, "Authorised, welcome to %s!", client->ckp->name);
+			stratum_send_message(client, buf);
+		}
 		goto out;
 	}
 
 	/* We should only accept authorised requests from here on */
 	if (!client->authorised) {
-		char buf[128];
-
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
-		ret = json_string("Unauthorised");
 		LOGINFO("Dropping unauthorised client %d", client->id);
 		sprintf(buf, "dropclient=%d", client->id);
 		send_proc(&client->ckp->connector, buf);
@@ -1375,6 +1375,10 @@ static void parse_instance_msg(int client_id, json_t *msg)
 	}
 	result_val = gen_json_result(client_id, json_msg, method, params,
 				     &err_val, &update);
+	if (unlikely(!result_val)) {
+		json_decref(json_msg);
+		return;
+	}
 	if (!err_val)
 		err_val = json_null();
 out:
