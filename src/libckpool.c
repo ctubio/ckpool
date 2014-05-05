@@ -739,50 +739,76 @@ out:
 	return buf;
 }
 
+int wait_write_select(int sockd, int timeout)
+{
+	tv_t tv_timeout;
+	fd_set writefds;
+	int ret;
+
+	tv_timeout.tv_sec = timeout;
+	tv_timeout.tv_usec = 0;
+
+retry:
+	FD_ZERO(&writefds);
+	FD_SET(sockd, &writefds);
+	ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
+	if (unlikely(ret < 1 &&interrupted()))
+		goto retry;
+	return ret;
+}
+
+int write_length(int sockd, const void *buf, int len)
+{
+	int ret, ofs = 0;
+
+	if (unlikely(len < 1)) {
+		LOGWARNING("Invalid write length of %d requested in write_length", len);
+		return -1;
+	}
+	while (len) {
+		ret = write(sockd, buf + ofs, len);
+		if (unlikely(ret < 0))
+			return -1;
+		ofs += ret;
+		len -= ret;
+	}
+	return ofs;
+}
+
 bool send_unix_msg(int sockd, const char *buf)
 {
-	tv_t tv_timeout = {1, 0};
 	uint32_t msglen, len;
-	fd_set writefds;
-	int ret, ofs;
+	int ret;
 
+	if (unlikely(!buf)) {
+		LOGWARNING("Null message sent to send_unix_msg");
+		return false;
+	}
 	len = strlen(buf);
 	if (unlikely(!len)) {
 		LOGWARNING("Zero length message sent to send_unix_msg");
 		return false;
 	}
 	msglen = htole32(len);
-	FD_ZERO(&writefds);
-	FD_SET(sockd, &writefds);
-	ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
-	if (ret < 1) {
+	ret = wait_write_select(sockd, 60);
+	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in send_unix_msg");
 		return false;
 	}
-	ret = write(sockd, &msglen, 4);
+	ret = write_length(sockd, &msglen, 4);
 	if (unlikely(ret < 4)) {
 		LOGERR("Failed to write 4 byte length in send_unix_msg");
 		return false;
 	}
-	ofs = 0;
-	while (len) {
-		tv_timeout.tv_sec = 1;
-		tv_timeout.tv_usec = 0;
-
-		FD_ZERO(&writefds);
-		FD_SET(sockd, &writefds);
-		ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
-		if (ret < 1) {
-			LOGERR("Select2 failed in send_unix_msg");
-			return false;
-		}
-		ret = write(sockd, buf + ofs, len);
-		if (unlikely(ret < 0)) {
-			LOGERR("Failed to write %d bytes in send_unix_msg", len);
-			return false;
-		}
-		ofs += ret;
-		len -= ret;
+	ret = wait_write_select(sockd, 60);
+	if (unlikely(ret < 1)) {
+		LOGERR("Select2 failed in send_unix_msg");
+		return false;
+	}
+	ret = write_length(sockd, buf, len);
+	if (unlikely(ret < 0)) {
+		LOGERR("Failed to write %d bytes in send_unix_msg", len);
+		return false;
 	}
 	return true;
 }

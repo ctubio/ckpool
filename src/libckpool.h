@@ -270,6 +270,8 @@ int open_unix_client(const char *server_path);
 int wait_read_select(int sockd, int timeout);
 int read_length(int sockd, void *buf, int len);
 char *recv_unix_msg(int sockd);
+int wait_write_select(int sockd, int timeout);
+int write_length(int sockd, const void *buf, int len);
 bool send_unix_msg(int sockd, const char *buf);
 bool send_proc(proc_instance_t *pi, const char *msg);
 char *send_recv_proc(proc_instance_t *pi, const char *msg);
