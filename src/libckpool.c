@@ -662,27 +662,59 @@ out:
 	return sockd;
 }
 
+int wait_read_select(int sockd, int timeout)
+{
+	tv_t tv_timeout;
+	fd_set readfs;
+	int ret;
+
+	tv_timeout.tv_sec = timeout;
+	tv_timeout.tv_usec = 0;
+
+retry:
+	FD_ZERO(&readfs);
+	FD_SET(sockd, &readfs);
+	ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
+	if (unlikely(ret < 1 &&interrupted()))
+		goto retry;
+	return ret;
+}
+
+int read_length(int sockd, void *buf, int len)
+{
+	int ret, ofs = 0;
+
+	if (unlikely(len < 1)) {
+		LOGWARNING("Invalid read length of %d requested in read_length", len);
+		return -1;
+	}
+	while (len) {
+		ret = read(sockd, buf + ofs, len);
+		if (unlikely(ret < 0))
+			return -1;
+		ofs += ret;
+		len -= ret;
+	}
+	return ofs;
+}
+
 /* Use a standard message across the unix sockets:
  * 4 byte length of message as little endian encoded uint32_t followed by the
  * string. Return NULL in case of failure. */
 char *recv_unix_msg(int sockd)
 {
-	tv_t tv_timeout = {60, 0};
 	char *buf = NULL;
 	uint32_t msglen;
-	fd_set readfs;
-	int ret, ofs;
+	int ret;
 
-	FD_ZERO(&readfs);
-	FD_SET(sockd, &readfs);
-	ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
-	if (ret < 1) {
+	ret = wait_read_select(sockd, 60);
+	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in recv_unix_msg");
 		goto out;
 	}
 	/* Get message length */
-	ret = read(sockd, &msglen, 4);
-	if (ret < 4) {
+	ret = read_length(sockd, &msglen, 4);
+	if (unlikely(ret < 4)) {
 		LOGERR("Failed to read 4 byte length in recv_unix_msg");
 		goto out;
 	}
@@ -693,27 +725,15 @@ char *recv_unix_msg(int sockd)
 	}
 	buf = ckalloc(msglen + 1);
 	buf[msglen] = 0;
-	ofs = 0;
-	while (msglen) {
-		tv_timeout.tv_sec = 60;
-		tv_timeout.tv_usec = 0;
-
-		FD_ZERO(&readfs);
-		FD_SET(sockd, &readfs);
-		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
-		if (ret < 1) {
-			LOGERR("Select2 failed in recv_unix_msg");
-			dealloc(buf);
-			goto out;
-		}
-		ret = read(sockd, buf + ofs, msglen);
-		if (unlikely(ret < 0)) {
-			LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
-			dealloc(buf);
-			goto out;
-		}
-		ofs += ret;
-		msglen -= ret;
+	ret = wait_read_select(sockd, 60);
+	if (unlikely(ret < 1)) {
+		LOGERR("Select2 failed in recv_unix_msg");
+		goto out;
+	}
+	ret = read_length(sockd, buf, msglen);
+	if (unlikely(ret < 0)) {
+		LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
+		dealloc(buf);
 	}
 out:
 	return buf;

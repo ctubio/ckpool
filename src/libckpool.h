@@ -267,6 +267,8 @@ void empty_socket(int fd);
 void close_unix_socket(const int sockd, const char *server_path);
 int open_unix_server(const char *server_path);
 int open_unix_client(const char *server_path);
+int wait_read_select(int sockd, int timeout);
+int read_length(int sockd, void *buf, int len);
 char *recv_unix_msg(int sockd);
 bool send_unix_msg(int sockd, const char *buf);
 bool send_proc(proc_instance_t *pi, const char *msg);
