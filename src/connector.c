@@ -310,8 +310,8 @@ void *sender(void *arg)
 		sender_send_t *sender_send;
 		client_instance_t *client;
 		tv_t timeout_tv = {0, 0};
+		bool only_send = false;
 		int ret, fd, ofs = 0;
-		fd_set writefds;
 
 		mutex_lock(&sender_lock);
 		if (!sender_sends) {
@@ -324,6 +324,8 @@ void *sender(void *arg)
 		sender_send = sender_sends;
 		if (likely(sender_send))
 			DL_DELETE(sender_sends, sender_send);
+		if (!sender_send)
+			only_send = true;
 		mutex_unlock(&sender_lock);
 
 		if (!sender_send)
@@ -341,18 +343,25 @@ void *sender(void *arg)
 			free(sender_send);
 			continue;
 		}
-		FD_ZERO(&writefds);
-		FD_SET(fd, &writefds);
-		ret = select(fd + 1, NULL, &writefds, NULL, &timeout_tv);
-		if (ret < 1) {
-			LOGDEBUG("Client %d not ready for writes", client->id);
+		/* If there are other sends pending and this socket is not
+		 * ready to receive data from us, put the send back on the
+		 * list. */
+		if (!only_send) {
+			fd_set writefds;
 
-			/* Append it to the tail of the list */
-			mutex_lock(&sender_lock);
-			DL_APPEND(sender_sends, sender_send);
-			mutex_unlock(&sender_lock);
+			FD_ZERO(&writefds);
+			FD_SET(fd, &writefds);
+			ret = select(fd + 1, NULL, &writefds, NULL, &timeout_tv);
+			if (ret < 1) {
+				LOGDEBUG("Client %d not ready for writes", client->id);
 
-			continue;
+				/* Append it to the tail of the list */
+				mutex_lock(&sender_lock);
+				DL_APPEND(sender_sends, sender_send);
+				mutex_unlock(&sender_lock);
+
+				continue;
+			}
 		}
 		while (sender_send->len) {
 			ret = send(fd, sender_send->buf + ofs, sender_send->len , 0);
