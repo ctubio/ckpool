@@ -450,8 +450,8 @@ retry:
 		if (interrupted())
 			goto retry;
 		LOGERR("Failed to accept on connector socket, retrying in 5s");
-		sleep(5);
-		goto retry;
+		ret = 1;
+		goto out;
 	}
 
 	buf = recv_unix_msg(sockd);
