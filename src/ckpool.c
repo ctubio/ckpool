@@ -203,6 +203,7 @@ static void sighandler(int sig)
 	join_pthread(global_ckp->pth_watchdog);
 
 	/* First attempt, send a shutdown message */
+	send_proc(&global_ckp->main, "shutdown");
 	send_proc(&global_ckp->generator, "shutdown");
 	send_proc(&global_ckp->stratifier, "shutdown");
 	send_proc(&global_ckp->connector, "shutdown");
@@ -345,6 +346,7 @@ static void *watchdog(void *arg)
 			break;
 		}
 	}
+	send_proc(&ckp->main, "shutdown");
 	return NULL;
 }
 
