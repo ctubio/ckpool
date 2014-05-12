@@ -320,9 +320,9 @@ static void *watchdog(void *arg)
 
 	rename_proc("watchdog");
 	while (42) {
-		int pid, status;
+		int pid;
 
-		pid = wait(&status);
+		pid = waitpid(0, NULL, 0);
 		if (pid == ckp->generator.pid) {
 			LOGERR("Generator process dead! Relaunching");
 			launch_process(&ckp->generator);
@@ -332,6 +332,9 @@ static void *watchdog(void *arg)
 		} else if (pid == ckp->connector.pid) {
 			LOGERR("Connector process dead! Relaunching");
 			launch_process(&ckp->connector);
+		} else {
+			LOGEMERG("Unknown child process %d dead, exiting!", pid);
+			break;
 		}
 	}
 	return NULL;

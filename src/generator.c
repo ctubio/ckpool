@@ -104,14 +104,13 @@ int generator(proc_instance_t *pi)
 	char *userpass = NULL;
 	gbtbase_t gbt;
 	connsock_t cs;
-	int ret = 0;
+	int ret = 1;
 
 	memset(&cs, 0, sizeof(cs));
 	memset(&gbt, 0, sizeof(gbt));
 
 	if (!extract_sockaddr(ckp->btcdurl, &cs.url, &cs.port)) {
 		LOGWARNING("Failed to extract address from %s", ckp->btcdurl);
-		ret = 1;
 		goto out;
 	}
 	userpass = strdup(ckp->btcdauth);
@@ -120,14 +119,12 @@ int generator(proc_instance_t *pi)
 	cs.auth = http_base64(userpass);
 	if (!cs.auth) {
 		LOGWARNING("Failed to create base64 auth from %s", userpass);
-		ret = 1;
 		goto out;
 	}
 	dealloc(userpass);
 	cs.fd = connect_socket(cs.url, cs.port);
 	if (cs.fd < 0) {
 		LOGWARNING("Failed to connect socket to %s:%s", cs.url, cs.port);
-		ret = 1;
 		goto out;
 	}
 	keep_sockalive(cs.fd);
