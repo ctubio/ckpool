@@ -455,11 +455,18 @@ retry:
 	}
 
 	buf = recv_unix_msg(sockd);
-	close(sockd);
 	if (!buf) {
+		close(sockd);
 		LOGWARNING("Failed to get message in connector_loop");
 		goto retry;
 	}
+	if (!strncasecmp(buf, "ping", 4)) {
+		LOGDEBUG("Connector received ping request");
+		send_unix_msg(sockd, "pong");
+		close(sockd);
+		goto retry;
+	}
+
 	LOGDEBUG("Connector received message: %s", buf);
 	if (!strncasecmp(buf, "shutdown", 8))
 		goto out;

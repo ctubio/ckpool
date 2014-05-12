@@ -669,11 +669,19 @@ retry:
 
 	dealloc(buf);
 	buf = recv_unix_msg(sockd);
-	close(sockd);
 	if (!buf) {
-		LOGWARNING("Failed to get message in strat_loop");
+		close(sockd);
+		LOGWARNING("Failed to get message in stratum_loop");
 		goto retry;
 	}
+	if (!strncasecmp(buf, "ping", 4)) {
+		LOGDEBUG("Stratifier received ping request");
+		send_unix_msg(sockd, "pong");
+		close(sockd);
+		goto retry;
+	}
+
+	close(sockd);
 	LOGDEBUG("Stratifier received request: %s", buf);
 	if (!strncasecmp(buf, "shutdown", 8)) {
 		ret = 0;

@@ -54,6 +54,10 @@ retry:
 		close(sockd);
 		goto out;
 	}
+	if (!strncasecmp(buf, "ping", 4)) {
+		LOGDEBUG("Listener received ping request");
+		send_unix_msg(sockd, "pong");
+	}
 	close(sockd);
 	goto retry;
 out:
