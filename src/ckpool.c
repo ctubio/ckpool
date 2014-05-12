@@ -316,13 +316,21 @@ static void prepare_connector(ckpool_t *ckp)
 
 static void *watchdog(void *arg)
 {
+	time_t last_relaunch_t = time(NULL);
 	ckpool_t *ckp = (ckpool_t *)arg;
 
 	rename_proc("watchdog");
 	while (42) {
+		time_t relaunch_t;
 		int pid;
 
 		pid = waitpid(0, NULL, 0);
+		relaunch_t = time(NULL);
+		if (relaunch_t == last_relaunch_t) {
+			LOGEMERG("Respawning processes too fast, exiting!");
+			break;
+		}
+		last_relaunch_t = relaunch_t;
 		if (pid == ckp->generator.pid) {
 			LOGERR("Generator process dead! Relaunching");
 			launch_process(&ckp->generator);
