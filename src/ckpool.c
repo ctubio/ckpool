@@ -87,7 +87,8 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		fclose(fp);
 		if (ret == 1 && !(kill(oldpid, 0))) {
 			if (!ckp->killold) {
-				LOGEMERG("Process %s pid %d still exists", path, oldpid);
+				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
+					 path, oldpid);
 				return false;
 			}
 			if (kill(oldpid, 9)) {
