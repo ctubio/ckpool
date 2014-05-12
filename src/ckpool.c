@@ -215,6 +215,7 @@ static void sighandler(int sig)
 		sleep(1);
 		__shutdown_children(global_ckp, SIGKILL);
 		pthread_cancel(global_ckp->pth_listener);
+		exit(0);
 	} else {
 		__shutdown_children(global_ckp, SIGKILL);
 		exit(1);
@@ -278,29 +279,6 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->startdiff, json_conf, "startdiff");
 	json_get_string(&ckp->logdir, json_conf, "logdir");
 	json_decref(json_conf);
-}
-
-static void test_functions(ckpool_t *ckp)
-{
-	char *path = ckp->generator.us.path, *buf;
-	int genfd;
-
-	genfd = open_unix_client(ckp->generator.us.path);
-	if (genfd < 0) {
-		LOGWARNING("Failed to open generator socket %s", path);
-		return;
-	}
-	send_unix_msg(genfd, "getbase");
-	buf = recv_unix_msg(genfd);
-	dealloc(buf);
-#if 0
-	genfd = open_unix_client(ckp->generator.us.path);
-	if (genfd < 0) {
-		LOGWARNING("Failed to open generator socket %s", path);
-		return;
-	}
-	send_unix_msg(genfd, "shutdown");
-#endif
 }
 
 static void prepare_generator(ckpool_t *ckp)
@@ -459,15 +437,13 @@ int main(int argc, char **argv)
 	launch_process(&ckp.stratifier);
 	launch_process(&ckp.connector);
 
+	create_pthread(&ckp.pth_watchdog, watchdog, &ckp);
+
 	handler.sa_handler = &sighandler;
 	handler.sa_flags = 0;
 	sigemptyset(&handler.sa_mask);
 	sigaction(SIGTERM, &handler, NULL);
 	sigaction(SIGINT, &handler, NULL);
-
-	test_functions(&ckp);
-
-	create_pthread(&ckp.pth_watchdog, watchdog, &ckp);
 
 	/* Shutdown from here if the listener is sent a shutdown message */
 	join_pthread(ckp.pth_listener);
