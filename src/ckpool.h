@@ -42,9 +42,13 @@ struct ckpool_instance {
 
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;
-	proc_instance_t generator;
-	proc_instance_t stratifier;
-	proc_instance_t connector;
+
+	int proc_instances;
+	proc_instance_t **children;
+
+	proc_instance_t *generator;
+	proc_instance_t *stratifier;
+	proc_instance_t *connector;
 
 	/* Threads of main process */
 	pthread_t pth_listener;

@@ -87,7 +87,7 @@ retry:
 	} else if (!strncasecmp(buf, "submitblock:", 12)) {
 		LOGNOTICE("Submitting block data!");
 		if (submit_block(cs, buf + 12))
-			send_proc(&ckp->stratifier, "update");
+			send_proc(ckp->stratifier, "update");
 		/* FIXME Add logging of block solves */
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Generator received ping request");

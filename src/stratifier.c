@@ -390,7 +390,7 @@ static void update_base(ckpool_t *ckp)
 	json_t *val;
 	char *buf;
 
-	buf = send_recv_proc(&ckp->generator, "getbase");
+	buf = send_recv_proc(ckp->generator, "getbase");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get base from generator in update_base");
 		return;
@@ -720,7 +720,7 @@ static void *blockupdate(void *arg)
 	char request[8];
 
 	rename_proc("blockupdate");
-	buf = send_recv_proc(&ckp->generator, "getbest");
+	buf = send_recv_proc(ckp->generator, "getbest");
 	if (buf && strncasecmp(buf, "Failed", 6))
 		sprintf(request, "getbest");
 	else
@@ -729,11 +729,11 @@ static void *blockupdate(void *arg)
 	memset(hash, 0, 68);
 	while (42) {
 		dealloc(buf);
-		buf = send_recv_proc(&ckp->generator, request);
+		buf = send_recv_proc(ckp->generator, request);
 		if (buf && strcmp(buf, hash) && strncasecmp(buf, "Failed", 6)) {
 			strcpy(hash, buf);
 			LOGNOTICE("Block hash changed to %s", hash);
-			send_proc(&ckp->stratifier, "update");
+			send_proc(ckp->stratifier, "update");
 		} else
 			cksleep_ms(ckp->blockpoll);
 	}
@@ -996,7 +996,7 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 	strcat(gbt_block, hexcoinbase);
 	if (wb->transactions)
 		realloc_strcat(&gbt_block, wb->txn_data);
-	send_proc(&wb->ckp->generator, gbt_block);
+	send_proc(wb->ckp->generator, gbt_block);
 	free(gbt_block);
 }
 
@@ -1289,7 +1289,7 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 		 * the stratum instance data. Clients will just reconnect. */
 		LOGINFO("Dropping unauthorised client %d", client->id);
 		sprintf(buf, "dropclient=%d", client->id);
-		send_proc(&client->ckp->connector, buf);
+		send_proc(client->ckp->connector, buf);
 		goto out;
 	}
 
@@ -1486,7 +1486,7 @@ static void *stratum_sender(void *arg)
 		 * connector process to be delivered */
 		json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
 		s = json_dumps(msg->json_msg, 0);
-		send_proc(&ckp->connector, s);
+		send_proc(ckp->connector, s);
 		free(s);
 
 		json_decref(msg->json_msg);

@@ -150,7 +150,7 @@ static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instanc
 	if (fd == -1)
 		return;
 	sprintf(buf, "dropclient=%d", client->id);
-	send_proc(&ckp->stratifier, buf);
+	send_proc(ckp->stratifier, buf);
 }
 
 static void send_client(conn_instance_t *ci, int id, char *buf);
@@ -222,7 +222,7 @@ reparse:
 
 		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 		s = json_dumps(val, 0);
-		send_proc(&ckp->stratifier, s);
+		send_proc(ckp->stratifier, s);
 		free(s);
 		json_decref(val);
 	}

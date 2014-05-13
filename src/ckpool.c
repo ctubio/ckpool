@@ -175,23 +175,38 @@ static void launch_process(proc_instance_t *pi)
 	pi->pid = pid;
 }
 
+static void launch_processes(ckpool_t *ckp)
+{
+	int i;
+
+	for (i = 0; i < ckp->proc_instances; i++)
+		launch_process(ckp->children[i]);
+}
+
 static void clean_up(ckpool_t *ckp)
 {
+	int i, children = ckp->proc_instances;
+
 	rm_namepid(&ckp->main);
 	dealloc(ckp->socket_dir);
+	ckp->proc_instances = 0;
+	for (i = 0; i < children; i++)
+		dealloc(ckp->children[i]);
+	dealloc(ckp->children);
 }
 
 static void __shutdown_children(ckpool_t *ckp, int sig)
 {
+	int i;
+
 	pthread_cancel(ckp->pth_watchdog);
 	join_pthread(ckp->pth_watchdog);
 
-	if (!kill(ckp->generator.pid, 0))
-		kill(ckp->generator.pid, sig);
-	if (!kill(ckp->stratifier.pid, 0))
-		kill(ckp->stratifier.pid, sig);
-	if (!kill(ckp->connector.pid, 0))
-		kill(ckp->connector.pid, sig);
+	for (i = 0; i < ckp->proc_instances; i++) {
+		pid_t pid = ckp->children[i]->pid;
+		if (!kill(pid, 0))
+			kill(pid, sig);
+	}
 }
 
 static void shutdown_children(ckpool_t *ckp, int sig)
@@ -204,14 +219,16 @@ static void shutdown_children(ckpool_t *ckp, int sig)
 
 static void sighandler(int sig)
 {
+	int i;
+
 	pthread_cancel(global_ckp->pth_watchdog);
 	join_pthread(global_ckp->pth_watchdog);
 
 	/* First attempt, send a shutdown message */
 	send_proc(&global_ckp->main, "shutdown");
-	send_proc(&global_ckp->generator, "shutdown");
-	send_proc(&global_ckp->stratifier, "shutdown");
-	send_proc(&global_ckp->connector, "shutdown");
+
+	for (i = 0; i < global_ckp->proc_instances; i++)
+		send_proc(global_ckp->children[i], "shutdown");
 
 	if (sig != 9) {
 		/* Wait a second, then send SIGTERM */
@@ -287,37 +304,32 @@ static void parse_config(ckpool_t *ckp)
 	json_decref(json_conf);
 }
 
-static void prepare_generator(ckpool_t *ckp)
+static proc_instance_t *prepare_child(ckpool_t *ckp, int (*process)(), char *name)
 {
-	proc_instance_t *pi = &ckp->generator;
+	proc_instance_t *pi = ckzalloc(sizeof(proc_instance_t));
 
+	ckp->children = realloc(ckp->children, sizeof(proc_instance_t *) * (ckp->proc_instances + 1));
+	ckp->children[ckp->proc_instances++] = pi;
 	pi->ckp = ckp;
-	pi->processname = strdup("generator");
+	pi->processname = name;
 	pi->sockname = pi->processname;
-	pi->process = &generator;
+	pi->process = process;
 	create_process_unixsock(pi);
+	return pi;
 }
 
-static void prepare_stratifier(ckpool_t *ckp)
+static proc_instance_t *child_by_pid(ckpool_t *ckp, pid_t pid)
 {
-	proc_instance_t *pi = &ckp->stratifier;
+	proc_instance_t *pi = NULL;
+	int i;
 
-	pi->ckp = ckp;
-	pi->processname = strdup("stratifier");
-	pi->sockname = pi->processname;
-	pi->process = &stratifier;
-	create_process_unixsock(pi);
-}
-
-static void prepare_connector(ckpool_t *ckp)
-{
-	proc_instance_t *pi = &ckp->connector;
-
-	pi->ckp = ckp;
-	pi->processname = strdup("connector");
-	pi->sockname = pi->processname;
-	pi->process = &connector;
-	create_process_unixsock(pi);
+	for (i = 0; i < ckp->proc_instances; i++) {
+		if (ckp->children[i]->pid == pid) {
+			pi = ckp->children[i];
+			break;
+		}
+	}
+	return pi;
 }
 
 static void *watchdog(void *arg)
@@ -327,6 +339,7 @@ static void *watchdog(void *arg)
 
 	rename_proc("watchdog");
 	while (42) {
+		proc_instance_t *pi;
 		time_t relaunch_t;
 		int pid;
 
@@ -337,15 +350,10 @@ static void *watchdog(void *arg)
 			break;
 		}
 		last_relaunch_t = relaunch_t;
-		if (pid == ckp->generator.pid) {
-			LOGERR("Generator process dead! Relaunching");
-			launch_process(&ckp->generator);
-		} else if (pid == ckp->stratifier.pid) {
-			LOGERR("Stratifier process dead! Relaunching");
-			launch_process(&ckp->stratifier);
-		} else if (pid == ckp->connector.pid) {
-			LOGERR("Connector process dead! Relaunching");
-			launch_process(&ckp->connector);
+		pi = child_by_pid(ckp, pid);
+		if (pi) {
+			LOGERR("%s process dead! Relaunching", pi->processname);
+			launch_process(pi);
 		} else {
 			LOGEMERG("Unknown child process %d dead, exiting!", pid);
 			break;
@@ -448,12 +456,11 @@ int main(int argc, char **argv)
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */
-	prepare_generator(&ckp);
-	prepare_stratifier(&ckp);
-	prepare_connector(&ckp);
-	launch_process(&ckp.generator);
-	launch_process(&ckp.stratifier);
-	launch_process(&ckp.connector);
+	ckp.generator = prepare_child(&ckp, &generator, "generator");
+	ckp.stratifier = prepare_child(&ckp, &stratifier, "stratifier");
+	ckp.connector = prepare_child(&ckp, &connector, "connector");
+
+	launch_processes(&ckp);
 
 	create_pthread(&ckp.pth_watchdog, watchdog, &ckp);
 
