@@ -7,10 +7,12 @@
  * any later version.  See COPYING for more details.
  */
 
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <jansson.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -279,10 +281,44 @@ static void json_get_int(int *store, json_t *val, const char *res)
 	*store = json_integer_value(entry);
 }
 
+static void parse_btcds(ckpool_t *ckp, json_t *arr_val, int arr_size)
+{
+	json_t *val;
+	int i;
+
+	ckp->btcds = arr_size;
+	ckp->btcdurl = ckzalloc(sizeof(char *) * arr_size);
+	ckp->btcdauth = ckzalloc(sizeof(char *) * arr_size);
+	ckp->btcdpass = ckzalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		val = json_array_get(arr_val, i);
+		json_get_string(&ckp->btcdurl[i], val, "btcdurl");
+		json_get_string(&ckp->btcdauth[i], val, "btcdauth");
+		json_get_string(&ckp->btcdpass[i], val, "btcdpass");
+	}
+}
+
+static void parse_proxies(ckpool_t *ckp, json_t *arr_val, int arr_size)
+{
+	json_t *val;
+	int i;
+
+	ckp->proxies = arr_size;
+	ckp->proxyurl = ckzalloc(sizeof(char *) * arr_size);
+	ckp->proxyauth = ckzalloc(sizeof(char *) * arr_size);
+	ckp->proxypass = ckzalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		val = json_array_get(arr_val, i);
+		json_get_string(&ckp->proxyurl[i], val, "proxyurl");
+		json_get_string(&ckp->proxyauth[i], val, "proxyauth");
+		json_get_string(&ckp->proxypass[i], val, "proxypass");
+	}
+}
+
 static void parse_config(ckpool_t *ckp)
 {
+	json_t *json_conf, *arr_val;
 	json_error_t err_val;
-	json_t *json_conf;
 
 	json_conf = json_load_file(ckp->config, JSON_DISABLE_EOF_CHECK, &err_val);
 	if (!json_conf) {
@@ -290,9 +326,13 @@ static void parse_config(ckpool_t *ckp)
 			   err_val.line, err_val.text);
 		return;
 	}
-	json_get_string(&ckp->btcdurl, json_conf, "btcdurl");
-	json_get_string(&ckp->btcdauth, json_conf, "btcdauth");
-	json_get_string(&ckp->btcdpass, json_conf, "btcdpass");
+	arr_val = json_object_get(json_conf, "btcd");
+	if (arr_val && json_is_array(arr_val)) {
+		int arr_size = json_array_size(arr_val);
+
+		if (arr_size)
+			parse_btcds(ckp, arr_val, arr_size);
+	}
 	json_get_string(&ckp->btcaddress, json_conf, "btcaddress");
 	json_get_string(&ckp->btcsig, json_conf, "btcsig");
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
@@ -301,6 +341,13 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->mindiff, json_conf, "mindiff");
 	json_get_int(&ckp->startdiff, json_conf, "startdiff");
 	json_get_string(&ckp->logdir, json_conf, "logdir");
+	arr_val = json_object_get(json_conf, "proxy");
+	if (arr_val && json_is_array(arr_val)) {
+		int arr_size = json_array_size(arr_val);
+
+		if (arr_size)
+			parse_proxies(ckp, arr_val, arr_size);
+	}
 	json_decref(json_conf);
 }
 
@@ -366,14 +413,15 @@ static void *watchdog(void *arg)
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
-	int len, c, ret;
+	int len, c, ret, i;
+	char buf[16] = {};
 	ckpool_t ckp;
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:kl:n:s:")) != -1) {
+	while ((c = getopt(argc, argv, "c:kl:n:ps:")) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
@@ -391,6 +439,9 @@ int main(int argc, char **argv)
 			case 'n':
 				ckp.name = optarg;
 				break;
+			case 'p':
+				ckp.proxy = true;
+				break;
 			case 's':
 				ckp.socket_dir = strdup(optarg);
 				break;
@@ -398,8 +449,14 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (!ckp.name)
-		ckp.name = strdup("ckpool");
+	if (!ckp.name) {
+		if (ckp.proxy)
+			ckp.name = "ckproxy";
+		else
+			ckp.name = "ckpool";
+	}
+	snprintf(buf, 15, "%s", ckp.name);
+	prctl(PR_SET_NAME, buf, 0, 0, 0);
 	if (!ckp.config) {
 		ckp.config = strdup(ckp.name);
 		realloc_strcat(&ckp.config, ".conf");
@@ -421,12 +478,23 @@ int main(int argc, char **argv)
 
 	parse_config(&ckp);
 	/* Set defaults if not found in config file */
-	if (!ckp.btcdurl)
-		ckp.btcdurl = strdup("localhost:8332");
-	if (!ckp.btcdauth)
-		ckp.btcdauth = strdup("user");
-	if (!ckp.btcdpass)
-		ckp.btcdpass = strdup("pass");
+	if (!ckp.btcds && !ckp.proxy) {
+		ckp.btcds = 1;
+		ckp.btcdurl = ckzalloc(sizeof(char *));
+		ckp.btcdauth = ckzalloc(sizeof(char *));
+		ckp.btcdpass = ckzalloc(sizeof(char *));
+	}
+	if (ckp.btcds) {
+		for (i = 0; i < ckp.btcds; i++) {
+			if (!ckp.btcdurl[i])
+				ckp.btcdurl[i] = strdup("localhost:8332");
+			if (!ckp.btcdauth[i])
+				ckp.btcdauth[i] = strdup("user");
+			if (!ckp.btcdpass[i])
+				ckp.btcdpass[i] = strdup("pass");
+		}
+	}
+
 	if (!ckp.btcaddress)
 		ckp.btcaddress = strdup("15qSxP1SQcUX3o4nhkfdbgyoWEFMomJ4rZ");
 	if (!ckp.blockpoll)
@@ -439,6 +507,8 @@ int main(int argc, char **argv)
 		ckp.startdiff = 42;
 	if (!ckp.logdir)
 		ckp.logdir = strdup("logs");
+	if (ckp.proxy && !ckp.proxies)
+		quit(0, "No proxy entries found in config file %s", ckp.config);
 
 	len = strlen(ckp.logdir);
 	if (memcmp(&ckp.logdir[len], "/", 1))

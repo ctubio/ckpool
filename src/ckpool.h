@@ -55,9 +55,10 @@ struct ckpool_instance {
 	pthread_t pth_watchdog;
 
 	/* Bitcoind data */
-	char *btcdurl;
-	char *btcdauth;
-	char *btcdpass;
+	int btcds;
+	char **btcdurl;
+	char **btcdauth;
+	char **btcdpass;
 	int blockpoll; // How frequently in ms to poll bitcoind for block updates
 
 	/* Difficulty settings */
@@ -71,6 +72,13 @@ struct ckpool_instance {
 	/* Stratum options */
 	int update_interval; // Seconds between stratum updates
 	char *serverurl;
+
+	/* Proxy options */
+	bool proxy;
+	int proxies;
+	char **proxyurl;
+	char **proxyauth;
+	char **proxypass;
 };
 
 ckpool_t *global_ckp;

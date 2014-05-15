@@ -112,13 +112,13 @@ int generator(proc_instance_t *pi)
 	memset(&cs, 0, sizeof(cs));
 	memset(&gbt, 0, sizeof(gbt));
 
-	if (!extract_sockaddr(ckp->btcdurl, &cs.url, &cs.port)) {
-		LOGWARNING("Failed to extract address from %s", ckp->btcdurl);
+	if (!extract_sockaddr(ckp->btcdurl[0], &cs.url, &cs.port)) {
+		LOGWARNING("Failed to extract address from %s", ckp->btcdurl[0]);
 		goto out;
 	}
-	userpass = strdup(ckp->btcdauth);
+	userpass = strdup(ckp->btcdauth[0]);
 	realloc_strcat(&userpass, ":");
-	realloc_strcat(&userpass, ckp->btcdpass);
+	realloc_strcat(&userpass, ckp->btcdpass[0]);
 	cs.auth = http_base64(userpass);
 	if (!cs.auth) {
 		LOGWARNING("Failed to create base64 auth from %s", userpass);
