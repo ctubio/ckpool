@@ -292,9 +292,9 @@ static void parse_btcds(ckpool_t *ckp, json_t *arr_val, int arr_size)
 	ckp->btcdpass = ckzalloc(sizeof(char *) * arr_size);
 	for (i = 0; i < arr_size; i++) {
 		val = json_array_get(arr_val, i);
-		json_get_string(&ckp->btcdurl[i], val, "btcdurl");
-		json_get_string(&ckp->btcdauth[i], val, "btcdauth");
-		json_get_string(&ckp->btcdpass[i], val, "btcdpass");
+		json_get_string(&ckp->btcdurl[i], val, "url");
+		json_get_string(&ckp->btcdauth[i], val, "auth");
+		json_get_string(&ckp->btcdpass[i], val, "pass");
 	}
 }
 
@@ -309,9 +309,9 @@ static void parse_proxies(ckpool_t *ckp, json_t *arr_val, int arr_size)
 	ckp->proxypass = ckzalloc(sizeof(char *) * arr_size);
 	for (i = 0; i < arr_size; i++) {
 		val = json_array_get(arr_val, i);
-		json_get_string(&ckp->proxyurl[i], val, "proxyurl");
-		json_get_string(&ckp->proxyauth[i], val, "proxyauth");
-		json_get_string(&ckp->proxypass[i], val, "proxypass");
+		json_get_string(&ckp->proxyurl[i], val, "url");
+		json_get_string(&ckp->proxyauth[i], val, "auth");
+		json_get_string(&ckp->proxypass[i], val, "pass");
 	}
 }
 

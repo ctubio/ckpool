@@ -101,10 +101,11 @@ out:
 	return ret;
 }
 
+/* FIXME: Hard wired to just use config 0 for now */
 int generator(proc_instance_t *pi)
 {
+	char *url, *auth, *pass, *userpass = NULL;
 	ckpool_t *ckp = pi->ckp;
-	char *userpass = NULL;
 	gbtbase_t gbt;
 	connsock_t cs;
 	int ret = 1;
@@ -112,13 +113,22 @@ int generator(proc_instance_t *pi)
 	memset(&cs, 0, sizeof(cs));
 	memset(&gbt, 0, sizeof(gbt));
 
-	if (!extract_sockaddr(ckp->btcdurl[0], &cs.url, &cs.port)) {
-		LOGWARNING("Failed to extract address from %s", ckp->btcdurl[0]);
+	if (!ckp->proxy) {
+		url = ckp->btcdurl[0];
+		auth = ckp->btcdauth[0];
+		pass = ckp->btcdpass[0];
+	} else {
+		url = ckp->proxyurl[0];
+		auth = ckp->proxyauth[0];
+		pass = ckp->proxypass[0];
+	}
+	if (!extract_sockaddr(url, &cs.url, &cs.port)) {
+		LOGWARNING("Failed to extract address from %s", url);
 		goto out;
 	}
-	userpass = strdup(ckp->btcdauth[0]);
+	userpass = strdup(auth);
 	realloc_strcat(&userpass, ":");
-	realloc_strcat(&userpass, ckp->btcdpass[0]);
+	realloc_strcat(&userpass, pass);
 	cs.auth = http_base64(userpass);
 	if (!cs.auth) {
 		LOGWARNING("Failed to create base64 auth from %s", userpass);
