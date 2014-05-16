@@ -202,6 +202,56 @@ typedef struct unixsock unixsock_t;
 
 typedef struct proc_instance proc_instance_t;
 
+/* No error checking with these, make sure we know they're valid already! */
+static inline void json_strcpy(char *buf, json_t *val, const char *key)
+{
+	strcpy(buf, json_string_value(json_object_get(val, key)));
+}
+
+static inline void json_dblcpy(double *dbl, json_t *val, const char *key)
+{
+	*dbl = json_real_value(json_object_get(val, key));
+}
+
+static inline void json_uintcpy(uint32_t *u32, json_t *val, const char *key)
+{
+	*u32 = (uint32_t)json_integer_value(json_object_get(val, key));
+}
+
+static inline void json_uint64cpy(uint64_t *u64, json_t *val, const char *key)
+{
+	*u64 = (uint64_t)json_integer_value(json_object_get(val, key));
+}
+static inline void json_intcpy(int *i, json_t *val, const char *key)
+{
+	*i = json_integer_value(json_object_get(val, key));
+}
+
+static inline void json_strdup(char **buf, json_t *val, const char *key)
+{
+	*buf = strdup(json_string_value(json_object_get(val, key)));
+}
+
+static inline void json_set_string(json_t *val, const char *key, const char *str)
+{
+	json_object_set_nocheck(val, key, json_string(str));
+}
+
+static inline void json_set_int(json_t *val, const char *key, int integer)
+{
+	json_object_set_new_nocheck(val, key, json_integer(integer));
+}
+
+static inline void json_set_double(json_t *val, const char *key, double real)
+{
+	json_object_set_new_nocheck(val, key, json_real(real));
+}
+
+static inline void json_set_bool(json_t *val, const char *key, bool boolean)
+{
+	json_object_set_new_nocheck(val, key, json_boolean(boolean));
+}
+
 void rename_proc(const char *name);
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);
 void join_pthread(pthread_t thread);

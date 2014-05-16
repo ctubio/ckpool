@@ -460,7 +460,7 @@ retry:
 			LOGERR("Select failed in write_socket");
 		goto out;
 	}
-	ret = write(fd, buf, nbyte);
+	ret = write_length(fd, buf, nbyte);
 	if (ret < 0)
 		LOGWARNING("Failed to write in write_socket");
 out:
