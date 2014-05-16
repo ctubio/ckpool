@@ -27,6 +27,7 @@ struct proxy_instance {
 	char *enonce1;
 	char *enonce1bin;
 	char *sessionid;
+	int nonce2len;
 
 	tv_t last_message;
 
@@ -196,8 +197,83 @@ static bool connect_proxy(connsock_t *cs)
 	return true;
 }
 
+/* Decode a string that should have a json message and return just the contents
+ * of the result key or NULL. */
+static json_t *json_result(json_t *val)
+{
+	json_t *res_val = NULL, *err_val;
+
+	res_val = json_object_get(val, "result");
+	if (json_is_null(res_val))
+		res_val = NULL;
+	if (!res_val) {
+		char *ss;
+
+		err_val = json_object_get(val, "error");
+		if (err_val)
+			ss = json_dumps(err_val, 0);
+		else
+			ss = strdup("(unknown reason)");
+
+		LOGWARNING("JSON-RPC decode failed: %s", ss);
+		free(ss);
+	}
+	return res_val;
+}
+
+/* Parse a string and return the json value it contains, if any, and the
+ * result in res_val. Return NULL if no result key is found. */
+static json_t *json_msg_result(char *msg, json_t **res_val)
+{
+	json_error_t err;
+	json_t *val;
+
+	*res_val = NULL;
+	val = json_loads(msg, 0, &err);
+	if (!val) {
+		LOGWARNING("Json decode failed(%d): %s", err.line, err.text);
+		goto out;
+	}
+	*res_val = json_result(val);
+	if (!*res_val) {
+		LOGWARNING("No json result found");
+		json_decref(val);
+		val = NULL;
+	}
+
+out:
+	return val;
+}
+
+/* For some reason notify is buried at various different array depths so use
+ * a reentrant function to try and find it. */
+static json_t *find_notify(json_t *val)
+{
+	int arr_size, i;
+	json_t *ret;
+	const char *entry;
+
+	if (!json_is_array(val))
+		return NULL;
+	arr_size = json_array_size(val);
+	entry = json_string_value(json_array_get(val, 0));
+	if (entry && !strncasecmp(entry, "mining.notify", 13))
+		return val;
+	for (i = 0; i < arr_size; i++) {
+		json_t *arr_val;
+
+		arr_val = json_array_get(val, i);
+		ret = find_notify(arr_val);
+		if (ret)
+			break;
+	}
+	return ret;
+}
+
 static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 {
+	json_t *val = NULL, *res_val, *notify_val, *tmp;
+	const char *string;
 	bool ret = false;
 	int size;
 
@@ -206,10 +282,63 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Failed to receive line in parse_subscribe");
 		goto out;
 	}
-	LOGWARNING("Got message: %s", cs->buf);
-	ret = true;
+	val = json_msg_result(cs->buf, &res_val);
+	if (!val) {
+		LOGWARNING("Failed to get a json result in parse_subscribe, got: %s", cs->buf);
+		goto out;
+	}
+	if (!json_is_array(res_val)) {
+		LOGWARNING("Result in parse_subscribe not an array");
+		goto out;
+	}
+	size = json_array_size(res_val);
+	if (size < 3) {
+		LOGWARNING("Result in parse_subscribe array too small");
+		goto out;
+	}
+	notify_val = find_notify(res_val);
+	if (!notify_val) {
+		LOGWARNING("Failed to find notify in parse_subscribe");
+		goto out;
+	}
+	if (!proxi->no_params && !proxi->no_sessionid && json_array_size(notify_val) > 1) {
+		/* Copy the session id if one exists. */
+		string = json_string_value(json_array_get(notify_val, 1));
+		if (string)
+			proxi->sessionid = strdup(string);
+	}
+	tmp = json_array_get(res_val, 1);
+	if (!tmp || !json_is_string(tmp)) {
+		LOGWARNING("Failed to parse enonce1 in parse_subscribe");
+		goto out;
+	}
+	string = json_string_value(tmp);
+	if (strlen(string) < 1) {
+		LOGWARNING("Invalid string length for enonce1 in parse_subscribe");
+		goto out;
+	}
+	proxi->enonce1 = strdup(string);
+	size = strlen(proxi->enonce1) / 2;
+	proxi->enonce1bin = ckalloc(size);
+	hex2bin(proxi->enonce1bin, proxi->enonce1, size);
+	tmp = json_array_get(res_val, 2);
+	if (!tmp || !json_is_integer(tmp)) {
+		LOGWARNING("Failed to parse nonce2len in parse_subscribe");
+		goto out;
+	}
+	size = json_integer_value(tmp);
+	if (size < 1 || size > 8) {
+		LOGWARNING("Invalid nonce2len %d in parse_subscribe", size);
+		goto out;
+	}
+	proxi->nonce2len = size;
+
+	LOGWARNING("Found notify with enonce %s nonce2len %d !", proxi->enonce1,
+		   proxi->nonce2len);
 
 out:
+	if (val)
+		json_decref(val);
 	return ret;
 }
 
@@ -303,7 +432,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 		      const char *auth, const char *pass)
 {
 	proxy_instance_t proxi;
-	int ret;
+	int ret = 1;
 
 	memset(&proxi, 0, sizeof(proxi));
 	if (!connect_proxy(cs)) {
