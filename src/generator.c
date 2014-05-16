@@ -39,6 +39,7 @@ struct proxy_instance {
 	int id; /* Message id for sending stratum messages */
 	bool no_sessionid; /* Doesn't support session id resume on subscribe */
 	bool no_params; /* Doesn't want any parameters on subscribe */
+	bool notified; /* Received template for work */
 };
 
 typedef struct proxy_instance proxy_instance_t;
@@ -333,8 +334,9 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 	}
 	proxi->nonce2len = size;
 
-	LOGWARNING("Found notify with enonce %s nonce2len %d !", proxi->enonce1,
+	LOGINFO("Found notify with enonce %s nonce2len %d !", proxi->enonce1,
 		   proxi->nonce2len);
+	ret = true;
 
 out:
 	if (val)
@@ -402,10 +404,93 @@ out:
 	return ret;
 }
 
+#define parse_diff(a, b) true
+#define parse_reconnect(a, b) true
+#define send_version(a, b) true
+#define show_message(a, b) true
+#define parse_notify(a, b) true
+
+static bool parse_method(proxy_instance_t *proxi, const char *msg)
+{
+	json_t *val = NULL, *method, *err_val, *params;
+	json_error_t err;
+	bool ret = false;
+	const char *buf;
+
+	val = json_loads(msg, 0, &err);
+	if (!val) {
+		LOGWARNING("JSON decode failed(%d): %s", err.line, err.text);
+		goto out;
+	}
+
+	method = json_object_get(val, "method");
+	if (!method) {
+		LOGDEBUG("Failed to find method in json for parse_method");
+		goto out;
+	}
+	err_val = json_object_get(val, "error");
+	params = json_object_get(val, "params");
+
+	if (err_val && !json_is_null(err_val)) {
+		char *ss;
+
+		if (err_val)
+			ss = json_dumps(err_val, 0);
+		else
+			ss = strdup("(unknown reason)");
+
+		LOGINFO("JSON-RPC method decode failed: %s", ss);
+		free(ss);
+		goto out;
+	}
+
+	if (!json_is_string(method)) {
+		LOGINFO("Method is not string in parse_method");
+		goto out;
+	}
+	buf = json_string_value(method);
+	if (!buf || strlen(buf) < 1) {
+		LOGINFO("Invalid string for method in parse_method");
+		goto out;
+	}
+
+	if (!strncasecmp(buf, "mining.notify", 13)) {
+		if (parse_notify(proxi, params))
+			proxi->notified = ret = true;
+		else
+			proxi->notified = ret = false;
+		goto out;
+	}
+
+	if (!strncasecmp(buf, "mining.set_difficulty", 21)) {
+		ret = parse_diff(proxi, params);
+		goto out;
+	}
+
+	if (!strncasecmp(buf, "client.reconnect", 16)) {
+		ret = parse_reconnect(proxi, params);
+		goto out;
+	}
+
+	if (!strncasecmp(buf, "client.get_version", 18)) {
+		ret =  send_version(proxi, val);
+		goto out;
+	}
+
+	if (!strncasecmp(buf, "client.show_message", 19)) {
+		ret = show_message(proxi, params);
+		goto out;
+	}
+out:
+	if (val)
+		json_decref(val);
+	return ret;
+}
+
 static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi, const char *auth,
 			 const char *pass)
 {
-	json_t *req;
+	json_t *val = NULL, *res_val, *req;
 	bool ret;
 
 	req = json_pack("{s:i,s:s,s:[s,s]}",
@@ -419,7 +504,36 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi, const char *au
 		close(cs->fd);
 		goto out;
 	}
+
+	/* Read and parse any extra methods sent. Anything left in the buffer
+	 * should be the response to our auth request. */
+	do {
+		int size;
+
+		size = read_socket_line(cs);
+		if (size < 1) {
+			LOGWARNING("Failed to receive line in auth_stratum");
+			ret = false;
+			goto out;
+		}
+		ret = parse_method(proxi, cs->buf);
+	} while (ret);
+
+	val = json_msg_result(cs->buf, &res_val);
+	if (!val) {
+		LOGWARNING("Failed to get a json result in auth_stratum, got: %s", cs->buf);
+		goto out;
+	}
+
+	ret = json_is_true(res_val);
+	if (!ret) {
+		LOGWARNING("Failed to authorise in auth_stratum");
+		goto out;
+	}
+	LOGINFO("Auth success in auth_stratum!");
 out:
+	if (val)
+		json_decref(val);
 	return ret;
 }
 
