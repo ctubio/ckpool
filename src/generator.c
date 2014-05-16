@@ -18,6 +18,26 @@
 #include "libckpool.h"
 #include "generator.h"
 #include "bitcoin.h"
+#include "uthash.h"
+
+struct notify_instance {
+	/* Hash table data */
+	UT_hash_handle hh;
+	int id;
+
+	char prevhash[68];
+	char *jobid;
+	char *coinbase1;
+	char *coinbase2;
+	int merkles;
+	char merklehash[16][68];
+	char nbit[12];
+	char ntime[12];
+	char bbversion[12];
+	bool clean;
+};
+
+typedef struct notify_instance notify_instance_t;
 
 /* Per proxied pool instance data */
 struct proxy_instance {
@@ -26,6 +46,7 @@ struct proxy_instance {
 
 	char *enonce1;
 	char *enonce1bin;
+	int nonce1len;
 	char *sessionid;
 	int nonce2len;
 
@@ -40,9 +61,14 @@ struct proxy_instance {
 	bool no_sessionid; /* Doesn't support session id resume on subscribe */
 	bool no_params; /* Doesn't want any parameters on subscribe */
 	bool notified; /* Received template for work */
+
+	pthread_mutex_t notify_lock;
+	notify_instance_t *notify_instances;
+	int notify_id;
 };
 
 typedef struct proxy_instance proxy_instance_t;
+
 
 static int gen_loop(proc_instance_t *pi, connsock_t *cs)
 {
@@ -319,9 +345,9 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		goto out;
 	}
 	proxi->enonce1 = strdup(string);
-	size = strlen(proxi->enonce1) / 2;
-	proxi->enonce1bin = ckalloc(size);
-	hex2bin(proxi->enonce1bin, proxi->enonce1, size);
+	proxi->nonce1len = strlen(proxi->enonce1) / 2;
+	proxi->enonce1bin = ckalloc(proxi->nonce1len);
+	hex2bin(proxi->enonce1bin, proxi->enonce1, proxi->nonce1len);
 	tmp = json_array_get(res_val, 2);
 	if (!tmp || !json_is_integer(tmp)) {
 		LOGWARNING("Failed to parse nonce2len in parse_subscribe");
@@ -408,7 +434,75 @@ out:
 #define parse_reconnect(a, b) true
 #define send_version(a, b) true
 #define show_message(a, b) true
-#define parse_notify(a, b) true
+
+static bool parse_notify(proxy_instance_t *proxi, json_t *val)
+{
+	const char *prev_hash, *bbversion, *nbit, *ntime;
+	char *job_id, *coinbase1, *coinbase2;
+	bool clean, ret = false;
+	notify_instance_t *ni;
+	int merkles, i;
+	json_t *arr;
+
+	arr = json_array_get(val, 4);
+	if (!arr || !json_is_array(arr))
+		goto out;
+
+	merkles = json_array_size(arr);
+	job_id = json_array_string(val, 0);
+	prev_hash = __json_array_string(val, 1);
+	coinbase1 = json_array_string(val, 2);
+	coinbase2 = json_array_string(val, 3);
+	bbversion = __json_array_string(val, 5);
+	nbit = __json_array_string(val, 6);
+	ntime = __json_array_string(val, 7);
+	clean = json_is_true(json_array_get(val, 8));
+	if (!job_id || !prev_hash || !coinbase1 || !coinbase2 || !bbversion || !nbit || !ntime) {
+		if (job_id)
+			free(job_id);
+		if (coinbase1)
+			free(coinbase1);
+		if (coinbase2)
+			free(coinbase2);
+		goto out;
+	}
+
+	LOGDEBUG("New notify");
+	ni = ckzalloc(sizeof(notify_instance_t));
+	ni->jobid = job_id;
+	LOGDEBUG("Job ID %s", job_id);
+	ni->coinbase1 = coinbase1;
+	LOGDEBUG("Coinbase1 %s", coinbase1);
+	ni->coinbase2 = coinbase2;
+	LOGDEBUG("Coinbase2 %s", coinbase2);
+	memcpy(ni->prevhash, prev_hash, 65);
+	LOGDEBUG("Prevhash %s", prev_hash);
+	memcpy(ni->bbversion, bbversion, 9);
+	LOGDEBUG("BBVersion %s", bbversion);
+	memcpy(ni->nbit, nbit, 9);
+	LOGDEBUG("Nbit %s", nbit);
+	memcpy(ni->ntime, ntime, 9);
+	LOGDEBUG("Ntime %s", ntime);
+	ni->clean = clean;
+	LOGDEBUG("Clean %s", clean ? "true" : "false");
+	LOGDEBUG("Merkles %d", merkles);
+	for (i = 0; i < merkles; i++) {
+		const char *merkle = __json_array_string(arr, i);
+
+		LOGDEBUG("Merkle %d %s", i, merkle);
+		memcpy(&ni->merklehash[i][0], merkle, 65);
+	}
+	ni->merkles = merkles;
+	ret = true;
+
+	mutex_lock(&proxi->notify_lock);
+	ni->id = proxi->notify_id++;
+	HASH_ADD_INT(proxi->notify_instances, id, ni);
+	mutex_unlock(&proxi->notify_lock);
+
+out:
+	return ret;
+}
 
 static bool parse_method(proxy_instance_t *proxi, const char *msg)
 {
@@ -567,6 +661,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 			   cs->url, cs->port, auth, pass);
 		goto out;
 	}
+	mutex_init(&proxi.notify_lock);
 
 	ret = proxy_loop(pi, cs);
 out:

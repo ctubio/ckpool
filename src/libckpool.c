@@ -873,6 +873,37 @@ out:
 }
 
 
+/* Extracts a string value from a json array with error checking. To be used
+ * when the value of the string returned is only examined and not to be stored.
+ * See json_array_string below */
+const char *__json_array_string(json_t *val, unsigned int entry)
+{
+	json_t *arr_entry;
+
+	if (json_is_null(val))
+		return NULL;
+	if (!json_is_array(val))
+		return NULL;
+	if (entry > json_array_size(val))
+		return NULL;
+	arr_entry = json_array_get(val, entry);
+	if (!json_is_string(arr_entry))
+		return NULL;
+
+	return json_string_value(arr_entry);
+}
+
+/* Creates a freshly malloced dup of __json_array_string */
+char *json_array_string(json_t *val, unsigned int entry)
+{
+	const char *buf = __json_array_string(val, entry);
+
+	if (buf)
+		return strdup(buf);
+	return NULL;
+}
+
+
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
 	char *http_req = NULL;
