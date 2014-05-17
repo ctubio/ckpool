@@ -142,10 +142,13 @@ static struct {
 	double diff;
 
 	char enonce1[32];
+	uchar enonce1bin[16];
+	int enonce1constlen;
 
 	int nonce2len;
-	int subnonce2len;
+	int enonce2constlen;
 	uint32_t subnonce2;
+	int enonce2varlen;
 } proxy_base;
 
 static uint64_t workbase_id;
@@ -340,14 +343,60 @@ static void purge_share_hashtable(uint64_t wb_id)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
 }
 
+static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
+{
+	workbase_t *tmp, *tmpa;
+	int len, ret;
+
+	wb->gentime = time(NULL);
+
+	len = strlen(ckp->logdir) + 8 + 1 + 16;
+	wb->logdir = ckalloc(len);
+
+	ck_wlock(&workbase_lock);
+	wb->id = workbase_id++;
+
+	if (strncmp(wb->prevhash, lasthash, 64)) {
+		*new_block = true;
+		memcpy(lasthash, wb->prevhash, 65);
+		blockchange_id = wb->id;
+	}
+	if (*new_block) {
+		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
+		ret = mkdir(wb->logdir, 0700);
+		if (unlikely(ret && errno != EEXIST))
+			quit(1, "Failed to create log directory %s", wb->logdir);
+	}
+	sprintf(wb->idstring, "%016lx", wb->id);
+	/* Do not store the trailing slash for the subdir */
+	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
+	ret = mkdir(wb->logdir, 0700);
+	if (unlikely(ret && errno != EEXIST))
+		quit(1, "Failed to create log directory %s", wb->logdir);
+	HASH_ITER(hh, workbases, tmp, tmpa) {
+		if (HASH_COUNT(workbases) < 3)
+			break;
+		/*  Age old workbases older than 10 minutes old */
+		if (tmp->gentime < wb->gentime - 600) {
+			HASH_DEL(workbases, tmp);
+			clear_workbase(tmp);
+		}
+	}
+	HASH_ADD_INT(workbases, id, wb);
+	current_workbase = wb;
+	ck_wunlock(&workbase_lock);
+
+	if (*new_block)
+		purge_share_hashtable(wb->id);
+}
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
 static void update_base(ckpool_t *ckp)
 {
-	workbase_t *wb, *tmp, *tmpa;
 	bool new_block = false;
-	int len, ret;
+	workbase_t *wb;
 	json_t *val;
 	char *buf;
 
@@ -396,46 +445,8 @@ static void update_base(ckpool_t *ckp)
 	}
 	json_decref(val);
 	generate_coinbase(ckp, wb);
-	wb->gentime = time(NULL);
 
-	len = strlen(ckp->logdir) + 8 + 1 + 16;
-	wb->logdir = ckalloc(len);
-
-	ck_wlock(&workbase_lock);
-	wb->id = workbase_id++;
-
-	if (strncmp(wb->prevhash, lasthash, 64)) {
-		new_block = true;
-		memcpy(lasthash, wb->prevhash, 65);
-		blockchange_id = wb->id;
-	}
-	if (new_block) {
-		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
-		ret = mkdir(wb->logdir, 0700);
-		if (unlikely(ret && errno != EEXIST))
-			quit(1, "Failed to create log directory %s", wb->logdir);
-	}
-	sprintf(wb->idstring, "%016lx", wb->id);
-	/* Do not store the trailing slash for the subdir */
-	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
-	ret = mkdir(wb->logdir, 0700);
-	if (unlikely(ret && errno != EEXIST))
-		quit(1, "Failed to create log directory %s", wb->logdir);
-	HASH_ITER(hh, workbases, tmp, tmpa) {
-		if (HASH_COUNT(workbases) < 3)
-			break;
-		/*  Age old workbases older than 10 minutes old */
-		if (tmp->gentime < wb->gentime - 600) {
-			HASH_DEL(workbases, tmp);
-			clear_workbase(tmp);
-		}
-	}
-	HASH_ADD_INT(workbases, id, wb);
-	current_workbase = wb;
-	ck_wunlock(&workbase_lock);
-
-	if (new_block)
-		purge_share_hashtable(wb->id);
+	add_base(ckp, wb, &new_block);
 
 	stratum_broadcast_update(new_block);
 }
@@ -459,11 +470,14 @@ static bool update_subscribe(ckpool_t *ckp)
 		proxy_base.diff = 1;
 	/* Length is checked by generator */
 	strcpy(proxy_base.enonce1, json_string_value(json_object_get(val, "enonce1")));
+	proxy_base.enonce1constlen = strlen(proxy_base.enonce1) / 2;
+	hex2bin(proxy_base.enonce1bin, proxy_base.enonce1, proxy_base.enonce1constlen);
 	proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
 	if (proxy_base.nonce2len > 5)
-		proxy_base.subnonce2len = 4;
+		proxy_base.enonce2constlen = 4;
 	else
-		proxy_base.subnonce2len = 2;
+		proxy_base.enonce2constlen = 2;
+	proxy_base.enonce2varlen = proxy_base.nonce2len - proxy_base.enonce2constlen;
 	ck_wunlock(&workbase_lock);
 
 	json_decref(val);
@@ -472,15 +486,65 @@ static bool update_subscribe(ckpool_t *ckp)
 
 static void update_notify(ckpool_t *ckp)
 {
+	bool new_block = false, clean;
+	char header[228];
+	workbase_t *wb;
+	json_t *val;
 	char *buf;
+	int i;
 
 	buf = send_recv_proc(ckp->generator, "getnotify");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get notify from generator in update_notify");
 		return;
 	}
-	LOGWARNING("Notify was %s", buf);
-	free(buf);
+
+	LOGDEBUG("Update notify: %s", buf);
+	wb = ckzalloc(sizeof(workbase_t));
+	wb->ckp = ckp;
+	val = json_loads(buf, 0, NULL);
+	dealloc(buf);
+
+	json_uint64cpy(&wb->id, val, "jobid");
+	json_strcpy(wb->prevhash, val, "prevhash");
+	json_strcpy(wb->coinb1, val, "coinbase1");
+	wb->coinb1len = strlen(wb->coinb1) / 2;
+	hex2bin(wb->coinb1bin, wb->coinb1, wb->coinb1len);
+	json_strcpy(wb->coinb2, val, "coinbase2");
+	wb->coinb2len = strlen(wb->coinb2) / 2;
+	hex2bin(wb->coinb2bin, wb->coinb2, wb->coinb2len);
+	wb->merkle_array = json_copy(json_object_get(val, "merklehash"));
+	wb->merkles = json_array_size(wb->merkle_array);
+	for (i = 0; i < wb->merkles; i++) {
+		strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(wb->merkle_array, i)));
+		hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
+	}
+	json_strcpy(wb->bbversion, val, "bbversion");
+	json_strcpy(wb->nbit, val, "nbit");
+	json_strcpy(wb->ntime, val, "ntime");
+	clean = json_is_true(json_object_get(val, "clean"));
+	json_decref(val);
+	wb->gentime = time(NULL);
+	wb->enonce1varlen = 0;
+	snprintf(header, 225, "%s%s%s%s%s%s%s",
+		 wb->bbversion, wb->prevhash,
+		 "0000000000000000000000000000000000000000000000000000000000000000",
+		 wb->ntime, wb->nbit,
+		 "00000000", /* nonce */
+		 workpadding);
+	LOGDEBUG("Header: %s", header);
+	hex2bin(wb->headerbin, header, 112);
+
+	ck_rlock(&workbase_lock);
+	strcpy(wb->enonce1const, proxy_base.enonce1);
+	memcpy(wb->enonce1constbin, proxy_base.enonce1bin, proxy_base.enonce1constlen);
+	wb->enonce1varlen = wb->enonce2constlen = proxy_base.enonce2constlen;
+	wb->enonce2varlen = proxy_base.enonce2varlen;
+	ck_runlock(&workbase_lock);
+
+	add_base(ckp, wb, &new_block);
+
+	stratum_broadcast_update(new_block | clean);
 }
 
 /* Enter with instance_lock held */
