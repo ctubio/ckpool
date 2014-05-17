@@ -353,6 +353,10 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 	}
 	proxi->enonce1 = strdup(string);
 	proxi->nonce1len = strlen(proxi->enonce1) / 2;
+	if (proxi->nonce1len > 15) {
+		LOGWARNING("Nonce1 too long at %d", proxi->nonce1len);
+		goto out;
+	}
 	proxi->enonce1bin = ckalloc(proxi->nonce1len);
 	hex2bin(proxi->enonce1bin, proxi->enonce1, proxi->nonce1len);
 	tmp = json_array_get(res_val, 2);

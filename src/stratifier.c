@@ -137,6 +137,17 @@ static cklock_t workbase_lock;
 /* For the hashtable of all workbases */
 static workbase_t *workbases;
 static workbase_t *current_workbase;
+
+static struct {
+	double diff;
+
+	char enonce1[32];
+
+	int nonce2len;
+	int subnonce2len;
+	uint32_t subnonce2;
+} proxy_base;
+
 static uint64_t workbase_id;
 static uint64_t blockchange_id;
 static char lasthash[68];
@@ -429,17 +440,34 @@ static void update_base(ckpool_t *ckp)
 	stratum_broadcast_update(new_block);
 }
 
-static void update_subscribe(ckpool_t *ckp)
+static bool update_subscribe(ckpool_t *ckp)
 {
+	json_t *val;
 	char *buf;
 
 	buf = send_recv_proc(ckp->generator, "getsubscribe");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get subscribe from generator in update_notify");
-		return;
+		return false;
 	}
-	LOGWARNING("Subscribe was %s", buf);
+	LOGDEBUG("Update subscribe: %s", buf);
+	val = json_loads(buf, 0, NULL);
 	free(buf);
+
+	ck_wlock(&workbase_lock);
+	if (!proxy_base.diff)
+		proxy_base.diff = 1;
+	/* Length is checked by generator */
+	strcpy(proxy_base.enonce1, json_string_value(json_object_get(val, "enonce1")));
+	proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
+	if (proxy_base.nonce2len > 5)
+		proxy_base.subnonce2len = 4;
+	else
+		proxy_base.subnonce2len = 2;
+	ck_wunlock(&workbase_lock);
+
+	json_decref(val);
+	return true;
 }
 
 static void update_notify(ckpool_t *ckp)
@@ -672,7 +700,8 @@ retry:
 		goto reset;
 	} else if (!strncasecmp(buf, "subscribe", 9)) {
 		/* Proxifier has a new subscription */
-		update_subscribe(ckp);
+		if (!update_subscribe(ckp))
+			goto out;
 		goto reset;
 	} else if (!strncasecmp(buf, "notify", 6)) {
 		/* Proxifier has a new notify ready */
