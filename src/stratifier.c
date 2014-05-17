@@ -429,6 +429,32 @@ static void update_base(ckpool_t *ckp)
 	stratum_broadcast_update(new_block);
 }
 
+static void update_subscribe(ckpool_t *ckp)
+{
+	char *buf;
+
+	buf = send_recv_proc(ckp->generator, "getsubscribe");
+	if (unlikely(!buf)) {
+		LOGWARNING("Failed to get subscribe from generator in update_notify");
+		return;
+	}
+	LOGWARNING("Subscribe was %s", buf);
+	free(buf);
+}
+
+static void update_notify(ckpool_t *ckp)
+{
+	char *buf;
+
+	buf = send_recv_proc(ckp->generator, "getnotify");
+	if (unlikely(!buf)) {
+		LOGWARNING("Failed to get notify from generator in update_notify");
+		return;
+	}
+	LOGWARNING("Notify was %s", buf);
+	free(buf);
+}
+
 /* Enter with instance_lock held */
 static stratum_instance_t *__instance_by_id(int id)
 {
@@ -585,16 +611,21 @@ static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret;
 	unixsock_t *us = &pi->us;
+	tv_t timeout, *to;
 	char *buf = NULL;
 	fd_set readfds;
-	tv_t timeout;
 
 reset:
-	timeout.tv_sec = ckp->update_interval;
+	if (ckp->proxy)
+		to = NULL;
+	else {
+		timeout.tv_sec = ckp->update_interval;
+		to = &timeout;
+	}
 retry:
 	FD_ZERO(&readfds);
 	FD_SET(us->sockd, &readfds);
-	selret = select(us->sockd + 1, &readfds, NULL, NULL, &timeout);
+	selret = select(us->sockd + 1, &readfds, NULL, NULL, to);
 	if (selret < 0) {
 		if (interrupted())
 			goto retry;
@@ -638,6 +669,14 @@ retry:
 		goto out;
 	} else if (!strncasecmp(buf, "update", 6)) {
 		update_base(ckp);
+		goto reset;
+	} else if (!strncasecmp(buf, "subscribe", 9)) {
+		/* Proxifier has a new subscription */
+		update_subscribe(ckp);
+		goto reset;
+	} else if (!strncasecmp(buf, "notify", 6)) {
+		/* Proxifier has a new notify ready */
+		update_notify(ckp);
 		goto reset;
 	} else if (!strncasecmp(buf, "dropclient", 10)) {
 		int client_id;
