@@ -41,6 +41,9 @@ typedef struct notify_instance notify_instance_t;
 
 /* Per proxied pool instance data */
 struct proxy_instance {
+	ckpool_t *ckp;
+	connsock_t *cs;
+
 	char *auth;
 	char *pass;
 
@@ -65,6 +68,10 @@ struct proxy_instance {
 	pthread_mutex_t notify_lock;
 	notify_instance_t *notify_instances;
 	int notify_id;
+
+	pthread_t pth_precv;
+	pthread_t pth_psend;
+	pthread_cond_t psend_cond;
 };
 
 typedef struct proxy_instance proxy_instance_t;
@@ -304,7 +311,7 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 	bool ret = false;
 	int size;
 
-	size = read_socket_line(cs);
+	size = read_socket_line(cs, 5);
 	if (size < 1) {
 		LOGWARNING("Failed to receive line in parse_subscribe");
 		goto out;
@@ -604,7 +611,7 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi, const char *au
 	do {
 		int size;
 
-		size = read_socket_line(cs);
+		size = read_socket_line(cs, 5);
 		if (size < 1) {
 			LOGWARNING("Failed to receive line in auth_stratum");
 			ret = false;
@@ -636,6 +643,20 @@ static int proxy_loop(proc_instance_t *pi, connsock_t *cs)
 	return 0;
 }
 
+static void *proxy_recv(void *arg)
+{
+	proxy_instance_t *pi = (proxy_instance_t *)arg;
+
+	return NULL;
+}
+
+static void *proxy_send(void *arg)
+{
+	proxy_instance_t *pi = (proxy_instance_t *)arg;
+
+	return NULL;
+}
+
 static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 		      const char *auth, const char *pass)
 {
@@ -643,6 +664,9 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 	int ret = 1;
 
 	memset(&proxi, 0, sizeof(proxi));
+	proxi.ckp = ckp;
+	proxi.cs = cs;
+
 	if (!connect_proxy(cs)) {
 		LOGWARNING("FATAL: Failed to connect to %s:%s in proxy_mode!",
 			   cs->url, cs->port);
@@ -662,8 +686,13 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 		goto out;
 	}
 	mutex_init(&proxi.notify_lock);
+	create_pthread(&proxi.pth_precv, proxy_recv, &proxi);
+	cond_init(&proxi.psend_cond);
+	create_pthread(&proxi.pth_psend, proxy_send, &proxi);
 
 	ret = proxy_loop(pi, cs);
+	join_pthread(proxi.pth_precv);
+	join_pthread(proxi.pth_psend);
 out:
 	close(cs->fd);
 	free(proxi.enonce1);

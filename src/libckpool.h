@@ -312,7 +312,7 @@ void block_socket(int fd);
 int bind_socket(char *url, char *port);
 int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
-int read_socket_line(connsock_t *cs);
+int read_socket_line(connsock_t *cs, int timeout);
 void empty_socket(int fd);
 void close_unix_socket(const int sockd, const char *server_path);
 int open_unix_server(const char *server_path);

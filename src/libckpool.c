@@ -469,11 +469,11 @@ out:
 
 /* Peek in a socket, and then receive only one line at a time, allocing enough
  * memory in *buf */
-int read_socket_line(connsock_t *cs)
+int read_socket_line(connsock_t *cs, int timeout)
 {
 	char readbuf[PAGESIZE], *eom = NULL;
 	size_t buflen = 0, bufofs = 0;
-	tv_t timeout = {5, 0};
+	tv_t tv_timeout;
 	int ret, bufsiz;
 	fd_set rd;
 
@@ -485,9 +485,9 @@ int read_socket_line(connsock_t *cs)
 
 		FD_ZERO(&rd);
 		FD_SET(cs->fd, &rd);
-		timeout.tv_sec = 5;
-		timeout.tv_usec = 0;
-		ret = select(cs->fd + 1, &rd, NULL, NULL, &timeout);
+		tv_timeout.tv_sec = timeout;
+		tv_timeout.tv_usec = 0;
+		ret = select(cs->fd + 1, &rd, NULL, NULL, &tv_timeout);
 		if (ret < 0 && interrupted())
 			continue;
 		if (ret < 1) {
@@ -951,7 +951,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("Failed to write to socket in json_rpc_call");
 		goto out_empty;
 	}
-	ret = read_socket_line(cs);
+	ret = read_socket_line(cs, 5);
 	if (ret < 1) {
 		LOGWARNING("Failed to read socket line in json_rpc_call");
 		goto out_empty;
@@ -961,7 +961,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		goto out_empty;
 	}
 	do {
-		ret = read_socket_line(cs);
+		ret = read_socket_line(cs, 5);
 		if (ret < 1) {
 			LOGWARNING("Failed to read http socket lines in json_rpc_call");
 			goto out_empty;
