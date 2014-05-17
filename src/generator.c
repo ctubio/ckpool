@@ -365,9 +365,13 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Invalid nonce2len %d in parse_subscribe", size);
 		goto out;
 	}
+	if (size < 4) {
+		LOGWARNING("Nonce2 length %d too small to be able to proxy", size);
+		goto out;
+	}
 	proxi->nonce2len = size;
 
-	LOGINFO("Found notify with enonce %s nonce2len %d !", proxi->enonce1,
+	LOGINFO("Found notify with enonce %s nonce2len %d", proxi->enonce1,
 		   proxi->nonce2len);
 	ret = true;
 
@@ -630,7 +634,7 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Failed to authorise in auth_stratum");
 		goto out;
 	}
-	LOGINFO("Auth success in auth_stratum!");
+	LOGINFO("Auth success in auth_stratum");
 out:
 	if (val)
 		json_decref(val);
