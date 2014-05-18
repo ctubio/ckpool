@@ -1208,10 +1208,10 @@ out_unlock:
 }
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held */
-static void __submit_share(stratum_instance_t *client, workbase_t *wb, uint64_t jobid,
-			   const char *nonce2, const char *ntime, const char *nonce)
+static void submit_share(stratum_instance_t *client, uint64_t jobid, const char *nonce2,
+			 const char *ntime, const char *nonce)
 {
-	ckpool_t *ckp = wb->ckp;
+	ckpool_t *ckp = client->ckp;
 	json_t *json_msg;
 	char enonce2[32];
 	char *msg;
@@ -1228,7 +1228,7 @@ static void __submit_share(stratum_instance_t *client, workbase_t *wb, uint64_t 
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
-	bool share = false, result = false, invalid = true;
+	bool share = false, result = false, invalid = true, submit = false;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	char hexhash[68], sharehash[32], *logdir;
 	int len, diff, wdiff;
@@ -1316,9 +1316,12 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	invalid = false;
 	if (wb->proxy && sdiff > wdiff)
-		__submit_share(client, wb, id, nonce2, ntime, nonce);
+		submit = true;
 out_unlock:
 	ck_runlock(&workbase_lock);
+
+	if (submit)
+		submit_share(client, id, nonce2, ntime, nonce);
 
 	/* Accept the lower of new and old diffs until the next update */
 	if (id < client->diff_change_job_id && client->old_diff < client->diff)
