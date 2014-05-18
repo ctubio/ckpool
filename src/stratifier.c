@@ -113,10 +113,7 @@ struct workbase {
 	int enonce1constlen; // length of above - usually zero unless proxying
 	int enonce1varlen; // length of unique extranonce1 string for each worker - usually 8
 
-	char enonce2const[16]; // extranonce2 section that is constant
-	uchar enonce2constbin[8];
-	int enonce2constlen; // length of above - usually zero unless proxying
-	int enonce2varlen; // length of space left for extranonce2 - usually 8
+	int enonce2varlen; // length of space left for extranonce2 - usually 8 unless proxying
 
 	char coinb2[128]; // coinbase2
 	uchar coinb2bin[64];
@@ -146,9 +143,9 @@ static struct {
 	char enonce1[32];
 	uchar enonce1bin[16];
 	int enonce1constlen;
+	int enonce1varlen;
 
 	int nonce2len;
-	int enonce2constlen;
 	int enonce2varlen;
 } proxy_base;
 
@@ -467,10 +464,10 @@ static bool update_subscribe(ckpool_t *ckp)
 	hex2bin(proxy_base.enonce1bin, proxy_base.enonce1, proxy_base.enonce1constlen);
 	proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
 	if (proxy_base.nonce2len > 5)
-		proxy_base.enonce2constlen = 4;
+		proxy_base.enonce1varlen = 4;
 	else
-		proxy_base.enonce2constlen = 2;
-	proxy_base.enonce2varlen = proxy_base.nonce2len - proxy_base.enonce2constlen;
+		proxy_base.enonce1varlen = 2;
+	proxy_base.enonce2varlen = proxy_base.nonce2len - proxy_base.enonce1varlen;
 	ck_wunlock(&workbase_lock);
 
 	json_decref(val);
@@ -534,7 +531,7 @@ static void update_notify(ckpool_t *ckp)
 	strcpy(wb->enonce1const, proxy_base.enonce1);
 	wb->enonce1constlen = proxy_base.enonce1constlen;
 	memcpy(wb->enonce1constbin, proxy_base.enonce1bin, wb->enonce1constlen);
-	wb->enonce1varlen = wb->enonce2constlen = proxy_base.enonce2constlen;
+	wb->enonce1varlen = proxy_base.enonce1varlen;
 	wb->enonce2varlen = proxy_base.enonce2varlen;
 	wb->diff = proxy_base.diff;
 	ck_runlock(&workbase_lock);
