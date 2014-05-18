@@ -175,6 +175,7 @@ struct stratum_instance {
 
 	char enonce1[32];
 	uchar enonce1bin[16];
+	char enonce1var[12];
 	uint64_t enonce1_64;
 
 	int diff; /* Current diff */
@@ -863,6 +864,7 @@ static void new_enonce1(stratum_instance_t *client)
 	if (wb->enonce1constlen)
 		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
 	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
+	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
 	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
 	ck_wunlock(&workbase_lock);
 }
@@ -1205,16 +1207,16 @@ out_unlock:
 }
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held */
-static void __submit_share(workbase_t *wb, const char *jobid, const char *nonce2,
-			   const char *ntime, const char *nonce)
+static void __submit_share(stratum_instance_t *client, workbase_t *wb, uint64_t jobid,
+			   const char *nonce2, const char *ntime, const char *nonce)
 {
 	ckpool_t *ckp = wb->ckp;
 	json_t *json_msg;
 	char enonce2[32];
 	char *msg;
 
-	sprintf(enonce2, "%s%s", wb->enonce1const, nonce2);
-	json_msg = json_pack("{ssssssss}", "jobid", jobid, "nonce2", enonce2,
+	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
+	json_msg = json_pack("{sissssss}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce);
 	msg = json_dumps(json_msg, 0);
 	json_decref(json_msg);
@@ -1312,7 +1314,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	invalid = false;
 	if (wb->proxy && sdiff > wb->diff)
-		__submit_share(wb, idstring, nonce2, ntime, nonce);
+		__submit_share(client, wb, id, nonce2, ntime, nonce);
 out_unlock:
 	ck_runlock(&workbase_lock);
 
