@@ -504,6 +504,7 @@ static void update_notify(ckpool_t *ckp)
 	json_strcpy(wb->coinb1, val, "coinbase1");
 	wb->coinb1len = strlen(wb->coinb1) / 2;
 	hex2bin(wb->coinb1bin, wb->coinb1, wb->coinb1len);
+	wb->height = get_sernumber(wb->coinb1bin + 42);
 	json_strcpy(wb->coinb2, val, "coinbase2");
 	wb->coinb2len = strlen(wb->coinb2) / 2;
 	hex2bin(wb->coinb2bin, wb->coinb2, wb->coinb2len);
