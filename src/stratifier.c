@@ -538,11 +538,35 @@ static void update_notify(ckpool_t *ckp)
 	memcpy(wb->enonce1constbin, proxy_base.enonce1bin, proxy_base.enonce1constlen);
 	wb->enonce1varlen = wb->enonce2constlen = proxy_base.enonce2constlen;
 	wb->enonce2varlen = proxy_base.enonce2varlen;
+	wb->diff = proxy_base.diff;
 	ck_runlock(&workbase_lock);
 
 	add_base(ckp, wb, &new_block);
 
 	stratum_broadcast_update(new_block | clean);
+}
+
+static void update_diff(ckpool_t *ckp)
+{
+	json_t *val;
+	double diff;
+	char *buf;
+
+	buf = send_recv_proc(ckp->generator, "getdiff");
+	if (unlikely(!buf)) {
+		LOGWARNING("Failed to get diff from generator in update_diff");
+		return;
+	}
+
+	LOGDEBUG("Update diff: %s", buf);
+	val = json_loads(buf, 0, NULL);
+	dealloc(buf);
+	json_dblcpy(&diff, val, "diff");
+	json_decref(val);
+
+	ck_wlock(&workbase_lock);
+	proxy_base.diff = diff;
+	ck_wunlock(&workbase_lock);
 }
 
 /* Enter with instance_lock held */
@@ -705,13 +729,12 @@ static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 	char *buf = NULL;
 	fd_set readfds;
 
-reset:
 	if (ckp->proxy)
 		to = NULL;
-	else {
-		timeout.tv_sec = ckp->update_interval;
+	else
 		to = &timeout;
-	}
+reset:
+	timeout.tv_sec = ckp->update_interval;
 retry:
 	FD_ZERO(&readfds);
 	FD_SET(us->sockd, &readfds);
@@ -764,11 +787,14 @@ retry:
 		/* Proxifier has a new subscription */
 		if (!update_subscribe(ckp))
 			goto out;
-		goto reset;
+		goto retry;
 	} else if (!strncasecmp(buf, "notify", 6)) {
 		/* Proxifier has a new notify ready */
 		update_notify(ckp);
-		goto reset;
+		goto retry;
+	} else if (!strncasecmp(buf, "diff", 4)) {
+		update_diff(ckp);
+		goto retry;
 	} else if (!strncasecmp(buf, "dropclient", 10)) {
 		int client_id;
 
@@ -874,7 +900,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		if (buf && strlen(buf))
 			client->useragent = strdup(buf);
 		if (arr_size > 1) {
-			/* This would be the session id for reconnect */
+			/* This would be the session id for reconnect, it will
+			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
 			LOGDEBUG("Found old session id %s", buf);
 			/* Add matching here */

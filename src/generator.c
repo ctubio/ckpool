@@ -63,7 +63,9 @@ struct proxy_instance {
 	int id; /* Message id for sending stratum messages */
 	bool no_sessionid; /* Doesn't support session id resume on subscribe */
 	bool no_params; /* Doesn't want any parameters on subscribe */
-	bool notified; /* Received template for work */
+
+	bool notified; /* Received new template for work */
+	bool diffed; /* Received new diff */
 
 	pthread_mutex_t notify_lock;
 	notify_instance_t *notify_instances;
@@ -445,7 +447,6 @@ out:
 	return ret;
 }
 
-#define parse_diff(a, b) true
 #define parse_reconnect(a, b) true
 #define send_version(a, b) true
 #define show_message(a, b) true
@@ -517,6 +518,17 @@ static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 
 out:
 	return ret;
+}
+
+static bool parse_diff(proxy_instance_t *proxi, json_t *val)
+{
+	double diff = json_number_value(json_array_get(val, 0));
+
+	if (diff == 0 || diff == proxi->diff)
+		return true;
+	proxi->diff = diff;
+	proxi->diffed = true;
+	return true;
 }
 
 static bool parse_method(proxy_instance_t *proxi, const char *msg)
@@ -688,6 +700,19 @@ static void send_notify(proxy_instance_t *proxi, int sockd)
 	close(sockd);
 }
 
+static void send_diff(proxy_instance_t *proxi, int sockd)
+{
+	json_t *json_msg;
+	char *msg;
+
+	json_msg = json_pack("{sf}", "diff", proxi->diff);
+	msg = json_dumps(json_msg, 0);
+	json_decref(json_msg);
+	send_unix_msg(sockd, msg);
+	free(msg);
+	close(sockd);
+}
+
 static int proxy_loop(proc_instance_t *pi, connsock_t *cs, proxy_instance_t *proxi)
 {
 	unixsock_t *us = &pi->us;
@@ -698,7 +723,6 @@ static int proxy_loop(proc_instance_t *pi, connsock_t *cs, proxy_instance_t *pro
 	/* We're not subscribed and authorised so tell the stratifier to
 	 * retrieve the first subscription. */
 	send_proc(ckp->stratifier, "subscribe");
-	send_proc(ckp->stratifier, "notify");
 
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
@@ -724,6 +748,8 @@ retry:
 		send_subscribe(proxi, sockd);
 	} else if (!strncasecmp(buf, "getnotify", 9)) {
 		send_notify(proxi, sockd);
+	} else if (!strncasecmp(buf, "getdiff", 7)) {
+		send_diff(proxi, sockd);
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
@@ -757,6 +783,7 @@ static void *proxy_recv(void *arg)
 {
 	proxy_instance_t *proxi = (proxy_instance_t *)arg;
 	connsock_t *cs = proxi->cs;
+	ckpool_t *ckp = proxi->ckp;
 
 	rename_proc("proxyrecv");
 
@@ -769,8 +796,17 @@ static void *proxy_recv(void *arg)
 			reconnect_stratum(cs, proxi);
 			continue;
 		}
-		if (parse_method(proxi, cs->buf))
+		if (parse_method(proxi, cs->buf)) {
+			if (proxi->notified) {
+				send_proc(ckp->stratifier, "notify");
+				proxi->notified = false;
+			}
+			if (proxi->diffed) {
+				send_proc(ckp->stratifier, "diff");
+				proxi->diffed = false;
+			}
 			continue;
+		}
 		LOGWARNING("Unhandled stratum message: %s", cs->buf);
 	}
 	return NULL;
