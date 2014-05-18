@@ -18,7 +18,9 @@
 #include "libckpool.h"
 #include "generator.h"
 #include "bitcoin.h"
+#include "stratifier.h"
 #include "uthash.h"
+#include "utlist.h"
 
 struct notify_instance {
 	/* Hash table data */
@@ -76,7 +78,10 @@ struct proxy_instance {
 
 	pthread_t pth_precv;
 	pthread_t pth_psend;
+	pthread_mutex_t psend_lock;
 	pthread_cond_t psend_cond;
+
+	stratum_msg_t *psends;
 };
 
 typedef struct proxy_instance proxy_instance_t;
@@ -718,6 +723,19 @@ static void send_diff(proxy_instance_t *proxi, int sockd)
 	close(sockd);
 }
 
+static void submit_share(proxy_instance_t *proxi, json_t *val)
+{
+	stratum_msg_t *msg;
+
+	msg = ckzalloc(sizeof(stratum_msg_t));
+	msg->json_msg = val;
+
+	mutex_lock(&proxi->psend_lock);
+	DL_APPEND(proxi->psends, msg);
+	pthread_cond_signal(&proxi->psend_cond);
+	mutex_unlock(&proxi->psend_lock);
+}
+
 static int proxy_loop(proc_instance_t *pi, connsock_t *cs, proxy_instance_t *proxi)
 {
 	unixsock_t *us = &pi->us;
@@ -760,6 +778,14 @@ retry:
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
+	} else {
+		/* Anything remaining should be share submissions */
+		json_t *val = json_loads(buf, 0, NULL);
+
+		if (!val)
+			LOGWARNING("Received unrecognised message: %s", buf);
+		else
+			submit_share(proxi, val);
 	}
 	close(sockd);
 	goto retry;
@@ -842,11 +868,34 @@ static void *proxy_recv(void *arg)
 	return NULL;
 }
 
+/* For processing and sending shares */
 static void *proxy_send(void *arg)
 {
 	proxy_instance_t *proxi = (proxy_instance_t *)arg;
 
 	rename_proc("proxysend");
+
+	while (42) {
+		stratum_msg_t *msg;
+		char *buf;
+
+		mutex_lock(&proxi->psend_lock);
+		if (!proxi->psends)
+			pthread_cond_wait(&proxi->psend_cond, &proxi->psend_lock);
+		msg = proxi->psends;
+		if (likely(msg))
+			DL_DELETE(proxi->psends, msg);
+		mutex_unlock(&proxi->psend_lock);
+
+		if (unlikely(!msg))
+			continue;
+
+		buf = json_dumps(msg->json_msg, 0);
+		LOGDEBUG("Proxysend received: %s", buf);
+
+		json_decref(msg->json_msg);
+		free(msg);
+	}
 	return NULL;
 }
 
@@ -883,6 +932,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 
 	mutex_init(&proxi.notify_lock);
 	create_pthread(&proxi.pth_precv, proxy_recv, &proxi);
+	mutex_init(&proxi.psend_lock);
 	cond_init(&proxi.psend_cond);
 	create_pthread(&proxi.pth_psend, proxy_send, &proxi);
 

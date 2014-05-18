@@ -10,6 +10,16 @@
 #ifndef STRATIFIER_H
 #define STRATIFIER_H
 
+struct stratum_msg {
+	struct stratum_msg *next;
+	struct stratum_msg *prev;
+
+	json_t *json_msg;
+	int client_id;
+};
+
+typedef struct stratum_msg stratum_msg_t;
+
 int stratifier(proc_instance_t *pi);
 
 #endif /* STRATIFIER_H */

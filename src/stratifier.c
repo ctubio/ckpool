@@ -20,9 +20,10 @@
 #include "ckpool.h"
 #include "libckpool.h"
 #include "bitcoin.h"
+#include "sha2.h"
+#include "stratifier.h"
 #include "uthash.h"
 #include "utlist.h"
-#include "sha2.h"
 
 static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
 
@@ -154,16 +155,6 @@ static struct {
 static uint64_t workbase_id;
 static uint64_t blockchange_id;
 static char lasthash[68];
-
-struct stratum_msg {
-	struct stratum_msg *next;
-	struct stratum_msg *prev;
-
-	json_t *json_msg;
-	int client_id;
-};
-
-typedef struct stratum_msg stratum_msg_t;
 
 /* For protecting the stratum msg data */
 static pthread_mutex_t stratum_recv_lock;
@@ -1188,7 +1179,6 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	if (!wb->proxy)
 		test_blocksolve(wb, swap, ret, coinbase, cblen);
 
-	/* FIXME: Log share here */
 	return ret;
 }
 
@@ -1212,6 +1202,24 @@ out_unlock:
 	ck_uilock(&share_lock);
 
 	return ret;
+}
+
+/* Submit a share in proxy mode to the parent pool. workbase_lock is held */
+static void __submit_share(workbase_t *wb, const char *jobid, const char *nonce2,
+			   const char *ntime, const char *nonce)
+{
+	ckpool_t *ckp = wb->ckp;
+	json_t *json_msg;
+	char enonce2[32];
+	char *msg;
+
+	sprintf(enonce2, "%s%s", wb->enonce1const, nonce2);
+	json_msg = json_pack("{ssssssss}", "jobid", jobid, "nonce2", enonce2,
+			     "ntime", ntime, "nonce", nonce);
+	msg = json_dumps(json_msg, 0);
+	json_decref(json_msg);
+	send_proc(ckp->generator, msg);
+	free(msg);
 }
 
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
@@ -1303,6 +1311,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		goto out_unlock;
 	}
 	invalid = false;
+	if (wb->proxy && sdiff > wb->diff)
+		__submit_share(wb, idstring, nonce2, ntime, nonce);
 out_unlock:
 	ck_runlock(&workbase_lock);
 
