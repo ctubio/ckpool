@@ -1231,13 +1231,13 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	bool share = false, result = false, invalid = true;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	char hexhash[68], sharehash[32], *logdir;
+	int len, diff, wdiff;
 	double sdiff = -1;
 	char idstring[20];
 	uint32_t ntime32;
 	char *fname, *s;
 	workbase_t *wb;
 	uchar hash[32];
-	int len, diff;
 	uint64_t id;
 	json_t *val;
 	FILE *fp;
@@ -1294,6 +1294,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		logdir = current_workbase->logdir;
 		goto out_unlock;
 	}
+	wdiff = wb->diff;
 	strcpy(idstring, wb->idstring);
 	logdir = strdupa(wb->logdir);
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
@@ -1314,7 +1315,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		goto out_unlock;
 	}
 	invalid = false;
-	if (wb->proxy && sdiff > wb->diff)
+	if (wb->proxy && sdiff > wdiff)
 		__submit_share(client, wb, id, nonce2, ntime, nonce);
 out_unlock:
 	ck_runlock(&workbase_lock);
@@ -1325,16 +1326,22 @@ out_unlock:
 	else
 		diff = client->diff;
 	if (!invalid) {
+		char wdiffsuffix[16];
+
+		suffix_string(wdiff, wdiffsuffix, 16, 0);
 		if (sdiff >= diff) {
 			if (new_share(hash, id)) {
-				LOGINFO("Accepted client %d share diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
+				LOGINFO("Accepted client %d share diff %.1f/%d/%s: %s",
+					client->id, sdiff, diff, wdiffsuffix, hexhash);
 				result = true;
 			} else {
 				json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
-				LOGINFO("Rejected client %d dupe diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
+				LOGINFO("Rejected client %d dupe diff %.1f/%d/%s: %s",
+					client->id, sdiff, diff, wdiffsuffix, hexhash);
 			}
 		} else {
-			LOGINFO("Rejected client %d high diff %.1f/%d: %s", client->id, sdiff, diff, hexhash);
+			LOGINFO("Rejected client %d high diff %.1f/%d/%s: %s",
+				client->id, sdiff, diff, wdiffsuffix, hexhash);
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
 		}
 	}  else
