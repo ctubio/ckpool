@@ -1757,7 +1757,8 @@ int stratifier(proc_instance_t *pi)
 	create_pthread(&pth_stratum_sender, stratum_sender, ckp);
 
 	cklock_init(&workbase_lock);
-	create_pthread(&pth_blockupdate, blockupdate, ckp);
+	if (!ckp->proxy)
+		create_pthread(&pth_blockupdate, blockupdate, ckp);
 
 	mutex_init(&stats_lock);
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
