@@ -35,6 +35,8 @@ struct notify_instance {
 	char ntime[12];
 	char bbversion[12];
 	bool clean;
+
+	time_t notify_time;
 };
 
 typedef struct notify_instance notify_instance_t;
@@ -69,6 +71,7 @@ struct proxy_instance {
 
 	pthread_mutex_t notify_lock;
 	notify_instance_t *notify_instances;
+	notify_instance_t *current_notify;
 	int notify_id;
 
 	pthread_t pth_precv;
@@ -510,10 +513,12 @@ static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 	}
 	ni->merkles = merkles;
 	ret = true;
+	ni->notify_time = time(NULL);
 
 	mutex_lock(&proxi->notify_lock);
 	ni->id = proxi->notify_id++;
 	HASH_ADD_INT(proxi->notify_instances, id, ni);
+	proxi->current_notify = ni;
 	mutex_unlock(&proxi->notify_lock);
 
 out:
@@ -681,7 +686,7 @@ static void send_notify(proxy_instance_t *proxi, int sockd)
 	merkle_arr = json_array();
 
 	mutex_lock(&proxi->notify_lock);
-	ni = proxi->notify_instances;
+	ni = proxi->current_notify;
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
@@ -781,6 +786,13 @@ static void reconnect_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	} while (!ret);
 }
 
+static void clear_notify(notify_instance_t *ni)
+{
+	free(ni->jobid);
+	free(ni->coinbase1);
+	free(ni->coinbase2);
+}
+
 static void *proxy_recv(void *arg)
 {
 	proxy_instance_t *proxi = (proxy_instance_t *)arg;
@@ -790,7 +802,23 @@ static void *proxy_recv(void *arg)
 	rename_proc("proxyrecv");
 
 	while (42) {
+		notify_instance_t *ni, *tmp;
+		time_t now;
 		int ret;
+
+		now = time(NULL);
+
+		mutex_lock(&proxi->notify_lock);
+		HASH_ITER(hh, proxi->notify_instances, ni, tmp) {
+			if (HASH_COUNT(proxi->notify_instances) < 3)
+				break;
+			/* Age old notifications older than 10 mins old */
+			if (ni->notify_time < now - 600) {
+				HASH_DEL(proxi->notify_instances, ni);
+				clear_notify(ni);
+			}
+		}
+		mutex_unlock(&proxi->notify_lock);
 
 		ret = read_socket_line(cs, 120);
 		if (ret < 1) {
