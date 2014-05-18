@@ -344,6 +344,7 @@ void b58tobin(char *b58bin, const char *b58);
 
 void address_to_pubkeytxn(char *pkh, const char *addr);
 int ser_number(uchar *s, int32_t val);
+int get_sernumber(uchar *s);
 bool fulltest(const uchar *hash, const uchar *target);
 
 void copy_tv(tv_t *dest, const tv_t *src);

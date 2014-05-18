@@ -1255,6 +1255,18 @@ int ser_number(uchar *s, int32_t val)
 	return len;
 }
 
+int get_sernumber(uchar *s)
+{
+	int32_t val = 0;
+	int len;
+
+	len = s[0];
+	if (unlikely(len < 1 || len > 4))
+		return 0;
+	memcpy(&val, &s[1], len);
+	return le32toh(val);
+}
+
 /* For testing a le encoded 256 byte hash against a target */
 bool fulltest(const uchar *hash, const uchar *target)
 {
