@@ -562,7 +562,7 @@ static void update_diff(ckpool_t *ckp)
 	json_decref(val);
 
 	ck_wlock(&workbase_lock);
-	proxy_base.diff = diff;
+	current_workbase->diff = proxy_base.diff = diff;
 	ck_wunlock(&workbase_lock);
 }
 
