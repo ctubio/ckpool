@@ -723,6 +723,8 @@ static int proxy_loop(proc_instance_t *pi, connsock_t *cs, proxy_instance_t *pro
 	/* We're not subscribed and authorised so tell the stratifier to
 	 * retrieve the first subscription. */
 	send_proc(ckp->stratifier, "subscribe");
+	send_proc(ckp->stratifier, "notify");
+	proxi->notified = false;
 
 retry:
 	sockd = accept(us->sockd, NULL, NULL);

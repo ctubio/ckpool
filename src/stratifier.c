@@ -127,6 +127,7 @@ struct workbase {
 	char *logdir;
 
 	ckpool_t *ckp;
+	bool proxy;
 };
 
 typedef struct workbase workbase_t;
@@ -182,6 +183,7 @@ struct stratum_instance {
 	int id;
 
 	char enonce1[32];
+	uchar enonce1bin[16];
 	uint64_t enonce1_64;
 
 	int diff; /* Current diff */
@@ -500,9 +502,10 @@ static void update_notify(ckpool_t *ckp)
 
 	LOGDEBUG("Update notify: %s", buf);
 	wb = ckzalloc(sizeof(workbase_t));
-	wb->ckp = ckp;
 	val = json_loads(buf, 0, NULL);
 	dealloc(buf);
+	wb->ckp = ckp;
+	wb->proxy = true;
 
 	json_uint64cpy(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
@@ -521,6 +524,7 @@ static void update_notify(ckpool_t *ckp)
 	json_strcpy(wb->bbversion, val, "bbversion");
 	json_strcpy(wb->nbit, val, "nbit");
 	json_strcpy(wb->ntime, val, "ntime");
+	sscanf(wb->ntime, "%x", &wb->ntime32);
 	clean = json_is_true(json_object_get(val, "clean"));
 	json_decref(val);
 	wb->gentime = time(NULL);
@@ -535,7 +539,8 @@ static void update_notify(ckpool_t *ckp)
 
 	ck_rlock(&workbase_lock);
 	strcpy(wb->enonce1const, proxy_base.enonce1);
-	memcpy(wb->enonce1constbin, proxy_base.enonce1bin, proxy_base.enonce1constlen);
+	wb->enonce1constlen = proxy_base.enonce1constlen;
+	memcpy(wb->enonce1constbin, proxy_base.enonce1bin, wb->enonce1constlen);
 	wb->enonce1varlen = wb->enonce2constlen = proxy_base.enonce2constlen;
 	wb->enonce2varlen = proxy_base.enonce2varlen;
 	wb->diff = proxy_base.diff;
@@ -846,12 +851,12 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-static uint64_t new_enonce1(char *enonce1)
+static void new_enonce1(stratum_instance_t *client)
 {
 	workbase_t *wb;
-	uint64_t ret;
 
 	ck_wlock(&workbase_lock);
+	client->enonce1_64 = enonce1_64;
 	wb = current_workbase;
 	if (wb->enonce1varlen == 8) {
 		enonce1_64++;
@@ -864,11 +869,11 @@ static uint64_t new_enonce1(char *enonce1)
 
 		++(*enonce1_32);
 	}
-	sprintf(enonce1, "%s%0*lx", wb->enonce1const, wb->enonce1varlen, enonce1_64);
-	ret = enonce1_64;
+	if (wb->enonce1constlen)
+		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
+	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
+	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
 	ck_wunlock(&workbase_lock);
-
-	return ret;
 }
 
 /* Extranonce1 must be set here */
@@ -906,8 +911,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 			LOGDEBUG("Found old session id %s", buf);
 			/* Add matching here */
 			if (disconnected_sessionid_exists(buf, client_id)) {
-				hex2bin(&client->enonce1_64, buf, 8);
-				strcpy(client->enonce1, buf);
+				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
 				stats.reused_clients++;
 			}
@@ -915,7 +919,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	}
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
-		client->enonce1_64 = new_enonce1(client->enonce1);
+		new_enonce1(client);
 		LOGINFO("Set new subscription %d to new enonce1 %s", client->id,
 			client->enonce1);
 	} else {
@@ -1139,8 +1143,8 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 
 	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
 	cblen += wb->coinb1len;
-	memcpy(coinbase + cblen, &client->enonce1_64, wb->enonce1varlen);
-	cblen += wb->enonce1varlen;
+	memcpy(coinbase + cblen, &client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
+	cblen += wb->enonce1constlen + wb->enonce1varlen;
 	hex2bin(coinbase + cblen, nonce2, wb->enonce2varlen);
 	cblen += wb->enonce2varlen;
 	memcpy(coinbase + cblen, wb->coinb2bin, wb->coinb2len);
@@ -1181,7 +1185,8 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	ret = diff_from_target(hash);
 
 	/* Test we haven't solved a block regardless of share status */
-	test_blocksolve(wb, swap, ret, coinbase, cblen);
+	if (!wb->proxy)
+		test_blocksolve(wb, swap, ret, coinbase, cblen);
 
 	/* FIXME: Log share here */
 	return ret;
