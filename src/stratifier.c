@@ -147,7 +147,6 @@ static struct {
 
 	int nonce2len;
 	int enonce2constlen;
-	uint32_t subnonce2;
 	int enonce2varlen;
 } proxy_base;
 
@@ -182,7 +181,7 @@ struct stratum_instance {
 	UT_hash_handle hh;
 	int id;
 
-	char enonce1[20];
+	char enonce1[32];
 	uint64_t enonce1_64;
 
 	int diff; /* Current diff */
@@ -525,7 +524,6 @@ static void update_notify(ckpool_t *ckp)
 	clean = json_is_true(json_object_get(val, "clean"));
 	json_decref(val);
 	wb->gentime = time(NULL);
-	wb->enonce1varlen = 0;
 	snprintf(header, 225, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
 		 "0000000000000000000000000000000000000000000000000000000000000000",
@@ -822,6 +820,31 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
+static uint64_t new_enonce1(char *enonce1)
+{
+	workbase_t *wb;
+	uint64_t ret;
+
+	ck_wlock(&workbase_lock);
+	wb = current_workbase;
+	if (wb->enonce1varlen == 8) {
+		enonce1_64++;
+	} else if (wb->enonce1varlen == 2) {
+		uint16_t *enonce1_16 = (uint16_t *)&enonce1_64;
+
+		++(*enonce1_16);
+	} else {
+		uint32_t *enonce1_32 = (uint32_t *)&enonce1_64;
+
+		++(*enonce1_32);
+	}
+	sprintf(enonce1, "%s%0*lx", wb->enonce1const, wb->enonce1varlen, enonce1_64);
+	ret = enonce1_64;
+	ck_wunlock(&workbase_lock);
+
+	return ret;
+}
+
 /* Extranonce1 must be set here */
 static json_t *parse_subscribe(int client_id, json_t *params_val)
 {
@@ -864,13 +887,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		}
 	}
 	if (!old_match) {
-		/* Create a new extranonce1 based on non-endian swapped
-		 * uint64_t pointer */
-		ck_wlock(&instance_lock);
-		client->enonce1_64 = enonce1_64++;
-		ck_wunlock(&instance_lock);
-
-		__bin2hex(client->enonce1, &client->enonce1_64, 8);
+		/* Create a new extranonce1 based on a uint64_t pointer */
+		client->enonce1_64 = new_enonce1(client->enonce1);
 		LOGINFO("Set new subscription %d to new enonce1 %s", client->id,
 			client->enonce1);
 	} else {
