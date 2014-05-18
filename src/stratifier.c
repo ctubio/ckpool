@@ -541,10 +541,13 @@ static void update_notify(ckpool_t *ckp)
 	stratum_broadcast_update(new_block | clean);
 }
 
+static void stratum_send_diff(stratum_instance_t *client);
+
 static void update_diff(ckpool_t *ckp)
 {
+	stratum_instance_t *client;
+	double old_diff, diff;
 	json_t *val;
-	double diff;
 	char *buf;
 
 	buf = send_recv_proc(ckp->generator, "getdiff");
@@ -560,8 +563,23 @@ static void update_diff(ckpool_t *ckp)
 	json_decref(val);
 
 	ck_wlock(&workbase_lock);
+	old_diff = proxy_base.diff;
 	current_workbase->diff = proxy_base.diff = diff;
 	ck_wunlock(&workbase_lock);
+
+	if (old_diff < diff)
+		return;
+
+	/* If the diff has dropped, iterated over all the clients and check
+	 * they're at or below the new diff, and update it if not. */
+	ck_rlock(&instance_lock);
+	for (client = stratum_instances; client != NULL; client = client->hh.next) {
+		if (client->diff > diff) {
+			client->diff = diff;
+			stratum_send_diff(client);
+		}
+	}
+	ck_runlock(&instance_lock);
 }
 
 /* Enter with instance_lock held */
