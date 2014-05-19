@@ -13,6 +13,7 @@
 #include "config.h"
 
 #include "libckpool.h"
+#include "uthash.h"
 
 struct ckpool_instance;
 typedef struct ckpool_instance ckpool_t;
@@ -25,6 +26,22 @@ struct proc_instance {
 	int pid;
 	int (*process)(proc_instance_t *);
 };
+
+struct server_instance {
+	/* Hash table data */
+	UT_hash_handle hh;
+	int id;
+
+	char *url;
+	char *auth;
+	char *pass;
+	connsock_t cs;
+	bool alive;
+
+	void *data; // Private data
+};
+
+typedef struct server_instance server_instance_t;
 
 struct ckpool_instance {
 	/* Filename of config file */
@@ -54,6 +71,9 @@ struct ckpool_instance {
 	pthread_t pth_listener;
 	pthread_t pth_watchdog;
 
+	/* Are we running as a proxy */
+	bool proxy;
+
 	/* Bitcoind data */
 	int btcds;
 	char **btcdurl;
@@ -70,11 +90,11 @@ struct ckpool_instance {
 	char *btcsig; // Optional signature to add to coinbase
 
 	/* Stratum options */
+	server_instance_t **servers;
+	char *serverurl; // URL to bind our server/proxy to
 	int update_interval; // Seconds between stratum updates
-	char *serverurl;
 
 	/* Proxy options */
-	bool proxy;
 	int proxies;
 	char **proxyurl;
 	char **proxyauth;

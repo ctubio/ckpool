@@ -47,6 +47,7 @@ typedef struct notify_instance notify_instance_t;
 struct proxy_instance {
 	ckpool_t *ckp;
 	connsock_t *cs;
+	server_instance_t *si;
 
 	const char *auth;
 	const char *pass;
@@ -167,48 +168,6 @@ retry:
 
 out:
 	dealloc(buf);
-	return ret;
-}
-
-static int server_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
-		       const char *auth, const char *pass)
-{
-	char *userpass = NULL;
-	gbtbase_t gbt;
-	int ret = 1;
-
-	memset(&gbt, 0, sizeof(gbt));
-
-	userpass = strdup(auth);
-	realloc_strcat(&userpass, ":");
-	realloc_strcat(&userpass, pass);
-	cs->auth = http_base64(userpass);
-	if (!cs->auth) {
-		LOGWARNING("Failed to create base64 auth from %s", userpass);
-		goto out;
-	}
-
-	cs->fd = connect_socket(cs->url, cs->port);
-	if (cs->fd < 0) {
-		LOGWARNING("FATAL: Failed to connect socket to %s:%s !", cs->url, cs->port);
-		goto out;
-	}
-	keep_sockalive(cs->fd);
-	/* Test we can connect, authorise and get a block template */
-	if (!gen_gbtbase(cs, &gbt)) {
-		LOGWARNING("FATAL: Failed to get test block template from %s:%s auth %s !",
-			   cs->url, cs->port, userpass);
-		goto out;
-	}
-	clear_gbtbase(&gbt);
-	if (!validate_address(cs, ckp->btcaddress)) {
-		LOGWARNING("FATAL: Invalid btcaddress: %s !", ckp->btcaddress);
-		goto out;
-	}
-	ret = gen_loop(pi, cs);
-out:
-	close(cs->fd);
-	dealloc(userpass);
 	return ret;
 }
 
@@ -946,6 +905,7 @@ static void *proxy_send(void *arg)
 	return NULL;
 }
 
+#if 0
 static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 		      const char *auth, const char *pass)
 {
@@ -999,41 +959,171 @@ out:
 
 	return ret;
 }
+#endif
 
-
-/* FIXME: Hard wired to just use config 0 for now */
-int generator(proc_instance_t *pi)
+/* FIXME: Make these use multiple BTCDs instead of just first alive. */
+static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
-	char *url, *auth, *pass, *userpass = NULL;
-	ckpool_t *ckp = pi->ckp;
-	connsock_t cs;
-	int ret = 1;
+	int i, ret = 1, alive = 0;
+	server_instance_t *si;
+	connsock_t *cs;
+	gbtbase_t gbt;
 
-	memset(&cs, 0, sizeof(cs));
+	memset(&gbt, 0, sizeof(gbt));
 
-	if (!ckp->proxy) {
-		url = ckp->btcdurl[0];
-		auth = ckp->btcdauth[0];
-		pass = ckp->btcdpass[0];
-	} else {
-		url = ckp->proxyurl[0];
-		auth = ckp->proxyauth[0];
-		pass = ckp->proxypass[0];
+	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->btcds);
+	for (i = 0; i < ckp->btcds; i++) {
+		char *userpass = NULL;
+
+		dealloc(userpass);
+		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
+		si = ckp->servers[i];
+		cs = &si->cs;
+		si->url = ckp->btcdurl[i];
+		si->auth = ckp->btcdauth[i];
+		si->pass = ckp->btcdpass[i];
+		if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
+			LOGWARNING("Failed to extract address from %s", si->url);
+			continue;
+		}
+		userpass = strdup(si->auth);
+		realloc_strcat(&userpass, ":");
+		realloc_strcat(&userpass, si->pass);
+		cs->auth = http_base64(userpass);
+		if (!cs->auth) {
+			LOGWARNING("Failed to create base64 auth from %s", userpass);
+			continue;
+		}
+
+		cs->fd = connect_socket(cs->url, cs->port);
+		if (cs->fd < 0) {
+			LOGWARNING("Failed to connect socket to %s:%s !", cs->url, cs->port);
+			continue;
+		}
+		keep_sockalive(cs->fd);
+		/* Test we can connect, authorise and get a block template */
+		if (!gen_gbtbase(cs, &gbt)) {
+			LOGWARNING("Failed to get test block template from %s:%s auth %s !",
+				cs->url, cs->port, userpass);
+			continue;
+		}
+		clear_gbtbase(&gbt);
+		if (!validate_address(cs, ckp->btcaddress)) {
+			LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
+			continue;
+		}
+		dealloc(userpass);
+		si->alive = true;
+		alive++;
 	}
-	if (!extract_sockaddr(url, &cs.url, &cs.port)) {
-		LOGWARNING("Failed to extract address from %s", url);
+	if (!alive) {
+		LOGEMERG("FATAL: No bitcoinds active!");
 		goto out;
 	}
-
-	if (!ckp->proxy)
-		ret = server_mode(ckp, pi, &cs, auth, pass);
-	else
-		ret = proxy_mode(ckp, pi, &cs, auth, pass);
+	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++) {
+		if (si->alive)
+			break;
+	}
+	ret = gen_loop(pi, &si->cs);
 out:
-	/* Clean up here */
-	dealloc(cs.url);
-	dealloc(cs.port);
-	dealloc(userpass);
+	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++)
+		dealloc(si);
+	dealloc(ckp->servers);
+	return ret;
+}
+
+static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
+{
+	int i, ret = 1, alive = 0;
+	proxy_instance_t *proxi;
+	server_instance_t *si;
+	connsock_t *cs;
+
+	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->proxies);
+	for (i = 0; i < ckp->proxies; i++) {
+		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
+		si = ckp->servers[i];
+		cs = &si->cs;
+		si->url = ckp->proxyurl[i];
+		si->auth = ckp->proxyauth[i];
+		si->pass = ckp->proxypass[i];
+		if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
+			LOGWARNING("Failed to extract address from %s", si->url);
+			continue;
+		}
+		if (!connect_proxy(cs)) {
+			LOGWARNING("Failed to connect to %s:%s in proxy_mode!",
+				   cs->url, cs->port);
+			continue;
+		}
+		proxi = ckzalloc(sizeof(proxy_instance_t));
+		si->data = proxi;
+		/* Test we can connect, authorise and get stratum information */
+		if (!subscribe_stratum(cs, proxi)) {
+			LOGWARNING("Failed initial subscribe to %s:%s !",
+				   cs->url, cs->port);
+			continue;
+		}
+		proxi->auth = si->auth;
+		proxi->pass = si->pass;
+		if (!auth_stratum(cs, proxi)) {
+			LOGWARNING("Failed initial authorise to %s:%s with %s:%s !",
+				   cs->url, cs->port, si->auth, si->pass);
+			continue;
+		}
+		proxi->si = si;
+		proxi->ckp = ckp;
+		proxi->cs = cs;
+		si->alive = true;
+		alive++;
+	}
+	if (!alive) {
+		LOGEMERG("FATAL: No proxied servers active!");
+		goto out;
+	}
+	for (i = 0; i < ckp->proxies; si = ckp->servers[i], i++) {
+		if (si->alive)
+			break;
+	}
+	proxi = si->data;
+
+	mutex_init(&proxi->notify_lock);
+	create_pthread(&proxi->pth_precv, proxy_recv, proxi);
+	mutex_init(&proxi->psend_lock);
+	cond_init(&proxi->psend_cond);
+	create_pthread(&proxi->pth_psend, proxy_send, proxi);
+
+	ret = proxy_loop(pi, proxi);
+
+	/* Return from the proxy loop means we have received a shutdown
+	 * request */
+	pthread_cancel(proxi->pth_precv);
+	pthread_cancel(proxi->pth_psend);
+	join_pthread(proxi->pth_precv);
+	join_pthread(proxi->pth_psend);
+out:
+	for (i = 0; i < ckp->proxies; si = ckp->servers[i], i++) {
+		close(si->cs.fd);
+		proxi = si->data;
+		free(proxi->enonce1);
+		free(proxi->enonce1bin);
+		free(proxi->sessionid);
+		dealloc(si->data);
+		dealloc(si);
+	}
+	dealloc(ckp->servers);
+	return ret;
+}
+
+int generator(proc_instance_t *pi)
+{
+	ckpool_t *ckp = pi->ckp;
+	int ret;
+
+	if (ckp->proxy)
+		ret = proxy_mode(ckp, pi);
+	else
+		ret = server_mode(ckp, pi);
 
 	LOGINFO("%s generator exiting with return code %d", ckp->name, ret);
 	if (ret) {
