@@ -1247,8 +1247,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	bool share = false, result = false, invalid = true, submit = false;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	char hexhash[68], sharehash[32], *logdir;
-	int len, diff, wdiff;
-	double sdiff = -1;
+	double diff, wdiff, sdiff = -1;
 	char idstring[20];
 	uint32_t ntime32;
 	char *fname, *s;
@@ -1257,6 +1256,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	uint64_t id;
 	json_t *val;
 	FILE *fp;
+	int len;
 
 	memset(hexhash, 0, 68);
 
@@ -1350,16 +1350,16 @@ out_unlock:
 		suffix_string(wdiff, wdiffsuffix, 16, 0);
 		if (sdiff >= diff) {
 			if (new_share(hash, id)) {
-				LOGINFO("Accepted client %d share diff %.1f/%d/%s: %s",
+				LOGINFO("Accepted client %d share diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 				result = true;
 			} else {
 				json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
-				LOGINFO("Rejected client %d dupe diff %.1f/%d/%s: %s",
+				LOGINFO("Rejected client %d dupe diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 			}
 		} else {
-			LOGINFO("Rejected client %d high diff %.1f/%d/%s: %s",
+			LOGINFO("Rejected client %d high diff %.1f/%.0f/%s: %s",
 				client->id, sdiff, diff, wdiffsuffix, hexhash);
 			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
 		}
