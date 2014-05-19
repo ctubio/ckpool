@@ -1224,7 +1224,7 @@ out_unlock:
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held */
 static void submit_share(stratum_instance_t *client, uint64_t jobid, const char *nonce2,
-			 const char *ntime, const char *nonce)
+			 const char *ntime, const char *nonce, int msg_id)
 {
 	ckpool_t *ckp = client->ckp;
 	json_t *json_msg;
@@ -1232,8 +1232,9 @@ static void submit_share(stratum_instance_t *client, uint64_t jobid, const char 
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	json_msg = json_pack("{sissssss}", "jobid", jobid, "nonce2", enonce2,
-			     "ntime", ntime, "nonce", nonce);
+	json_msg = json_pack("{sisssssssisi}", "jobid", jobid, "nonce2", enonce2,
+			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
+			     "msg_id", msg_id);
 	msg = json_dumps(json_msg, 0);
 	json_decref(json_msg);
 	send_proc(ckp->generator, msg);
@@ -1336,7 +1337,7 @@ out_unlock:
 	ck_runlock(&workbase_lock);
 
 	if (submit)
-		submit_share(client, id, nonce2, ntime, nonce);
+		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
 
 	/* Accept the lower of new and old diffs until the next update */
 	if (id < client->diff_change_job_id && client->old_diff < client->diff)
@@ -1529,6 +1530,7 @@ static void parse_instance_msg(int client_id, json_t *msg)
 		err_val = json_string("-1:id not found");
 		goto out;
 	}
+	json_object_set_nocheck(json_msg, "id", id_val);
 #if 0
 	/* Random broken clients send something not an integer so just use the
 	 * json object, whatever it is. */
@@ -1553,14 +1555,13 @@ static void parse_instance_msg(int client_id, json_t *msg)
 	}
 	result_val = gen_json_result(client_id, json_msg, method, params,
 				     &err_val, &update);
-	if (unlikely(!result_val)) {
+	if (!result_val) {
 		json_decref(json_msg);
 		return;
 	}
 	if (!err_val)
 		err_val = json_null();
 out:
-	json_object_set_nocheck(json_msg, "id", id_val);
 	json_object_set_nocheck(json_msg, "error", err_val);
 	json_object_set_nocheck(json_msg, "result", result_val);
 

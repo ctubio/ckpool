@@ -43,6 +43,17 @@ struct notify_instance {
 
 typedef struct notify_instance notify_instance_t;
 
+struct share_msg {
+	UT_hash_handle hh;
+	int id; // Our own id for submitting upstream
+
+	int client_id;
+	int msg_id; // Stratum message id from client
+	time_t submit_time;
+};
+
+typedef struct share_msg share_msg_t;
+
 /* Per proxied pool instance data */
 struct proxy_instance {
 	ckpool_t *ckp;
@@ -83,6 +94,10 @@ struct proxy_instance {
 	pthread_cond_t psend_cond;
 
 	stratum_msg_t *psends;
+
+	pthread_mutex_t share_lock;
+	share_msg_t *shares;
+	int share_id;
 };
 
 typedef struct proxy_instance proxy_instance_t;
@@ -710,10 +725,26 @@ static void send_diff(proxy_instance_t *proxi, int sockd)
 static void submit_share(proxy_instance_t *proxi, json_t *val)
 {
 	stratum_msg_t *msg;
+	share_msg_t *share;
 
 	msg = ckzalloc(sizeof(stratum_msg_t));
+	share = ckzalloc(sizeof(share_msg_t));
+	share->submit_time = time(NULL);
+	share->client_id = json_integer_value(json_object_get(val, "client_id"));
+	share->msg_id = json_integer_value(json_object_get(val, "msg_id"));
+	json_object_del(val, "client_id");
+	json_object_del(val, "msg_id");
 	msg->json_msg = val;
 
+	/* Add new share entry to the share hashtable */
+	mutex_lock(&proxi->share_lock);
+	share->id = proxi->share_id++;
+	HASH_ADD_INT(proxi->shares, id, share);
+	mutex_unlock(&proxi->share_lock);
+
+	json_object_set_nocheck(val, "id", json_integer(share->id));
+
+	/* Add the new message to the psend list */
 	mutex_lock(&proxi->psend_lock);
 	DL_APPEND(proxi->psends, msg);
 	pthread_cond_signal(&proxi->psend_cond);
@@ -803,6 +834,46 @@ static void clear_notify(notify_instance_t *ni)
 	free(ni->coinbase2);
 }
 
+/* FIXME: Return something useful to the stratifier based on this result */
+static bool parse_share(ckpool_t *ckp, proxy_instance_t *proxi, const char *buf)
+{
+	json_t *val = NULL, *idval;
+	share_msg_t *share;
+	bool ret = false;
+	int id;
+
+	val = json_loads(buf, 0, NULL);
+	if (!val) {
+		LOGINFO("Failed to parse json msg: %s", buf);
+		goto out;
+	}
+	idval = json_object_get(val, "id");
+	if (!idval) {
+		LOGINFO("Failed to find id in json msg: %s", buf);
+		goto out;
+	}
+	id = json_integer_value(idval);
+
+	mutex_lock(&proxi->share_lock);
+	HASH_FIND_INT(proxi->shares, &id, share);
+	if (share)
+		HASH_DEL(proxi->shares, share);
+	mutex_unlock(&proxi->share_lock);
+
+	if (!share) {
+		LOGINFO("Failed to find matching share to result: %s", buf);
+		goto out;
+	}
+	ret = true;
+	LOGDEBUG("Found share from client %d with msg_id %d", share->client_id,
+		 share->msg_id);
+	free(share);
+out:
+	if (val)
+		json_decref(val);
+	return ret;
+}
+
 static void *proxy_recv(void *arg)
 {
 	proxy_instance_t *proxi = (proxy_instance_t *)arg;
@@ -813,22 +884,32 @@ static void *proxy_recv(void *arg)
 
 	while (42) {
 		notify_instance_t *ni, *tmp;
+		share_msg_t *share, *tmpshare;
 		time_t now;
 		int ret;
 
 		now = time(NULL);
 
+		/* Age old notifications older than 10 mins old */
 		mutex_lock(&proxi->notify_lock);
 		HASH_ITER(hh, proxi->notify_instances, ni, tmp) {
 			if (HASH_COUNT(proxi->notify_instances) < 3)
 				break;
-			/* Age old notifications older than 10 mins old */
 			if (ni->notify_time < now - 600) {
 				HASH_DEL(proxi->notify_instances, ni);
 				clear_notify(ni);
 			}
 		}
 		mutex_unlock(&proxi->notify_lock);
+
+		/* Similary with shares older than 2 mins without response */
+		mutex_lock(&proxi->share_lock);
+		HASH_ITER(hh, proxi->shares, share, tmpshare) {
+			if (share->submit_time < now - 120) {
+				HASH_DEL(proxi->shares, share);
+			}
+		}
+		mutex_unlock(&proxi->share_lock);
 
 		ret = read_socket_line(cs, 120);
 		if (ret < 1) {
@@ -847,6 +928,10 @@ static void *proxy_recv(void *arg)
 			}
 			continue;
 		}
+		if (parse_share(ckp, proxi, cs->buf)) {
+			continue;
+		}
+		/* If it's not a method it should be a share result */
 		LOGWARNING("Unhandled stratum message: %s", cs->buf);
 	}
 	return NULL;
@@ -890,12 +975,12 @@ static void *proxy_send(void *arg)
 			LOGWARNING("Failed to find matching jobid in proxysend");
 			continue;
 		}
-		/* FIXME Use unique IDs and parse responses */
-		val = json_pack("{s[ssooo]siss}", "params", proxi->auth, jobid,
+		val = json_pack("{s[ssooo]soss}", "params", proxi->auth, jobid,
 				json_object_get(msg->json_msg, "nonce2"),
 				json_object_get(msg->json_msg, "ntime"),
 				json_object_get(msg->json_msg, "nonce"),
-				"id", 0, "method", "mining.submit");
+				"id", json_object_get(msg->json_msg, "id"),
+				"method", "mining.submit");
 		free(jobid);
 		send_json_msg(cs, val);
 		json_decref(val);
