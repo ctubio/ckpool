@@ -457,7 +457,6 @@ out:
 }
 
 #define parse_reconnect(a, b) true
-#define show_message(a, b) true
 
 static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 {
@@ -554,6 +553,19 @@ static bool send_version(proxy_instance_t *proxi, json_t *val)
 	return ret;
 }
 
+static bool show_message(json_t *val)
+{
+	const char *msg;
+
+	if (!json_is_array(val))
+		return false;
+	msg = json_string_value(json_array_get(val, 0));
+	if (!msg)
+		return false;
+	LOGNOTICE("Pool message: %s", msg);
+	return true;
+}
+
 static bool parse_method(proxy_instance_t *proxi, const char *msg)
 {
 	json_t *val = NULL, *method, *err_val, *params;
@@ -622,7 +634,7 @@ static bool parse_method(proxy_instance_t *proxi, const char *msg)
 	}
 
 	if (!strncasecmp(buf, "client.show_message", 19)) {
-		ret = show_message(proxi, params);
+		ret = show_message(params);
 		goto out;
 	}
 out:
