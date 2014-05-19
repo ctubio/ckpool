@@ -57,6 +57,8 @@ struct pool_stats {
 	/* Diff shares stats */
 	int64_t unaccounted_diff_shares;
 	int64_t accounted_diff_shares;
+	int64_t unaccounted_rejects;
+	int64_t accounted_rejects;
 
 	/* Diff shares per second for 1/5/15... minute rolling averages */
 	double dsps1;
@@ -1093,12 +1095,13 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	bias = time_bias(bdiff, 300);
 	tdiff = tvdiff(&now_t, &client->ldc);
 
+	mutex_lock(&stats_lock);
 	if (valid) {
-		mutex_lock(&stats_lock);
 		stats.unaccounted_shares++;
 		stats.unaccounted_diff_shares += diff;
-		mutex_unlock(&stats_lock);
-	}
+	} else
+		stats.unaccounted_rejects += diff;
+	mutex_unlock(&stats_lock);
 
 	/* Check the difficulty every 240 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
@@ -1732,7 +1735,9 @@ static void *statsupdate(void *arg)
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
 		double ghs, tdiff, bias;
+		char fname[512] = {};
 		tv_t now, diff;
+		FILE *fp;
 		int i;
 
 		tv_time(&now);
@@ -1767,21 +1772,29 @@ static void *statsupdate(void *arg)
 		ghs = stats.dsps1440 * nonces / bias;
 		suffix_string(ghs, suffix1440, 16, 0);
 
-		LOGNOTICE("Pool runtime: %lus  Live clients: %d  Dead clients: %d  "
-			  "Reusable clients: %d  Reused clients: %d",
-			  diff.tv_sec, stats.live_clients, stats.dead_clients,
-			  stats.reusable_clients, stats.reused_clients);
-		LOGNOTICE("Pool hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  "
-			  "(6h):%s  (1d):%s",
-			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
-		LOGNOTICE("Pool shares difftotal: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
-			  stats.accounted_diff_shares, sps1, sps5, sps15, sps60);
+		snprintf(fname, 511, "%s/pool.status", ckp->logdir);
+		fp = fopen(fname, "w");
+		if (unlikely(!fp))
+			LOGERR("Failed to fopen %s", fname);
+
+		snprintf(logout, 511, "runtime: %lus  Live clients: %d  Dead clients: %d  "
+			 "Reusable clients: %d  Reused clients: %d",
+			 diff.tv_sec, stats.live_clients, stats.dead_clients,
+			 stats.reusable_clients, stats.reused_clients);
+		LOGNOTICE("Pool %s", logout);
+		fprintf(fp, "%s\n", logout);
+		snprintf(logout, 511, "hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
+			 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+		LOGNOTICE("Pool %s", logout);
+		fprintf(fp, "%s\n", logout);
+		snprintf(logout, 511, "shares A: %ld  R: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
+			 stats.accounted_diff_shares, stats.accounted_rejects, sps1, sps5, sps15, sps60);
+		LOGNOTICE("Pool %s", logout);
+		fprintf(fp, "%s\n", logout);
+		fclose(fp);
 
 		ck_rlock(&instance_lock);
 		HASH_ITER(hh, user_instances, instance, tmp) {
-			char fname[512] = {};
-			FILE *fp;
-
 			if (now.tv_sec - instance->last_share.tv_sec > 60) {
 				/* No shares for over a minute, decay to 0 */
 				decay_time(&instance->dsps1, 0, tdiff, 60);
@@ -1829,6 +1842,7 @@ static void *statsupdate(void *arg)
 			mutex_lock(&stats_lock);
 			stats.accounted_shares += stats.unaccounted_shares;
 			stats.accounted_diff_shares += stats.unaccounted_diff_shares;
+			stats.accounted_rejects += stats.unaccounted_rejects;
 
 			decay_time(&stats.sps1, stats.unaccounted_shares, 15, 60);
 			decay_time(&stats.sps5, stats.unaccounted_shares, 15, 300);
@@ -1842,7 +1856,9 @@ static void *statsupdate(void *arg)
 			decay_time(&stats.dsps360, stats.unaccounted_diff_shares, 15, 21600);
 			decay_time(&stats.dsps1440, stats.unaccounted_diff_shares, 15, 86400);
 
-			stats.unaccounted_shares = stats.unaccounted_diff_shares = 0;
+			stats.unaccounted_shares =
+			stats.unaccounted_diff_shares =
+			stats.unaccounted_rejects = 0;
 			mutex_unlock(&stats_lock);
 		}
 	}
