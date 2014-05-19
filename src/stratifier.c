@@ -165,6 +165,24 @@ static pthread_cond_t stratum_send_cond;
 static stratum_msg_t *stratum_recvs;
 static stratum_msg_t *stratum_sends;
 
+static int user_instance_id;
+
+struct user_instance {
+	UT_hash_handle hh;
+	char username[128];
+	int id;
+
+	int64_t absolute_shares;
+	int64_t diff_shares;
+	double dsps1;
+	double dsps5;
+	double dsps15;
+};
+
+typedef struct user_instance user_instance_t;
+
+static user_instance_t *user_instances;
+
 /* Per client stratum instance, to be further expanded */
 struct stratum_instance {
 	UT_hash_handle hh;
@@ -188,6 +206,7 @@ struct stratum_instance {
 
 	bool authorised;
 
+	user_instance_t *user_instance;
 	char *useragent;
 	char *workername;
 	int user_id;
@@ -202,6 +221,7 @@ typedef struct stratum_instance stratum_instance_t;
 static stratum_instance_t *stratum_instances;
 static stratum_instance_t *disconnected_instances;
 
+/* Protects both stratum and user instances */
 static cklock_t instance_lock;
 
 struct share {
@@ -948,17 +968,38 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	return ret;
 }
 
-static int authorise_user(const char __maybe_unused *workername)
+/* FIXME: Talk to database here instead. This simply strips off the first part
+ * of the workername and matches it to a user or creates a new one. */
+static user_instance_t *authorise_user(const char *workername)
 {
-	/* Talk to database here and return user_id or -1 if invalid */
-	return 1;
+	char *fullname = strdupa(workername);
+	char *username = strsep(&fullname, ".");
+	user_instance_t *instance;
+
+	if (strlen(username) > 127)
+		username[127] = '\0';
+
+	ck_ilock(&instance_lock);
+	HASH_FIND_STR(user_instances, username, instance);
+	if (!instance) {
+		instance = ckzalloc(sizeof(user_instance_t));
+		strcpy(instance->username, username);
+
+		ck_ulock(&instance_lock);
+		instance->id = user_instance_id++;
+		HASH_ADD_STR(user_instances, username, instance);
+		ck_dwilock(&instance_lock);
+	}
+	ck_uilock(&instance_lock);
+
+	return instance;
 }
 
 static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, json_t **err_val)
 {
-	int arr_size, user_id;
 	bool ret = false;
 	const char *buf;
+	int arr_size;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -978,14 +1019,12 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty workername parameter");
 		goto out;
 	}
-	user_id = authorise_user(buf);
-	if (user_id < 0) {
-		*err_val = json_string("User not found");
-		goto out;
-	}
-	LOGNOTICE("Authorised client %d as user %s", client->id, buf);
+	client->user_instance = authorise_user(buf);
+	client->user_id = client->user_instance->id;
+
+	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
+		  client->user_instance->username);
 	client->workername = strdup(buf);
-	client->user_id = user_id;
 	client->authorised = true;
 	ret = true;
 out:
