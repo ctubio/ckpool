@@ -218,6 +218,7 @@ static bool send_json_msg(connsock_t *cs, json_t *json_msg)
 	char *s;
 
 	s = json_dumps(json_msg, JSON_ESCAPE_SLASH);
+	LOGDEBUG("Sending json msg: %s", s);
 	realloc_strcat(&s, "\n");
 	len = strlen(s);
 	sent = write_socket(cs->fd, s, len);
@@ -406,13 +407,13 @@ retry:
 		req = json_pack("{s:i,s:s,s:[s,s]}",
 				"id", proxi->id++,
 				"method", "mining.subscribe",
-				"params", "ckproxy", proxi->sessionid);
+				"params", PACKAGE"/"VERSION, proxi->sessionid);
 	/* Then attempt to connect with just the client description */
 	} else if (!proxi->no_params) {
 		req = json_pack("{s:i,s:s,s:[s]}",
 				"id", proxi->id++,
 				"method", "mining.subscribe",
-				"params", "ckproxy");
+				"params", PACKAGE"/"VERSION);
 	/* Then try without any parameters */
 	} else {
 		req = json_pack("{s:i,s:s,s:[]}",
@@ -456,7 +457,6 @@ out:
 }
 
 #define parse_reconnect(a, b) true
-#define send_version(a, b) true
 #define show_message(a, b) true
 
 static bool parse_notify(proxy_instance_t *proxi, json_t *val)
@@ -539,6 +539,19 @@ static bool parse_diff(proxy_instance_t *proxi, json_t *val)
 	proxi->diff = diff;
 	proxi->diffed = true;
 	return true;
+}
+
+static bool send_version(proxy_instance_t *proxi, json_t *val)
+{
+	json_t *json_msg, *id_val = json_object_get(val, "id");
+	connsock_t *cs = proxi->cs;
+	bool ret;
+
+	json_msg = json_pack("{sossso}", "id", id_val, "result", PACKAGE"/"VERSION,
+			     "error", json_null());
+	ret = send_json_msg(cs, json_msg);
+	json_decref(json_msg);
+	return ret;
 }
 
 static bool parse_method(proxy_instance_t *proxi, const char *msg)
@@ -736,7 +749,7 @@ static void submit_share(proxy_instance_t *proxi, json_t *val)
 	mutex_unlock(&proxi->psend_lock);
 }
 
-static int proxy_loop(proc_instance_t *pi, connsock_t *cs, proxy_instance_t *proxi)
+static int proxy_loop(proc_instance_t *pi, proxy_instance_t *proxi)
 {
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
@@ -958,7 +971,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi, connsock_t *cs,
 	cond_init(&proxi.psend_cond);
 	create_pthread(&proxi.pth_psend, proxy_send, &proxi);
 
-	ret = proxy_loop(pi, cs, &proxi);
+	ret = proxy_loop(pi, &proxi);
 
 	/* Return from the proxy loop means we have received a shutdown
 	 * request */
