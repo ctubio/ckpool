@@ -1715,7 +1715,7 @@ static void *stratum_sender(void *arg)
 
 static void *statsupdate(void *arg)
 {
-	ckpool_t __maybe_unused *ckp = (ckpool_t *)arg;
+	ckpool_t *ckp = (ckpool_t *)arg;
 
 	rename_proc("statsupdate");
 
@@ -1724,7 +1724,7 @@ static void *statsupdate(void *arg)
 
 	while (42) {
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16];
-		char suffix360[16], suffix1440[16];
+		char suffix360[16], suffix1440[16], logout[512] = {};
 		const double nonces = 4294967296;
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
@@ -1776,6 +1776,9 @@ static void *statsupdate(void *arg)
 
 		ck_rlock(&instance_lock);
 		HASH_ITER(hh, user_instances, instance, tmp) {
+			char fname[512] = {};
+			FILE *fp;
+
 			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
 			ghs = instance->dsps5 * nonces;
@@ -1788,10 +1791,19 @@ static void *statsupdate(void *arg)
 			suffix_string(ghs, suffix360, 16, 0);
 			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
-			LOGNOTICE("User %s:  A: %ld  R: %ld  "
-				  "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
-				  instance->username, instance->diff_accepted, instance->diff_rejected,
-				  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+			snprintf(logout, 511, "A: %ld  R: %ld  "
+				 "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
+				 instance->diff_accepted, instance->diff_rejected,
+				 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+			LOGNOTICE("User %s: %s", instance->username, logout);
+			snprintf(fname, 511, "%s/%s", ckp->logdir, instance->username);
+			fp = fopen(fname, "w");
+			if (unlikely(!fp)) {
+				LOGERR("Failed to fopen %s", fname);
+				continue;
+			}
+			fprintf(fp, "%s\n", logout);
+			fclose(fp);
 		}
 		ck_runlock(&instance_lock);
 
