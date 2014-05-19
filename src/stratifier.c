@@ -175,16 +175,16 @@ struct stratum_instance {
 	char enonce1var[12];
 	uint64_t enonce1_64;
 
-	double diff; /* Current diff */
-	double old_diff; /* Previous diff */
+	int64_t diff; /* Current diff */
+	int64_t old_diff; /* Previous diff */
 	uint64_t diff_change_job_id; /* Last job_id we changed diff */
 	double dsps5; /* Diff shares per second, 5 minute rolling average */
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
 	tv_t first_share;
 	tv_t last_share;
-	int absolute_shares;
-	double diff_shares;
+	int64_t absolute_shares;
+	int64_t diff_shares;
 
 	bool authorised;
 
@@ -1017,8 +1017,9 @@ static double time_bias(double tdiff, double period)
 
 static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
-	double optimal, tdiff, bdiff, dsps, drr, network_diff, bias;
+	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	uint64_t next_blockid;
+	int64_t optimal;
 	tv_t now_t;
 
 	if (valid) {
@@ -1060,9 +1061,9 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 		/* FIXME For now show the hashrate every ~1m when the diff is
 		 * stable */
 		if (!(client->ssdc % 18)) {
-			LOGNOTICE("Client %d worker %s DiffAcc: %.0f hashrate %.1fGH/s",
-				  client->id, client->workername, client->diff_shares,
-				  dsps * 4.294967296);
+			LOGNOTICE("Client %d worker %s accepted %ld DiffAccepted %ld hashrate %.1fGH/s",
+				  client->id, client->workername, client->absolute_shares,
+				  client->diff_shares, dsps * 4.294967296);
 		}
 		return;
 	}
@@ -1091,7 +1092,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 
 	client->ssdc = 0;
 
-	LOGINFO("Client %d biased dsps %.2f dsps %.2f drr %.2f adjust diff from %.0f to: %.0f ",
+	LOGINFO("Client %d biased dsps %.2f dsps %.2f drr %.2f adjust diff from %ld to: %ld ",
 		client->id, dsps, client->dsps5, drr, client->diff, optimal);
 
 	copy_tv(&client->ldc, &now_t);
