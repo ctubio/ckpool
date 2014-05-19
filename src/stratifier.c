@@ -172,8 +172,9 @@ struct user_instance {
 	char username[128];
 	int id;
 
-	int64_t absolute_shares;
 	int64_t diff_shares;
+	int64_t diff_reject;
+
 	double dsps1;
 	double dsps5;
 	double dsps15;
@@ -1054,21 +1055,28 @@ static double time_bias(double tdiff, double period)
 	return 1.0 - 1.0 / exp(tdiff / period);
 }
 
-static void add_submit(stratum_instance_t *client, int diff, bool valid)
+static void add_submit(stratum_instance_t *client, user_instance_t *instance, int diff,
+		       bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	uint64_t next_blockid;
 	int64_t optimal;
 	tv_t now_t;
 
+	tv_time(&now_t);
+	tdiff = tvdiff(&now_t, &client->last_share);
+
 	if (valid) {
 		if (unlikely(!client->absolute_shares++))
 			tv_time(&client->first_share);
 		client->diff_shares += diff;
-	}
+		instance->diff_shares += diff;
+		decay_time(&instance->dsps1, diff, tdiff, 60);
+		decay_time(&instance->dsps5, diff, tdiff, 300);
+		decay_time(&instance->dsps15, diff, tdiff, 900);
+	} else
+		instance->diff_reject += diff;
 
-	tv_time(&now_t);
-	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
 	decay_time(&client->dsps5, diff, tdiff, 300);
@@ -1096,16 +1104,8 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	drr = dsps / (double)client->diff;
 
 	/* Optimal rate product is 0.3, allow some hysteresis. */
-	if (drr > 0.2 && drr < 0.4) {
-		/* FIXME For now show the hashrate every ~1m when the diff is
-		 * stable */
-		if (!(client->ssdc % 18)) {
-			LOGNOTICE("Client %d worker %s accepted %ld DiffAccepted %ld hashrate %.1fGH/s",
-				  client->id, client->workername, client->absolute_shares,
-				  client->diff_shares, dsps * 4.294967296);
-		}
+	if (drr > 0.15 && drr < 0.4)
 		return;
-	}
 
 	optimal = round(dsps * 3.33);
 	if (optimal <= client->ckp->mindiff) {
@@ -1405,7 +1405,7 @@ out_unlock:
 		}
 	}  else
 		LOGINFO("Rejected client %d invalid share", client->id);
-	add_submit(client, diff, result);
+	add_submit(client, client->user_instance, diff, result);
 
 	/* Log shares here */
 	len = strlen(logdir) + strlen(client->workername) + 12;
