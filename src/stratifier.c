@@ -172,12 +172,15 @@ struct user_instance {
 	char username[128];
 	int id;
 
-	int64_t diff_shares;
-	int64_t diff_reject;
+	int64_t diff_accepted;
+	int64_t diff_rejected;
 
 	double dsps1;
 	double dsps5;
 	double dsps15;
+	double dsps60;
+	double dsps360;
+	double dsps1440;
 };
 
 typedef struct user_instance user_instance_t;
@@ -1070,12 +1073,15 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 		if (unlikely(!client->absolute_shares++))
 			tv_time(&client->first_share);
 		client->diff_shares += diff;
-		instance->diff_shares += diff;
+		instance->diff_accepted += diff;
 		decay_time(&instance->dsps1, diff, tdiff, 60);
 		decay_time(&instance->dsps5, diff, tdiff, 300);
 		decay_time(&instance->dsps15, diff, tdiff, 900);
+		decay_time(&instance->dsps60, diff, tdiff, 3600);
+		decay_time(&instance->dsps360, diff, tdiff, 21600);
+		decay_time(&instance->dsps1440, diff, tdiff, 86400);
 	} else
-		instance->diff_reject += diff;
+		instance->diff_rejected += diff;
 
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
@@ -1721,6 +1727,7 @@ static void *statsupdate(void *arg)
 		char suffix360[16], suffix1440[16];
 		const double nonces = 4294967296;
 		double sps1, sps5, sps15, sps60;
+		user_instance_t *instance, *tmp;
 		double ghs, tdiff, bias;
 		tv_t diff;
 		int i;
@@ -1766,6 +1773,28 @@ static void *statsupdate(void *arg)
 			  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 		LOGNOTICE("Pool shares difftotal: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
 			  stats.accounted_diff_shares, sps1, sps5, sps15, sps60);
+
+		ck_rlock(&instance_lock);
+		HASH_ITER(hh, user_instances, instance, tmp) {
+			ghs = instance->dsps1 * nonces;
+			suffix_string(ghs, suffix1, 16, 0);
+			ghs = instance->dsps5 * nonces;
+			suffix_string(ghs, suffix5, 16, 0);
+			ghs = instance->dsps15 * nonces;
+			suffix_string(ghs, suffix15, 16, 0);
+			ghs = instance->dsps60 * nonces;
+			suffix_string(ghs, suffix60, 16, 0);
+			ghs = instance->dsps360 * nonces;
+			suffix_string(ghs, suffix360, 16, 0);
+			ghs = instance->dsps1440 * nonces;
+			suffix_string(ghs, suffix1440, 16, 0);
+			LOGNOTICE("User %s:  A: %ld  R: %ld  "
+				  "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
+				  instance->username, instance->diff_accepted, instance->diff_rejected,
+				  suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+		}
+		ck_runlock(&instance_lock);
+
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
