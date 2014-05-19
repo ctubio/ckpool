@@ -175,6 +175,8 @@ struct user_instance {
 	int64_t diff_accepted;
 	int64_t diff_rejected;
 
+	tv_t last_share;
+
 	double dsps1;
 	double dsps5;
 	double dsps15;
@@ -1080,6 +1082,7 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 		decay_time(&instance->dsps60, diff, tdiff, 3600);
 		decay_time(&instance->dsps360, diff, tdiff, 21600);
 		decay_time(&instance->dsps1440, diff, tdiff, 86400);
+		copy_tv(&instance->last_share, &now_t);
 	} else
 		instance->diff_rejected += diff;
 
@@ -1729,11 +1732,11 @@ static void *statsupdate(void *arg)
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
 		double ghs, tdiff, bias;
-		tv_t diff;
+		tv_t now, diff;
 		int i;
 
-		tv_time(&diff);
-		timersub(&diff, &stats.start_time, &diff);
+		tv_time(&now);
+		timersub(&now, &stats.start_time, &diff);
 		tdiff = diff.tv_sec + (double)diff.tv_usec / 1000000;
 
 		bias = time_bias(tdiff, 60);
@@ -1779,6 +1782,15 @@ static void *statsupdate(void *arg)
 			char fname[512] = {};
 			FILE *fp;
 
+			if (now.tv_sec - instance->last_share.tv_sec > 60) {
+				/* No shares for over a minute, decay to 0 */
+				decay_time(&instance->dsps1, 0, tdiff, 60);
+				decay_time(&instance->dsps5, 0, tdiff, 300);
+				decay_time(&instance->dsps15, 0, tdiff, 900);
+				decay_time(&instance->dsps60, 0, tdiff, 3600);
+				decay_time(&instance->dsps360, 0, tdiff, 21600);
+				decay_time(&instance->dsps1440, 0, tdiff, 86400);
+			}
 			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
 			ghs = instance->dsps5 * nonces;
