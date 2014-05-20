@@ -226,9 +226,6 @@ static void sighandler(int sig)
 	pthread_cancel(global_ckp->pth_watchdog);
 	join_pthread(global_ckp->pth_watchdog);
 
-	/* First attempt, send a shutdown message */
-	send_proc(&global_ckp->main, "shutdown");
-
 	for (i = 0; i < global_ckp->proc_instances; i++)
 		send_proc(global_ckp->children[i], "shutdown");
 
