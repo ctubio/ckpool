@@ -398,7 +398,7 @@ bool submit_block(connsock_t *cs, char *params)
 			goto out;
 		}
 	}
-	LOGWARNING("BLOCK ACCEPTED! HASH: %s", params);
+	LOGWARNING("BLOCK ACCEPTED!");
 	ret = true;
 out:
 	json_decref(val);
