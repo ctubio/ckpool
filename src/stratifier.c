@@ -1951,5 +1951,5 @@ int stratifier(proc_instance_t *pi)
 		sleep(1);
 	}
 
-	exit(ret);
+	exit(ret? 1: 0);
 }

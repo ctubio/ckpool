@@ -1237,5 +1237,5 @@ int generator(proc_instance_t *pi)
 		send_proc(&ckp->main, "shutdown");
 		sleep(1);
 	}
-	exit(ret);
+	exit(ret? 1: 0);
 }
