@@ -492,7 +492,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 			continue;
 		if (ret < 1) {
 			if (!ret)
-				LOGNOTICE("Select timed out in read_socket_line");
+				LOGDEBUG("Select timed out in read_socket_line");
 			else
 				LOGERR("Select failed in read_socket_line");
 			goto out;

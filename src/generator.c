@@ -897,8 +897,8 @@ static void *proxy_recv(void *arg)
 	while (42) {
 		notify_instance_t *ni, *tmp;
 		share_msg_t *share, *tmpshare;
+		int retries = 0, ret;
 		time_t now;
-		int ret;
 
 		now = time(NULL);
 
@@ -923,7 +923,12 @@ static void *proxy_recv(void *arg)
 		}
 		mutex_unlock(&proxi->share_lock);
 
-		ret = read_socket_line(cs, 120);
+		/* If we don't get an update within 2 minutes the upstream pool
+		 * has likely stopped responding. */
+		do {
+			ret = read_socket_line(cs, 5);
+		} while (ret == 0 && ++retries < 24);
+
 		if (ret < 1) {
 			LOGWARNING("Failed to read_socket_line in proxy_recv, attempting reconnect");
 			reconnect_stratum(cs, proxi);
