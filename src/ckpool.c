@@ -388,16 +388,20 @@ static void *watchdog(void *arg)
 	while (42) {
 		proc_instance_t *pi;
 		time_t relaunch_t;
-		int pid;
+		int pid, status;
 
-		pid = waitpid(0, NULL, 0);
+		pid = waitpid(0, &status, 0);
+		pi = child_by_pid(ckp, pid);
+		if (pi && WIFEXITED(status)) {
+			LOGWARNING("Child process %s exited, terminating!", pi->processname);
+			break;
+		}
 		relaunch_t = time(NULL);
 		if (relaunch_t == last_relaunch_t) {
 			LOGEMERG("Respawning processes too fast, exiting!");
 			break;
 		}
 		last_relaunch_t = relaunch_t;
-		pi = child_by_pid(ckp, pid);
 		if (pi) {
 			LOGERR("%s process dead! Relaunching", pi->processname);
 			launch_process(pi);
