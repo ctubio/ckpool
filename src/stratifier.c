@@ -469,6 +469,25 @@ static void update_base(ckpool_t *ckp)
 	stratum_broadcast_update(new_block);
 }
 
+static void drop_allclients(ckpool_t *ckp)
+{
+	stratum_instance_t *client, *tmp;
+	char buf[128];
+
+	ck_wlock(&instance_lock);
+	HASH_ITER(hh, stratum_instances, client, tmp) {
+		HASH_DEL(stratum_instances, client);
+		stats.live_clients--;
+		sprintf(buf, "dropclient=%d", client->id);
+		send_proc(ckp->connector, buf);
+	}
+	HASH_ITER(hh, disconnected_instances, client, tmp) {
+		stats.reusable_clients--;
+		HASH_DEL(disconnected_instances, client);
+	}
+	ck_wunlock(&instance_lock);
+}
+
 static bool update_subscribe(ckpool_t *ckp)
 {
 	json_t *val;
@@ -499,6 +518,8 @@ static bool update_subscribe(ckpool_t *ckp)
 	ck_wunlock(&workbase_lock);
 
 	json_decref(val);
+	drop_allclients(ckp);
+
 	return true;
 }
 

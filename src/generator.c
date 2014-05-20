@@ -811,6 +811,7 @@ out:
 
 static void reconnect_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
+	ckpool_t *ckp = proxi->ckp;
 	bool ret = true;
 
 	do {
@@ -823,6 +824,7 @@ static void reconnect_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		ret = subscribe_stratum(cs, proxi);
 		if (!ret)
 			continue;
+		send_proc(ckp->stratifier, "subscribe");
 		ret = auth_stratum(cs, proxi);
 	} while (!ret);
 }
