@@ -966,9 +966,9 @@ static void *proxy_send(void *arg)
 		notify_instance_t *ni;
 		stratum_msg_t *msg;
 		char *jobid = NULL;
+		bool ret = true;
 		json_t *val;
 		uint32_t id;
-		bool ret;
 
 		mutex_lock(&proxi->psend_lock);
 		if (!proxi->psends)
