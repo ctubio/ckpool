@@ -269,7 +269,7 @@ out:
 static json_t *find_notify(json_t *val)
 {
 	int arr_size, i;
-	json_t *ret;
+	json_t *ret = NULL;
 	const char *entry;
 
 	if (!json_is_array(val))
@@ -951,6 +951,7 @@ static void *proxy_send(void *arg)
 		char *jobid;
 		json_t *val;
 		uint32_t id;
+		bool ret;
 
 		mutex_lock(&proxi->psend_lock);
 		if (!proxi->psends)
@@ -982,10 +983,14 @@ static void *proxy_send(void *arg)
 				"id", json_object_get(msg->json_msg, "id"),
 				"method", "mining.submit");
 		free(jobid);
-		send_json_msg(cs, val);
+		ret = send_json_msg(cs, val);
 		json_decref(val);
 		json_decref(msg->json_msg);
 		free(msg);
+		if (!ret) {
+			LOGWARNING("Failed to send msg in proxy_send, dropping to reconnect");
+			close(cs->fd);
+		}
 	}
 	return NULL;
 }
