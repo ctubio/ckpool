@@ -294,6 +294,7 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 	json_t *val = NULL, *res_val, *notify_val, *tmp;
 	const char *string;
 	bool ret = false;
+	char *old;
 	int size;
 
 	size = read_socket_line(cs, 5);
@@ -320,12 +321,16 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Failed to find notify in parse_subscribe");
 		goto out;
 	}
+	/* Free up old data in place if we are re-subscribing */
+	old = proxi->sessionid;
+	proxi->sessionid = NULL;
 	if (!proxi->no_params && !proxi->no_sessionid && json_array_size(notify_val) > 1) {
 		/* Copy the session id if one exists. */
 		string = json_string_value(json_array_get(notify_val, 1));
 		if (string)
 			proxi->sessionid = strdup(string);
 	}
+	free(old);
 	tmp = json_array_get(res_val, 1);
 	if (!tmp || !json_is_string(tmp)) {
 		LOGWARNING("Failed to parse enonce1 in parse_subscribe");
@@ -336,13 +341,17 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Invalid string length for enonce1 in parse_subscribe");
 		goto out;
 	}
+	old = proxi->enonce1;
 	proxi->enonce1 = strdup(string);
+	free(old);
 	proxi->nonce1len = strlen(proxi->enonce1) / 2;
 	if (proxi->nonce1len > 15) {
 		LOGWARNING("Nonce1 too long at %d", proxi->nonce1len);
 		goto out;
 	}
+	old = proxi->enonce1bin;
 	proxi->enonce1bin = ckalloc(proxi->nonce1len);
+	free(old);
 	hex2bin(proxi->enonce1bin, proxi->enonce1, proxi->nonce1len);
 	tmp = json_array_get(res_val, 2);
 	if (!tmp || !json_is_integer(tmp)) {
@@ -361,7 +370,7 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 	proxi->nonce2len = size;
 
 	LOGINFO("Found notify with enonce %s nonce2len %d", proxi->enonce1,
-		   proxi->nonce2len);
+		proxi->nonce2len);
 	ret = true;
 
 out:
