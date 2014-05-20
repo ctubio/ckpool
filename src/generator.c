@@ -809,10 +809,27 @@ out:
 	return ret;
 }
 
+static void clear_notify(notify_instance_t *ni)
+{
+	free(ni->jobid);
+	free(ni->coinbase1);
+	free(ni->coinbase2);
+	free(ni);
+}
+
 static void reconnect_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
+	notify_instance_t *ni, *tmp;
 	ckpool_t *ckp = proxi->ckp;
 	bool ret = true;
+
+	/* All our notify data is invalid if we reconnect so discard them */
+	mutex_lock(&proxi->notify_lock);
+	HASH_ITER(hh, proxi->notify_instances, ni, tmp) {
+		HASH_DEL(proxi->notify_instances, ni);
+		clear_notify(ni);
+	}
+	mutex_unlock(&proxi->notify_lock);
 
 	do {
 		if (!ret)
@@ -824,16 +841,9 @@ static void reconnect_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		ret = subscribe_stratum(cs, proxi);
 		if (!ret)
 			continue;
-		send_proc(ckp->stratifier, "subscribe");
 		ret = auth_stratum(cs, proxi);
 	} while (!ret);
-}
-
-static void clear_notify(notify_instance_t *ni)
-{
-	free(ni->jobid);
-	free(ni->coinbase1);
-	free(ni->coinbase2);
+	send_proc(ckp->stratifier, "subscribe");
 }
 
 /* FIXME: Return something useful to the stratifier based on this result */
