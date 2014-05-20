@@ -963,9 +963,9 @@ static void *proxy_send(void *arg)
 	rename_proc("proxysend");
 
 	while (42) {
-		notify_instance_t *instance;
+		notify_instance_t *ni;
 		stratum_msg_t *msg;
-		char *jobid;
+		char *jobid = NULL;
 		json_t *val;
 		uint32_t id;
 		bool ret;
@@ -984,24 +984,23 @@ static void *proxy_send(void *arg)
 		json_uintcpy(&id, msg->json_msg, "jobid");
 
 		mutex_lock(&proxi->notify_lock);
-		HASH_FIND_INT(proxi->notify_instances, &id, instance);
-		if (instance)
-			jobid = strdup(instance->jobid);
+		HASH_FIND_INT(proxi->notify_instances, &id, ni);
+		if (ni)
+			jobid = strdup(ni->jobid);
 		mutex_unlock(&proxi->notify_lock);
 
-		if (!instance) {
+		if (jobid) {
+			val = json_pack("{s[ssooo]soss}", "params", proxi->auth, jobid,
+					json_object_get(msg->json_msg, "nonce2"),
+					json_object_get(msg->json_msg, "ntime"),
+					json_object_get(msg->json_msg, "nonce"),
+					"id", json_object_get(msg->json_msg, "id"),
+					"method", "mining.submit");
+			free(jobid);
+			ret = send_json_msg(cs, val);
+			json_decref(val);
+		} else
 			LOGWARNING("Failed to find matching jobid in proxysend");
-			continue;
-		}
-		val = json_pack("{s[ssooo]soss}", "params", proxi->auth, jobid,
-				json_object_get(msg->json_msg, "nonce2"),
-				json_object_get(msg->json_msg, "ntime"),
-				json_object_get(msg->json_msg, "nonce"),
-				"id", json_object_get(msg->json_msg, "id"),
-				"method", "mining.submit");
-		free(jobid);
-		ret = send_json_msg(cs, val);
-		json_decref(val);
 		json_decref(msg->json_msg);
 		free(msg);
 		if (!ret) {
