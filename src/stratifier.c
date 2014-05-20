@@ -1071,9 +1071,9 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	tv_t now_t;
 
 	tv_time(&now_t);
-	tdiff = tvdiff(&now_t, &client->last_share);
 
 	if (valid) {
+		tdiff = tvdiff(&now_t, &instance->last_share);
 		if (unlikely(!client->absolute_shares++))
 			tv_time(&client->first_share);
 		client->diff_shares += diff;
@@ -1088,6 +1088,7 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	} else
 		instance->diff_rejected += diff;
 
+	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
 	decay_time(&client->dsps5, diff, tdiff, 300);
