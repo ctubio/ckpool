@@ -392,7 +392,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	if (unlikely(ret && errno != EEXIST))
 		quit(1, "Failed to create log directory %s", wb->logdir);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
-		if (HASH_COUNT(workbases) < 3)
+		if (HASH_COUNT(workbases) < 2)
 			break;
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime < wb->gentime - 600) {
@@ -490,6 +490,7 @@ static void drop_allclients(ckpool_t *ckp)
 
 static bool update_subscribe(ckpool_t *ckp)
 {
+	workbase_t *wb, *tmp;
 	json_t *val;
 	char *buf;
 
@@ -515,6 +516,11 @@ static bool update_subscribe(ckpool_t *ckp)
 	else
 		proxy_base.enonce1varlen = 2;
 	proxy_base.enonce2varlen = proxy_base.nonce2len - proxy_base.enonce1varlen;
+	/* Delete all the workbases since they're now invalid */
+	HASH_ITER(hh, workbases, wb, tmp) {
+		HASH_DEL(workbases, wb);
+		clear_workbase(wb);
+	}
 	ck_wunlock(&workbase_lock);
 
 	json_decref(val);
@@ -613,7 +619,9 @@ static void update_diff(ckpool_t *ckp)
 
 	ck_wlock(&workbase_lock);
 	old_diff = proxy_base.diff;
-	current_workbase->diff = proxy_base.diff = diff;
+	proxy_base.diff = diff;
+	if (current_workbase)
+		current_workbase->diff = diff;
 	ck_wunlock(&workbase_lock);
 
 	if (old_diff < diff)
@@ -908,11 +916,16 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-static void new_enonce1(stratum_instance_t *client)
+static bool new_enonce1(stratum_instance_t *client)
 {
+	bool ret = true;
 	workbase_t *wb;
 
 	ck_wlock(&workbase_lock);
+	if (unlikely(!current_workbase)) {
+		ret = false;
+		goto out_unlock;
+	}
 	client->enonce1_64 = enonce1_64;
 	wb = current_workbase;
 	if (wb->enonce1varlen == 8) {
@@ -931,7 +944,10 @@ static void new_enonce1(stratum_instance_t *client)
 	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
 	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
 	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
+out_unlock:
 	ck_wunlock(&workbase_lock);
+
+	return ret;
 }
 
 /* Extranonce1 must be set here */
@@ -939,8 +955,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 {
 	stratum_instance_t *client = NULL;
 	bool old_match = false;
+	json_t *ret = NULL;
 	int arr_size;
-	json_t *ret;
 	int n2len;
 
 	if (unlikely(!json_is_array(params_val)))
@@ -952,7 +968,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 
 	if (unlikely(!client)) {
 		LOGERR("Failed to find client id %d in hashtable!", client_id);
-		return NULL;
+		goto out;
 	}
 
 	arr_size = json_array_size(params_val);
@@ -977,7 +993,10 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	}
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
-		new_enonce1(client);
+		if (!new_enonce1(client)) {
+			LOGNOTICE("No valid data from upstream to create enonce1 for client %d", client_id);
+			goto out;
+		}
 		LOGINFO("Set new subscription %d to new enonce1 %s", client->id,
 			client->enonce1);
 	} else {
@@ -993,7 +1012,7 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	ret = json_pack("[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
 			n2len);
 	ck_runlock(&workbase_lock);
-
+out:
 	return ret;
 }
 
@@ -1506,6 +1525,8 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 	if (!strncasecmp(method, "mining.subscribe", 16)) {
 		*update = true;
 		ret = parse_subscribe(client_id, params_val);
+		if (!ret)
+			drop_client(client_id);
 		goto out;
 	}
 
