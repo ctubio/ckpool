@@ -1222,6 +1222,10 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	if (diff != client->diff)
 		return;
 
+	/* We have the effect of a change pending */
+	if (client->diff_change_job_id >= next_blockid)
+		return;
+
 	/* Diff rate ratio */
 	dsps = client->dsps5 / bias;
 	drr = dsps / (double)client->diff;
@@ -1243,10 +1247,11 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 		if (client->diff == optimal)
 			return;
 	}
-	/* We have the effect of a change pending */
-	if (client->diff_change_job_id >= next_blockid)
-		return;
 
+	/* Don't drop diff to rapidly in case the client simply switched away
+	 * and has just returned */
+	if (optimal < client->diff / 2)
+		optimal = client->diff / 2;
 	client->ssdc = 0;
 
 	LOGINFO("Client %d biased dsps %.2f dsps %.2f drr %.2f adjust diff from %ld to: %ld ",
