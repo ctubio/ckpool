@@ -1885,9 +1885,9 @@ static void *statsupdate(void *arg)
 			suffix_string(ghs, suffix360, 16, 0);
 			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
-			snprintf(logout, 511, "A: %ld  R: %ld  "
+			snprintf(logout, 511, "A: %ld  R: %ld  PPLNS: %lu  "
 				 "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
-				 instance->diff_accepted, instance->diff_rejected,
+				 instance->diff_accepted, instance->diff_rejected, instance->pplns_shares,
 				 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 
 			/* Only display the status of connected users to the
