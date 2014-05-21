@@ -811,22 +811,22 @@ static void log_pplns(const char *logdir, user_instance_t *instance)
 static void block_solve(ckpool_t *ckp)
 {
 	user_instance_t *instance, *tmp;
-	double network_diff;
-	uint64_t total = 0;
+	uint64_t window, total = 0;
 
 	ck_rlock(&workbase_lock);
-	network_diff = current_workbase->network_diff;
+	window = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
+	window /= 5;
 	LOGWARNING("Block solve user summary");
 
 	ck_rlock(&instance_lock);
 	HASH_ITER(hh, user_instances, instance, tmp) {
 		uint64_t remaining = 0, credited, shares = instance->pplns_shares;
 
-		if (shares > network_diff) {
-			credited = network_diff;
-			remaining = shares - network_diff;
+		if (shares > window) {
+			credited = window;
+			remaining = shares - window;
 		} else
 			credited = shares;
 		LOGWARNING("User %s: Credited: %lu  Remaining: %lu", instance->username,
@@ -837,7 +837,7 @@ static void block_solve(ckpool_t *ckp)
 	}
 	ck_runlock(&instance_lock);
 
-	LOGWARNING("Total shares from all users: %lu", total);
+	LOGWARNING("Total shares from all users: %lu  pplns window %lu", total, window);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
