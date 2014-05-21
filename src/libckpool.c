@@ -1565,16 +1565,16 @@ double diff_from_target(uchar *target)
 
 /* Return the network difficulty from the block header which is in packed form,
  * as a double. */
-double diff_from_header(uchar *header)
+double diff_from_nbits(char *nbits)
 {
 	double numerator;
 	uint32_t diff32;
 	uint8_t pow;
 	int powdiff;
 
-	pow = header[72];
+	pow = nbits[0];
 	powdiff = (8 * (0x1d - 3)) - (8 * (pow - 3));
-	diff32 = be32toh(*((uint32_t *)(header + 72))) & 0x00FFFFFF;
+	diff32 = be32toh(*((uint32_t *)nbits)) & 0x00FFFFFF;
 	numerator = 0xFFFFULL << powdiff;
 	return numerator / (double)diff32;
 }

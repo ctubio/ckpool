@@ -88,6 +88,7 @@ struct workbase {
 	/* GBT/shared variables */
 	char target[68];
 	double diff;
+	double network_diff;
 	uint32_t version;
 	uint32_t curtime;
 	char prevhash[68];
@@ -367,6 +368,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	int len, ret;
 
 	wb->gentime = time(NULL);
+	wb->network_diff = diff_from_nbits(wb->headerbin + 72);
 
 	len = strlen(ckp->logdir) + 8 + 1 + 16;
 	wb->logdir = ckalloc(len);
@@ -1184,7 +1186,11 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 	char hexcoinbase[512];
 
 	/* Submit anything over 95% of the diff in case of rounding errors */
-	if (diff < current_workbase->diff * 0.95)
+	if (diff < current_workbase->network_diff * 0.95)
+		return;
+
+	LOGWARNING("Possible block solve diff %f !", diff);
+	if (wb->proxy)
 		return;
 
 	gbt_block = ckalloc(512);
@@ -1268,8 +1274,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	ret = diff_from_target(hash);
 
 	/* Test we haven't solved a block regardless of share status */
-	if (!wb->proxy)
-		test_blocksolve(wb, swap, ret, coinbase, cblen);
+	test_blocksolve(wb, swap, ret, coinbase, cblen);
 
 	return ret;
 }

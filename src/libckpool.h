@@ -380,7 +380,7 @@ void suffix_string(double val, char *buf, size_t bufsiz, int sigdigits);
 
 double le256todouble(const uchar *target);
 double diff_from_target(uchar *target);
-double diff_from_header(uchar *header);
+double diff_from_nbits(char *nbits);
 void target_from_diff(uchar *target, double diff);
 
 void gen_hash(uchar *data, uchar *hash, int len);
