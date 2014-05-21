@@ -177,6 +177,7 @@ struct user_instance {
 
 	int64_t diff_accepted;
 	int64_t diff_rejected;
+	uint64_t pplns_shares;
 
 	tv_t last_share;
 
@@ -1089,13 +1090,22 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 		       bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
+	ckpool_t *ckp = client->ckp;
 	uint64_t next_blockid;
 	int64_t optimal;
 	tv_t now_t;
 
 	tv_time(&now_t);
 
+	ck_rlock(&workbase_lock);
+	next_blockid = workbase_id + 1;
+	network_diff = current_workbase->network_diff;
+	ck_runlock(&workbase_lock);
+
 	if (valid) {
+		char fnametmp[512] = {}, fname[512] = {};
+		FILE *fp;
+
 		tdiff = tvdiff(&now_t, &instance->last_share);
 		if (unlikely(!client->absolute_shares++))
 			tv_time(&client->first_share);
@@ -1108,9 +1118,27 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 		decay_time(&instance->dsps360, diff, tdiff, 21600);
 		decay_time(&instance->dsps1440, diff, tdiff, 86400);
 		copy_tv(&instance->last_share, &now_t);
+
+		/* Write the share summary to a tmp file first and then move
+		 * it to the user file to prevent leaving us without a file
+		 * if we abort at just the wrong time. */
+		instance->pplns_shares += diff;
+		if (unlikely(instance->pplns_shares > network_diff))
+			instance->pplns_shares = network_diff;
+		snprintf(fnametmp, 511, "%s/%stmp.pplns", ckp->logdir, instance->username);
+		fp = fopen(fnametmp, "w");
+		if (unlikely(!fp)) {
+			LOGERR("Failed to fopen %s", fnametmp);
+			goto noflog;
+		}
+		fprintf(fp, "%lu", instance->pplns_shares);
+		fclose(fp);
+		snprintf(fname, 511, "%s/%s.pplns", ckp->logdir, instance->username);
+		if (rename(fnametmp, fname))
+			LOGERR("Failed to rename %s to %s", fnametmp, fname);
 	} else
 		instance->diff_rejected += diff;
-
+noflog:
 	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
@@ -1149,11 +1177,6 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 			return;
 		optimal = client->ckp->mindiff;
 	}
-
-	ck_rlock(&workbase_lock);
-	next_blockid = workbase_id + 1;
-	network_diff = current_workbase->diff;
-	ck_runlock(&workbase_lock);
 
 	if (optimal > network_diff) {
 		/* Intentionally round down here */
@@ -1822,7 +1845,10 @@ static void *statsupdate(void *arg)
 
 		ck_rlock(&instance_lock);
 		HASH_ITER(hh, user_instances, instance, tmp) {
+			bool idle = false;
+
 			if (now.tv_sec - instance->last_share.tv_sec > 60) {
+				idle = true;
 				/* No shares for over a minute, decay to 0 */
 				decay_time(&instance->dsps1, 0, tdiff, 60);
 				decay_time(&instance->dsps5, 0, tdiff, 300);
@@ -1847,7 +1873,11 @@ static void *statsupdate(void *arg)
 				 "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
 				 instance->diff_accepted, instance->diff_rejected,
 				 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
-			LOGNOTICE("User %s: %s", instance->username, logout);
+
+			/* Only display the status of connected users to the
+			 * console log. */
+			if (!idle)
+				LOGNOTICE("User %s: %s", instance->username, logout);
 			snprintf(fname, 511, "%s/%s", ckp->logdir, instance->username);
 			fp = fopen(fname, "w");
 			if (unlikely(!fp)) {
