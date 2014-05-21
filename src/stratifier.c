@@ -786,6 +786,60 @@ static void drop_client(int id)
 	ck_uilock(&instance_lock);
 }
 
+/* FIXME: Talk to database instead of doing this */
+static void log_pplns(const char *logdir, user_instance_t *instance)
+{
+	char fnametmp[512] = {}, fname[512] = {};
+	FILE *fp;
+
+	snprintf(fnametmp, 511, "%s/%stmp.pplns", logdir, instance->username);
+	fp = fopen(fnametmp, "w");
+	if (unlikely(!fp)) {
+		LOGERR("Failed to fopen %s", fnametmp);
+		return;
+	}
+	fprintf(fp, "%lu", instance->pplns_shares);
+	fclose(fp);
+	snprintf(fname, 511, "%s/%s.pplns", logdir, instance->username);
+	if (rename(fnametmp, fname))
+		LOGERR("Failed to rename %s to %s", fnametmp, fname);
+}
+
+/* FIXME: This is all a simple workaround till we use a proper database. It
+ * does not account for users who have shelved shares but have not mined since
+ * the pool's restart ! */
+static void block_solve(ckpool_t *ckp)
+{
+	user_instance_t *instance, *tmp;
+	double network_diff;
+	uint64_t total = 0;
+
+	ck_rlock(&workbase_lock);
+	network_diff = current_workbase->network_diff;
+	ck_runlock(&workbase_lock);
+
+	LOGWARNING("Block solve user summary");
+
+	ck_rlock(&instance_lock);
+	HASH_ITER(hh, user_instances, instance, tmp) {
+		uint64_t remaining = 0, credited, shares = instance->pplns_shares;
+
+		if (shares > network_diff) {
+			credited = network_diff;
+			remaining = shares - network_diff;
+		} else
+			credited = shares;
+		LOGWARNING("User %s: Credited: %lu  Remaining: %lu", instance->username,
+			   credited, remaining);
+		total += credited;
+		instance->pplns_shares = remaining;
+		log_pplns(ckp->logdir, instance);
+	}
+	ck_runlock(&instance_lock);
+
+	LOGWARNING("Total shares from all users: %lu", total);
+}
+
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret;
@@ -869,6 +923,10 @@ retry:
 		else
 			drop_client(client_id);
 		goto retry;
+	} else if (!strncasecmp(buf, "block", 5)) {
+		block_solve(ckp);
+		update_base(ckp);
+		goto reset;
 	} else {
 		json_t *val = json_loads(buf, 0, NULL);
 
@@ -1119,9 +1177,6 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	ck_runlock(&workbase_lock);
 
 	if (valid) {
-		char fnametmp[512] = {}, fname[512] = {};
-		FILE *fp;
-
 		tdiff = tvdiff(&now_t, &instance->last_share);
 		if (unlikely(!client->absolute_shares++))
 			tv_time(&client->first_share);
@@ -1139,22 +1194,10 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 		 * it to the user file to prevent leaving us without a file
 		 * if we abort at just the wrong time. */
 		instance->pplns_shares += diff;
-		if (unlikely(instance->pplns_shares > network_diff))
-			instance->pplns_shares = network_diff;
-		snprintf(fnametmp, 511, "%s/%stmp.pplns", ckp->logdir, instance->username);
-		fp = fopen(fnametmp, "w");
-		if (unlikely(!fp)) {
-			LOGERR("Failed to fopen %s", fnametmp);
-			goto noflog;
-		}
-		fprintf(fp, "%lu", instance->pplns_shares);
-		fclose(fp);
-		snprintf(fname, 511, "%s/%s.pplns", ckp->logdir, instance->username);
-		if (rename(fnametmp, fname))
-			LOGERR("Failed to rename %s to %s", fnametmp, fname);
+		log_pplns(ckp->logdir, instance);
 	} else
 		instance->diff_rejected += diff;
-noflog:
+
 	tdiff = tvdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
@@ -1885,7 +1928,7 @@ static void *statsupdate(void *arg)
 			suffix_string(ghs, suffix360, 16, 0);
 			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
-			snprintf(logout, 511, "A: %ld  R: %ld  PPLNS: %lu  "
+			snprintf(logout, 511, "A: %ld  R: %ld  Shares: %lu  "
 				 "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
 				 instance->diff_accepted, instance->diff_rejected, instance->pplns_shares,
 				 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
