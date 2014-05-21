@@ -1002,7 +1002,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 
 /* FIXME: Talk to database here instead. This simply strips off the first part
  * of the workername and matches it to a user or creates a new one. */
-static user_instance_t *authorise_user(const char *workername)
+static user_instance_t *authorise_user(const stratum_instance_t *client,
+				       const char *workername)
 {
 	char *fullname = strdupa(workername);
 	char *username = strsep(&fullname, ".");
@@ -1014,8 +1015,23 @@ static user_instance_t *authorise_user(const char *workername)
 	ck_ilock(&instance_lock);
 	HASH_FIND_STR(user_instances, username, instance);
 	if (!instance) {
+		char fname[512] = {};
+		FILE *fp;
+
+		/* New user instance */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
+
+		/* Check to see if a pplns log file exists and load its shares
+		 * if it does */
+		snprintf(fname, 511, "%s/%s.pplns", client->ckp->logdir, instance->username);
+		fp = fopen(fname, "r");
+		if (fp) {
+			fscanf(fp, "%lu", &instance->pplns_shares);
+			fclose(fp);
+			LOGINFO("Loaded %lu pplns shares for user %s", instance->pplns_shares,
+				username);
+		}
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
@@ -1051,7 +1067,7 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty workername parameter");
 		goto out;
 	}
-	client->user_instance = authorise_user(buf);
+	client->user_instance = authorise_user(client, buf);
 	client->user_id = client->user_instance->id;
 
 	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
