@@ -564,7 +564,7 @@ void close_unix_socket(const int sockd, const char *server_path)
 		LOGERR("Failed to unlink %s", server_path);
 }
 
-int open_unix_server(const char *server_path)
+int _open_unix_server(const char *server_path, const char *file, const char *func, const int line)
 {
 	struct sockaddr_un serveraddr;
 	int sockd = -1, len, ret;
@@ -623,10 +623,12 @@ int open_unix_server(const char *server_path)
 
 	LOGDEBUG("Opened server path %s successfully on socket %d", server_path, sockd);
 out:
+	if (unlikely(sockd == -1))
+		LOGERR("Failure in open_unix_server from %s %s:%d", file, func, line);
 	return sockd;
 }
 
-int open_unix_client(const char *server_path)
+int _open_unix_client(const char *server_path, const char *file, const char *func, const int line)
 {
 	struct sockaddr_un serveraddr;
 	int sockd = -1, len, ret;
@@ -658,7 +660,11 @@ int open_unix_client(const char *server_path)
 		sockd = -1;
 		goto out;
 	}
+
+	LOGDEBUG("Opened client path %s successfully on socket %d", server_path, sockd);
 out:
+	if (unlikely(sockd == -1))
+		LOGERR("Failure in open_unix_client from %s %s:%d", file, func, line);
 	return sockd;
 }
 
@@ -701,7 +707,7 @@ int read_length(int sockd, void *buf, int len)
 /* Use a standard message across the unix sockets:
  * 4 byte length of message as little endian encoded uint32_t followed by the
  * string. Return NULL in case of failure. */
-char *recv_unix_msg(int sockd)
+char *_recv_unix_msg(int sockd, const char *file, const char *func, const int line)
 {
 	char *buf = NULL;
 	uint32_t msglen;
@@ -736,6 +742,8 @@ char *recv_unix_msg(int sockd)
 		dealloc(buf);
 	}
 out:
+	if (unlikely(!buf))
+		LOGERR("Failure in recv_unix_msg from %s %s:%d", file, func, line);
 	return buf;
 }
 
@@ -775,47 +783,52 @@ int write_length(int sockd, const void *buf, int len)
 	return ofs;
 }
 
-bool send_unix_msg(int sockd, const char *buf)
+bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line)
 {
 	uint32_t msglen, len;
+	bool retval = false;
 	int ret;
 
 	if (unlikely(!buf)) {
 		LOGWARNING("Null message sent to send_unix_msg");
-		return false;
+		goto out;
 	}
 	len = strlen(buf);
 	if (unlikely(!len)) {
 		LOGWARNING("Zero length message sent to send_unix_msg");
-		return false;
+		goto out;
 	}
 	msglen = htole32(len);
 	ret = wait_write_select(sockd, 60);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in send_unix_msg");
-		return false;
+		goto out;
 	}
 	ret = write_length(sockd, &msglen, 4);
 	if (unlikely(ret < 4)) {
 		LOGERR("Failed to write 4 byte length in send_unix_msg");
-		return false;
+		goto out;
 	}
 	ret = wait_write_select(sockd, 60);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select2 failed in send_unix_msg");
-		return false;
+		goto out;
 	}
 	ret = write_length(sockd, buf, len);
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to write %d bytes in send_unix_msg", len);
-		return false;
+		goto out;
 	}
-	return true;
+	retval = true;
+out:
+	if (unlikely(!retval))
+		LOGERR("Failure in send_unix_msg from %s %s:%d", file, func, line);
+	return retval;
 }
 
 /* Send a single message to a process instance when there will be no response,
  * closing the socket immediately. */
-bool send_proc(proc_instance_t *pi, const char *msg)
+bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path;
 	bool ret = false;
@@ -840,12 +853,14 @@ bool send_proc(proc_instance_t *pi, const char *msg)
 		ret = true;
 	close(sockd);
 out:
+	if (unlikely(!ret))
+		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 	return ret;
 }
 
 /* Send a single message to a process instance and retrieve the response, then
  * close the socket. */
-char *send_recv_proc(proc_instance_t *pi, const char *msg)
+char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path, *buf = NULL;
 	int sockd;
@@ -869,6 +884,8 @@ char *send_recv_proc(proc_instance_t *pi, const char *msg)
 		buf = recv_unix_msg(sockd);
 	close(sockd);
 out:
+	if (unlikely(!buf))
+		LOGERR("Failure in send_recv_proc from %s %s:%d", file, func, line);
 	return buf;
 }
 
