@@ -1073,6 +1073,7 @@ static user_instance_t *authorise_user(const stratum_instance_t *client,
 	char *fullname = strdupa(workername);
 	char *username = strsep(&fullname, ".");
 	user_instance_t *instance;
+	int64_t pplns_shares = 0;
 
 	if (strlen(username) > 127)
 		username[127] = '\0';
@@ -1102,8 +1103,15 @@ static user_instance_t *authorise_user(const stratum_instance_t *client,
 		instance->id = user_instance_id++;
 		HASH_ADD_STR(user_instances, username, instance);
 		ck_dwilock(&instance_lock);
+		pplns_shares = instance->pplns_shares;
 	}
 	ck_uilock(&instance_lock);
+
+	if (pplns_shares) {
+		mutex_lock(&stats_lock);
+		stats.accounted_diff_shares += pplns_shares;
+		mutex_unlock(&stats_lock);
+	}
 
 	return instance;
 }
