@@ -810,8 +810,8 @@ static void log_pplns(const char *logdir, user_instance_t *instance)
  * the pool's restart ! */
 static void block_solve(ckpool_t *ckp)
 {
+	double total = 0, retain = 0, window;
 	user_instance_t *instance, *tmp;
-	uint64_t window, total = 0;
 
 	ck_rlock(&workbase_lock);
 	window = current_workbase->network_diff;
@@ -821,23 +821,26 @@ static void block_solve(ckpool_t *ckp)
 	LOGWARNING("Block solve user summary");
 
 	ck_rlock(&instance_lock);
-	HASH_ITER(hh, user_instances, instance, tmp) {
-		uint64_t remaining = 0, credited, shares = instance->pplns_shares;
+	/* Work out the total first */
+	HASH_ITER(hh, user_instances, instance, tmp)
+		total += instance->pplns_shares;
 
-		if (shares > window) {
-			credited = window;
-			remaining = shares - window;
-		} else
-			credited = shares;
-		LOGWARNING("User %s: Credited: %lu  Remaining: %lu", instance->username,
-			   credited, remaining);
-		total += credited;
-		instance->pplns_shares = remaining;
+	/* What proportion of shares should each user retain */
+	if (total > window)
+		retain = (total - window) / total;
+	HASH_ITER(hh, user_instances, instance, tmp) {
+		double residual, shares;
+
+		shares = instance->pplns_shares;
+		residual = shares * retain;
+		LOGWARNING("User %s: Credited: %.0f  Remaining: %.0f", instance->username,
+			   shares, residual);
+		instance->pplns_shares = residual;
 		log_pplns(ckp->logdir, instance);
 	}
 	ck_runlock(&instance_lock);
 
-	LOGWARNING("Total shares from all users: %lu  pplns window %lu", total, window);
+	LOGWARNING("Total shares from all users: %.0f  pplns window %.0f", total, window);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
