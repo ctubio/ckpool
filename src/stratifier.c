@@ -810,14 +810,16 @@ static void log_pplns(const char *logdir, user_instance_t *instance)
  * the pool's restart ! */
 static void block_solve(ckpool_t *ckp)
 {
-	double total = 0, retain = 0, window;
+	double total = 0, retain = 0, window, max_window;
 	user_instance_t *instance, *tmp;
 
 	ck_rlock(&workbase_lock);
-	window = current_workbase->network_diff;
+	max_window = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
-	window /= 5;
+	window = max_window / 5;
+	max_window *= 5;
+
 	LOGWARNING("Block solve user summary");
 
 	ck_rlock(&instance_lock);
@@ -828,6 +830,8 @@ static void block_solve(ckpool_t *ckp)
 	/* What proportion of shares should each user retain */
 	if (total > window)
 		retain = (total - window) / total;
+	if (total > max_window)
+		retain *= (max_window / total);
 	HASH_ITER(hh, user_instances, instance, tmp) {
 		double residual, shares;
 
