@@ -814,11 +814,10 @@ static void block_solve(ckpool_t *ckp)
 	user_instance_t *instance, *tmp;
 
 	ck_rlock(&workbase_lock);
-	max_window = current_workbase->network_diff;
+	window = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
-	window = max_window / 5;
-	max_window *= 5;
+	max_window = window * 5;
 
 	LOGWARNING("Block solve user summary");
 
