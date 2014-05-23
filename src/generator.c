@@ -1244,10 +1244,5 @@ int generator(proc_instance_t *pi)
 	else
 		ret = server_mode(ckp, pi);
 
-	LOGINFO("%s generator exiting with return code %d", ckp->name, ret);
-	if (ret) {
-		send_proc(&ckp->main, "shutdown");
-		sleep(1);
-	}
-	exit(ret? 1: 0);
+	return process_exit(ckp, pi, ret);
 }

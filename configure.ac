@@ -39,7 +39,7 @@ AC_CHECK_HEADERS(ctype.h errno.h byteswap.h string.h time.h)
 AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h sys/poll.h syslog.h)
 AC_CHECK_HEADERS(alloca.h pthread.h stdio.h math.h signal.h sys/prctl.h)
 AC_CHECK_HEADERS(sys/types.h sys/socket.h sys/stat.h linux/un.h netdb.h)
-AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h)
+AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h)
 AC_CHECK_HEADERS(jansson.h)
 
 PTHREAD_LIBS="-lpthread"

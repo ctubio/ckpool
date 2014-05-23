@@ -103,6 +103,8 @@ struct ckpool_instance {
 
 ckpool_t *global_ckp;
 
+int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
+
 /* Placeholders for when we have more comprehensive logging facilities */
 
 #define LOGMSG(_loglevel, fmt, ...) do { \

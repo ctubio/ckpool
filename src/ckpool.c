@@ -7,6 +7,7 @@
  * any later version.  See COPYING for more details.
  */
 
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -147,6 +148,8 @@ static void childsighandler(int sig)
 {
 	pid_t ppid = getppid();
 
+	LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
+		   sig, global_ckp->name);
 	kill(ppid, sig);
 }
 
@@ -167,6 +170,9 @@ static void launch_process(proc_instance_t *pi)
 		sigaction(SIGTERM, &handler, NULL);
 		sigaction(SIGINT, &handler, NULL);
 
+		/* Detach child processes leaving main only to communicate with
+		 * the terminal. */
+		ioctl(0, TIOCNOTTY, NULL);
 		rename_proc(pi->processname);
 		write_namepid(pi);
 		ret = pi->process(pi);
@@ -183,6 +189,21 @@ static void launch_processes(ckpool_t *ckp)
 
 	for (i = 0; i < ckp->proc_instances; i++)
 		launch_process(ckp->children[i]);
+}
+
+int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret)
+{
+	if (ret) {
+		/* Abnormal termination, kill entire process */
+		LOGWARNING("%s %s exiting with return code %d, shutting down!",
+			   ckp->name, pi->processname, ret);
+		send_proc(&ckp->main, "shutdown");
+		sleep(1);
+		ret = 1;
+	} else /* Should be part of a normal shutdown */
+		LOGNOTICE("%s %s exited normally", ckp->name, pi->processname);
+
+	return ret;
 }
 
 static void clean_up(ckpool_t *ckp)

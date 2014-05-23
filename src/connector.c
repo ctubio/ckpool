@@ -593,10 +593,5 @@ int connector(proc_instance_t *pi)
 
 	//join_pthread(pth_acceptor);
 out:
-	LOGINFO("%s connector exiting with return code %d", ckp->name, ret);
-	if (ret) {
-		send_proc(&ckp->main, "shutdown");
-		sleep(1);
-	}
-	exit(ret? 1: 0);
+	return process_exit(ckp, pi, ret);
 }

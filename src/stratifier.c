@@ -2037,11 +2037,5 @@ int stratifier(proc_instance_t *pi)
 	cklock_init(&share_lock);
 
 	ret = stratum_loop(ckp, pi);
-	LOGINFO("%s stratifier exiting with return code %d", ckp->name, ret);
-	if (ret) {
-		send_proc(&ckp->main, "shutdown");
-		sleep(1);
-	}
-
-	exit(ret? 1: 0);
+	return process_exit(ckp, pi, ret);
 }
