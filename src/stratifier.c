@@ -805,6 +805,15 @@ static void log_pplns(const char *logdir, user_instance_t *instance)
 		LOGERR("Failed to rename %s to %s", fnametmp, fname);
 }
 
+static void stratum_broadcast_message(const char *msg)
+{
+	json_t *json_msg;
+
+	json_msg = json_pack("{sosss[s]}", "id", json_null(), "method", "client.show_message",
+			     "params", msg);
+	stratum_broadcast(json_msg);
+}
+
 /* FIXME: This is all a simple workaround till we use a proper database. It
  * does not account for users who have shelved shares but have not mined since
  * the pool's restart ! */
@@ -812,6 +821,7 @@ static void block_solve(ckpool_t *ckp)
 {
 	double total = 0, retain = 0, window, max_window;
 	user_instance_t *instance, *tmp;
+	char *msg;
 
 	ck_rlock(&workbase_lock);
 	window = current_workbase->network_diff;
@@ -844,6 +854,10 @@ static void block_solve(ckpool_t *ckp)
 	ck_runlock(&instance_lock);
 
 	LOGWARNING("Total shares from all users: %.0f  pplns window %.0f", total, window);
+
+	asprintf(&msg, "Block solved by %s after %.0f shares!", ckp->name, total);
+	stratum_broadcast_message(msg);
+	free(msg);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
