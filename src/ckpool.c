@@ -7,6 +7,8 @@
  * any later version.  See COPYING for more details.
  */
 
+#include "config.h"
+
 #include <sys/ioctl.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
@@ -216,6 +218,7 @@ static void clean_up(ckpool_t *ckp)
 	for (i = 0; i < children; i++)
 		dealloc(ckp->children[i]);
 	dealloc(ckp->children);
+	fclose(ckp->logfp);
 }
 
 static void __shutdown_children(ckpool_t *ckp, int sig)
@@ -436,7 +439,7 @@ int main(int argc, char **argv)
 {
 	struct sigaction handler;
 	int len, c, ret, i;
-	char buf[16] = {};
+	char buf[512] = {};
 	ckpool_t ckp;
 
 	global_ckp = &ckp;
@@ -479,6 +482,8 @@ int main(int argc, char **argv)
 	}
 	snprintf(buf, 15, "%s", ckp.name);
 	prctl(PR_SET_NAME, buf, 0, 0, 0);
+	memset(buf, 0, 15);
+
 	if (!ckp.config) {
 		ckp.config = strdup(ckp.name);
 		realloc_strcat(&ckp.config, ".conf");
@@ -532,12 +537,20 @@ int main(int argc, char **argv)
 	if (ckp.proxy && !ckp.proxies)
 		quit(0, "No proxy entries found in config file %s", ckp.config);
 
+	/* Create the log directory */
 	len = strlen(ckp.logdir);
 	if (memcmp(&ckp.logdir[len], "/", 1))
 		realloc_strcat(&ckp.logdir, "/");
 	ret = mkdir(ckp.logdir, 0700);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make log directory %s", ckp.logdir);
+
+	/* Create the logfile */
+	sprintf(buf, "%s%s.log", ckp.logdir, ckp.name);
+	ckp.logfp = fopen(buf, "a");
+	if (!ckp.logfp)
+		quit(1, "Failed to make open log file %s", buf);
+	ckp.logfd = fileno(ckp.logfp);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");

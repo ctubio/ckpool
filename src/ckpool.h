@@ -12,6 +12,8 @@
 
 #include "config.h"
 
+#include <sys/file.h>
+
 #include "libckpool.h"
 #include "uthash.h"
 
@@ -56,6 +58,9 @@ struct ckpool_instance {
 	char *socket_dir;
 	/* Directory where logs are written */
 	char *logdir;
+	/* Logfile */
+	FILE *logfp;
+	int logfd;
 
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;
@@ -105,26 +110,41 @@ ckpool_t *global_ckp;
 
 int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 
-/* Placeholders for when we have more comprehensive logging facilities */
-
+/* Log everything to the logfile, but display warnings on the console as well */
 #define LOGMSG(_loglevel, fmt, ...) do { \
 	if (global_ckp->loglevel >= _loglevel && fmt) { \
 		struct tm *tm; \
+		char *buf = NULL; \
+		asprintf(&buf, fmt, ##__VA_ARGS__); \
 		time_t now_t; \
 		now_t = time(NULL); \
 		tm = localtime(&now_t); \
-		fprintf(stderr, "[%d-%02d-%02d %02d:%02d:%02d] ", \
+		flock(global_ckp->logfd, LOCK_EX); \
+		fprintf(global_ckp->logfp, "[%d-%02d-%02d %02d:%02d:%02d] %s", \
 			tm->tm_year + 1900, \
 			tm->tm_mon + 1, \
 			tm->tm_mday, \
 			tm->tm_hour, \
 			tm->tm_min, \
-			tm->tm_sec); \
-		fprintf(stderr, fmt, ##__VA_ARGS__); \
+			tm->tm_sec, \
+			buf); \
 		if (_loglevel <= LOG_ERR) \
-			fprintf(stderr, " with errno %d: %s", errno, strerror(errno)); \
-		fprintf(stderr, "\n"); \
-		fflush(stderr); \
+			fprintf(global_ckp->logfp, " with errno %d: %s", errno, strerror(errno)); \
+		fprintf(global_ckp->logfp, "\n"); \
+		if (_loglevel <= LOG_WARNING) \
+			fprintf(stderr, "%s\n", buf); \
+		fflush(NULL); \
+		flock(global_ckp->logfd, LOCK_UN); \
+		free(buf); \
+	} \
+} while (0)
+
+#define LOGBOTH(_loglevel, fmt, ...) do { \
+	if (global_ckp->loglevel >= _loglevel && fmt) { \
+		char *buf = NULL; \
+		asprintf(&buf, fmt, ##__VA_ARGS__); \
+		printf("%s\n", buf); \
+		free(buf); \
 	} \
 } while (0)
 
