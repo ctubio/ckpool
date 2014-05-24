@@ -2043,6 +2043,7 @@ int stratifier(proc_instance_t *pi)
 	pthread_t pth_blockupdate, pth_stratum_receiver, pth_stratum_sender;
 	pthread_t pth_statsupdate;
 	ckpool_t *ckp = pi->ckp;
+	char *buf;
 	int ret;
 
 	/* Store this for use elsewhere */
@@ -2053,6 +2054,11 @@ int stratifier(proc_instance_t *pi)
 	/* Set the initial id to time as high bits so as to not send the same
 	 * id on restarts */
 	blockchange_id = workbase_id = ((int64_t)time(NULL)) << 32;
+
+	/* Wait for the generator to have something for us */
+	do {
+		buf = send_recv_proc(ckp->generator, "ping");
+	} while (!buf);
 
 	cklock_init(&instance_lock);
 
