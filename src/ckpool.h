@@ -114,37 +114,39 @@ int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 #define LOGMSG(_loglevel, fmt, ...) do { \
 	if (global_ckp->loglevel >= _loglevel && fmt) { \
 		struct tm *tm; \
-		char *buf = NULL; \
-		asprintf(&buf, fmt, ##__VA_ARGS__); \
+		char *BUF = NULL; \
 		time_t now_t; \
+		int LOGFD = global_ckp->logfd; \
+		\
+		asprintf(&BUF, fmt, ##__VA_ARGS__); \
 		now_t = time(NULL); \
 		tm = localtime(&now_t); \
-		flock(global_ckp->logfd, LOCK_EX); \
-		fprintf(global_ckp->logfp, "[%d-%02d-%02d %02d:%02d:%02d] %s", \
-			tm->tm_year + 1900, \
-			tm->tm_mon + 1, \
-			tm->tm_mday, \
-			tm->tm_hour, \
-			tm->tm_min, \
-			tm->tm_sec, \
-			buf); \
-		if (_loglevel <= LOG_ERR) \
-			fprintf(global_ckp->logfp, " with errno %d: %s", errno, strerror(errno)); \
-		fprintf(global_ckp->logfp, "\n"); \
-		if (_loglevel <= LOG_WARNING) \
-			fprintf(stderr, "%s\n", buf); \
-		fflush(NULL); \
-		flock(global_ckp->logfd, LOCK_UN); \
-		free(buf); \
-	} \
-} while (0)
-
-#define LOGBOTH(_loglevel, fmt, ...) do { \
-	if (global_ckp->loglevel >= _loglevel && fmt) { \
-		char *buf = NULL; \
-		asprintf(&buf, fmt, ##__VA_ARGS__); \
-		printf("%s\n", buf); \
-		free(buf); \
+		if (LOGFD) { \
+			FILE *LOGFP = global_ckp->logfp; \
+			\
+			flock(LOGFD, LOCK_EX); \
+			fprintf(LOGFP, "[%d-%02d-%02d %02d:%02d:%02d] %s", \
+				tm->tm_year + 1900, \
+				tm->tm_mon + 1, \
+				tm->tm_mday, \
+				tm->tm_hour, \
+				tm->tm_min, \
+				tm->tm_sec, \
+				BUF); \
+			if (_loglevel <= LOG_ERR) \
+				fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno)); \
+			fprintf(LOGFP, "\n"); \
+			fflush(LOGFP); \
+			flock(LOGFD, LOCK_UN); \
+		} \
+		if (_loglevel <= LOG_WARNING) {\
+			fprintf(stderr, "%s", BUF); \
+			if (_loglevel <= LOG_ERR) \
+				fprintf(stderr, " with errno %d: %s", errno, strerror(errno)); \
+			fprintf(stderr, "\n"); \
+			fflush(stderr); \
+		} \
+		free(BUF); \
 	} \
 } while (0)
 
