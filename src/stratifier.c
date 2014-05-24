@@ -12,6 +12,8 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <math.h>
 #include <string.h>
@@ -1080,13 +1082,11 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 
 /* FIXME: Talk to database here instead. This simply strips off the first part
  * of the workername and matches it to a user or creates a new one. */
-static user_instance_t *authorise_user(const stratum_instance_t *client,
-				       const char *workername)
+static user_instance_t *authorise_user(const char *workername)
 {
 	char *fullname = strdupa(workername);
 	char *username = strsep(&fullname, ".");
 	user_instance_t *instance;
-	int64_t pplns_shares = 0;
 
 	if (strlen(username) > 127)
 		username[127] = '\0';
@@ -1094,37 +1094,16 @@ static user_instance_t *authorise_user(const stratum_instance_t *client,
 	ck_ilock(&instance_lock);
 	HASH_FIND_STR(user_instances, username, instance);
 	if (!instance) {
-		char fname[512] = {};
-		FILE *fp;
-
 		/* New user instance */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
-
-		/* Check to see if a pplns log file exists and load its shares
-		 * if it does */
-		snprintf(fname, 511, "%s/%s.pplns", client->ckp->logdir, instance->username);
-		fp = fopen(fname, "r");
-		if (fp) {
-			fscanf(fp, "%lu", &instance->pplns_shares);
-			fclose(fp);
-			LOGINFO("Loaded %lu pplns shares for user %s", instance->pplns_shares,
-				username);
-		}
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
 		HASH_ADD_STR(user_instances, username, instance);
 		ck_dwilock(&instance_lock);
-		pplns_shares = instance->pplns_shares;
 	}
 	ck_uilock(&instance_lock);
-
-	if (pplns_shares) {
-		mutex_lock(&stats_lock);
-		stats.accounted_diff_shares += pplns_shares;
-		mutex_unlock(&stats_lock);
-	}
 
 	return instance;
 }
@@ -1153,7 +1132,7 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty workername parameter");
 		goto out;
 	}
-	client->user_instance = authorise_user(client, buf);
+	client->user_instance = authorise_user(buf);
 	client->user_id = client->user_instance->id;
 
 	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
@@ -2015,6 +1994,54 @@ static void *statsupdate(void *arg)
 	return NULL;
 }
 
+static void load_users(ckpool_t *ckp)
+{
+	uint64_t total_pplns_shares = 0;
+	struct dirent *ep;
+	DIR *dp;
+
+	dp = opendir(ckp->logdir);
+	if (!dp)
+		quit(1, "Failed to open logdir %s!", ckp->logdir);
+	while ((ep = readdir(dp))) {
+		user_instance_t *instance;
+		uint64_t pplns_shares;
+		char fname[512] = {};
+		char *period;
+		FILE *fp;
+
+		if (strlen(ep->d_name) < 7)
+			continue;
+		if (!strstr(ep->d_name, ".pplns"))
+			continue;
+
+		snprintf(fname, 511, "%s%s", ckp->logdir, ep->d_name);
+		fp = fopen(fname, "r");
+		if (!fp) {
+			LOGERR("Failed to open pplns logfile %s!", fname);
+			continue;
+		}
+		if (fscanf(fp, "%lu", &pplns_shares) < 1)
+			continue;
+		if (!pplns_shares)
+			continue;
+
+		/* Create a new user instance */
+		instance = ckzalloc(sizeof(user_instance_t));
+		strncpy(instance->username, ep->d_name, 127);
+		period = strstr(instance->username, ".");
+		*period = '\0';
+		instance->pplns_shares = pplns_shares;
+		total_pplns_shares += pplns_shares;
+
+		ck_wlock(&instance_lock);
+		HASH_ADD_STR(user_instances, username, instance);
+		ck_wunlock(&instance_lock);
+
+		LOGDEBUG("Added user %s with %lu shares", instance->username, pplns_shares);
+	}
+}
+
 int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_stratum_receiver, pth_stratum_sender;
@@ -2049,6 +2076,8 @@ int stratifier(proc_instance_t *pi)
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	cklock_init(&share_lock);
+
+	load_users(ckp);
 
 	ret = stratum_loop(ckp, pi);
 	return process_exit(ckp, pi, ret);

@@ -34,7 +34,7 @@ PKG_PROG_PKG_CONFIG()
 AC_CHECK_LIB(jansson, json_loads, ,
 	AC_MSG_ERROR([Could not find jansson library - please install libjansson-dev]))
 
-AC_CHECK_HEADERS(stdio.h stdlib.h fcntl.h sys/time.h unistd.h)
+AC_CHECK_HEADERS(stdio.h stdlib.h fcntl.h sys/time.h unistd.h dirent.h)
 AC_CHECK_HEADERS(ctype.h errno.h byteswap.h string.h time.h)
 AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h sys/poll.h syslog.h)
 AC_CHECK_HEADERS(alloca.h pthread.h stdio.h math.h signal.h sys/prctl.h)
