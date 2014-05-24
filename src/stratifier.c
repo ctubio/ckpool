@@ -1992,7 +1992,6 @@ static void *statsupdate(void *arg)
 
 static void load_users(ckpool_t *ckp)
 {
-	uint64_t total_pplns_shares = 0;
 	struct dirent *ep;
 	DIR *dp;
 
@@ -2028,7 +2027,7 @@ static void load_users(ckpool_t *ckp)
 		period = strstr(instance->username, ".");
 		*period = '\0';
 		instance->pplns_shares = pplns_shares;
-		total_pplns_shares += pplns_shares;
+		stats.accounted_diff_shares += pplns_shares;
 
 		ck_wlock(&instance_lock);
 		HASH_ADD_STR(user_instances, username, instance);
