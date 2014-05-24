@@ -816,20 +816,16 @@ static void stratum_broadcast_message(const char *msg)
 	stratum_broadcast(json_msg);
 }
 
-/* FIXME: This is all a simple workaround till we use a proper database. It
- * does not account for users who have shelved shares but have not mined since
- * the pool's restart ! */
+/* FIXME: This is all a simple workaround till we use a proper database. */
 static void block_solve(ckpool_t *ckp)
 {
-	double total = 0, retain = 0, window, max_window;
+	double total = 0, retain = 0, window;
 	user_instance_t *instance, *tmp;
 	char *msg;
 
 	ck_rlock(&workbase_lock);
 	window = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
-
-	max_window = window * 5;
 
 	LOGWARNING("Block solve user summary");
 
@@ -841,8 +837,6 @@ static void block_solve(ckpool_t *ckp)
 	/* What proportion of shares should each user retain */
 	if (total > window)
 		retain = (total - window) / total;
-	if (total > max_window)
-		retain *= (max_window / total);
 	HASH_ITER(hh, user_instances, instance, tmp) {
 		double residual, shares;
 
