@@ -841,6 +841,8 @@ static void block_solve(ckpool_t *ckp)
 		double residual, shares;
 
 		shares = instance->pplns_shares;
+		if (!shares)
+			continue;
 		residual = shares * retain;
 		LOGWARNING("User %s: Credited: %.0f  Remaining: %.0f", instance->username,
 			   shares, residual);
