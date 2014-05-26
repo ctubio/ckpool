@@ -269,10 +269,10 @@ static bool send_json_msg(connsock_t *cs, json_t *json_msg)
 
 	s = json_dumps(json_msg, JSON_ESCAPE_SLASH);
 	LOGDEBUG("Sending json msg: %s", s);
-	realloc_strcat(&s, "\n");
-	len = strlen(s);
+	len = strlen(s) + 1;
 	sent = write_socket(cs->fd, s, len);
 	dealloc(s);
+	sent += write_socket(cs->fd, "\n", 1);
 	if (sent != len) {
 		LOGWARNING("Failed to send %d bytes in send_json_msg", len);
 		return false;
