@@ -105,6 +105,7 @@ typedef struct proxy_instance proxy_instance_t;
 static server_instance_t *live_server(ckpool_t *ckp)
 {
 	server_instance_t *alive = NULL;
+	connsock_t *cs;
 	int i;
 
 	LOGDEBUG("Attempting to connect to bitcoind");
@@ -112,7 +113,6 @@ retry:
 	for (i = 0; i < ckp->btcds; i++) {
 		server_instance_t *si;
 		char *userpass = NULL;
-		connsock_t *cs;
 		gbtbase_t *gbt;
 
 		si = ckp->servers[i];
@@ -159,20 +159,31 @@ retry:
 		sleep(5);
 		goto retry;
 	}
+	cs = &alive->cs;
+	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 	return alive;
+}
+
+static void kill_server(server_instance_t *si)
+{
+	close(si->cs.fd);
+	si->cs.fd = -1;
 }
 
 static int gen_loop(proc_instance_t *pi)
 {
+	server_instance_t *si = NULL;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
-	server_instance_t *si;
 	int sockd, ret = 0;
 	char *buf = NULL;
 	connsock_t *cs;
 	gbtbase_t *gbt;
 	char hash[68];
 
+reconnect:
+	if (si)
+		kill_server(si);
 	si = live_server(ckp);
 	gbt = si->data;
 	cs = &si->cs;
@@ -203,6 +214,7 @@ retry:
 			LOGWARNING("Failed to get block template from %s:%s",
 				   cs->url, cs->port);
 			send_unix_msg(sockd, "Failed");
+			goto reconnect;
 		} else {
 			char *s = json_dumps(gbt->json, 0);
 
@@ -215,19 +227,20 @@ retry:
 			LOGINFO("No best block hash support from %s:%s",
 				cs->url, cs->port);
 			send_unix_msg(sockd, "Failed");
-		} else {
+		} else
 			send_unix_msg(sockd, hash);
-		}
 	} else if (!strncasecmp(buf, "getlast", 7)) {
 		int height = get_blockcount(cs);
 
-		if (height == -1)
+		if (height == -1) {
 			send_unix_msg(sockd,  "Failed");
-		else {
+			goto reconnect;
+		} else {
 			LOGDEBUG("Height: %d", height);
-			if (!get_blockhash(cs, height, hash))
+			if (!get_blockhash(cs, height, hash)) {
 				send_unix_msg(sockd, "Failed");
-			else {
+				goto reconnect;
+			} else {
 				send_unix_msg(sockd, hash);
 				LOGDEBUG("Hash: %s", hash);
 			}
@@ -244,6 +257,7 @@ retry:
 	goto retry;
 
 out:
+	kill_server(si);
 	dealloc(buf);
 	return ret;
 }
@@ -1009,6 +1023,7 @@ static void *proxy_send(void *arg)
 static proxy_instance_t *live_proxy(ckpool_t *ckp)
 {
 	proxy_instance_t *alive = NULL;
+	connsock_t *cs;
 	int i;
 
 	LOGDEBUG("Attempting to connect to proxy");
@@ -1016,7 +1031,6 @@ retry:
 	for (i = 0; i < ckp->proxies; i++) {
 		proxy_instance_t *proxi;
 		server_instance_t *si;
-		connsock_t *cs;
 
 		si = ckp->servers[i];
 		proxi = si->data;
@@ -1049,7 +1063,8 @@ retry:
 		sleep(5);
 		goto retry;
 	}
-	LOGNOTICE("Connected to upstream server %s:%s as proxy", alive->cs->url, alive->cs->port);
+	cs = alive->cs;
+	LOGNOTICE("Connected to upstream server %s:%s as proxy", cs->url, cs->port);
 	mutex_init(&alive->notify_lock);
 	create_pthread(&alive->pth_precv, proxy_recv, alive);
 	mutex_init(&alive->psend_lock);
@@ -1143,7 +1158,6 @@ out:
 	close(sockd);
 	return ret;
 }
-
 
 static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
