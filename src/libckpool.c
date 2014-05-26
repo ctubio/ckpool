@@ -375,6 +375,7 @@ int connect_socket(char *url, char *port)
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
+	memset(&servinfobase, 0, sizeof(struct addrinfo));
 	servinfo = &servinfobase;
 
 	if (getaddrinfo(url, port, &hints, &servinfo) != 0) {

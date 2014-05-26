@@ -2035,6 +2035,7 @@ static void load_users(ckpool_t *ckp)
 
 		LOGDEBUG("Added user %s with %lu shares", instance->username, pplns_shares);
 	}
+	closedir(dp);
 }
 
 int stratifier(proc_instance_t *pi)

@@ -109,8 +109,7 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 			len += strlen(txn);
 		}
 
-		gbt->txn_data = ckalloc(len + 1);
-		gbt->txn_data[len] = '\0';
+		gbt->txn_data = ckzalloc(len + 1);
 
 		for (i = 0; i < gbt->transactions; i++) {
 			char binswap[32];
