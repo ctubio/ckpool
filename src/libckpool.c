@@ -471,16 +471,19 @@ out:
  * memory in *buf */
 int read_socket_line(connsock_t *cs, int timeout)
 {
-	char readbuf[PAGESIZE], *eom = NULL;
 	size_t buflen = 0, bufofs = 0;
+	char *eom = NULL;
 	tv_t tv_timeout;
 	int ret, bufsiz;
 	fd_set rd;
 
 	dealloc(cs->buf);
+	if (unlikely(cs->fd < 0))
+		return -1;
+
 	bufsiz = PAGESIZE;
-	readbuf[bufsiz - 1] = '\0';
 	while (!eom) {
+		char readbuf[PAGESIZE] = {};
 		int extralen;
 
 		FD_ZERO(&rd);
