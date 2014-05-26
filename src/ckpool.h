@@ -38,7 +38,6 @@ struct server_instance {
 	char *auth;
 	char *pass;
 	connsock_t cs;
-	bool alive;
 
 	void *data; // Private data
 };

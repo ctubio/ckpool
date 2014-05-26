@@ -102,17 +102,80 @@ struct proxy_instance {
 
 typedef struct proxy_instance proxy_instance_t;
 
+static server_instance_t *live_server(ckpool_t *ckp)
+{
+	server_instance_t *alive = NULL;
+	int i;
 
-static int gen_loop(proc_instance_t *pi, connsock_t *cs)
+	LOGDEBUG("Attempting to connect to bitcoind");
+retry:
+	for (i = 0; i < ckp->btcds; i++) {
+		server_instance_t *si;
+		char *userpass = NULL;
+		connsock_t *cs;
+		gbtbase_t gbt;
+
+		si = ckp->servers[i];
+		cs = &si->cs;
+		if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
+			LOGWARNING("Failed to extract address from %s", si->url);
+			continue;
+		}
+		userpass = strdup(si->auth);
+		realloc_strcat(&userpass, ":");
+		realloc_strcat(&userpass, si->pass);
+		cs->auth = http_base64(userpass);
+		dealloc(userpass);
+		if (!cs->auth) {
+			LOGWARNING("Failed to create base64 auth from %s", userpass);
+			continue;
+		}
+
+		cs->fd = connect_socket(cs->url, cs->port);
+		if (cs->fd < 0) {
+			LOGWARNING("Failed to connect socket to %s:%s !", cs->url, cs->port);
+			continue;
+		}
+
+		keep_sockalive(cs->fd);
+
+		/* Test we can connect, authorise and get a block template */
+		memset(&gbt, 0, sizeof(gbtbase_t));
+		if (!gen_gbtbase(cs, &gbt)) {
+			LOGINFO("Failed to get test block template from %s:%s auth %s !",
+				cs->url, cs->port, userpass);
+			continue;
+		}
+		clear_gbtbase(&gbt);
+		if (!validate_address(cs, ckp->btcaddress)) {
+			LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
+			continue;
+		}
+		alive = si;
+		break;
+	}
+	if (!alive) {
+		LOGWARNING("CRITICAL: No bitcoinds active!");
+		sleep(5);
+		goto retry;
+	}
+	return alive;
+}
+
+static int gen_loop(proc_instance_t *pi)
 {
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
+	server_instance_t *si;
 	int sockd, ret = 0;
 	char *buf = NULL;
+	connsock_t *cs;
 	gbtbase_t gbt;
 	char hash[68];
 
 	memset(&gbt, 0, sizeof(gbt));
+	si = live_server(ckp);
+	cs = &si->cs;
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
@@ -149,8 +212,8 @@ retry:
 		}
 	} else if (!strncasecmp(buf, "getbest", 7)) {
 		if (!get_bestblockhash(cs, hash)) {
-			LOGWARNING("No best block hash support from %s:%s",
-				   cs->url, cs->port);
+			LOGINFO("No best block hash support from %s:%s",
+				cs->url, cs->port);
 			send_unix_msg(sockd, "Failed");
 		} else {
 			send_unix_msg(sockd, hash);
@@ -1081,71 +1144,23 @@ out:
 	return ret;
 }
 
-/* FIXME: Make these use multiple BTCDs instead of just first alive. */
+
 static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
-	int i, ret = 1, alive = 0;
 	server_instance_t *si;
-	connsock_t *cs;
-	gbtbase_t gbt;
-
-	memset(&gbt, 0, sizeof(gbt));
+	int i, ret;
 
 	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->btcds);
 	for (i = 0; i < ckp->btcds; i++) {
-		char *userpass = NULL;
-
-		dealloc(userpass);
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
 		si = ckp->servers[i];
-		cs = &si->cs;
 		si->url = ckp->btcdurl[i];
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
-		if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
-			LOGWARNING("Failed to extract address from %s", si->url);
-			continue;
-		}
-		userpass = strdup(si->auth);
-		realloc_strcat(&userpass, ":");
-		realloc_strcat(&userpass, si->pass);
-		cs->auth = http_base64(userpass);
-		if (!cs->auth) {
-			LOGWARNING("Failed to create base64 auth from %s", userpass);
-			continue;
-		}
+	}
 
-		cs->fd = connect_socket(cs->url, cs->port);
-		if (cs->fd < 0) {
-			LOGWARNING("Failed to connect socket to %s:%s !", cs->url, cs->port);
-			continue;
-		}
-		keep_sockalive(cs->fd);
-		/* Test we can connect, authorise and get a block template */
-		if (!gen_gbtbase(cs, &gbt)) {
-			LOGWARNING("Failed to get test block template from %s:%s auth %s !",
-				cs->url, cs->port, userpass);
-			continue;
-		}
-		clear_gbtbase(&gbt);
-		if (!validate_address(cs, ckp->btcaddress)) {
-			LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
-			continue;
-		}
-		dealloc(userpass);
-		si->alive = true;
-		alive++;
-	}
-	if (!alive) {
-		LOGEMERG("FATAL: No bitcoinds active!");
-		goto out;
-	}
-	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++) {
-		if (si->alive)
-			break;
-	}
-	ret = gen_loop(pi, &si->cs);
-out:
+	ret = gen_loop(pi);
+
 	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++)
 		dealloc(si);
 	dealloc(ckp->servers);
@@ -1156,12 +1171,11 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
 	proxy_instance_t *proxi;
 	server_instance_t *si;
-	int i, ret = 1;
+	int i, ret;
 
 	/* Create all our proxy structures and pointers */
 	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->proxies);
 	for (i = 0; i < ckp->proxies; i++) {
-
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
 		si = ckp->servers[i];
 		si->url = ckp->proxyurl[i];
