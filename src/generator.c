@@ -113,7 +113,7 @@ retry:
 		server_instance_t *si;
 		char *userpass = NULL;
 		connsock_t *cs;
-		gbtbase_t gbt;
+		gbtbase_t *gbt;
 
 		si = ckp->servers[i];
 		cs = &si->cs;
@@ -140,13 +140,13 @@ retry:
 		keep_sockalive(cs->fd);
 
 		/* Test we can connect, authorise and get a block template */
-		memset(&gbt, 0, sizeof(gbtbase_t));
-		if (!gen_gbtbase(cs, &gbt)) {
+		gbt = si->data;
+		if (!gen_gbtbase(cs, gbt)) {
 			LOGINFO("Failed to get test block template from %s:%s auth %s !",
 				cs->url, cs->port, userpass);
 			continue;
 		}
-		clear_gbtbase(&gbt);
+		clear_gbtbase(gbt);
 		if (!validate_address(cs, ckp->btcaddress)) {
 			LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
 			continue;
@@ -170,11 +170,11 @@ static int gen_loop(proc_instance_t *pi)
 	int sockd, ret = 0;
 	char *buf = NULL;
 	connsock_t *cs;
-	gbtbase_t gbt;
+	gbtbase_t *gbt;
 	char hash[68];
 
-	memset(&gbt, 0, sizeof(gbt));
 	si = live_server(ckp);
+	gbt = si->data;
 	cs = &si->cs;
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
@@ -199,16 +199,16 @@ retry:
 		goto out;
 	}
 	if (!strncasecmp(buf, "getbase", 7)) {
-		if (!gen_gbtbase(cs, &gbt)) {
+		if (!gen_gbtbase(cs, gbt)) {
 			LOGWARNING("Failed to get block template from %s:%s",
 				   cs->url, cs->port);
 			send_unix_msg(sockd, "Failed");
 		} else {
-			char *s = json_dumps(gbt.json, 0);
+			char *s = json_dumps(gbt->json, 0);
 
 			send_unix_msg(sockd, s);
 			free(s);
-			clear_gbtbase(&gbt);
+			clear_gbtbase(gbt);
 		}
 	} else if (!strncasecmp(buf, "getbest", 7)) {
 		if (!get_bestblockhash(cs, hash)) {
@@ -1152,17 +1152,23 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 
 	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->btcds);
 	for (i = 0; i < ckp->btcds; i++) {
+		gbtbase_t *gbt;
+
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
 		si = ckp->servers[i];
 		si->url = ckp->btcdurl[i];
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
+		gbt = ckzalloc(sizeof(gbtbase_t));
+		si->data = gbt;
 	}
 
 	ret = gen_loop(pi);
 
-	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++)
+	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++) {
+		dealloc(si->data);
 		dealloc(si);
+	}
 	dealloc(ckp->servers);
 	return ret;
 }
