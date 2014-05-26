@@ -403,7 +403,6 @@ int connect_socket(char *url, char *port)
 				LOGDEBUG("Failed sock connect");
 				continue;
 			}
-retry:
 			FD_ZERO(&rw);
 			FD_SET(sockd, &rw);
 			selret = select(sockd + 1, NULL, &rw, NULL, &tv_timeout);
@@ -419,8 +418,6 @@ retry:
 					break;
 				}
 			}
-			if (selret < 0 && interrupted())
-				goto retry;
 			close(sockd);
 			sockd = -1;
 			LOGDEBUG("Select timeout/failed connect");
@@ -447,12 +444,9 @@ int write_socket(int fd, const void *buf, size_t nbyte)
 	fd_set writefds;
 	int ret;
 
-retry:
 	FD_ZERO(&writefds);
 	FD_SET(fd, &writefds);
 	ret = select(fd + 1, NULL, &writefds, NULL, &tv_timeout);
-	if (ret < 0 && interrupted())
-		goto retry;
 	if (ret < 1) {
 		if (!ret)
 			LOGNOTICE("Select timed out in write_socket");
@@ -472,14 +466,14 @@ out:
 int read_socket_line(connsock_t *cs, int timeout)
 {
 	size_t buflen = 0, bufofs = 0;
+	int ret = -1, bufsiz;
 	char *eom = NULL;
 	tv_t tv_timeout;
-	int ret, bufsiz;
 	fd_set rd;
 
 	dealloc(cs->buf);
 	if (unlikely(cs->fd < 0))
-		return -1;
+		return ret;
 
 	bufsiz = PAGESIZE;
 	while (!eom) {
@@ -491,8 +485,6 @@ int read_socket_line(connsock_t *cs, int timeout)
 		tv_timeout.tv_sec = timeout;
 		tv_timeout.tv_usec = 0;
 		ret = select(cs->fd + 1, &rd, NULL, NULL, &tv_timeout);
-		if (ret < 0 && interrupted())
-			continue;
 		if (ret < 1) {
 			if (!ret)
 				LOGDEBUG("Select timed out in read_socket_line");
@@ -545,8 +537,6 @@ void empty_socket(int fd)
 		FD_ZERO(&rd);
 		FD_SET(fd, &rd);
 		ret = select(fd + 1, &rd, NULL, NULL, &timeout);
-		if (ret < 0 && interrupted())
-			continue;
 		if (ret > 0) {
 			ret = recv(fd, buf, PAGESIZE - 1, 0);
 			buf[ret] = 0;

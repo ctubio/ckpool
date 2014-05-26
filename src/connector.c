@@ -93,11 +93,8 @@ void *acceptor(void *arg)
 retry:
 	client = ckzalloc(sizeof(client_instance_t));
 	client->address_len = sizeof(client->address);
-reaccept:
 	fd = accept(ci->serverfd, &client->address, &client->address_len);
 	if (unlikely(fd < 0)) {
-		if (interrupted())
-			goto reaccept;
 		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
 		dealloc(client);
 		goto out;
@@ -258,11 +255,8 @@ retry:
 		cksleep_ms(100);
 		goto retry;
 	}
-repoll:
 	ret = poll(fds, nfds, 1000);
 	if (ret < 0) {
-		if (interrupted())
-			goto repoll;
 		LOGERR("Failed to poll in receiver");
 		goto out;
 	}
