@@ -837,7 +837,7 @@ static void send_notify(proxy_instance_t *proxi, int sockd)
 	mutex_lock(&proxi->notify_lock);
 	ni = proxi->current_notify;
 	for (i = 0; i < ni->merkles; i++)
-		json_array_append(merkle_arr, json_string(&ni->merklehash[i][0]));
+		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
 	json_msg = json_pack("{sisssssssosssssssb}",
 			     "jobid", ni->id, "prevhash", ni->prevhash,
@@ -1249,6 +1249,11 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 	ret = gen_loop(pi);
 
 	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++) {
+		connsock_t *cs = &si->cs;
+
+		dealloc(cs->url);
+		dealloc(cs->port);
+		dealloc(cs->auth);
 		dealloc(si->data);
 		dealloc(si);
 	}

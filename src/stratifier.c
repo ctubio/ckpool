@@ -464,7 +464,7 @@ static void update_base(ckpool_t *ckp)
 		for (i = 0; i < wb->merkles; i++) {
 			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(arr, i)));
 			hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
-			json_array_append(wb->merkle_array, json_string(&wb->merklehash[i][0]));
+			json_array_append_new(wb->merkle_array, json_string(&wb->merklehash[i][0]));
 		}
 	}
 	json_decref(val);
@@ -782,8 +782,11 @@ static void drop_client(int id)
 		if (!old_client) {
 			stats.reusable_clients++;
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		} else
+		} else {
+			dealloc(client->workername);
+			dealloc(client->useragent);
 			free(client);
+		}
 		ck_dwilock(&instance_lock);
 	}
 	ck_uilock(&instance_lock);
@@ -1476,7 +1479,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&workbase_lock);
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
-		json_object_set_nocheck(json_msg, "reject-reason", json_string("Invalid JobID"));
+		json_set_string(json_msg, "reject-reason", "Invalid JobID");
 		strcpy(idstring, job_id);
 		logdir = current_workbase->logdir;
 		goto out_unlock;
@@ -1489,7 +1492,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	__bin2hex(hexhash, sharehash, 32);
 
 	if (id < blockchange_id) {
-		json_object_set_nocheck(json_msg, "reject-reason", json_string("Stale"));
+		json_set_string(json_msg, "reject-reason", "Stale");
 		goto out_unlock;
 	}
 	if ((int)strlen(nonce2) != wb->enonce2varlen * 2) {
@@ -1498,7 +1501,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	/* Ntime cannot be less, but allow forward ntime rolling up to max */
 	if (ntime32 < wb->ntime32 || ntime32 > wb->ntime32 + 7000) {
-		json_object_set_nocheck(json_msg, "reject-reason", json_string("Ntime out of range"));
+		json_set_string(json_msg, "reject-reason", "Ntime out of range");
 		goto out_unlock;
 	}
 	invalid = false;
@@ -1525,14 +1528,14 @@ out_unlock:
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 				result = true;
 			} else {
-				json_object_set_nocheck(json_msg, "reject-reason", json_string("Duplicate"));
+				json_set_string(json_msg, "reject-reason", "Duplicate");
 				LOGINFO("Rejected client %d dupe diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 			}
 		} else {
 			LOGINFO("Rejected client %d high diff %.1f/%.0f/%s: %s",
 				client->id, sdiff, diff, wdiffsuffix, hexhash);
-			json_object_set_nocheck(json_msg, "reject-reason", json_string("Above target"));
+			json_set_string(json_msg, "reject-reason", "Above target");
 		}
 	}  else
 		LOGINFO("Rejected client %d invalid share", client->id);
@@ -1733,8 +1736,8 @@ static void parse_instance_msg(int client_id, json_t *msg)
 	if (!err_val)
 		err_val = json_null();
 out:
-	json_object_set_nocheck(json_msg, "error", err_val);
-	json_object_set_nocheck(json_msg, "result", result_val);
+	json_object_set_new_nocheck(json_msg, "error", err_val);
+	json_object_set_new_nocheck(json_msg, "result", result_val);
 
 	stratum_add_send(json_msg, client_id);
 	if (update) {
@@ -2061,6 +2064,7 @@ int stratifier(proc_instance_t *pi)
 	do {
 		buf = send_recv_proc(ckp->generator, "ping");
 	} while (!buf);
+	dealloc(buf);
 
 	cklock_init(&instance_lock);
 

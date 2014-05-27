@@ -499,6 +499,7 @@ retry:
 
 	goto retry;
 out:
+	dealloc(buf);
 	return ret;
 }
 

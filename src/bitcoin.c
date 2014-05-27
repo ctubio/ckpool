@@ -381,6 +381,7 @@ bool submit_block(connsock_t *cs, char *params)
 	rpc_req = ckalloc(len);
 	sprintf(rpc_req, "{\"method\": \"submitblock\", \"params\": [\"%s\"]}\n", params);
 	val = json_rpc_call(cs, rpc_req);
+	dealloc(rpc_req);
 	if (!val) {
 		LOGWARNING("Failed to get valid json response to submitblock");
 		return ret;

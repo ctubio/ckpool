@@ -234,7 +234,7 @@ static inline void json_strdup(char **buf, json_t *val, const char *key)
 
 static inline void json_set_string(json_t *val, const char *key, const char *str)
 {
-	json_object_set_nocheck(val, key, json_string(str));
+	json_object_set_new_nocheck(val, key, json_string(str));
 }
 
 static inline void json_set_int(json_t *val, const char *key, int integer)
