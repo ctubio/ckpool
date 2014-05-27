@@ -110,6 +110,11 @@ ckpool_t *global_ckp;
 
 int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 
+#define ASPRINTF(strp, fmt, ...) do { \
+	if (unlikely(asprintf(strp, fmt, ##__VA_ARGS__))) \
+		quitfrom(1, __FILE__, __func__, __LINE__, "Failed to asprintf"); \
+} while (0)
+
 /* Log everything to the logfile, but display warnings on the console as well */
 #define LOGMSG(_loglevel, fmt, ...) do { \
 	if (global_ckp->loglevel >= _loglevel && fmt) { \
@@ -118,7 +123,7 @@ int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 		time_t now_t; \
 		int LOGFD = global_ckp->logfd; \
 		\
-		asprintf(&BUF, fmt, ##__VA_ARGS__); \
+		ASPRINTF(&BUF, fmt, ##__VA_ARGS__); \
 		now_t = time(NULL); \
 		tm = localtime(&now_t); \
 		if (LOGFD) { \

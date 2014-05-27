@@ -658,7 +658,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 				   si->url, new_url);
 			goto out;
 		}
-		asprintf(&url, "%s:%d", new_url, new_port);
+		ASPRINTF(&url, "%s:%d", new_url, new_port);
 	} else
 		url = strdup(si->url);
 	LOGINFO("Processing reconnect request to %s", url);

@@ -854,7 +854,7 @@ static void block_solve(ckpool_t *ckp)
 
 	LOGWARNING("Total shares from all users: %.0f  pplns window %.0f", total, window);
 
-	asprintf(&msg, "Block solved by %s after %.0f shares!", ckp->name, total);
+	ASPRINTF(&msg, "Block solved by %s after %.0f shares!", ckp->name, total);
 	stratum_broadcast_message(msg);
 	free(msg);
 }
