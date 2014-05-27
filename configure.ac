@@ -31,21 +31,19 @@ AC_FUNC_ALLOCA
 
 PKG_PROG_PKG_CONFIG()
 
-AC_CHECK_LIB(jansson, json_loads, ,
-	AC_MSG_ERROR([Could not find jansson library - please install libjansson-dev]))
-
 AC_CHECK_HEADERS(stdio.h stdlib.h fcntl.h sys/time.h unistd.h dirent.h)
 AC_CHECK_HEADERS(ctype.h errno.h byteswap.h string.h time.h)
 AC_CHECK_HEADERS(endian.h sys/endian.h arpa/inet.h sys/poll.h syslog.h)
 AC_CHECK_HEADERS(alloca.h pthread.h stdio.h math.h signal.h sys/prctl.h)
 AC_CHECK_HEADERS(sys/types.h sys/socket.h sys/stat.h linux/un.h netdb.h)
 AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h)
-AC_CHECK_HEADERS(jansson.h)
 
 PTHREAD_LIBS="-lpthread"
 MATH_LIBS="-lm"
 RT_LIBS="-lrt"
-JANSSON_LIBS="-ljansson"
+
+AC_CONFIG_SUBDIRS([src/jansson-2.6])
+JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
 
 AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(MATH_LIBS)

@@ -1,7 +1,9 @@
 AC_PREREQ([2.60])
 AC_INIT([jansson], [2.6], [petri@digip.org])
+AC_CONFIG_MACRO_DIR([m4])
 
 AM_INIT_AUTOMAKE([1.10 foreign])
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AC_CONFIG_SRCDIR([src/value.c])
 AC_CONFIG_HEADERS([config.h])
@@ -92,12 +94,7 @@ fi
 AC_CONFIG_FILES([
         jansson.pc
         Makefile
-        doc/Makefile
         src/Makefile
         src/jansson_config.h
-        test/Makefile
-        test/bin/Makefile
-        test/suites/Makefile
-        test/suites/api/Makefile
 ])
 AC_OUTPUT
