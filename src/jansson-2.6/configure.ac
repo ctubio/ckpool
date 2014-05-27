@@ -92,7 +92,6 @@ AC_DEFINE([USE_WINDOWS_CRYPTOAPI], [1],
 fi
 
 AC_CONFIG_FILES([
-        jansson.pc
         Makefile
         src/Makefile
         src/jansson_config.h
