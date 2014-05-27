@@ -377,7 +377,8 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	wb->logdir = ckalloc(len);
 
 	ck_wlock(&workbase_lock);
-	wb->id = workbase_id++;
+	if (!ckp->proxy)
+		wb->id = workbase_id++;
 
 	if (strncmp(wb->prevhash, lasthash, 64)) {
 		*new_block = true;
