@@ -97,6 +97,7 @@ struct ckpool_instance {
 	server_instance_t **servers;
 	char *serverurl; // URL to bind our server/proxy to
 	int update_interval; // Seconds between stratum updates
+	int chosen_server; // Chosen server for next connection
 
 	/* Proxy options */
 	int proxies;

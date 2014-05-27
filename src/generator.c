@@ -82,6 +82,7 @@ struct proxy_instance {
 
 	bool notified; /* Received new template for work */
 	bool diffed; /* Received new diff */
+	bool reconnect; /* We need to drop and reconnect */
 
 	pthread_mutex_t notify_lock;
 	notify_instance_t *notify_instances;
@@ -516,8 +517,6 @@ out:
 	return ret;
 }
 
-#define parse_reconnect(a, b) true
-
 static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
@@ -624,6 +623,66 @@ static bool show_message(json_t *val)
 		return false;
 	LOGNOTICE("Pool message: %s", msg);
 	return true;
+}
+
+static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
+{
+	server_instance_t *newsi, *si = proxi->si;
+	ckpool_t *ckp = proxi->ckp;
+	const char *new_url;
+	bool ret = false;
+	int new_port;
+	char *url;
+
+	new_url = json_string_value(json_array_get(val, 0));
+	new_port = json_integer_value(json_array_get(val, 1));
+	if (new_url && strlen(new_url) && new_port) {
+		char *dot_pool, *dot_reconnect;
+		int len;
+
+		dot_pool = strchr(si->url, '.');
+		if (!dot_pool) {
+			LOGWARNING("Denied stratum reconnect request from server without domain %s",
+				   si->url);
+			goto out;
+		}
+		dot_reconnect = strchr(new_url, '.');
+		if (!dot_reconnect) {
+			LOGWARNING("Denied stratum reconnect request to url without domain %s",
+				   new_url);
+			goto out;
+		}
+		len = strlen(dot_reconnect);
+		if (strncmp(dot_pool, dot_reconnect, len)) {
+			LOGWARNING("Denied stratum reconnect request from %s to non-matching domain %s",
+				   si->url, new_url);
+			goto out;
+		}
+		asprintf(&url, "%s:%d", new_url, new_port);
+	} else
+		url = strdup(si->url);
+	LOGINFO("Processing reconnect request to %s", url);
+
+	ret = true;
+	newsi = ckzalloc(sizeof(server_instance_t));
+	newsi->id = ckp->proxies++;
+	ckp->servers = realloc(ckp->servers, sizeof(server_instance_t *) * ckp->proxies);
+	ckp->servers[newsi->id] = newsi;
+	ckp->chosen_server = newsi->id;
+	newsi->url = url;
+	newsi->auth = strdup(si->auth);
+	newsi->pass = strdup(si->pass);
+	proxi->reconnect = true;
+
+	proxi = ckzalloc(sizeof(proxy_instance_t));
+	newsi->data = proxi;
+	proxi->auth = newsi->auth;
+	proxi->pass = newsi->pass;
+	proxi->si = newsi;
+	proxi->ckp = ckp;
+	proxi->cs = &newsi->cs;
+out:
+	return ret;
 }
 
 static bool parse_method(proxy_instance_t *proxi, const char *msg)
@@ -950,6 +1009,12 @@ static void *proxy_recv(void *arg)
 				send_proc(ckp->stratifier, "diff");
 				proxi->diffed = false;
 			}
+			if (proxi->reconnect) {
+				proxi->reconnect = false;
+				LOGWARNING("Reconnect issue, dropping existing connection");
+				send_proc(ckp->generator, "reconnect");
+				break;
+			}
 			continue;
 		}
 		if (parse_share(proxi, cs->buf)) {
@@ -1029,7 +1094,7 @@ static proxy_instance_t *live_proxy(ckpool_t *ckp)
 
 	LOGDEBUG("Attempting to connect to proxy");
 retry:
-	for (i = 0; i < ckp->proxies; i++) {
+	for (i = ckp->chosen_server; i < ckp->proxies; i++) {
 		proxy_instance_t *proxi;
 		server_instance_t *si;
 
@@ -1060,10 +1125,13 @@ retry:
 		break;
 	}
 	if (!alive) {
-		LOGWARNING("Failed to connect to any servers as proxy, retrying in 5s!");
-		sleep(5);
+		if (!ckp->chosen_server) {
+			LOGWARNING("Failed to connect to any servers as proxy, retrying in 5s!");
+			sleep(5);
+		}
 		goto retry;
 	}
+	ckp->chosen_server = 0;
 	cs = alive->cs;
 	LOGNOTICE("Connected to upstream server %s:%s as proxy", cs->url, cs->port);
 	mutex_init(&alive->notify_lock);
@@ -1199,9 +1267,10 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	for (i = 0; i < ckp->proxies; i++) {
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
 		si = ckp->servers[i];
-		si->url = ckp->proxyurl[i];
-		si->auth = ckp->proxyauth[i];
-		si->pass = ckp->proxypass[i];
+		si->id = i;
+		si->url = strdup(ckp->proxyurl[i]);
+		si->auth = strdup(ckp->proxyauth[i]);
+		si->pass = strdup(ckp->proxypass[i]);
 		proxi = ckzalloc(sizeof(proxy_instance_t));
 		si->data = proxi;
 		proxi->auth = si->auth;
@@ -1213,13 +1282,17 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 
 	ret = proxy_loop(pi);
 
-	for (i = 0; i < ckp->proxies; si = ckp->servers[i], i++) {
+	for (i = 0; i < ckp->proxies; i++) {
+		si = ckp->servers[i];
 		close(si->cs.fd);
 		proxi = si->data;
 		free(proxi->enonce1);
 		free(proxi->enonce1bin);
 		free(proxi->sessionid);
 		dealloc(si->data);
+		dealloc(si->url);
+		dealloc(si->auth);
+		dealloc(si->pass);
 		dealloc(si);
 	}
 	dealloc(ckp->servers);

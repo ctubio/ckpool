@@ -872,6 +872,7 @@ static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 		to = &timeout;
 reset:
 	timeout.tv_sec = ckp->update_interval;
+	timeout.tv_usec = 0;
 retry:
 	FD_ZERO(&readfds);
 	FD_SET(us->sockd, &readfds);
