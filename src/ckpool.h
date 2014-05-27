@@ -111,7 +111,7 @@ ckpool_t *global_ckp;
 int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 
 #define ASPRINTF(strp, fmt, ...) do { \
-	if (unlikely(asprintf(strp, fmt, ##__VA_ARGS__))) \
+	if (unlikely(asprintf(strp, fmt, ##__VA_ARGS__) < 0)) \
 		quitfrom(1, __FILE__, __func__, __LINE__, "Failed to asprintf"); \
 } while (0)
 
