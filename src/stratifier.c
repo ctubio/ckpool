@@ -232,6 +232,7 @@ typedef struct stratum_instance stratum_instance_t;
  * is sorted by enonce1_64. */
 static stratum_instance_t *stratum_instances;
 static stratum_instance_t *disconnected_instances;
+static stratum_instance_t *dead_instances;
 
 /* Protects both stratum and user instances */
 static cklock_t instance_lock;
@@ -782,11 +783,8 @@ static void drop_client(int id)
 		if (!old_client) {
 			stats.reusable_clients++;
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		} else {
-			dealloc(client->workername);
-			dealloc(client->useragent);
-			free(client);
-		}
+		} else // Keep around instance so we don't get a dereference
+			HASH_ADD(hh, dead_instances, enonce1_64, sizeof(uint64_t), client);
 		ck_dwilock(&instance_lock);
 	}
 	ck_uilock(&instance_lock);
