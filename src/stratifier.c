@@ -61,6 +61,8 @@ struct pool_stats {
 	int64_t accounted_diff_shares;
 	int64_t unaccounted_rejects;
 	int64_t accounted_rejects;
+	int64_t pplns_shares;
+	int64_t round_shares;
 
 	/* Diff shares per second for 1/5/15... minute rolling averages */
 	double dsps1;
@@ -802,7 +804,7 @@ static void log_pplns(const char *logdir, user_instance_t *instance)
 		LOGERR("Failed to fopen %s", fnametmp);
 		return;
 	}
-	fprintf(fp, "%lu", instance->pplns_shares);
+	fprintf(fp, "%lu,%ld,%ld", instance->pplns_shares, instance->diff_accepted, instance->diff_rejected);
 	fclose(fp);
 	snprintf(fname, 511, "%s/%s.pplns", logdir, instance->username);
 	if (rename(fnametmp, fname))
@@ -821,7 +823,7 @@ static void stratum_broadcast_message(const char *msg)
 /* FIXME: This is all a simple workaround till we use a proper database. */
 static void block_solve(ckpool_t *ckp)
 {
-	double total = 0, retain = 0, window;
+	double round, total = 0, retain = 0, window;
 	user_instance_t *instance, *tmp;
 	char *msg;
 
@@ -831,33 +833,44 @@ static void block_solve(ckpool_t *ckp)
 
 	LOGWARNING("Block solve user summary");
 
-	ck_rlock(&instance_lock);
-	/* Work out the total first */
-	HASH_ITER(hh, user_instances, instance, tmp)
-		total += instance->pplns_shares;
+	mutex_lock(&stats_lock);
+	total = stats.pplns_shares;
+	round = stats.round_shares;
+	mutex_unlock(&stats_lock);
 
+	if (unlikely(total == 0.0))
+		total = 1;
+
+	ck_rlock(&instance_lock);
 	/* What proportion of shares should each user retain */
 	if (total > window)
 		retain = (total - window) / total;
 	HASH_ITER(hh, user_instances, instance, tmp) {
-		double residual, shares;
+		double residual, shares, percentage;
 
 		shares = instance->pplns_shares;
 		if (!shares)
 			continue;
 		residual = shares * retain;
-		LOGWARNING("User %s: Credited: %.0f  Remaining: %.0f", instance->username,
-			   shares, residual);
+		percentage = shares / total * 100;
+		LOGWARNING("User %s: Reward: %f %%  Credited: %.0f  Remaining: %.0f",
+			   instance->username, percentage, shares, residual);
 		instance->pplns_shares = residual;
+		instance->diff_accepted = instance->diff_rejected = 0;
 		log_pplns(ckp->logdir, instance);
 	}
 	ck_runlock(&instance_lock);
 
-	LOGWARNING("Total shares from all users: %.0f  pplns window %.0f", total, window);
+	LOGWARNING("Round shares: %.0f  Total pplns: %.0f  pplns window %.0f", round, total, window);
 
-	ASPRINTF(&msg, "Block solved by %s after %.0f shares!", ckp->name, total);
+	ASPRINTF(&msg, "Block solved by %s after %.0f shares!", ckp->name, round);
 	stratum_broadcast_message(msg);
 	free(msg);
+
+	mutex_lock(&stats_lock);
+	stats.round_shares = 0;
+	stats.pplns_shares *= retain;
+	mutex_unlock(&stats_lock);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -1855,6 +1868,7 @@ static void *statsupdate(void *arg)
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
 		double ghs, tdiff, bias;
+		int64_t pplns_shares;
 		char fname[512] = {};
 		tv_t now, diff;
 		FILE *fp;
@@ -1897,6 +1911,8 @@ static void *statsupdate(void *arg)
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
 
+		pplns_shares = stats.pplns_shares + 1;
+
 		snprintf(logout, 511, "runtime: %lus  Live clients: %d  Dead clients: %d  "
 			 "Reusable clients: %d  Reused clients: %d",
 			 diff.tv_sec, stats.live_clients, stats.dead_clients,
@@ -1907,8 +1923,8 @@ static void *statsupdate(void *arg)
 			 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 		LOGNOTICE("Pool %s", logout);
 		fprintf(fp, "%s\n", logout);
-		snprintf(logout, 511, "shares A: %ld  R: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
-			 stats.accounted_diff_shares, stats.accounted_rejects, sps1, sps5, sps15, sps60);
+		snprintf(logout, 511, "round shares: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
+			 stats.round_shares, sps1, sps5, sps15, sps60);
 		LOGNOTICE("Pool %s", logout);
 		fprintf(fp, "%s\n", logout);
 		fclose(fp);
@@ -1916,6 +1932,7 @@ static void *statsupdate(void *arg)
 		ck_rlock(&instance_lock);
 		HASH_ITER(hh, user_instances, instance, tmp) {
 			bool idle = false;
+			double reward;
 
 			if (now.tv_sec - instance->last_share.tv_sec > 60) {
 				idle = true;
@@ -1939,9 +1956,12 @@ static void *statsupdate(void *arg)
 			suffix_string(ghs, suffix360, 16, 0);
 			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
-			snprintf(logout, 511, "A: %ld  R: %ld  Shares: %lu  "
+
+			reward = 25 * instance->pplns_shares;
+			reward /= pplns_shares;
+			snprintf(logout, 511, "A: %ld  R: %ld  Est Reward: %f  "
 				 "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
-				 instance->diff_accepted, instance->diff_rejected, instance->pplns_shares,
+				 instance->diff_accepted, instance->diff_rejected, reward,
 				 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
 
 			/* Only display the status of connected users to the
@@ -1969,6 +1989,8 @@ static void *statsupdate(void *arg)
 			mutex_lock(&stats_lock);
 			stats.accounted_shares += stats.unaccounted_shares;
 			stats.accounted_diff_shares += stats.unaccounted_diff_shares;
+			stats.round_shares += stats.unaccounted_diff_shares;
+			stats.pplns_shares += stats.unaccounted_diff_shares;
 			stats.accounted_rejects += stats.unaccounted_rejects;
 
 			decay_time(&stats.sps1, stats.unaccounted_shares, 15, 60);
@@ -2002,10 +2024,12 @@ static void load_users(ckpool_t *ckp)
 	if (!dp)
 		quit(1, "Failed to open logdir %s!", ckp->logdir);
 	while ((ep = readdir(dp))) {
+		int64_t diff_accepted, diff_rejected = 0;
 		user_instance_t *instance;
 		uint64_t pplns_shares;
 		char fname[512] = {};
 		char *period;
+		int results;
 		FILE *fp;
 
 		if (strlen(ep->d_name) < 7)
@@ -2019,8 +2043,11 @@ static void load_users(ckpool_t *ckp)
 			LOGERR("Failed to open pplns logfile %s!", fname);
 			continue;
 		}
-		if (fscanf(fp, "%lu", &pplns_shares) < 1)
+		results = fscanf(fp, "%lu,%ld,%ld", &pplns_shares, &diff_accepted, &diff_rejected);
+		if (results < 1)
 			continue;
+		if (results == 1)
+			diff_accepted = pplns_shares;
 		if (!pplns_shares)
 			continue;
 
@@ -2030,7 +2057,10 @@ static void load_users(ckpool_t *ckp)
 		period = strstr(instance->username, ".");
 		*period = '\0';
 		instance->pplns_shares = pplns_shares;
-		stats.accounted_diff_shares += pplns_shares;
+		stats.pplns_shares += pplns_shares;
+		instance->diff_accepted = diff_accepted;
+		instance->diff_rejected = diff_rejected;
+		stats.round_shares += diff_accepted;
 
 		ck_wlock(&instance_lock);
 		HASH_ADD_STR(user_instances, username, instance);
