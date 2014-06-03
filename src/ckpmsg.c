@@ -9,6 +9,7 @@
 
 #include "config.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -16,7 +17,7 @@
 
 int main(int argc, char **argv)
 {
-	char *name = NULL, *socket_dir = NULL;
+	char *name = NULL, *socket_dir = NULL, *buf = NULL;
 	bool proxy = false;
 	int c;
 
@@ -43,10 +44,48 @@ int main(int argc, char **argv)
 			name = strdup("ckpool");
 	}
 	realloc_strcat(&socket_dir, name);
-	free(name);
+	dealloc(name);
 	trail_slash(&socket_dir);
 	realloc_strcat(&socket_dir, "listener");
 
-	free(socket_dir);
+	while (42) {
+		int sockd, len;
+		size_t n;
+
+		dealloc(buf);
+		len = getline(&buf, &n, stdin);
+		if (len == -1) {
+			LOGERR("Failed to get a valid line");
+			break;
+		}
+		len = strlen(buf);
+		if (len < 2) {
+			LOGERR("No message");
+			continue;
+		}
+		buf[len - 1] = '\0'; // Strip /n
+		LOGDEBUG("Got message: %s", buf);
+
+		sockd = open_unix_client(socket_dir);
+		if (sockd < 0) {
+			LOGERR("Failed to open socket: %s", socket_dir);
+			break;
+		}
+		if (!send_unix_msg(sockd, buf)) {
+			LOGERR("Failed to end unix msg: %s", buf);
+			break;
+		}
+		dealloc(buf);
+		buf = recv_unix_msg(sockd);
+		close(sockd);
+		if (!buf) {
+			LOGERR("Received empty message");
+			continue;
+		}
+		LOGNOTICE("Received response: %s", buf);
+	}
+
+	dealloc(buf);
+	dealloc(socket_dir);
 	return 0;
 }

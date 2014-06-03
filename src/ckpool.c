@@ -74,6 +74,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 	}
 }
 
+/* Listen for incoming global requests. Always returns a response if possible */
 static void *listener(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
@@ -86,8 +87,6 @@ retry:
 	dealloc(buf);
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
-		if (interrupted())
-			goto retry;
 		LOGERR("Failed to accept on socket in listener");
 		goto out;
 	}
@@ -95,17 +94,16 @@ retry:
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
-		close(sockd);
-		goto retry;
-	}
-	if (!strncasecmp(buf, "shutdown", 8)) {
+	} else if (!strncasecmp(buf, "shutdown", 8)) {
 		LOGWARNING("Listener received shutdown message, terminating ckpool");
-		close(sockd);
+		send_unix_msg(sockd, "exiting");
 		goto out;
-	}
-	if (!strncasecmp(buf, "ping", 4)) {
+	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Listener received ping request");
 		send_unix_msg(sockd, "pong");
+	} else {
+		LOGINFO("Listener received unhandled message: %s", buf);
+		send_unix_msg(sockd, "unknown");
 	}
 	close(sockd);
 	goto retry;
