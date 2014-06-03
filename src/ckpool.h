@@ -108,6 +108,7 @@ struct ckpool_instance {
 
 ckpool_t *global_ckp;
 
+bool ping_main(ckpool_t *ckp);
 int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 
 #define ASPRINTF(strp, fmt, ...) do { \

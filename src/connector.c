@@ -431,11 +431,20 @@ static client_instance_t *client_by_id(conn_instance_t *ci, int id)
 
 static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 {
-	int sockd, client_id, ret = 0;
+	int sockd, client_id, ret = 0, selret;
 	unixsock_t *us = &pi->us;
+	ckpool_t *ckp = pi->ckp;
 	char *buf = NULL;
 	json_t *json_msg;
 
+	do {
+		selret = wait_read_select(us->sockd, 5);
+		if (!selret && !ping_main(ckp)) {
+			LOGEMERG("Connector failed to ping main process, exiting");
+			ret = 1;
+			goto out;
+		}
+	} while (selret < 1);
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {

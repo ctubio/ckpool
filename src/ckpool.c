@@ -71,6 +71,17 @@ out:
 	return NULL;
 }
 
+bool ping_main(ckpool_t *ckp)
+{
+	char *buf;
+
+	buf = send_recv_proc(&ckp->main, "ping");
+	if (!buf)
+		return false;
+	free(buf);
+	return true;
+}
+
 /* Open the file in path, check if there is a pid in there that still exists
  * and if not, write the pid into that file. */
 static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)

@@ -173,10 +173,10 @@ static void kill_server(server_instance_t *si)
 
 static int gen_loop(proc_instance_t *pi)
 {
+	int sockd = -1, ret = 0, selret;
 	server_instance_t *si = NULL;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
-	int sockd, ret = 0;
 	char *buf = NULL;
 	connsock_t *cs;
 	gbtbase_t *gbt;
@@ -188,7 +188,17 @@ reconnect:
 	si = live_server(ckp);
 	gbt = si->data;
 	cs = &si->cs;
+
 retry:
+	do {
+		selret = wait_read_select(us->sockd, 5);
+		if (!selret && !ping_main(ckp)) {
+			LOGEMERG("Generator failed to ping main process, exiting");
+			ret = 1;
+			goto out;
+		}
+	} while (selret < 1);
+
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		if (interrupted())
@@ -1163,10 +1173,10 @@ static void kill_proxy(proxy_instance_t *proxi)
 
 static int proxy_loop(proc_instance_t *pi)
 {
+	int sockd = -1, ret = 0, selret;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
 	proxy_instance_t *proxi;
-	int sockd, ret = 0;
 	char *buf = NULL;
 
 reconnect:
@@ -1177,6 +1187,14 @@ reconnect:
 	send_proc(ckp->stratifier, "notify");
 	proxi->notified = false;
 
+	do {
+		selret = wait_read_select(us->sockd, 5);
+		if (!selret && !ping_main(ckp)) {
+			LOGEMERG("Generator failed to ping main process, exiting");
+			ret = 1;
+			goto out;
+		}
+	} while (selret < 1);
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {

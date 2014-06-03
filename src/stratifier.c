@@ -875,36 +875,36 @@ static void block_solve(ckpool_t *ckp)
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
-	int sockd, ret = 0, selret;
+	int sockd, ret = 0, selret = 0;
 	unixsock_t *us = &pi->us;
-	tv_t timeout, *to;
 	char *buf = NULL;
-	fd_set readfds;
+	tv_t start_tv;
 
-	if (ckp->proxy)
-		to = NULL;
-	else
-		to = &timeout;
-reset:
-	timeout.tv_sec = ckp->update_interval;
-	timeout.tv_usec = 0;
+	tv_time(&start_tv);
 retry:
-	FD_ZERO(&readfds);
-	FD_SET(us->sockd, &readfds);
-	selret = select(us->sockd + 1, &readfds, NULL, NULL, to);
-	if (selret < 0) {
-		if (interrupted())
-			goto retry;
-		LOGERR("Select failed in strat_loop, killing stratifier!");
-		sleep(5);
-		ret = 1;
-		goto out;
-	}
-	if (!selret) {
-		LOGDEBUG("%ds elapsed in strat_loop, updating gbt base", ckp->update_interval);
-		update_base(ckp);
-		goto reset;
-	}
+	do {
+		if (!ckp->proxy) {
+			double tdiff;
+			tv_t end_tv;
+
+			tv_time(&end_tv);
+			tdiff = tvdiff(&end_tv, &start_tv);
+			if (tdiff > ckp->update_interval) {
+				copy_tv(&start_tv, &end_tv);
+				LOGDEBUG("%ds elapsed in strat_loop, updating gbt base",
+					 ckp->update_interval);
+				update_base(ckp);
+				continue;
+			}
+		}
+		selret = wait_read_select(us->sockd, 5);
+		if (!selret && !ping_main(ckp)) {
+			LOGEMERG("Generator failed to ping main process, exiting");
+			ret = 1;
+			goto out;
+		}
+	} while (selret < 1);
+
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		if (interrupted())
@@ -935,19 +935,15 @@ retry:
 		goto out;
 	} else if (!strncasecmp(buf, "update", 6)) {
 		update_base(ckp);
-		goto reset;
 	} else if (!strncasecmp(buf, "subscribe", 9)) {
 		/* Proxifier has a new subscription */
 		if (!update_subscribe(ckp))
 			goto out;
-		goto retry;
 	} else if (!strncasecmp(buf, "notify", 6)) {
 		/* Proxifier has a new notify ready */
 		update_notify(ckp);
-		goto retry;
 	} else if (!strncasecmp(buf, "diff", 4)) {
 		update_diff(ckp);
-		goto retry;
 	} else if (!strncasecmp(buf, "dropclient", 10)) {
 		int client_id;
 
@@ -956,11 +952,9 @@ retry:
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
 			drop_client(client_id);
-		goto retry;
 	} else if (!strncasecmp(buf, "block", 5)) {
 		block_solve(ckp);
 		update_base(ckp);
-		goto reset;
 	} else {
 		json_t *val = json_loads(buf, 0, NULL);
 
@@ -968,8 +962,8 @@ retry:
 			LOGWARNING("Received unrecognised message: %s", buf);
 		}  else
 			stratum_add_recvd(val);
-		goto retry;
 	}
+	goto retry;
 
 out:
 	dealloc(buf);

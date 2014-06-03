@@ -671,12 +671,9 @@ int wait_read_select(int sockd, int timeout)
 	tv_timeout.tv_sec = timeout;
 	tv_timeout.tv_usec = 0;
 
-retry:
 	FD_ZERO(&readfs);
 	FD_SET(sockd, &readfs);
 	ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
-	if (unlikely(ret < 1 &&interrupted()))
-		goto retry;
 	return ret;
 }
 
@@ -750,12 +747,9 @@ int wait_write_select(int sockd, int timeout)
 	tv_timeout.tv_sec = timeout;
 	tv_timeout.tv_usec = 0;
 
-retry:
 	FD_ZERO(&writefds);
 	FD_SET(sockd, &writefds);
 	ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
-	if (unlikely(ret < 1 &&interrupted()))
-		goto retry;
 	return ret;
 }
 
@@ -793,7 +787,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		goto out;
 	}
 	msglen = htole32(len);
-	ret = wait_write_select(sockd, 60);
+	ret = wait_write_select(sockd, 5);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in send_unix_msg");
 		goto out;
@@ -803,7 +797,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		LOGERR("Failed to write 4 byte length in send_unix_msg");
 		goto out;
 	}
-	ret = wait_write_select(sockd, 60);
+	ret = wait_write_select(sockd, 5);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select2 failed in send_unix_msg");
 		goto out;
@@ -836,6 +830,10 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
+	if (unlikely(kill(pi->pid, 0))) {
+		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
+		goto out;
+	}
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
 		LOGWARNING("Failed to open socket %s", path);
@@ -865,6 +863,10 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 	}
 	if (unlikely(!msg || !strlen(msg))) {
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
+		goto out;
+	}
+	if (unlikely(kill(pi->pid, 0))) {
+		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
 		goto out;
 	}
 	sockd = open_unix_client(path);
