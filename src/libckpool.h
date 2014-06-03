@@ -161,18 +161,45 @@ static inline void flip_80(void *dest_p, const void *src_p)
 
 #define dealloc(ptr) _dealloc((void *)&(ptr))
 
-/* Should be defined in syslog, but keeping them here is a reminder of their
- * values. */
-#ifndef LOG_ERR
-#define	LOG_EMERG	0	/* system is unusable */
-#define	LOG_ALERT	1	/* action must be taken immediately */
-#define	LOG_CRIT	2	/* critical conditions */
-#define	LOG_ERR		3	/* error conditions */
-#define	LOG_WARNING	4	/* warning conditions */
-#define	LOG_NOTICE	5	/* normal but significant condition */
-#define	LOG_INFO	6	/* informational */
-#define	LOG_DEBUG	7	/* debug-level messages */
-#endif
+#define VASPRINTF(strp, fmt, ...) do { \
+	if (unlikely(vasprintf(strp, fmt, ##__VA_ARGS__) < 0)) \
+		quitfrom(1, __FILE__, __func__, __LINE__, "Failed to asprintf"); \
+} while (0)
+
+#define ASPRINTF(strp, fmt, ...) do { \
+	if (unlikely(asprintf(strp, fmt, ##__VA_ARGS__) < 0)) \
+		quitfrom(1, __FILE__, __func__, __LINE__, "Failed to asprintf"); \
+} while (0)
+
+void logmsg(int loglevel, const char *fmt, ...);
+
+#define LOGEMERG(fmt, ...) logmsg(LOG_EMERG, fmt, ##__VA_ARGS__)
+#define LOGALERT(fmt, ...) logmsg(LOG_ALERT, fmt, ##__VA_ARGS__)
+#define LOGCRIT(fmt, ...) logmsg(LOG_CRIT, fmt, ##__VA_ARGS__)
+#define LOGERR(fmt, ...) logmsg(LOG_ERR, fmt, ##__VA_ARGS__)
+#define LOGWARNING(fmt, ...) logmsg(LOG_WARNING, fmt, ##__VA_ARGS__)
+#define LOGNOTICE(fmt, ...) logmsg(LOG_NOTICE, fmt, ##__VA_ARGS__)
+#define LOGINFO(fmt, ...) logmsg(LOG_INFO, fmt, ##__VA_ARGS__)
+#define LOGDEBUG(fmt, ...) logmsg(LOG_DEBUG, fmt, ##__VA_ARGS__)
+
+#define IN_FMT_FFL " in %s %s():%d"
+#define quitfrom(status, _file, _func, _line, fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt IN_FMT_FFL, ##__VA_ARGS__, _file, _func, _line); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+	exit(status); \
+} while (0)
+
+#define quit(status, fmt, ...) do { \
+	if (fmt) { \
+		fprintf(stderr, fmt, ##__VA_ARGS__); \
+		fprintf(stderr, "\n"); \
+		fflush(stderr); \
+	} \
+	exit(status); \
+} while (0)
 
 #define PAGESIZE (4096)
 

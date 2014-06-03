@@ -30,6 +30,50 @@
 
 ckpool_t *global_ckp;
 
+/* Log everything to the logfile, but display warnings on the console as well */
+void logmsg(int loglevel, const char *fmt, ...) {
+	if (global_ckp->loglevel >= loglevel && fmt) {
+		int logfd = global_ckp->logfd;
+		char *buf = NULL;
+		struct tm *tm;
+		time_t now_t;
+		va_list ap;
+
+		va_start(ap, fmt);
+		VASPRINTF(&buf, fmt, ap);
+		va_end(ap);
+
+		now_t = time(NULL);
+		tm = localtime(&now_t);
+		if (logfd) {
+			FILE *LOGFP = global_ckp->logfp;
+
+			flock(logfd, LOCK_EX);
+			fprintf(LOGFP, "[%d-%02d-%02d %02d:%02d:%02d] %s",
+				tm->tm_year + 1900,
+				tm->tm_mon + 1,
+				tm->tm_mday,
+				tm->tm_hour,
+				tm->tm_min,
+				tm->tm_sec,
+				buf);
+			if (loglevel <= LOG_ERR)
+				fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno));
+			fprintf(LOGFP, "\n");
+			fflush(LOGFP);
+			flock(logfd, LOCK_UN);
+		}
+		if (loglevel <= LOG_WARNING) {\
+			fprintf(stderr, "%s", buf);
+			if (loglevel <= LOG_ERR)
+				fprintf(stderr, " with errno %d: %s", errno, strerror(errno));
+			fprintf(stderr, "\n");
+			fflush(stderr);
+		}
+		free(buf);
+	}
+}
+
 static void *listener(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;

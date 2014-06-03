@@ -37,6 +37,21 @@
 #define UNIX_PATH_MAX 108
 #endif
 
+/* We use a weak function as a simple printf within the library that can be
+ * overridden by however the outside executable wishes to do its logging. */
+void __attribute__((weak)) logmsg(int __maybe_unused loglevel, const char *fmt, ...)
+{
+	va_list ap;
+	char *buf;
+
+	va_start(ap, fmt);
+	VASPRINTF(&buf, fmt, ap);
+	va_end(ap);
+
+	printf("%s\n", buf);
+	free(buf);
+}
+
 void rename_proc(const char *name)
 {
 	char buf[16];
