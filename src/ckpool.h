@@ -109,6 +109,14 @@ struct ckpool_instance {
 ckpool_t *global_ckp;
 
 bool ping_main(ckpool_t *ckp);
+int read_socket_line(connsock_t *cs, int timeout);
+bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
+#define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
+char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
+#define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
+
+json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
+
 int process_exit(ckpool_t *ckp, proc_instance_t *pi, int ret);
 
 #define ASPRINTF(strp, fmt, ...) do { \

@@ -313,7 +313,6 @@ void block_socket(int fd);
 int bind_socket(char *url, char *port);
 int connect_socket(char *url, char *port);
 int write_socket(int fd, const void *buf, size_t nbyte);
-int read_socket_line(connsock_t *cs, int timeout);
 void empty_socket(int fd);
 void close_unix_socket(const int sockd, const char *server_path);
 int _open_unix_server(const char *server_path, const char *file, const char *func, const int line);
@@ -328,15 +327,9 @@ int wait_write_select(int sockd, int timeout);
 int write_length(int sockd, const void *buf, int len);
 bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line);
 #define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, __FILE__, __func__, __LINE__)
-bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
-#define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
-char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
-#define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
 
 const char *__json_array_string(json_t *val, unsigned int entry);
 char *json_array_string(json_t *val, unsigned int entry);
-
-json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
