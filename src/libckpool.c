@@ -1034,6 +1034,15 @@ void realloc_strcat(char **ptr, const char *s)
 	sprintf(ofs, "%s", s);
 }
 
+void trail_slash(char **buf)
+{
+	int ofs;
+
+	ofs = strlen(*buf) - 1;
+	if (memcmp(*buf + ofs, "/", 1))
+		realloc_strcat(buf, "/");
+}
+
 void *_ckalloc(size_t len, const char *file, const char *func, const int line)
 {
 	void *ptr;

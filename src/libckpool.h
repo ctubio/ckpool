@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <syslog.h>
 
 #if HAVE_BYTESWAP_H
@@ -339,6 +340,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
+void trail_slash(char **buf);
 void *_ckalloc(size_t len, const char *file, const char *func, const int line);
 void *_ckzalloc(size_t len, const char *file, const char *func, const int line);
 void _dealloc(void **ptr);

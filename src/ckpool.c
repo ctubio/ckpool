@@ -481,7 +481,6 @@ int main(int argc, char **argv)
 			case 's':
 				ckp.socket_dir = strdup(optarg);
 				break;
-				break;
 		}
 	}
 
@@ -504,8 +503,7 @@ int main(int argc, char **argv)
 		realloc_strcat(&ckp.socket_dir, ckp.name);
 	}
 	len = strlen(ckp.socket_dir);
-	if (memcmp(&ckp.socket_dir[len], "/", 1))
-		realloc_strcat(&ckp.socket_dir, "/");
+	trail_slash(&ckp.socket_dir);
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
@@ -550,8 +548,7 @@ int main(int argc, char **argv)
 
 	/* Create the log directory */
 	len = strlen(ckp.logdir);
-	if (memcmp(&ckp.logdir[len], "/", 1))
-		realloc_strcat(&ckp.logdir, "/");
+	trail_slash(&ckp.logdir);
 	ret = mkdir(ckp.logdir, 0700);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make log directory %s", ckp.logdir);
