@@ -401,9 +401,10 @@ static void send_client(conn_instance_t *ci, int id, char *buf)
 
 	if (unlikely(fd == -1)) {
 		if (client)
-			LOGWARNING("Client id %d disconnected", id);
+			LOGINFO("Client id %d disconnected", id);
 		else
-			LOGWARNING("Connector failed to find client id %d", id);
+			LOGINFO("Connector failed to find client id %d to send to", id);
+		free(buf);
 		return;
 	}
 
@@ -481,7 +482,7 @@ retry:
 		}
 		client = client_by_id(ci, client_id);
 		if (unlikely(!client)) {
-			LOGWARNING("Connector failed to find client id: %d", client_id);
+			LOGINFO("Connector failed to find client id %d to drop", client_id);
 			goto retry;
 		}
 		ret = drop_client(ci, client);
