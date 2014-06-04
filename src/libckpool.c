@@ -637,8 +637,8 @@ int read_length(int sockd, void *buf, int len)
 		return -1;
 	}
 	while (len) {
-		ret = read(sockd, buf + ofs, len);
-		if (unlikely(ret < 0))
+		ret = recv(sockd, buf + ofs, len, MSG_WAITALL);
+		if (unlikely(ret < 1))
 			return -1;
 		ofs += ret;
 		len -= ret;
@@ -655,7 +655,7 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 	uint32_t msglen;
 	int ret;
 
-	ret = wait_read_select(sockd, 60);
+	ret = wait_read_select(sockd, 5);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in recv_unix_msg");
 		goto out;
@@ -673,13 +673,13 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 	}
 	buf = ckalloc(msglen + 1);
 	buf[msglen] = 0;
-	ret = wait_read_select(sockd, 60);
+	ret = wait_read_select(sockd, 5);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select2 failed in recv_unix_msg");
 		goto out;
 	}
 	ret = read_length(sockd, buf, msglen);
-	if (unlikely(ret < 0)) {
+	if (unlikely(ret < (int)msglen)) {
 		LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
 		dealloc(buf);
 	}
