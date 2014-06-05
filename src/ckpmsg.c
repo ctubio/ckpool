@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 			break;
 		}
 		if (!send_unix_msg(sockd, buf)) {
-			LOGERR("Failed to end unix msg: %s", buf);
+			LOGERR("Failed to send unix msg: %s", buf);
 			break;
 		}
 		dealloc(buf);

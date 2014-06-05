@@ -918,7 +918,7 @@ static const int hex2bin_tbl[256] = {
 };
 
 /* Does the reverse of bin2hex but does not allocate any ram */
-bool hex2bin(void *vp, const void *vhexstr, size_t len)
+bool _hex2bin(void *vp, const void *vhexstr, size_t len, const char *file, const char *func, const int line)
 {
 	const uchar *hexstr = vhexstr;
 	int nibble1, nibble2;
@@ -928,7 +928,7 @@ bool hex2bin(void *vp, const void *vhexstr, size_t len)
 
 	while (*hexstr && len) {
 		if (unlikely(!hexstr[1])) {
-			LOGWARNING("Early end of string in hex2bin");
+			LOGWARNING("Early end of string in hex2bin from %s %s:%d", file, func, line);
 			return ret;
 		}
 
@@ -938,7 +938,7 @@ bool hex2bin(void *vp, const void *vhexstr, size_t len)
 		nibble2 = hex2bin_tbl[idx];
 
 		if (unlikely((nibble1 < 0) || (nibble2 < 0))) {
-			LOGWARNING("Invalid binary encoding in hex2bin");
+			LOGWARNING("Invalid binary encoding in hex2bin from %s %s:%d", file, func, line);
 			return ret;
 		}
 
@@ -949,7 +949,7 @@ bool hex2bin(void *vp, const void *vhexstr, size_t len)
 	if (likely(len == 0 && *hexstr == 0))
 		ret = true;
 	if (!ret)
-		LOGWARNING("Failed hex2bin decode");
+		LOGWARNING("Failed hex2bin decode from %s %s:%d", file, func, line);
 	return ret;
 }
 
