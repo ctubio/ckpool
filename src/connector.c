@@ -557,7 +557,7 @@ int connector(proc_instance_t *pi)
 		memset(&serv_addr, 0, sizeof(serv_addr));
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-		serv_addr.sin_port = htons(3333);
+		serv_addr.sin_port = htons(ckp->proxy ? 3334 : 3333);
 		do {
 			ret = bind(sockd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 			if (!ret)
