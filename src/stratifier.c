@@ -122,8 +122,8 @@ struct workbase {
 
 	int enonce2varlen; // length of space left for extranonce2 - usually 8 unless proxying
 
-	char coinb2[128]; // coinbase2
-	uchar coinb2bin[64];
+	char *coinb2; // coinbase2
+	uchar *coinb2bin;
 	int coinb2len; // length of above
 
 	/* Cached header binary */
@@ -290,6 +290,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len += wb->enonce1varlen;
 	len += wb->enonce2varlen;
 
+	wb->coinb2bin = ckalloc(128);
 	memcpy(wb->coinb2bin, "\x0a\x63\x6b\x70\x6f\x6f\x6c", 7);
 	wb->coinb2len = 7;
 	if (ckp->btcsig) {
@@ -324,7 +325,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 
 	wb->coinb2len += 4; // Blank lock
 
-	__bin2hex(wb->coinb2, wb->coinb2bin, wb->coinb2len);
+	wb->coinb2 = bin2hex(wb->coinb2bin, wb->coinb2len);
 	LOGDEBUG("Coinb2: %s", wb->coinb2);
 	/* Coinbase 2 complete */
 
@@ -345,6 +346,8 @@ static void clear_workbase(workbase_t *wb)
 	free(wb->flags);
 	free(wb->txn_data);
 	free(wb->logdir);
+	free(wb->coinb2bin);
+	free(wb->coinb2);
 	json_decref(wb->merkle_array);
 	free(wb);
 }
@@ -560,8 +563,9 @@ static void update_notify(ckpool_t *ckp)
 	wb->coinb1len = strlen(wb->coinb1) / 2;
 	hex2bin(wb->coinb1bin, wb->coinb1, wb->coinb1len);
 	wb->height = get_sernumber(wb->coinb1bin + 42);
-	json_strcpy(wb->coinb2, val, "coinbase2");
+	json_strdup(&wb->coinb2, val, "coinbase2");
 	wb->coinb2len = strlen(wb->coinb2) / 2;
+	wb->coinb2bin = ckalloc(wb->coinb2len);
 	hex2bin(wb->coinb2bin, wb->coinb2, wb->coinb2len);
 	wb->merkle_array = json_copy(json_object_get(val, "merklehash"));
 	wb->merkles = json_array_size(wb->merkle_array);
