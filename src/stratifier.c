@@ -1177,6 +1177,16 @@ static double time_bias(double tdiff, double period)
 	return 1.0 - 1.0 / exp(tdiff / period);
 }
 
+/* Sanity check to prevent clock adjustments backwards from screwing up stats */
+static double sane_tdiff(tv_t *end, tv_t *start)
+{
+	double tdiff = tvdiff(end, start);
+
+	if (unlikely(tdiff < 0.001))
+		tdiff = 0.001;
+	return tdiff;
+}
+
 static void add_submit(stratum_instance_t *client, user_instance_t *instance, int diff,
 		       bool valid)
 {
@@ -1194,7 +1204,7 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	ck_runlock(&workbase_lock);
 
 	if (valid) {
-		tdiff = tvdiff(&now_t, &instance->last_share);
+		tdiff = sane_tdiff(&now_t, &instance->last_share);
 		if (unlikely(!client->absolute_shares++))
 			tv_time(&client->first_share);
 		client->diff_shares += diff;
@@ -1215,13 +1225,13 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	} else
 		instance->diff_rejected += diff;
 
-	tdiff = tvdiff(&now_t, &client->last_share);
+	tdiff = sane_tdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
 	decay_time(&client->dsps5, diff, tdiff, 300);
-	bdiff = tvdiff(&now_t, &client->first_share);
+	bdiff = sane_tdiff(&now_t, &client->first_share);
 	bias = time_bias(bdiff, 300);
-	tdiff = tvdiff(&now_t, &client->ldc);
+	tdiff = sane_tdiff(&now_t, &client->ldc);
 
 	mutex_lock(&stats_lock);
 	if (valid) {
