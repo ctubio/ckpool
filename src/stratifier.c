@@ -2088,6 +2088,10 @@ int stratifier(proc_instance_t *pi)
 
 	/* Wait for the generator to have something for us */
 	do {
+		if (!ping_main(ckp)) {
+			ret = 1;
+			goto out;
+		}
 		buf = send_recv_proc(ckp->generator, "ping");
 	} while (!buf);
 	dealloc(buf);
@@ -2114,5 +2118,6 @@ int stratifier(proc_instance_t *pi)
 	load_users(ckp);
 
 	ret = stratum_loop(ckp, pi);
+out:
 	return process_exit(ckp, pi, ret);
 }
