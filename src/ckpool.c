@@ -141,20 +141,23 @@ int read_socket_line(connsock_t *cs, int timeout)
 		cs->buf = ckzalloc(PAGESIZE);
 	else if (cs->buflen) {
 		memmove(cs->buf, cs->buf + cs->bufofs, cs->buflen);
-		cs->buf[cs->buflen] = '\0';
+		memset(cs->buf + cs->buflen, 0, cs->bufofs);
 		cs->bufofs = cs->buflen;
 		cs->buflen = 0;
+		eom = strchr(cs->buf, '\n');
 	} else
 		cs->bufofs = 0;
 
-	while (!eom) {
+	while (42) {
 		char readbuf[PAGESIZE] = {};
 
 		FD_ZERO(&rd);
 		FD_SET(cs->fd, &rd);
-		tv_timeout.tv_sec = timeout;
+		tv_timeout.tv_sec = eom ? 0 : timeout;
 		tv_timeout.tv_usec = 0;
 		ret = select(cs->fd + 1, &rd, NULL, NULL, &tv_timeout);
+		if (eom && !ret)
+			break;
 		if (ret < 1) {
 			if (!ret)
 				LOGDEBUG("Select timed out in read_socket_line");
@@ -172,18 +175,20 @@ int read_socket_line(connsock_t *cs, int timeout)
 		align_len(&buflen);
 		cs->buf = realloc(cs->buf, buflen);
 		if (unlikely(!cs->buf))
-			quit(1, "Failed to alloc rem of %d bytes in read_socket_line", (int)buflen);
+			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
 		memcpy(cs->buf + cs->bufofs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
 		cs->bufofs += ret;
 		cs->buf[cs->bufofs] = '\0';
 	}
+	ret = eom - cs->buf;
+
 	if (eom < cs->buf + cs->bufofs) {
 		cs->buflen = cs->buf + cs->bufofs - eom - 1;
 		cs->bufofs = eom - cs->buf + 1;
 	} else
 		cs->buflen = cs->bufofs = 0;
-	eom[0] = '\0';
+	*eom = '\0';
 out:
 	if (ret < 1) {
 		dealloc(cs->buf);
