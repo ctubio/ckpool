@@ -211,16 +211,6 @@ struct cklock {
 
 typedef struct cklock cklock_t;
 
-struct connsock {
-	int fd;
-	char *url;
-	char *port;
-	char *auth;
-	char *buf;
-};
-
-typedef struct connsock connsock_t;
-
 struct unixsock {
 	int sockd;
 	char *path;

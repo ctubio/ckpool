@@ -29,6 +29,16 @@ struct proc_instance {
 	int (*process)(proc_instance_t *);
 };
 
+struct connsock {
+	int fd;
+	char *url;
+	char *port;
+	char *auth;
+	char *buf;
+};
+
+typedef struct connsock connsock_t;
+
 struct server_instance {
 	/* Hash table data */
 	UT_hash_handle hh;
