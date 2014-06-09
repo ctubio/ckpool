@@ -1101,6 +1101,9 @@ static proxy_instance_t *live_proxy(ckpool_t *ckp)
 
 	LOGDEBUG("Attempting to connect to proxy");
 retry:
+	if (!ping_main(ckp))
+		goto out;
+
 	for (i = ckp->chosen_server; i < ckp->proxies; i++) {
 		proxy_instance_t *proxi;
 		server_instance_t *si;
@@ -1146,14 +1149,18 @@ retry:
 	mutex_init(&alive->psend_lock);
 	cond_init(&alive->psend_cond);
 	create_pthread(&alive->pth_psend, proxy_send, alive);
+out:
 	return alive;
 }
 
 static void kill_proxy(proxy_instance_t *proxi)
 {
 	notify_instance_t *ni, *tmp;
-	connsock_t *cs = proxi->cs;
+	connsock_t *cs;
 
+	if (!proxi)
+		return;
+	cs = proxi->cs;
 	close(cs->fd);
 
 	/* All our notify data is invalid if we reconnect so discard them */
@@ -1178,6 +1185,9 @@ static int proxy_loop(proc_instance_t *pi)
 
 reconnect:
 	proxi = live_proxy(ckp);
+	if (!proxi)
+		goto out;
+
 	/* We've just subscribed and authorised so tell the stratifier to
 	 * retrieve the first subscription. */
 	send_proc(ckp->stratifier, "subscribe");
