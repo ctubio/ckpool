@@ -357,6 +357,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 
 const char *__json_array_string(json_t *val, unsigned int entry);
 char *json_array_string(json_t *val, unsigned int entry);
+json_t *json_object_dup(json_t *val, const char *entry);
 
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);

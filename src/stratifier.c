@@ -567,7 +567,7 @@ static void update_notify(ckpool_t *ckp)
 	wb->coinb2len = strlen(wb->coinb2) / 2;
 	wb->coinb2bin = ckalloc(wb->coinb2len);
 	hex2bin(wb->coinb2bin, wb->coinb2, wb->coinb2len);
-	wb->merkle_array = json_copy(json_object_get(val, "merklehash"));
+	wb->merkle_array = json_object_dup(val, "merklehash");
 	wb->merkles = json_array_size(wb->merkle_array);
 	for (i = 0; i < wb->merkles; i++) {
 		strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(wb->merkle_array, i)));
@@ -1580,7 +1580,7 @@ out_unlock:
 	json_set_double(val, "sdiff", sdiff);
 	json_set_string(val, "hash", hexhash);
 	json_set_bool(val, "result", result);
-	json_object_set(val, "reject-reason", json_object_get(json_msg, "reject-reason"));
+	json_object_set(val, "reject-reason", json_object_dup(json_msg, "reject-reason"));
 	json_object_set(val, "error", *err_val);
 	s = json_dumps(val, 0);
 	len = strlen(s);

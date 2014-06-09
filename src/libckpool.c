@@ -795,6 +795,11 @@ char *json_array_string(json_t *val, unsigned int entry)
 	return NULL;
 }
 
+json_t *json_object_dup(json_t *val, const char *entry)
+{
+	return json_copy(json_object_get(val, entry));
+}
+
 
 /* Align a size_t to 4 byte boundaries for fussy arches */
 void align_len(size_t *len)

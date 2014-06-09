@@ -611,7 +611,7 @@ static bool parse_diff(proxy_instance_t *proxi, json_t *val)
 
 static bool send_version(proxy_instance_t *proxi, json_t *val)
 {
-	json_t *json_msg, *id_val = json_object_get(val, "id");
+	json_t *json_msg, *id_val = json_object_dup(val, "id");
 	connsock_t *cs = proxi->cs;
 	bool ret;
 
@@ -1070,10 +1070,10 @@ static void *proxy_send(void *arg)
 
 		if (jobid) {
 			val = json_pack("{s[ssooo]soss}", "params", proxi->auth, jobid,
-					json_object_get(msg->json_msg, "nonce2"),
-					json_object_get(msg->json_msg, "ntime"),
-					json_object_get(msg->json_msg, "nonce"),
-					"id", json_object_get(msg->json_msg, "id"),
+					json_object_dup(msg->json_msg, "nonce2"),
+					json_object_dup(msg->json_msg, "ntime"),
+					json_object_dup(msg->json_msg, "nonce"),
+					"id", json_object_dup(msg->json_msg, "id"),
 					"method", "mining.submit");
 			free(jobid);
 			ret = send_json_msg(cs, val);
