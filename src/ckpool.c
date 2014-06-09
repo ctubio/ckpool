@@ -192,7 +192,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 		cs->buflen = cs->bufofs = 0;
 	*eom = '\0';
 out:
-	if (ret < 1) {
+	if (ret < 0) {
 		dealloc(cs->buf);
 		if (ret < 0 && cs->fd > 0) {
 			close(cs->fd);
