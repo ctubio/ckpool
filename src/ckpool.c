@@ -173,7 +173,6 @@ int read_socket_line(connsock_t *cs, int timeout)
 			goto out;
 		}
 		buflen = cs->bufofs + ret + 1;
-		align_len(&buflen);
 		ptr = realloc(cs->buf, buflen);
 		if (unlikely(!ptr))
 			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
@@ -194,7 +193,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 out:
 	if (ret < 0) {
 		dealloc(cs->buf);
-		if (ret < 0 && cs->fd > 0) {
+		if (cs->fd > 0) {
 			close(cs->fd);
 			cs->fd = -1;
 		}
