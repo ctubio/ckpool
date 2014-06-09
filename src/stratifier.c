@@ -1338,7 +1338,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 			      uint32_t ntime32, const char *nonce, uchar *hash)
 {
 	unsigned char merkle_root[32], merkle_sha[64];
-	uint32_t *data32, *swap32, nonce32;
+	uint32_t *data32, *swap32, benonce32;
 	char coinbase[256], data[80];
 	uchar swap[80], hash1[32];
 	int cblen = 0, i;
@@ -1369,9 +1369,9 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	memcpy(data + 36, merkle_root, 32);
 
 	/* Insert the nonce value into the data */
-	sscanf(nonce, "%x", &nonce32);
+	hex2bin(&benonce32, nonce, 4);
 	data32 = (uint32_t *)(data + 64 + 12);
-	*data32 = htobe32(nonce32);
+	*data32 = benonce32;
 
 	/* Insert the ntime value into the data */
 	data32 = (uint32_t *)(data + 68);
