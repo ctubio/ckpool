@@ -961,9 +961,6 @@ static void *proxy_recv(void *arg)
 	ckpool_t *ckp = proxi->ckp;
 
 	rename_proc("proxyrecv");
-	/* We don't wait for them to pthread_join in case it takes a while, so
-	 * we detach the threads instead to clean up themselves */
-	pthread_detach(pthread_self());
 
 	while (42) {
 		notify_instance_t *ni, *tmp;
@@ -1043,7 +1040,6 @@ static void *proxy_send(void *arg)
 	connsock_t *cs = proxi->cs;
 
 	rename_proc("proxysend");
-	pthread_detach(pthread_self());
 
 	while (42) {
 		notify_instance_t *ni;
@@ -1312,6 +1308,10 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		free(proxi->enonce1);
 		free(proxi->enonce1bin);
 		free(proxi->sessionid);
+		pthread_cancel(proxi->pth_psend);
+		pthread_cancel(proxi->pth_precv);
+		join_pthread(proxi->pth_psend);
+		join_pthread(proxi->pth_precv);
 		dealloc(si->data);
 		dealloc(si->url);
 		dealloc(si->auth);
