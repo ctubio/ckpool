@@ -1339,13 +1339,14 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 {
 	unsigned char merkle_root[32], merkle_sha[64];
 	uint32_t *data32, *swap32, benonce32;
-	char coinbase[256], data[80];
+	char *coinbase, data[80];
 	uchar swap[80], hash1[32];
-	int cblen = 0, i;
+	int cblen, i;
 	double ret;
 
+	coinbase = alloca(wb->coinb1len + wb->enonce1constlen + wb->enonce1varlen + wb->enonce2varlen + wb->coinb2len);
 	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
-	cblen += wb->coinb1len;
+	cblen = wb->coinb1len;
 	memcpy(coinbase + cblen, &client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
 	cblen += wb->enonce1constlen + wb->enonce1varlen;
 	hex2bin(coinbase + cblen, nonce2, wb->enonce2varlen);
