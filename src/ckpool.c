@@ -188,6 +188,8 @@ out:
 	return ret;
 }
 
+static void childsighandler(int sig);
+
 /* Send a single message to a process instance when there will be no response,
  * closing the socket immediately. */
 bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
@@ -219,8 +221,10 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		ret = true;
 	close(sockd);
 out:
-	if (unlikely(!ret))
+	if (unlikely(!ret)) {
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
+		childsighandler(15);
+	}
 	return ret;
 }
 
