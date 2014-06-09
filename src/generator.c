@@ -702,6 +702,7 @@ static bool parse_method(proxy_instance_t *proxi, const char *msg)
 	bool ret = false;
 	const char *buf;
 
+	memset(&err, 0, sizeof(err));
 	val = json_loads(msg, 0, &err);
 	if (!val) {
 		LOGWARNING("JSON decode failed(%d): %s", err.line, err.text);
