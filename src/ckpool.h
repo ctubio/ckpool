@@ -35,6 +35,8 @@ struct connsock {
 	char *port;
 	char *auth;
 	char *buf;
+	int bufofs;
+	int buflen;
 };
 
 typedef struct connsock connsock_t;

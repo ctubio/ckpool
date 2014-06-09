@@ -124,24 +124,31 @@ bool ping_main(ckpool_t *ckp)
 	return true;
 }
 
-/* Peek in a socket, and then receive only one line at a time, allocing enough
- * memory in *buf */
+/* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
+ * and storing how much extra data we've received, to be moved to the beginning
+ * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, int timeout)
 {
-	size_t buflen = 0, bufofs = 0;
-	int ret = -1, bufsiz;
 	char *eom = NULL;
 	tv_t tv_timeout;
+	size_t buflen;
+	int ret = -1;
 	fd_set rd;
 
-	dealloc(cs->buf);
 	if (unlikely(cs->fd < 0))
-		return ret;
+		goto out;
+	if (unlikely(!cs->buf))
+		cs->buf = ckzalloc(PAGESIZE);
+	else if (cs->buflen) {
+		memmove(cs->buf, cs->buf + cs->bufofs, cs->buflen);
+		cs->buf[cs->buflen] = '\0';
+		cs->bufofs = cs->buflen;
+		cs->buflen = 0;
+	} else
+		cs->bufofs = 0;
 
-	bufsiz = PAGESIZE;
 	while (!eom) {
 		char readbuf[PAGESIZE] = {};
-		int extralen;
 
 		FD_ZERO(&rd);
 		FD_SET(cs->fd, &rd);
@@ -155,33 +162,27 @@ int read_socket_line(connsock_t *cs, int timeout)
 				LOGERR("Select failed in read_socket_line");
 			goto out;
 		}
-		ret = recv(cs->fd, readbuf, bufsiz - 2, MSG_PEEK);
-		if (ret < 0) {
+		ret = recv(cs->fd, readbuf, PAGESIZE - 4, 0);
+		if (ret < 1) {
 			LOGERR("Failed to recv in read_socket_line");
 			goto out;
 		}
-		if (!ret)
-			continue;
-		eom = strchr(readbuf, '\n');
-		if (eom)
-			extralen = eom - readbuf + 1;
-		else
-			extralen = ret;
-		buflen += extralen + 1;
+		buflen = cs->bufofs + ret + 1;
 		align_len(&buflen);
 		cs->buf = realloc(cs->buf, buflen);
 		if (unlikely(!cs->buf))
-			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		ret = recv(cs->fd, cs->buf + bufofs, extralen, 0);
-		if (ret < 0) {
-			LOGERR("Failed to recv %d bytes in read_socket_line", (int)buflen);
-			goto out;
-		}
-		bufofs += ret;
+			quit(1, "Failed to alloc rem of %d bytes in read_socket_line", (int)buflen);
+		memcpy(cs->buf + cs->bufofs, readbuf, ret);
+		eom = strchr(cs->buf, '\n');
+		cs->bufofs += ret;
+		cs->buf[cs->bufofs] = '\0';
 	}
-	eom = cs->buf + bufofs;
+	if (eom < cs->buf + cs->bufofs) {
+		cs->buflen = cs->buf + cs->bufofs - eom - 1;
+		cs->bufofs = eom - cs->buf + 1;
+	} else
+		cs->buflen = cs->bufofs = 0;
 	eom[0] = '\0';
-	ret = bufofs + 1;
 out:
 	if (ret < 1)
 		dealloc(cs->buf);
