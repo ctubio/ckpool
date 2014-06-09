@@ -165,6 +165,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 		ret = recv(cs->fd, readbuf, PAGESIZE - 4, 0);
 		if (ret < 1) {
 			LOGERR("Failed to recv in read_socket_line");
+			ret = -1;
 			goto out;
 		}
 		buflen = cs->bufofs + ret + 1;
@@ -184,8 +185,13 @@ int read_socket_line(connsock_t *cs, int timeout)
 		cs->buflen = cs->bufofs = 0;
 	eom[0] = '\0';
 out:
-	if (ret < 1)
+	if (ret < 1) {
 		dealloc(cs->buf);
+		if (ret < 0 && cs->fd > 0) {
+			close(cs->fd);
+			cs->fd = -1;
+		}
+	}
 	return ret;
 }
 
