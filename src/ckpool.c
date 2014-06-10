@@ -79,6 +79,7 @@ static void *listener(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	unixsock_t *us = &pi->us;
+	ckpool_t *ckp = pi->ckp;
 	char *buf = NULL;
 	int sockd;
 
@@ -90,7 +91,7 @@ retry:
 		LOGERR("Failed to accept on socket in listener");
 		goto out;
 	}
-	/* Insert parsing and repeat code here */
+
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
@@ -101,6 +102,16 @@ retry:
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Listener received ping request");
 		send_unix_msg(sockd, "pong");
+	} else if (!strncasecmp(buf, "getfd", 5)) {
+		char *msg;
+
+		msg = send_recv_proc(ckp->connector, "getfd");
+		if (!msg)
+			LOGWARNING("Failed to receive fd data from connector");
+		else {
+			send_unix_data(sockd, msg, sizeof(struct msghdr));
+			free(msg);
+		}
 	} else {
 		LOGINFO("Listener received unhandled message: %s", buf);
 		send_unix_msg(sockd, "unknown");
