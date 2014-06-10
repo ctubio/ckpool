@@ -449,8 +449,6 @@ static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
-		if (interrupted())
-			goto retry;
 		LOGERR("Failed to accept on connector socket, retrying in 5s");
 		ret = 1;
 		goto out;
