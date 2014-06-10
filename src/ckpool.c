@@ -124,6 +124,11 @@ bool ping_main(ckpool_t *ckp)
 	return true;
 }
 
+void empty_buffer(connsock_t *cs)
+{
+	cs->buflen = cs->bufofs = 0;
+}
+
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. */
@@ -345,6 +350,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
 out_empty:
 	empty_socket(cs->fd);
+	empty_buffer(cs);
 	if (!val) {
 		/* Assume that a failed request means the socket will be closed
 		 * and reopen it */
