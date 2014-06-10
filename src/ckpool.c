@@ -137,6 +137,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 
 	if (unlikely(cs->fd < 0))
 		goto out;
+
 	if (unlikely(!cs->buf))
 		cs->buf = ckzalloc(PAGESIZE);
 	else if (cs->buflen) {
@@ -144,9 +145,9 @@ int read_socket_line(connsock_t *cs, int timeout)
 		memset(cs->buf + cs->buflen, 0, cs->bufofs);
 		cs->bufofs = cs->buflen;
 		cs->buflen = 0;
+		cs->buf[cs->bufofs] = '\0';
 		eom = strchr(cs->buf, '\n');
-	} else
-		cs->bufofs = 0;
+	}
 
 	while (42) {
 		char readbuf[PAGESIZE] = {};
@@ -182,11 +183,11 @@ int read_socket_line(connsock_t *cs, int timeout)
 	}
 	ret = eom - cs->buf;
 
-	if (eom < cs->buf + cs->bufofs) {
-		cs->buflen = cs->buf + cs->bufofs - eom - 1;
+	cs->buflen = cs->buf + cs->bufofs - eom - 1;
+	if (cs->buflen)
 		cs->bufofs = eom - cs->buf + 1;
-	} else
-		cs->buflen = cs->bufofs = 0;
+	else
+		cs->bufofs = 0;
 	*eom = '\0';
 out:
 	if (ret < 0) {
