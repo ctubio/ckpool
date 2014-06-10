@@ -504,9 +504,6 @@ void close_unix_socket(const int sockd, const char *server_path)
 	ret = close(sockd);
 	if (unlikely(ret < 0))
 		LOGERR("Failed to close sock %d %s", sockd, server_path);
-	ret = unlink(server_path);
-	if (unlikely(ret < 0))
-		LOGERR("Failed to unlink %s", server_path);
 }
 
 int _open_unix_server(const char *server_path, const char *file, const char *func, const int line)
