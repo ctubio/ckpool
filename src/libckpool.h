@@ -344,6 +344,8 @@ int wait_write_select(int sockd, int timeout);
 int write_length(int sockd, const void *buf, int len);
 bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line);
 #define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, __FILE__, __func__, __LINE__)
+bool _send_unix_data(int sockd, void *buf, uint32_t len, const char *file, const char *func, const int line);
+#define send_unix_data(sockd, buf, len) _send_unix_data(sockd, buf, len, __FILE__, __func__, __LINE__)
 
 const char *__json_array_string(json_t *val, unsigned int entry);
 char *json_array_string(json_t *val, unsigned int entry);
