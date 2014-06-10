@@ -150,7 +150,6 @@ int read_socket_line(connsock_t *cs, int timeout)
 
 	while (42) {
 		char readbuf[PAGESIZE] = {};
-		char *ptr;
 
 		FD_ZERO(&rd);
 		FD_SET(cs->fd, &rd);
@@ -173,14 +172,13 @@ int read_socket_line(connsock_t *cs, int timeout)
 			goto out;
 		}
 		buflen = cs->bufofs + ret + 1;
-		ptr = realloc(cs->buf, buflen);
-		if (unlikely(!ptr))
+		cs->buf = realloc(cs->buf, buflen);
+		if (unlikely(!cs->buf))
 			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		cs->buf = ptr;
 		memcpy(cs->buf + cs->bufofs, readbuf, ret);
-		eom = strchr(cs->buf, '\n');
 		cs->bufofs += ret;
 		cs->buf[cs->bufofs] = '\0';
+		eom = strchr(cs->buf, '\n');
 	}
 	ret = eom - cs->buf;
 
