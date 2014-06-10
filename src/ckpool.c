@@ -129,8 +129,8 @@ bool ping_main(ckpool_t *ckp)
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, int timeout)
 {
+	tv_t tv_timeout = {timeout, 0};
 	char *eom = NULL;
-	tv_t tv_timeout;
 	size_t buflen;
 	int ret = -1;
 	fd_set rd;
@@ -153,8 +153,8 @@ int read_socket_line(connsock_t *cs, int timeout)
 
 		FD_ZERO(&rd);
 		FD_SET(cs->fd, &rd);
-		tv_timeout.tv_sec = eom ? 0 : timeout;
-		tv_timeout.tv_usec = 0;
+		if (eom)
+			tv_timeout.tv_sec = tv_timeout.tv_usec = 0;
 		ret = select(cs->fd + 1, &rd, NULL, NULL, &tv_timeout);
 		if (eom && !ret)
 			break;
