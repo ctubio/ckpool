@@ -447,6 +447,7 @@ static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 		}
 	} while (selret < 1);
 retry:
+	close(sockd);
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		LOGERR("Failed to accept on connector socket, retrying in 5s");
@@ -455,7 +456,6 @@ retry:
 	}
 
 	buf = recv_unix_msg(sockd);
-	close(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in connector_loop");
 		goto retry;
@@ -507,6 +507,7 @@ retry:
 
 	goto retry;
 out:
+	close(sockd);
 	dealloc(buf);
 	return ret;
 }
