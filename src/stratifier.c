@@ -87,7 +87,7 @@ struct workbase {
 	uint64_t id;
 	char idstring[20];
 
-	time_t gentime;
+	ts_t gentime;
 
 	/* GBT/shared variables */
 	char target[68];
@@ -392,7 +392,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	workbase_t *tmp, *tmpa;
 	int len, ret;
 
-	wb->gentime = time(NULL);
+	ts_realtime(&wb->gentime);
 	wb->network_diff = diff_from_nbits(wb->headerbin + 72);
 
 	len = strlen(ckp->logdir) + 8 + 1 + 16;
@@ -423,7 +423,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		if (HASH_COUNT(workbases) < 3)
 			break;
 		/*  Age old workbases older than 10 minutes old */
-		if (tmp->gentime < wb->gentime - 600) {
+		if (tmp->gentime.tv_sec < wb->gentime.tv_sec - 600) {
 			HASH_DEL(workbases, tmp);
 			clear_workbase(tmp);
 		}
@@ -595,7 +595,7 @@ static void update_notify(ckpool_t *ckp)
 	sscanf(wb->ntime, "%x", &wb->ntime32);
 	clean = json_is_true(json_object_get(val, "clean"));
 	json_decref(val);
-	wb->gentime = time(NULL);
+	ts_realtime(&wb->gentime);
 	snprintf(header, 225, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
 		 "0000000000000000000000000000000000000000000000000000000000000000",
