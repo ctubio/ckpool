@@ -114,6 +114,10 @@ struct workbase {
 	char coinb1[256]; // coinbase1
 	uchar coinb1bin[128];
 	int coinb1len; // length of above
+	uchar *coinb1a; // Pointer to GBT supplied part of coinb1 - height + flags
+	uchar *coinb1b; // Pointer to the our supplied part of coinb1 - timestamps
+	int coinb1alen;
+	int coinb1blen;
 
 	char enonce1const[32]; // extranonce1 section that is constant
 	uchar enonce1constbin[16];
@@ -256,7 +260,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	char header[228];
 	int len, ofs = 0;
 	uint64_t *u64;
-	tv_t now;
+	ts_t now;
 
 	/* Strings in wb should have been zero memset prior. Generate binary
 	 * templates first, then convert to hex */
@@ -266,17 +270,29 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	ofs++; // Script length is filled in at the end @wb->coinb1bin[41];
 
 	/* Put block height at start of template */
-	ofs += ser_number(wb->coinb1bin + ofs, wb->height);
+	wb->coinb1a = wb->coinb1bin + ofs;
+	len = ser_number(wb->coinb1bin + ofs, wb->height);
+	wb->coinb1alen = len;
+	ofs += len;
 
 	/* Followed by flag */
 	len = strlen(wb->flags) / 2;
 	wb->coinb1bin[ofs++] = len;
 	hex2bin(wb->coinb1bin + ofs, wb->flags, len);
+	wb->coinb1alen += len;
 	ofs += len;
 
 	/* Followed by timestamp */
-	tv_time(&now);
-	ofs += ser_number(wb->coinb1bin + ofs, now.tv_sec);
+	wb->coinb1b = wb->coinb1bin + ofs;
+	ts_realtime(&now);
+	len = ser_number(wb->coinb1bin + ofs, now.tv_sec);
+	wb->coinb1blen = len;
+	ofs += len;
+
+	/* Followed by our unique randomiser based on the nsec timestamp */
+	len = ser_number(wb->coinb1bin + ofs, now.tv_nsec);
+	wb->coinb1blen += len;
+	ofs += len;
 
 	/* Leave enonce1/2varlen constant at 8 bytes for bitcoind sources */
 	wb->enonce1varlen = 8;
