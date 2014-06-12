@@ -556,10 +556,8 @@ static void sighandler(int sig)
 	join_pthread(ckp->pth_watchdog);
 
 	if (sig != 9) {
-		/* Wait a second, then send SIGTERM */
-		sleep(1);
 		__shutdown_children(ckp, SIGTERM);
-		/* Wait another second, then send SIGKILL */
+		/* Wait a second, then send SIGKILL */
 		sleep(1);
 		__shutdown_children(ckp, SIGKILL);
 		pthread_cancel(ckp->pth_listener);
