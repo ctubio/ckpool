@@ -1758,7 +1758,7 @@ static void parse_instance_msg(int client_id, json_t *msg)
 	json_t *json_msg;
 
 	json_msg = json_object();
-	id_val = json_object_get(msg, "id");
+	id_val = json_object_dup(msg, "id");
 	if (unlikely(!id_val)) {
 		err_val = json_string("-1:id not found");
 		goto out;
