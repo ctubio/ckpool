@@ -115,10 +115,6 @@ struct workbase {
 	char coinb1[256]; // coinbase1
 	uchar coinb1bin[128];
 	int coinb1len; // length of above
-	uchar *coinb1a; // Pointer to GBT supplied part of coinb1 - height + flags
-	uchar *coinb1b; // Pointer to the our supplied part of coinb1 - timestamps
-	int coinb1alen;
-	int coinb1blen;
 
 	char enonce1const[32]; // extranonce1 section that is constant
 	uchar enonce1constbin[16];
@@ -271,28 +267,22 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	ofs++; // Script length is filled in at the end @wb->coinb1bin[41];
 
 	/* Put block height at start of template */
-	wb->coinb1a = wb->coinb1bin + ofs;
 	len = ser_number(wb->coinb1bin + ofs, wb->height);
-	wb->coinb1alen = len;
 	ofs += len;
 
 	/* Followed by flag */
 	len = strlen(wb->flags) / 2;
 	wb->coinb1bin[ofs++] = len;
 	hex2bin(wb->coinb1bin + ofs, wb->flags, len);
-	wb->coinb1alen += len;
 	ofs += len;
 
 	/* Followed by timestamp */
-	wb->coinb1b = wb->coinb1bin + ofs;
 	ts_realtime(&now);
 	len = ser_number(wb->coinb1bin + ofs, now.tv_sec);
-	wb->coinb1blen = len;
 	ofs += len;
 
 	/* Followed by our unique randomiser based on the nsec timestamp */
 	len = ser_number(wb->coinb1bin + ofs, now.tv_nsec);
-	wb->coinb1blen += len;
 	ofs += len;
 
 	/* Leave enonce1/2varlen constant at 8 bytes for bitcoind sources */
@@ -392,27 +382,27 @@ static void purge_share_hashtable(uint64_t wb_id)
 /* This message will be sent to the database once it's hooked in */
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
-	char *coinb1a, *cdhex;
+	char cdfield[64];
 	json_t *val;
 
-	ASPRINTF(&cdhex, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
-	coinb1a = bin2hex(wb->coinb1a, wb->coinb1alen);
+	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
 
-	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,ss,ss}",
+	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,so,ss,ss,ss,ss}",
 			"method", "workinfo",
 			"workinfoid", wb->id,
 			"poolinstance", ckp->name,
 			"transactiontree", wb->txn_hashes,
 			"prevhash", wb->prevhash,
-			"coinbase1a", coinb1a,
+			"coinbase1", wb->coinb1,
+			"coinbase2", wb->coinb2,
 			"version", wb->bbversion,
+			"ntime", wb->ntime,
 			"bits", wb->nbit,
-			"createdate", cdhex,
+			"merklehash", json_deep_copy(wb->merkle_array),
+			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	free(coinb1a);
-	free(cdhex);
 	json_decref(val);
 }
 
