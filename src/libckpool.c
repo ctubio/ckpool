@@ -71,7 +71,8 @@ void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg
 
 void join_pthread(pthread_t thread)
 {
-	pthread_join(thread, NULL);
+	if (!pthread_kill(thread, 0))
+		pthread_join(thread, NULL);
 }
 
 

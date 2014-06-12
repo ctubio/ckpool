@@ -550,25 +550,22 @@ static void shutdown_children(ckpool_t *ckp, int sig)
 
 static void sighandler(int sig)
 {
-	int i;
+	ckpool_t *ckp = global_ckp;
 
-	pthread_cancel(global_ckp->pth_watchdog);
-	join_pthread(global_ckp->pth_watchdog);
-
-	for (i = 0; i < global_ckp->proc_instances; i++)
-		send_proc(global_ckp->children[i], "shutdown");
+	pthread_cancel(ckp->pth_watchdog);
+	join_pthread(ckp->pth_watchdog);
 
 	if (sig != 9) {
 		/* Wait a second, then send SIGTERM */
 		sleep(1);
-		__shutdown_children(global_ckp, SIGTERM);
+		__shutdown_children(ckp, SIGTERM);
 		/* Wait another second, then send SIGKILL */
 		sleep(1);
-		__shutdown_children(global_ckp, SIGKILL);
-		pthread_cancel(global_ckp->pth_listener);
+		__shutdown_children(ckp, SIGKILL);
+		pthread_cancel(ckp->pth_listener);
 		exit(0);
 	} else {
-		__shutdown_children(global_ckp, SIGKILL);
+		__shutdown_children(ckp, SIGKILL);
 		exit(1);
 	}
 }
