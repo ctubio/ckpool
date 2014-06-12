@@ -105,6 +105,7 @@ struct workbase {
 	char *flags;
 	int transactions;
 	char *txn_data;
+	char *txn_hashes;
 	int merkles;
 	char merklehash[16][68];
 	char merklebin[16][32];
@@ -361,6 +362,7 @@ static void clear_workbase(workbase_t *wb)
 {
 	free(wb->flags);
 	free(wb->txn_data);
+	free(wb->txn_hashes);
 	free(wb->logdir);
 	free(wb->coinb2bin);
 	free(wb->coinb2);
@@ -385,6 +387,37 @@ static void purge_share_hashtable(uint64_t wb_id)
 
 	if (purged)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
+}
+
+/* This message will be sent to the database once it's hooked in */
+static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
+{
+	uint64_t createdate;
+	char *coinb1a, *s;
+	json_t *val;
+
+	createdate = wb->gentime.tv_sec;
+	createdate *= 1000000000ull;
+	createdate += wb->gentime.tv_nsec;
+	coinb1a = bin2hex(wb->coinb1a, wb->coinb1alen);
+	ASPRINTF(&s, "%016lx", createdate);
+
+	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,ss,ss}",
+			"method", "workinfo",
+			"workinfoid", wb->id,
+			"poolinstance", ckp->name,
+			"transactiontree", wb->txn_hashes,
+			"prevhash", wb->prevhash,
+			"coinbase1a", coinb1a,
+			"version", wb->bbversion,
+			"bits", wb->nbit,
+			"createdate", s,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", "127.0.0.1");
+	free(coinb1a);
+	free(s);
+	json_decref(val);
 }
 
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
@@ -434,6 +467,8 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 
 	if (*new_block)
 		purge_share_hashtable(wb->id);
+
+	send_workinfo(ckp, wb);
 }
 
 /* This function assumes it will only receive a valid json gbt base template
@@ -474,8 +509,10 @@ static void update_base(ckpool_t *ckp)
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
 	json_intcpy(&wb->transactions, val, "transactions");
-	if (wb->transactions)
+	if (wb->transactions) {
 		json_strdup(&wb->txn_data, val, "txn_data");
+		json_strdup(&wb->txn_hashes, val, "txn_hashes");
+	}
 	json_intcpy(&wb->merkles, val, "merkles");
 	wb->merkle_array = json_array();
 	if (wb->merkles) {

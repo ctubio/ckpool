@@ -88,6 +88,7 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 	uchar *hashbin;
 
 	dealloc(gbt->txn_data);
+	dealloc(gbt->txn_hashes);
 	gbt->transactions = 0;
 	gbt->merkles = 0;
 	gbt->transactions = json_array_size(transaction_arr);
@@ -110,6 +111,8 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 		}
 
 		gbt->txn_data = ckzalloc(len + 1);
+		gbt->txn_hashes = ckzalloc(gbt->transactions * 65 + 1);
+		memset(gbt->txn_hashes, 0x20, gbt->transactions * 65); // Spaces
 
 		for (i = 0; i < gbt->transactions; i++) {
 			char binswap[32];
@@ -140,6 +143,7 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 				LOGERR("Failed to hex2bin hash in gbt_merkle_bins");
 				return false;
 			}
+			memcpy(gbt->txn_hashes + i * 65, hash, 64);
 			bswap_256(hashbin + 32 + 32 * i, binswap);
 		}
 	}
@@ -256,8 +260,10 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 
 	gbt_merkle_bins(gbt, transaction_arr);
 	json_object_set_new_nocheck(gbt->json, "transactions", json_integer(gbt->transactions));
-	if (gbt->transactions)
+	if (gbt->transactions) {
 		json_object_set_new_nocheck(gbt->json, "txn_data", json_string_nocheck(gbt->txn_data));
+		json_object_set_new_nocheck(gbt->json, "txn_hashes", json_string_nocheck(gbt->txn_hashes));
+	}
 	json_object_set_new_nocheck(gbt->json, "merkles", json_integer(gbt->merkles));
 	if (gbt->merkles) {
 		array = json_array();
@@ -276,6 +282,7 @@ void clear_gbtbase(gbtbase_t *gbt)
 {
 	dealloc(gbt->flags);
 	dealloc(gbt->txn_data);
+	dealloc(gbt->txn_hashes);
 	json_decref(gbt->json);
 	gbt->json = NULL;
 	memset(gbt, 0, sizeof(gbtbase_t));
