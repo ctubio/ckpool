@@ -1157,7 +1157,33 @@ static user_instance_t *authorise_user(const char *workername)
 	return instance;
 }
 
-static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, json_t **err_val)
+/* Send this to the database and parse the response to authorise a user and
+ * get paramters back */
+static bool send_recv_auth(stratum_instance_t *client)
+{
+	char cdfield[64];
+	json_t *val;
+	ts_t now;
+
+	ts_realtime(&now);
+	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
+
+	val = json_pack("{ss,ss,ss,ss,si,ss,ss,ss,ss}",
+			"method", "authorise",
+			"username", client->user_instance->username,
+			"workername", client->workername,
+			"useragent", client->useragent,
+			"client_id", client->id,
+			"enonce1", client->enonce1,
+			"createdate", cdfield,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", "127.0.0.1");
+	json_decref(val);
+	return true;
+}
+
+static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val)
 {
 	bool ret = false;
 	const char *buf;
@@ -1187,8 +1213,8 @@ static json_t *parse_authorize(stratum_instance_t *client, json_t *params_val, j
 	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
 		  client->user_instance->username);
 	client->workername = strdup(buf);
-	client->authorised = true;
-	ret = true;
+	ret = send_recv_auth(client);
+	client->authorised = ret;
 out:
 	return json_boolean(ret);
 }
@@ -1678,7 +1704,7 @@ static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_v
 	}
 
 	if (!strncasecmp(method, "mining.auth", 11)) {
-		ret = parse_authorize(client, params_val, err_val);
+		ret = parse_authorise(client, params_val, err_val);
 		if (ret) {
 			snprintf(buf, 128, "Authorised, welcome to %s!", client->ckp->name);
 			stratum_send_message(client, buf);
