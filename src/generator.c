@@ -111,6 +111,9 @@ static server_instance_t *live_server(ckpool_t *ckp)
 
 	LOGDEBUG("Attempting to connect to bitcoind");
 retry:
+	if (!ping_main(ckp))
+		goto out;
+
 	for (i = 0; i < ckp->btcds; i++) {
 		server_instance_t *si;
 		char *userpass = NULL;
@@ -162,11 +165,14 @@ retry:
 	}
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
+out:
 	return alive;
 }
 
 static void kill_server(server_instance_t *si)
 {
+	if (!si)
+		return;
 	close(si->cs.fd);
 	si->cs.fd = -1;
 }
@@ -186,6 +192,9 @@ reconnect:
 	if (si)
 		kill_server(si);
 	si = live_server(ckp);
+	if (!si)
+		goto out;
+
 	gbt = si->data;
 	cs = &si->cs;
 
