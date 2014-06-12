@@ -392,15 +392,15 @@ static void purge_share_hashtable(uint64_t wb_id)
 /* This message will be sent to the database once it's hooked in */
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
+	char *coinb1a, cdhex[20];
 	uint64_t createdate;
-	char *coinb1a, *s;
 	json_t *val;
 
 	createdate = wb->gentime.tv_sec;
 	createdate *= 1000000000ull;
 	createdate += wb->gentime.tv_nsec;
+	sprintf(cdhex, "%016lx", createdate);
 	coinb1a = bin2hex(wb->coinb1a, wb->coinb1alen);
-	ASPRINTF(&s, "%016lx", createdate);
 
 	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,ss,ss}",
 			"method", "workinfo",
@@ -411,12 +411,11 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"coinbase1a", coinb1a,
 			"version", wb->bbversion,
 			"bits", wb->nbit,
-			"createdate", s,
+			"createdate", cdhex,
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
 	free(coinb1a);
-	free(s);
 	json_decref(val);
 }
 
