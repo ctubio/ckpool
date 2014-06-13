@@ -1996,7 +1996,6 @@ static void *stratum_receiver(void *arg)
 
 	rename_proc("sreceiver");
 
-	sleep(1);
 	while (42) {
 		stratum_instance_t *instance;
 
@@ -2442,6 +2441,10 @@ int stratifier(proc_instance_t *pi)
 	cond_init(&stratum_send_cond);
 	create_pthread(&pth_stratum_sender, stratum_sender, ckp);
 
+	mutex_init(&stratum_recv_lock);
+	cond_init(&stratum_recv_cond);
+	create_pthread(&pth_stratum_receiver, stratum_receiver, ckp);
+
 	mutex_init(&sshare_lock);
 	cond_init(&sshare_cond);
 	create_pthread(&pth_share_processer, share_processor, ckp);
@@ -2460,12 +2463,6 @@ int stratifier(proc_instance_t *pi)
 	cklock_init(&share_lock);
 
 	load_users(ckp);
-
-	/* Start the receiver last to only process requests once all structures
-	 * are set up. */
-	mutex_init(&stratum_recv_lock);
-	cond_init(&stratum_recv_cond);
-	create_pthread(&pth_stratum_receiver, stratum_receiver, ckp);
 
 	ret = stratum_loop(ckp, pi);
 out:

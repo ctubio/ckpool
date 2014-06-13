@@ -166,6 +166,7 @@ retry:
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 out:
+	send_proc(ckp->connector, alive ? "accept" : "reject");
 	return alive;
 }
 
@@ -1159,6 +1160,7 @@ retry:
 	cond_init(&alive->psend_cond);
 	create_pthread(&alive->pth_psend, proxy_send, alive);
 out:
+	send_proc(ckp->connector, alive ? "accept" : "reject");
 	return alive;
 }
 

@@ -29,6 +29,7 @@ struct connector_instance {
 	proc_instance_t *pi;
 	int serverfd;
 	int nfds;
+	bool accept;
 };
 
 typedef struct connector_instance conn_instance_t;
@@ -93,6 +94,8 @@ void *acceptor(void *arg)
 retry:
 	client = ckzalloc(sizeof(client_instance_t));
 	client->address_len = sizeof(client->address);
+	while (!ci->accept)
+		sleep(1);
 	fd = accept(ci->serverfd, &client->address, &client->address_len);
 	if (unlikely(fd < 0)) {
 		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
@@ -480,6 +483,7 @@ retry:
 		goto out;
 	}
 
+	dealloc(buf);
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in connector_loop");
@@ -488,6 +492,16 @@ retry:
 	if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Connector received ping request");
 		send_unix_msg(sockd, "pong");
+		goto retry;
+	}
+	if (!strncasecmp(buf, "accept", 6)) {
+		LOGDEBUG("Connector received accept signal");
+		ci->accept = true;
+		goto retry;
+	}
+	if (!strncasecmp(buf, "reject", 6)) {
+		LOGDEBUG("Connector received reject signal");
+		ci->accept = false;
 		goto retry;
 	}
 
