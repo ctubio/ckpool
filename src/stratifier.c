@@ -1898,15 +1898,17 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 {
 	stratum_instance_t *client;
 	const char *method;
-	json_t *val;
 
 	method = json_string_value(method_val);
 	if (!strncasecmp(method, "mining.subscribe", 16)) {
-		val = parse_subscribe(client_id, params_val);
-		if (!val)
+		json_t *val, *result_val = parse_subscribe(client_id, params_val);
+
+		if (!result_val)
 			return;
-		json_object_set(val, "id", id_val);
-		json_object_set(val, "error", json_null());
+		val = json_object();
+		json_object_set_new_nocheck(val, "result", result_val);
+		json_object_set_nocheck(val, "id", id_val);
+		json_object_set_new_nocheck(val, "error", json_null());
 		stratum_add_send(val, client_id);
 		update_client(client_id);
 		return;
