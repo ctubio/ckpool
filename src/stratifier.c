@@ -1695,63 +1695,6 @@ out:
 	return json_boolean(result);
 }
 
-#if 0
-/* We should have already determined all the values passed to this are valid
- * by now. Set update if we should also send the latest stratum parameters */
-static json_t *gen_json_result(int client_id, json_t *json_msg, json_t *method_val,
-			       json_t *params_val, json_t **err_val, bool *update)
-{
-	stratum_instance_t *client = NULL;
-	const char *method;
-	json_t *ret = NULL;
-	char buf[128];
-
-	method = json_string_value(method_val);
-	if (!strncasecmp(method, "mining.subscribe", 16)) {
-		*update = true;
-		ret = parse_subscribe(client_id, params_val);
-		goto out;
-	}
-
-	ck_rlock(&instance_lock);
-	client = __instance_by_id(client_id);
-	ck_runlock(&instance_lock);
-
-	if (unlikely(!client)) {
-		LOGINFO("Failed to find client id %d in hashtable!", client_id);
-		goto out;
-	}
-
-	if (!strncasecmp(method, "mining.auth", 11)) {
-		ret = parse_authorise(client, params_val, err_val);
-		if (ret) {
-			snprintf(buf, 128, "Authorised, welcome to %s!", client->ckp->name);
-			stratum_send_message(client, buf);
-		}
-		goto out;
-	}
-
-	/* We should only accept authorised requests from here on */
-	if (!client->authorised) {
-		/* Dropping unauthorised clients here also allows the
-		 * stratifier process to restart since it will have lost all
-		 * the stratum instance data. Clients will just reconnect. */
-		LOGINFO("Dropping unauthorised client %d", client->id);
-		sprintf(buf, "dropclient=%d", client->id);
-		send_proc(client->ckp->connector, buf);
-		goto out;
-	}
-
-	if (!strncasecmp(method, "mining.submit", 13)) {
-		ret = parse_submit(client, json_msg, params_val, err_val);
-		goto out;
-	}
-
-out:
-	return ret;
-}
-#endif
-
 /* Must enter with workbase_lock held */
 static json_t *__stratum_notify(bool clean)
 {
@@ -1796,71 +1739,6 @@ static void stratum_send_update(int client_id, bool clean)
 	stratum_add_send(json_msg, client_id);
 }
 
-#if 0
-static void parse_instance_msg(int client_id, json_t *msg)
-{
-	json_t *result_val = NULL, *err_val = NULL, *id_val = NULL;
-	json_t *method, *params;
-	bool update = false;
-	json_t *json_msg;
-
-	json_msg = json_object();
-	id_val = json_object_dup(msg, "id");
-	if (unlikely(!id_val)) {
-		err_val = json_string("-1:id not found");
-		goto out;
-	}
-	json_object_set_nocheck(json_msg, "id", id_val);
-#if 0
-	/* Random broken clients send something not an integer so just use the
-	 * json object, whatever it is. */
-	if (unlikely(!json_is_integer(id_val))) {
-		err_val = json_string("-1:id is not integer");
-		goto out;
-	}
-#endif
-	method = json_object_get(msg, "method");
-	if (unlikely(!method)) {
-		err_val = json_string("-3:method not found");
-		goto out;
-	}
-	if (unlikely(!json_is_string(method))) {
-		err_val = json_string("-1:method is not string");
-		goto out;
-	}
-	params = json_object_get(msg, "params");
-	if (unlikely(!params)) {
-		err_val = json_string("-1:params not found");
-		goto out;
-	}
-	result_val = gen_json_result(client_id, json_msg, method, params,
-				     &err_val, &update);
-	if (!result_val) {
-		json_decref(json_msg);
-		return;
-	}
-	if (!err_val)
-		err_val = json_null();
-out:
-	json_object_set_new_nocheck(json_msg, "error", err_val);
-	json_object_set_new_nocheck(json_msg, "result", result_val);
-
-	stratum_add_send(json_msg, client_id);
-	if (update) {
-		stratum_instance_t *client;
-
-		stratum_send_update(client_id, true);
-
-		ck_rlock(&instance_lock);
-		client = __instance_by_id(client_id);
-		ck_runlock(&instance_lock);
-
-		if (likely(client))
-			stratum_send_diff(client);
-	}
-}
-#endif
-
 static void send_json_err(int client_id, json_t *id_val, const char *err_msg)
 {
 	json_t *val;
@@ -1899,6 +1777,8 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 	stratum_instance_t *client;
 	const char *method;
 
+	/* Random broken clients send something not an integer as the id so we copy
+	 * the json item for id_val as is for the response. */
 	method = json_string_value(method_val);
 	if (!strncasecmp(method, "mining.subscribe", 16)) {
 		json_t *val, *result_val = parse_subscribe(client_id, params_val);
