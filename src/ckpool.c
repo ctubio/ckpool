@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <grp.h>
 #include <jansson.h>
 #include <signal.h>
 #include <stdio.h>
@@ -422,6 +423,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 static void create_process_unixsock(proc_instance_t *pi)
 {
 	unixsock_t *us = &pi->us;
+	ckpool_t *ckp = pi->ckp;
 
 	us->path = strdup(pi->ckp->socket_dir);
 	realloc_strcat(&us->path, pi->sockname);
@@ -429,6 +431,8 @@ static void create_process_unixsock(proc_instance_t *pi)
 	us->sockd = open_unix_server(us->path);
 	if (unlikely(us->sockd < 0))
 		quit(1, "Failed to open %s socket", pi->sockname);
+	if (chown(us->path, -1, ckp->gr_gid))
+		quit(1, "Failed to set %s to group id %d", us->path, ckp->gr_gid);
 }
 
 static void write_namepid(proc_instance_t *pi)
@@ -746,10 +750,13 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:kl:n:ps:")) != -1) {
+	while ((c = getopt(argc, argv, "c:g:kl:n:ps:")) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
+				break;
+			case 'g':
+				ckp.grpnam = optarg;
 				break;
 			case 'k':
 				ckp.killold = true;
@@ -782,6 +789,15 @@ int main(int argc, char **argv)
 	snprintf(buf, 15, "%s", ckp.name);
 	prctl(PR_SET_NAME, buf, 0, 0, 0);
 	memset(buf, 0, 15);
+
+	if (ckp.grpnam) {
+		struct group *group = getgrnam(ckp.grpnam);
+
+		if (!group)
+			quit(1, "Failed to find group %s", ckp.grpnam);
+		ckp.gr_gid = group->gr_gid;
+	} else
+		ckp.gr_gid = getegid();
 
 	if (!ckp.config) {
 		ckp.config = strdup(ckp.name);
