@@ -41,6 +41,7 @@ AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h)
 PTHREAD_LIBS="-lpthread"
 MATH_LIBS="-lm"
 RT_LIBS="-lrt"
+PQ_LIBS="-lpq"
 
 AC_CONFIG_SUBDIRS([src/jansson-2.6])
 JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
@@ -48,6 +49,7 @@ JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
 AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(MATH_LIBS)
 AC_SUBST(RT_LIBS)
+AC_SUBST(PQ_LIBS)
 AC_SUBST(JANSSON_LIBS)
 
 AC_OUTPUT([Makefile] [src/Makefile])
@@ -58,6 +60,7 @@ echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS"
 echo "  LDADD................: $PTHREAD_LIBS $MATH_LIBS $RT_LIBS $JANSSON_LIBS"
+echo "  db LDADD.............: $PQ_LIBS"
 echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"
