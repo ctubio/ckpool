@@ -1523,7 +1523,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 {
 	bool share = false, result = false, invalid = true, submit = false;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
-	char hexhash[68], sharehash[32], *logdir;
+	char hexhash[68], sharehash[32], cdfield[64], *logdir;
 	double diff, wdiff = 0, sdiff = -1;
 	char idstring[20];
 	uint32_t ntime32;
@@ -1532,6 +1532,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	uchar hash[32];
 	uint64_t id;
 	json_t *val;
+	ts_t now;
 	FILE *fp;
 	int len;
 
@@ -1656,9 +1657,13 @@ out_unlock:
 		goto out;
 	}
 
+	ts_realtime(&now);
+	sprintf(cdfield, "%lu.%lu", now.tv_sec, now.tv_nsec);
+
 	val = json_object();
 	json_set_string(val, "wbid", idstring);
 	json_set_string(val, "nonce2", nonce2);
+	json_set_string(val, "nonce", nonce);
 	json_set_int(val, "ntime", ntime32);
 	json_set_int(val, "diff", diff);
 	json_set_double(val, "sdiff", sdiff);
@@ -1666,6 +1671,10 @@ out_unlock:
 	json_set_bool(val, "result", result);
 	json_object_set(val, "reject-reason", json_object_dup(json_msg, "reject-reason"));
 	json_object_set(val, "error", *err_val);
+	json_set_string(val, "createdate", cdfield);
+	json_set_string(val, "createby", "code");
+	json_set_string(val, "createcode", __func__);
+	json_set_string(val, "createinet", "127.0.0.1");
 	s = json_dumps(val, 0);
 	len = strlen(s);
 	len = fprintf(fp, "%s\n", s);
