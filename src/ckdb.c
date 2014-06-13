@@ -23,7 +23,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <regex.h>
+#ifdef HAVE_LIBPQ_FE_H
 #include <libpq-fe.h>
+#elif defined (HAVE_POSTGRESQL_LIBPQ_FE_H)
+#include <postgresql/libpq-fe.h>
+#endif
 
 #include "ckpool.h"
 #include "libckpool.h"
