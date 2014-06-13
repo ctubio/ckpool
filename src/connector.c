@@ -436,6 +436,7 @@ static void send_fd(int fd, int sockd)
 	struct iovec iov[1];
 	struct msghdr msg;
 	char buf[2];
+	int *cd;
 
 	memset(&cmptr, 0, sizeof(struct cmsghdr));
 	iov[0].iov_base = buf;
@@ -447,7 +448,8 @@ static void send_fd(int fd, int sockd)
 	cmptr.cmsg_level = SOL_SOCKET;
 	cmptr.cmsg_type = SCM_RIGHTS;
 	cmptr.cmsg_len = CMSG_LEN(sizeof(int));
-	*(int *)CMSG_DATA(&cmptr) = fd;
+	cd = (int *)CMSG_DATA(&cmptr);
+	*cd = fd;
 	buf[1] = 0;
 	buf[0] = 0;
 	send_unix_data(sockd, &msg, sizeof(struct msghdr));
@@ -455,7 +457,7 @@ static void send_fd(int fd, int sockd)
 
 static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 {
-	int sockd, client_id, ret = 0, selret;
+	int sockd = -1, client_id, ret = 0, selret;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
 	char *buf = NULL;
