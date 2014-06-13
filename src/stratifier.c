@@ -2104,10 +2104,12 @@ static void *share_processor(void *arg)
 		if (jp)
 			discard_json_params(&jp);
 
-		mutex_lock(&sauth_lock);
+		mutex_lock(&sshare_lock);
 		if (!sshares)
 			pthread_cond_wait(&sshare_cond, &sshare_lock);
 		jp = sshares;
+		if (likely(jp))
+			DL_DELETE(sshares, jp);
 		mutex_unlock(&sshare_lock);
 
 		if (unlikely(!jp))
@@ -2154,6 +2156,8 @@ static void *authoriser(void *arg)
 		if (!sauths)
 			pthread_cond_wait(&sauth_cond, &sauth_lock);
 		jp = sauths;
+		if (likely(jp))
+			DL_DELETE(sauths, jp);
 		mutex_unlock(&sauth_lock);
 
 		if (unlikely(!jp))
