@@ -1517,6 +1517,8 @@ static void submit_share(stratum_instance_t *client, int64_t jobid, const char *
 	free(msg);
 }
 
+#define JSON_ERR(err) json_string(SHARE_ERR(err))
+
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
@@ -1524,6 +1526,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char hexhash[68] = {}, sharehash[32], cdfield[64], *logdir;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	double diff, wdiff = 0, sdiff = -1;
+	enum share_err err = SE_NONE;
 	char idstring[20];
 	uint32_t ntime32;
 	char *fname, *s;
@@ -1539,40 +1542,48 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	sprintf(cdfield, "%lu.%lu", now.tv_sec, now.tv_nsec);
 
 	if (unlikely(!json_is_array(params_val))) {
-		*err_val = json_string("params not an array");
+		err = SE_NOT_ARRAY;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	if (unlikely(json_array_size(params_val) != 5)) {
-		*err_val = json_string("Invalid array size");
+		err = SE_INVALID_SIZE;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	user = json_string_value(json_array_get(params_val, 0));
 	if (unlikely(!user || !strlen(user))) {
-		*err_val = json_string("No username");
+		err = SE_NO_USERNAME;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	job_id = json_string_value(json_array_get(params_val, 1));
 	if (unlikely(!job_id || !strlen(job_id))) {
-		*err_val = json_string("No job_id");
+		err = SE_NO_JOBID;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	nonce2 = json_string_value(json_array_get(params_val, 2));
 	if (unlikely(!nonce2 || !strlen(nonce2))) {
-		*err_val = json_string("No nonce2");
+		err = SE_NO_NONCE2;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	ntime = json_string_value(json_array_get(params_val, 3));
 	if (unlikely(!ntime || !strlen(ntime))) {
-		*err_val = json_string("No ntime");
+		err = SE_NO_NTIME;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	nonce = json_string_value(json_array_get(params_val, 4));
 	if (unlikely(!nonce || !strlen(nonce))) {
-		*err_val = json_string("No nonce");
+		err = SE_NO_NONCE;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	if (strcmp(user, client->workername)) {
-		*err_val = json_string("Worker mismatch");
+		err = SE_WORKER_MISMATCH;
+		*err_val = JSON_ERR(err);
 		goto out;
 	}
 	sscanf(job_id, "%lx", &id);
@@ -1583,7 +1594,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&workbase_lock);
 	HASH_FIND_INT(workbases, &id, wb);
 	if (unlikely(!wb)) {
-		json_set_string(json_msg, "reject-reason", "Invalid JobID");
+		err = SE_INVALID_JOBID;
+		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		strcpy(idstring, job_id);
 		logdir = current_workbase->logdir;
 		goto out_unlock;
@@ -1596,16 +1608,19 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	__bin2hex(hexhash, sharehash, 32);
 
 	if (id < blockchange_id) {
-		json_set_string(json_msg, "reject-reason", "Stale");
+		err = SE_STALE;
+		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		goto out_unlock;
 	}
 	if ((int)strlen(nonce2) != wb->enonce2varlen * 2) {
-		*err_val = json_string("Invalid nonce2 length");
+		err = SE_INVALID_NONCE2;
+		*err_val = JSON_ERR(err);
 		goto out_unlock;
 	}
 	/* Ntime cannot be less, but allow forward ntime rolling up to max */
 	if (ntime32 < wb->ntime32 || ntime32 > wb->ntime32 + 7000) {
-		json_set_string(json_msg, "reject-reason", "Ntime out of range");
+		err = SE_NTIME_INVALID;
+		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		goto out_unlock;
 	}
 	invalid = false;
@@ -1632,14 +1647,16 @@ out_unlock:
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 				result = true;
 			} else {
-				json_set_string(json_msg, "reject-reason", "Duplicate");
+				err = SE_DUPE;
+				json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 				LOGINFO("Rejected client %d dupe diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 			}
 		} else {
+			err = SE_HIGH_DIFF;
 			LOGINFO("Rejected client %d high diff %.1f/%.0f/%s: %s",
 				client->id, sdiff, diff, wdiffsuffix, hexhash);
-			json_set_string(json_msg, "reject-reason", "Above target");
+			json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		}
 	}  else
 		LOGINFO("Rejected client %d invalid share", client->id);

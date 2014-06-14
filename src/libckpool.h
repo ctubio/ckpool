@@ -203,6 +203,45 @@ void logmsg(int loglevel, const char *fmt, ...);
 
 #define PAGESIZE (4096)
 
+/* Share error values */
+
+enum share_err {
+	SE_INVALID_NONCE2 = -9,
+	SE_WORKER_MISMATCH,
+	SE_NO_NONCE,
+	SE_NO_NTIME,
+	SE_NO_NONCE2,
+	SE_NO_JOBID,
+	SE_NO_USERNAME,
+	SE_INVALID_SIZE,
+	SE_NOT_ARRAY,
+	SE_NONE, // 0
+	SE_INVALID_JOBID,
+	SE_STALE,
+	SE_NTIME_INVALID,
+	SE_DUPE,
+	SE_HIGH_DIFF
+};
+
+static const char __maybe_unused *share_errs[] = {
+	"Invalid nonce2 length",
+	"Worker mismatch",
+	"No nonce",
+	"No ntime",
+	"No nonce2",
+	"No job_id",
+	"No username",
+	"Invalid array size",
+	"Valid",
+	"Invalid JobID",
+	"Stale",
+	"Ntime out of range",
+	"Duplicate",
+	"Above target"
+};
+
+#define SHARE_ERR(x) share_errs[((x) + 9)]
+
 /* ck locks, a write biased variant of rwlocks */
 struct cklock {
 	pthread_mutex_t mutex;
