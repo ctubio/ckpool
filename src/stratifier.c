@@ -1521,8 +1521,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	bool share = false, result = false, invalid = true, submit = false;
+	char hexhash[68] = {}, sharehash[32], cdfield[64], *logdir;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
-	char hexhash[68], sharehash[32], cdfield[64], *logdir;
 	double diff, wdiff = 0, sdiff = -1;
 	char idstring[20];
 	uint32_t ntime32;
@@ -1535,7 +1535,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	FILE *fp;
 	int len;
 
-	memset(hexhash, 0, 68);
+	ts_realtime(&now);
+	sprintf(cdfield, "%lu.%lu", now.tv_sec, now.tv_nsec);
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -1656,9 +1657,6 @@ out_unlock:
 		goto out;
 	}
 
-	ts_realtime(&now);
-	sprintf(cdfield, "%lu.%lu", now.tv_sec, now.tv_nsec);
-
 	val = json_object();
 	json_set_int(val, "workinfoid", id);
 	json_set_string(val, "nonce2", nonce2);
@@ -1701,8 +1699,21 @@ out_unlock:
 	/* FIXME : Send val json to database here */
 	json_decref(val);
 out:
-	if (!share)
+	if (!share) {
+		val = json_pack("{ss,si,ss,ss,so,ss,ss,ss,ss}",
+				"method", "shareerror",
+				"workinfoid", current_workbase->id,
+				"worker", client->workername,
+				"username", client->user_instance->username,
+				"error", json_copy(*err_val),
+				"createdate", cdfield,
+				"createby", "code",
+				"createcode", __func__,
+				"createinet", "127.0.0.1");
+		/* FIXME : Send val json to database here */
+		json_decref(val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
+	}
 	return json_boolean(result);
 }
 
