@@ -240,6 +240,12 @@ static inline void json_uint64cpy(uint64_t *u64, json_t *val, const char *key)
 {
 	*u64 = (uint64_t)json_integer_value(json_object_get(val, key));
 }
+
+static inline void json_int64cpy(int64_t *i64, json_t *val, const char *key)
+{
+	*i64 = (int64_t)json_integer_value(json_object_get(val, key));
+}
+
 static inline void json_intcpy(int *i, json_t *val, const char *key)
 {
 	*i = json_integer_value(json_object_get(val, key));
@@ -255,7 +261,7 @@ static inline void json_set_string(json_t *val, const char *key, const char *str
 	json_object_set_new_nocheck(val, key, json_string(str));
 }
 
-static inline void json_set_int(json_t *val, const char *key, int integer)
+static inline void json_set_int(json_t *val, const char *key, int64_t integer)
 {
 	json_object_set_new_nocheck(val, key, json_integer(integer));
 }

@@ -84,7 +84,7 @@ static uint64_t enonce1_64;
 struct workbase {
 	/* Hash table data */
 	UT_hash_handle hh;
-	uint64_t id;
+	int64_t id;
 	char idstring[20];
 
 	ts_t gentime;
@@ -157,8 +157,8 @@ static struct {
 	int enonce2varlen;
 } proxy_base;
 
-static uint64_t workbase_id;
-static uint64_t blockchange_id;
+static int64_t workbase_id;
+static int64_t blockchange_id;
 static char lasthash[68];
 
 /* For protecting the stratum msg data */
@@ -228,7 +228,7 @@ struct stratum_instance {
 
 	int64_t diff; /* Current diff */
 	int64_t old_diff; /* Previous diff */
-	uint64_t diff_change_job_id; /* Last job_id we changed diff */
+	int64_t diff_change_job_id; /* Last job_id we changed diff */
 	double dsps5; /* Diff shares per second, 5 minute rolling average */
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
@@ -261,7 +261,7 @@ static cklock_t instance_lock;
 struct share {
 	UT_hash_handle hh;
 	uchar hash[32];
-	uint64_t workbase_id;
+	int64_t workbase_id;
 };
 
 typedef struct share share_t;
@@ -378,7 +378,7 @@ static void clear_workbase(workbase_t *wb)
 	free(wb);
 }
 
-static void purge_share_hashtable(uint64_t wb_id)
+static void purge_share_hashtable(int64_t wb_id)
 {
 	share_t *share, *tmp;
 	int purged = 0;
@@ -614,7 +614,7 @@ static void update_notify(ckpool_t *ckp)
 	wb->ckp = ckp;
 	wb->proxy = true;
 
-	json_uint64cpy(&wb->id, val, "jobid");
+	json_int64cpy(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
 	json_strcpy(wb->coinb1, val, "coinbase1");
 	wb->coinb1len = strlen(wb->coinb1) / 2;
@@ -1275,8 +1275,7 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	ckpool_t *ckp = client->ckp;
-	uint64_t next_blockid;
-	int64_t optimal;
+	int64_t next_blockid, optimal;
 	tv_t now_t;
 
 	tv_time(&now_t);
@@ -1477,7 +1476,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	return ret;
 }
 
-static bool new_share(const uchar *hash, uint64_t  wb_id)
+static bool new_share(const uchar *hash, int64_t  wb_id)
 {
 	share_t *share, *match = NULL;
 	bool ret = false;
@@ -1500,7 +1499,7 @@ out_unlock:
 }
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held */
-static void submit_share(stratum_instance_t *client, uint64_t jobid, const char *nonce2,
+static void submit_share(stratum_instance_t *client, int64_t jobid, const char *nonce2,
 			 const char *ntime, const char *nonce, int msg_id)
 {
 	ckpool_t *ckp = client->ckp;
@@ -1530,7 +1529,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char *fname, *s;
 	workbase_t *wb;
 	uchar hash[32];
-	uint64_t id;
+	int64_t id;
 	json_t *val;
 	ts_t now;
 	FILE *fp;
@@ -1661,10 +1660,10 @@ out_unlock:
 	sprintf(cdfield, "%lu.%lu", now.tv_sec, now.tv_nsec);
 
 	val = json_object();
-	json_set_string(val, "wbid", idstring);
+	json_set_int(val, "workinfoid", id);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
-	json_set_int(val, "ntime", ntime32);
+	json_set_string(val, "ntime", ntime);
 	json_set_int(val, "diff", diff);
 	json_set_double(val, "sdiff", sdiff);
 	json_set_string(val, "hash", hexhash);
@@ -1685,9 +1684,11 @@ out_unlock:
 
 	/* Now write to the pool's sharelog, adding workername to json */
 	sprintf(fname, "%s.sharelog", logdir);
+	json_set_string(val, "method", "shares");
+	json_set_string(val, "worker", client->workername);
+	json_set_string(val, "username", client->user_instance->username);
 	fp = fopen(fname, "a");
 	if (likely(fp)) {
-		json_set_string(val, "worker", client->workername);
 		s = json_dumps(val, 0);
 		len = strlen(s);
 		len = fprintf(fp, "%s\n", s);
@@ -1697,6 +1698,7 @@ out_unlock:
 			LOGERR("Failed to fwrite to %s", fname);
 	} else
 		LOGERR("Failed to fopen %s", fname);
+	/* FIXME : Send val json to database here */
 	json_decref(val);
 out:
 	if (!share)
