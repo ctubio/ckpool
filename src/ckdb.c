@@ -1744,7 +1744,7 @@ static bool workinfo_fill(PGconn *conn)
 	int par;
 	char *field;
 	char *sel;
-	int fields = 8;
+	int fields = 11;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
@@ -2155,7 +2155,7 @@ static bool auths_fill(PGconn *conn)
 	int par;
 	char *field;
 	char *sel;
-	int fields = 11;
+	int fields = 6;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);

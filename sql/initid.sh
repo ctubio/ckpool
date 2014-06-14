@@ -29,7 +29,7 @@ addid()
 #  but of course overlapping with another id doesn't technically matter
 now="`date +%Y%m%d`"
 #
-addid userid ${now}100000
-addid workerid ${now}200000
-addid paymentid ${now}300000
-addid authid ${now}400000
+addid workerid ${now}100000
+addid paymentid ${now}200000
+addid authid ${now}300000
+addid userid ${now}400000
