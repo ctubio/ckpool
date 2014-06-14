@@ -1685,6 +1685,7 @@ out_unlock:
 	json_set_bool(val, "result", result);
 	json_object_set(val, "reject-reason", json_object_dup(json_msg, "reject-reason"));
 	json_object_set(val, "error", *err_val);
+	json_set_int(val, "errno", err);
 	json_set_string(val, "createdate", cdfield);
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
@@ -1717,12 +1718,13 @@ out_unlock:
 	json_decref(val);
 out:
 	if (!share) {
-		val = json_pack("{ss,si,ss,ss,so,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,ss,ss,so,si,ss,ss,ss,ss}",
 				"method", "shareerror",
 				"workinfoid", current_workbase->id,
 				"worker", client->workername,
 				"username", client->user_instance->username,
 				"error", json_copy(*err_val),
+				"errno", err,
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
