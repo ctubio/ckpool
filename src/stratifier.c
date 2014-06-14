@@ -1998,7 +1998,7 @@ static void *share_processor(void *arg)
 
 	rename_proc("sprocessor");
 	while (42) {
-		json_t *result_val, *json_msg, *err_val;
+		json_t *result_val, *json_msg, *err_val = NULL;
 		stratum_instance_t *client;
 		int client_id;
 
