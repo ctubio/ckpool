@@ -482,6 +482,9 @@ void empty_socket(int fd)
 {
 	int ret;
 
+	if (fd < 1)
+		return;
+
 	do {
 		char buf[PAGESIZE];
 		tv_t timeout = {0, 0};
