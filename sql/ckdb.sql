@@ -32,7 +32,7 @@ CREATE UNIQUE INDEX usersusername ON users USING btree (username, expirydate);
 CREATE TABLE workers (
     workerid bigint NOT NULL, -- unique per record
     userid bigint NOT NULL,
-    workername character varying(64) NOT NULL,
+    workername character varying(256) NOT NULL,
     difficultydefault integer DEFAULT 128 NOT NULL,
     idlenotificationenabled char DEFAULT 'n'::character varying NOT NULL,
     idlenotificationtime integer DEFAULT 10 NOT NULL,
@@ -95,6 +95,20 @@ CREATE TABLE accountbalance ( -- summarised from miningpayouts and payments
 );
 
 
+CREATE TABLE accountadjustment ( -- manual corrections
+    userid bigint NOT NULL,
+    authority character varying(256) NOT NULL,
+    reason text NOT NULL,
+    amount bigint DEFAULT 0 NOT NULL, -- satoshis
+    createdate timestamp with time zone NOT NULL,
+    createby character varying(64) DEFAULT ''::character varying NOT NULL,
+    createcode character varying(128) DEFAULT ''::character varying NOT NULL,
+    createinet character varying(128) DEFAULT ''::character varying NOT NULL,
+    expirydate timestamp with time zone DEFAULT '6666-06-06 06:06:06+00',
+    PRIMARY KEY (userid, createdate, expirydate)
+);
+
+
 CREATE TABLE idcontrol  (
     idname character varying(64) NOT NULL,
     lastid bigint DEFAULT 1 NOT NULL,
@@ -112,7 +126,7 @@ CREATE TABLE idcontrol  (
 
 CREATE TABLE optioncontrol (
     optionname character varying(64) NOT NULL,
-    optionvalue character varying(128) DEFAULT ''::character varying NOT NULL,
+    optionvalue text NOT NULL,
     activationdate timestamp with time zone DEFAULT '6666-06-06 06:06:06+00',
     activationheight integer DEFAULT 999999999,
     createdate timestamp with time zone NOT NULL,
@@ -135,6 +149,7 @@ CREATE TABLE workinfo (
     version character varying(64) NOT NULL,
     bits character varying(64) NOT NULL,
     ntime character varying(64) NOT NULL,
+    reward bigint NOT NULL, -- satoshis
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -144,14 +159,18 @@ CREATE TABLE workinfo (
 );
 
 
-CREATE TABLE shares (
+CREATE TABLE shares ( -- not stored in the db - only in log files
     workinfoid bigint NOT NULL,
     userid bigint NOT NULL,
-    workername character varying(64) NOT NULL,
+    workername character varying(256) NOT NULL,
     clientid integer NOT NULL,
     enonce1 character varying(64) NOT NULL,
     nonce2 character varying(256) NOT NULL,
     nonce character varying(64) NOT NULL,
+    diff float NOT NULL,
+    sdiff float NOT NULL,
+    errno integer NOT NULL,
+    error character varying(64) DEFAULT ''::character varying NOT NULL, -- optional
     secondaryuserid character varying(64) NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
@@ -162,10 +181,27 @@ CREATE TABLE shares (
 );
 
 
+CREATE TABLE shareerrors ( -- not stored in the db - only in log files
+    workinfoid bigint NOT NULL,
+    userid bigint NOT NULL,
+    workername character varying(256) NOT NULL,
+    clientid integer NOT NULL,
+    errno integer NOT NULL,
+    error character varying(64) DEFAULT ''::character varying NOT NULL, -- optional
+    secondaryuserid character varying(64) NOT NULL,
+    createdate timestamp with time zone NOT NULL,
+    createby character varying(64) DEFAULT ''::character varying NOT NULL,
+    createcode character varying(128) DEFAULT ''::character varying NOT NULL,
+    createinet character varying(128) DEFAULT ''::character varying NOT NULL,
+    expirydate timestamp with time zone DEFAULT '6666-06-06 06:06:06+00',
+    PRIMARY KEY (workinfoid, userid, workername, clientid, createdate, expirydate)
+);
+
+
 -- memory only?
 CREATE TABLE sharesummary ( -- per workinfo for each user+worker
     userid bigint NOT NULL,
-    workername character varying(64) NOT NULL,
+    workername character varying(256) NOT NULL,
     workinfoid bigint NOT NULL,
     diff_acc bigint NOT NULL,
     diff_sta bigint NOT NULL,
@@ -196,7 +232,7 @@ CREATE TABLE blocksummary ( -- summation of sharesummary per block found for eac
     height integer not NULL,
     blockhash character varying(256) NOT NULL,
     userid bigint NOT NULL,
-    workername character varying(64) NOT NULL,
+    workername character varying(256) NOT NULL,
     diff_acc bigint NOT NULL,
     diff_sta bigint NOT NULL,
     diff_dup bigint NOT NULL,
@@ -229,11 +265,12 @@ CREATE TABLE blocks (
     blockhash character varying(256) NOT NULL,
     workinfoid bigint NOT NULL,
     userid bigint NOT NULL,
-    workername character varying(64) NOT NULL,
+    workername character varying(256) NOT NULL,
     clientid integer NOT NULL,
     enonce1 character varying(64) NOT NULL,
     nonce2 character varying(256) NOT NULL,
     nonce character varying(64) NOT NULL,
+    reward bigint NOT NULL, -- satoshis
     confirmed char DEFAULT '' NOT NULL, -- blank, 'c'onfirmed or 'o'rphan
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
@@ -279,7 +316,7 @@ CREATE TABLE eventlog (
 CREATE TABLE auths (
     authid bigint NOT NULL, -- unique per record
     userid bigint NOT NULL,
-    workername character varying(64) NOT NULL,
+    workername character varying(256) NOT NULL,
     clientid integer NOT NULL,
     enonce1 character varying(64) NOT NULL,
     useragent character varying(256) NOT NULL,

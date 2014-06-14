@@ -27,6 +27,8 @@
 #include <libpq-fe.h>
 #elif defined (HAVE_POSTGRESQL_LIBPQ_FE_H)
 #include <postgresql/libpq-fe.h>
+#else
+#include <libpq-fe.h>
 #endif
 
 #include "ckpool.h"
@@ -34,6 +36,9 @@
 
 #include "klist.h"
 #include "ktree.h"
+
+// TODO: a lot of the tree access isn't locked
+// will need to be if threading is required
 
 static char *db_user;
 static char *db_pass;
@@ -100,7 +105,8 @@ enum data_type {
 	TYPE_BIGINT,
 	TYPE_INT,
 	TYPE_TV,
-	TYPE_BLOB
+	TYPE_BLOB,
+	TYPE_DOUBLE
 };
 
 #define TXT_TO_STR(__nam, __fld, __data) txt_to_str(__nam, __fld, (__data), sizeof(__data))
@@ -108,6 +114,7 @@ enum data_type {
 #define TXT_TO_INT(__nam, __fld, __data) txt_to_int(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_TV(__nam, __fld, __data) txt_to_tv(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_BLOB(__nam, __fld, __data) txt_to_blob(__nam, __fld, __data)
+#define TXT_TO_DOUBLE(__nam, __fld, __data) txt_to_double(__nam, __fld, &(__data), sizeof(__data))
 
 #define PQ_GET_FLD(__res, __row, __name, __fld, __ok) do { \
 		int __col = PQfnumber(__res, __name); \
@@ -175,6 +182,33 @@ static const tv_t default_expiry = { DEFAULT_EXPIRY, 0L };
 		STRNCPY(_row->createinet, _inet); \
 		_row->expirydate.tv_sec = default_expiry.tv_sec; \
 		_row->expirydate.tv_usec = default_expiry.tv_usec; \
+	} while (0)
+
+// Override _row defaults if transfer fields are present
+#define HISTORYDATETRANSFER(_row) do { \
+		K_ITEM *item; \
+		item = optional_name("createdate", 10, NULL); \
+		if (item) { \
+			long sec, usec; \
+			int n; \
+			n = sscanf(DATA_TRANSFER(item)->data, "%ld,%ld", &sec, &usec); \
+			if (n > 0) { \
+				_row->createdate.tv_sec = (time_t)sec; \
+				if (n > 1) \
+					_row->createdate.tv_usec = usec; \
+				else \
+					_row->createdate.tv_usec = 0L; \
+			} \
+		} \
+		item = optional_name("createby", 1, NULL); \
+		if (item) \
+			STRNCPY(_row->createby, DATA_TRANSFER(item)->data); \
+		item = optional_name("createcode", 1, NULL); \
+		if (item) \
+			STRNCPY(_row->createcode, DATA_TRANSFER(item)->data); \
+		item = optional_name("createinet", 1, NULL); \
+		if (item) \
+			STRNCPY(_row->createinet, DATA_TRANSFER(item)->data); \
 	} while (0)
 
 // MODIFY FIELDS
@@ -284,12 +318,27 @@ static const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 static const char *intpatt = "^[0-9][0-9]*$";
 static const char *hashpatt = "^[A-Fa-f0-9]*$";
 
+#define JSON_TRANSFER "json="
+#define JSON_TRANSFER_LEN (sizeof(JSON_TRANSFER)-1)
+
+// JSON Methods
+#define METHOD_WORKINFO "workinfo"
+#define METHOD_SHARES "shares"
+#define METHOD_SHAREERRORS "shareerror"
+#define METHOD_AUTH "authorise"
+
+// LOGFILE codes - should be in libckpool.h ... with the file logging code
+#define CODE_WORKINFO "W"
+#define CODE_SHARES "S"
+#define CODE_SHAREERRORSS "E"
+
 // TRANSFER
 #define NAME_SIZE 63
 #define VALUE_SIZE 1023
 typedef struct transfer {
 	char name[NAME_SIZE+1];
 	char value[VALUE_SIZE+1];
+	char *data;
 } TRANSFER;
 
 #define ALLOC_TRANSFER 1024
@@ -316,6 +365,7 @@ typedef struct users {
 #define DATA_USERS(_item) ((USERS *)(_item->data))
 
 static K_TREE *users_root;
+static K_TREE *userid_root;
 static K_LIST *users_list;
 static K_STORE *users_store;
 
@@ -323,7 +373,7 @@ static K_STORE *users_store;
 typedef struct workers {
 	int64_t workerid;
 	int64_t userid;
-	char workername[TXT_SML+1];
+	char workername[TXT_BIG+1]; // includes username
 	int32_t difficultydefault;
 	char idlenotificationenabled[TXT_FLAG+1];
 	int32_t idlenotificationtime;
@@ -396,6 +446,23 @@ typedef struct accountbalance {
 static K_TREE *accountbalance_root;
 static K_LIST *accountbalance_list;
 static K_STORE *accountbalance_store;
+
+// ACCOUNTADJUSTMENT
+typedef struct accountbalance {
+	int64_t userid;
+	char authority[TXT_BIG+1];
+	char *reason;
+	int64_t amount;
+	HISTORYDATECONTROLFIELDS;
+} ACCOUNTADJUSTMENT;
+
+#define ALLOC_ACCOUNTADJUSTMENT 100
+#define LIMIT_ACCOUNTADJUSTMENT 0
+#define DATA_ACCOUNTADJUSTMENT(_item) ((ACCOUNTADJUSTMENT *)(_item->data))
+
+static K_TREE *accountbalance_root;
+static K_LIST *accountbalance_list;
+static K_STORE *accountbalance_store;
 */
 
 // IDCONTROL
@@ -418,7 +485,7 @@ static K_STORE *idcontrol_store;
 // OPTIONCONTROL
 typedef struct optioncontrol {
 	char optionname[TXT_SML+1];
-	char optionvalue[TXT_MED+1];
+	char *optionvalue;
 	tv_t activationdate;
 	int32_t activationheight;
 	HISTORYDATECONTROLFIELDS;
@@ -431,19 +498,22 @@ typedef struct optioncontrol {
 static K_TREE *optioncontrol_root;
 static K_LIST *optioncontrol_list;
 static K_STORE *optioncontrol_store;
+*/
 
 // TODO: aging/discarding workinfo,shares
-// WORKINFO id.workinfo.json={...}
+// WORKINFO id.sharelog.json={...}
 typedef struct workinfo {
 	int64_t workinfoid;
 	char poolinstance[TXT_BIG+1];
 	char *transactiontree;
+	char *merklehash;
 	char prevhash[TXT_BIG+1];
 	char coinbase1[TXT_BIG+1];
 	char coinbase2[TXT_BIG+1];
 	char version[TXT_SML+1];
 	char bits[TXT_SML+1];
 	char ntime[TXT_SML+1];
+	int64_t reward;
 	HISTORYDATECONTROLFIELDS;
 } WORKINFO;
 
@@ -460,11 +530,15 @@ static K_STORE *workinfo_store;
 typedef struct shares {
 	int64_t workinfoid;
 	int64_t userid;
-	char workername[TXT_SML+1];
+	char workername[TXT_BIG+1];
 	int32_t clientid;
 	char enonce1[TXT_SML+1];
 	char nonce2[TXT_BIG+1];
 	char nonce[TXT_SML+1];
+	double diff;
+	double sdiff;
+	int32_t errn;
+	char error[TXT_SML+1];
 	char secondaryuserid[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
 } SHARES;
@@ -477,10 +551,31 @@ static K_TREE *shares_root;
 static K_LIST *shares_list;
 static K_STORE *shares_store;
 
+// SHAREERRORS id.sharelog.json={...}
+typedef struct shareerrorss {
+	int64_t workinfoid;
+	int64_t userid;
+	char workername[TXT_BIG+1];
+	int32_t clientid;
+	int32_t errn;
+	char error[TXT_SML+1];
+	char secondaryuserid[TXT_SML+1];
+	HISTORYDATECONTROLFIELDS;
+} SHAREERRORS;
+
+#define ALLOC_SHAREERRORS 10000
+#define LIMIT_SHAREERRORS 0
+#define DATA_SHAREERRORS(_item) ((SHAREERRORS *)(_item->data))
+
+static K_TREE *shareerrors_root;
+static K_LIST *shareerrors_list;
+static K_STORE *shareerrors_store;
+
+/*
 // SHARESUMMARY
 typedef struct sharesummary {
 	int64_t userid;
-	char workername[TXT_SML+1];
+	char workername[TXT_BIG+1];
 	int64_t workinfoid;
 	int64_t diff_acc;
 	int64_t diff_sta;
@@ -511,7 +606,7 @@ typedef struct blocksummary {
 	int32_t height;
 	char blockhash[TXT_BIG+1];
 	int64_t userid;
-	char workername[TXT_SML+1];
+	char workername[TXT_BIG+1];
 	int64_t diff_acc;
 	int64_t diff_sta;
 	int64_t diff_dup;
@@ -542,11 +637,12 @@ typedef struct blocks {
 	char blockhash[TXT_BIG+1];
 	int64_t workinfoid;
 	int64_t userid;
-	char workername[TXT_SML+1];
+	char workername[TXT_BIG+1];
 	int32_t clientid;
 	char enonce1[TXT_SML+1];
 	char nonce2[TXT_BIG+1];
 	char nonce[TXT_SML+1];
+	int64_t reward;
 	char confirmed[TXT_FLAG+1];
 	HISTORYDATECONTROLFIELDS;
 } BLOCKS;
@@ -592,12 +688,13 @@ typedef struct eventlog {
 static K_TREE *eventlog_root;
 static K_LIST *eventlog_list;
 static K_STORE *eventlog_store;
+*/
 
 // AUTHS
 typedef struct auths {
 	int64_t authid;
 	int64_t userid;
-	char workername[TXT_SML+1];
+	char workername[TXT_BIG+1];
 	int32_t clientid;
 	char enonce1[TXT_SML+1];
 	char useragent[TXT_BIG+1];
@@ -612,6 +709,7 @@ static K_TREE *auths_root;
 static K_LIST *auths_list;
 static K_STORE *auths_store;
 
+/*
 // POOLSTATS
 // TODO: not in DB yet - design incomplete
 // poll pool(s) every 10min?
@@ -643,6 +741,89 @@ static void setnow(tv_t *now)
 	clock_gettime(CLOCK_REALTIME, &spec);
 	now->tv_sec = spec.tv_sec;
 	now->tv_usec = spec.tv_nsec / 1000;
+}
+
+static double cmp_transfer(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)strcmp(DATA_TRANSFER(a)->name, DATA_TRANSFER(b)->name);
+	return c;
+}
+
+static K_ITEM *find_transfer(char *name)
+{
+	TRANSFER transfer;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	STRNCPY(transfer.name, name);
+	look.data = (void *)(&transfer);
+	return find_in_ktree(transfer_root, &look, cmp_transfer, ctx);
+}
+
+static K_ITEM *optional_name(char *name, int len, char *patt)
+{
+	K_ITEM *item;
+	char *value;
+	regex_t re;
+	int ret;
+
+	item = find_transfer(name);
+	if (!item)
+		return NULL;
+
+	value = DATA_TRANSFER(item)->data;
+	if (!*value || (int)strlen(value) < len)
+		return NULL;
+
+	if (patt) {
+		if (regcomp(&re, patt, REG_NOSUB) != 0)
+			return NULL;
+
+		ret = regexec(&re, value, (size_t)0, NULL, 0);
+		regfree(&re);
+
+		if (ret != 0)
+			return NULL;
+	}
+
+	return item;
+}
+
+static K_ITEM *require_name(char *name, int len, char *patt, char *reply, size_t siz)
+{
+	K_ITEM *item;
+	char *value;
+	regex_t re;
+	int ret;
+
+	item = find_transfer(name);
+	if (!item) {
+		snprintf(reply, siz, "failed.missing %s", name);
+		return NULL;
+	}
+
+	value = DATA_TRANSFER(item)->data;
+	if (!*value || (int)strlen(value) < len) {
+		snprintf(reply, siz, "failed.short %s", name);
+		return NULL;
+	}
+
+	if (patt) {
+		if (regcomp(&re, patt, REG_NOSUB) != 0) {
+			snprintf(reply, siz, "failed.REC %s", name);
+			return NULL;
+		}
+
+		ret = regexec(&re, value, (size_t)0, NULL, 0);
+		regfree(&re);
+
+		if (ret != 0) {
+			snprintf(reply, siz, "failed.invalid %s", name);
+			return NULL;
+		}
+	}
+
+	return item;
 }
 
 static void txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz)
@@ -684,7 +865,7 @@ static void txt_to_data(enum data_type typ, char *nam, char *fld, void *data, si
 			n = sscanf(fld, "%u-%u-%u %u:%u:%u+%u",
 					&yyyy, &mm, &dd, &HH, &MM, &SS, &tz);
 			if (n != 7) {
-				// allow uS in case data was created elsewhere
+				// allow uS
 				n = sscanf(fld, "%u-%u-%u %u:%u:%u.%u+%u",
 						&yyyy, &mm, &dd, &HH, &MM, &SS, &uS, &tz);
 				if (n != 8) {
@@ -715,6 +896,13 @@ static void txt_to_data(enum data_type typ, char *nam, char *fld, void *data, si
 				quithere(1, "Field %s (%d) OOM", nam, (int)strlen(fld));
 			*((char **)data) = tmp;
 			break;
+		case TYPE_DOUBLE:
+			if (siz != sizeof(double)) {
+				quithere(1, "Field %s int incorrect structure size %d - should be %d",
+						nam, (int)siz, (int)sizeof(double));
+			}
+			*((double *)data) = atof(fld);
+			break;
 		default:
 			quithere(1, "Unknown field %s (%d) to convert", nam, (int)typ);
 			break;
@@ -742,12 +930,15 @@ static void txt_to_tv(char *nam, char *fld, tv_t *data, size_t siz)
 	txt_to_data(TYPE_TV, nam, fld, (void *)data, siz);
 }
 
-/* unused yet
 static void txt_to_blob(char *nam, char *fld, char *data)
 {
 	txt_to_data(TYPE_BLOB, nam, fld, (void *)(&data), 0);
 }
-*/
+
+static void txt_to_double(char *nam, char *fld, double *data, size_t siz)
+{
+	txt_to_data(TYPE_DOUBLE, nam, fld, (void *)data, siz);
+}
 
 static char *data_to_buf(enum data_type typ, void *data, char *buf, size_t siz)
 {
@@ -763,6 +954,7 @@ static char *data_to_buf(enum data_type typ, void *data, char *buf, size_t siz)
 			case TYPE_BIGINT:
 			case TYPE_INT:
 			case TYPE_TV:
+			case TYPE_DOUBLE:
 				siz = 64; // More than big enough
 				break;
 			default:
@@ -796,6 +988,9 @@ static char *data_to_buf(enum data_type typ, void *data, char *buf, size_t siz)
 					   (((struct timeval *)data)->tv_usec));
 			free(buf2);
 			break;
+		case TYPE_DOUBLE:
+			snprintf(buf, siz, "%f", *((double *)data));
+			break;
 	}
 
 	return buf;
@@ -811,12 +1006,10 @@ static char *bigint_to_buf(int64_t data, char *buf, size_t siz)
 	return data_to_buf(TYPE_BIGINT, (void *)(&data), buf, siz);
 }
 
-/* unused yet
 static char *int_to_buf(int32_t data, char *buf, size_t siz)
 {
 	return data_to_buf(TYPE_INT, (void *)(&data), buf, siz);
 }
-*/
 
 static char *tv_to_buf(tv_t *data, char *buf, size_t siz)
 {
@@ -827,6 +1020,11 @@ static char *tv_to_buf(tv_t *data, char *buf, size_t siz)
 static char *blob_to_buf(char *data, char *buf, size_t siz)
 {
 	return data_to_buf(TYPE_BLOB, (void *)data, buf, siz);
+}
+
+static char *double_to_buf(double data, char *buf, size_t siz)
+{
+	return data_to_buf(TYPE_DOUBLE, (void *)(&data), buf, siz);
 }
 */
 
@@ -922,14 +1120,53 @@ cleanup:
 	return lastid;
 }
 
-// order by username asc,expirydate desc
-static double users_cmp(K_ITEM *a, K_ITEM *b)
+// default tree order by username asc,expirydate desc
+static double cmp_users(K_ITEM *a, K_ITEM *b)
 {
 	double c = strcmp(DATA_USERS(a)->username, DATA_USERS(b)->username);
 	if (c == 0.0)
 		c = tvdiff(&(DATA_USERS(b)->expirydate), &(DATA_USERS(a)->expirydate));
 	return c;
 }
+
+// order by userid asc,expirydate desc
+static double cmp_userid(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)(DATA_USERS(a)->userid) - (double)(DATA_USERS(b)->userid);
+	if (c == 0.0)
+		c = tvdiff(&(DATA_USERS(b)->expirydate), &(DATA_USERS(a)->expirydate));
+	return c;
+}
+
+static K_ITEM *find_users(char *username)
+{
+	USERS users;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	STRNCPY(users.username, username);
+	users.expirydate.tv_sec = default_expiry.tv_sec;
+	users.expirydate.tv_usec = default_expiry.tv_usec;
+
+	look.data = (void *)(&users);
+	return find_in_ktree(users_root, &look, cmp_users, ctx);
+}
+
+/* unused
+static K_ITEM *find_userid(int64_t userid)
+{
+	USERS users;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	users.userid = userid;
+	users.expirydate.tv_sec = default_expiry.tv_sec;
+	users.expirydate.tv_usec = default_expiry.tv_usec;
+
+	look.data = (void *)(&users);
+	return find_in_ktree(userid_root, &look, cmp_userid, ctx);
+}
+*/
 
 static bool users_add(PGconn *conn, char *username, char *emailaddress, char *passwordhash, char *by, char *code, char *inet)
 {
@@ -957,6 +1194,8 @@ static bool users_add(PGconn *conn, char *username, char *emailaddress, char *pa
 	row->userid = nextid(conn, "userid", (int64_t)(666 + (rand() % 334)), by, code, inet);
 	if (row->userid == 0)
 		goto unitem;
+
+	// TODO: pre-check the username exists?
 
 	STRNCPY(row->username, username);
 	STRNCPY(row->emailaddress, emailaddress);
@@ -1004,7 +1243,8 @@ unitem:
 	if (!ok)
 		k_add_head(users_list, item);
 	else {
-		users_root = add_to_ktree(users_root, item, users_cmp);
+		users_root = add_to_ktree(users_root, item, cmp_users);
+		userid_root = add_to_ktree(userid_root, item, cmp_userid);
 		k_add_head(users_store, item);
 	}
 	K_WUNLOCK(users_list);
@@ -1089,7 +1329,8 @@ static bool users_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		users_root = add_to_ktree(users_root, item, users_cmp);
+		users_root = add_to_ktree(users_root, item, cmp_users);
+		userid_root = add_to_ktree(userid_root, item, cmp_userid);
 		k_add_head(users_store, item);
 	}
 	if (!ok)
@@ -1110,6 +1351,7 @@ void users_reload()
 
 	K_WLOCK(users_list);
 	users_root = free_ktree(users_root, NULL);
+	userid_root = free_ktree(userid_root, NULL);
 	k_list_transfer_to_head(users_store, users_list);
 	K_WUNLOCK(users_list);
 
@@ -1119,7 +1361,7 @@ void users_reload()
 }
 
 // order by userid asc,workername asc,expirydate desc
-static double workers_cmp(K_ITEM *a, K_ITEM *b)
+static double cmp_workers(K_ITEM *a, K_ITEM *b)
 {
 	double c = (double)(DATA_WORKERS(a)->userid) - (double)(DATA_WORKERS(b)->userid);
 	if (c == 0.0) {
@@ -1128,6 +1370,21 @@ static double workers_cmp(K_ITEM *a, K_ITEM *b)
 			c = tvdiff(&(DATA_WORKERS(b)->expirydate), &(DATA_WORKERS(a)->expirydate));
 	}
 	return c;
+}
+
+static K_ITEM *find_workers(int64_t userid, char *workername)
+{
+	WORKERS workers;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	workers.userid = userid;
+	STRNCPY(workers.workername, workername);
+	workers.expirydate.tv_sec = default_expiry.tv_sec;
+	workers.expirydate.tv_usec = default_expiry.tv_usec;
+
+	look.data = (void *)(&workers);
+	return find_in_ktree(workers_root, &look, cmp_workers, ctx);
 }
 
 static bool workers_fill(PGconn *conn)
@@ -1207,7 +1464,7 @@ static bool workers_fill(PGconn *conn)
 			break;
 		TXT_TO_BIGINT("workerid", field, row->workerid);
 
-		workers_root = add_to_ktree(workers_root, item, workers_cmp);
+		workers_root = add_to_ktree(workers_root, item, cmp_workers);
 		k_add_head(workers_store, item);
 	}
 	if (!ok)
@@ -1236,14 +1493,17 @@ void workers_reload()
 	PQfinish(conn);
 }
 
-// order by userid asc,paydate asc,payaddress asc
-static double payments_cmp(K_ITEM *a, K_ITEM *b)
+// order by userid asc,paydate asc,payaddress asc,expirydate desc
+static double cmp_payments(K_ITEM *a, K_ITEM *b)
 {
 	double c = (double)(DATA_PAYMENTS(a)->userid) - (double)(DATA_PAYMENTS(b)->userid);
 	if (c == 0.0) {
 		c = tvdiff(&(DATA_PAYMENTS(a)->paydate), &(DATA_PAYMENTS(b)->paydate));
-		if (c == 0.0)
+		if (c == 0.0) {
 			c = strcmp(DATA_PAYMENTS(a)->payaddress, DATA_PAYMENTS(b)->payaddress);
+			if (c == 0.0)
+				c = tvdiff(&(DATA_PAYMENTS(b)->expirydate), &(DATA_PAYMENTS(a)->expirydate));
+		}
 	}
 	return c;
 }
@@ -1340,7 +1600,7 @@ static bool payments_fill(PGconn *conn)
 			break;
 		TXT_TO_BIGINT("paymentid", field, row->paymentid);
 
-		payments_root = add_to_ktree(payments_root, item, payments_cmp);
+		payments_root = add_to_ktree(payments_root, item, cmp_payments);
 		k_add_head(payments_store, item);
 	}
 	if (!ok)
@@ -1369,6 +1629,634 @@ void payments_reload()
 	PQfinish(conn);
 }
 
+// order by workinfoid asc, expirydate asc
+static double cmp_workinfo(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)(DATA_WORKINFO(a)->workinfoid) - (double)(DATA_WORKINFO(b)->workinfoid);
+	if (c == 0)
+		c = tvdiff(&(DATA_WORKINFO(b)->expirydate), &(DATA_WORKINFO(a)->expirydate));
+	return c;
+}
+
+static K_ITEM *find_workinfo(int64_t workinfoid)
+{
+	WORKINFO workinfo;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	workinfo.workinfoid = workinfoid;
+
+	look.data = (void *)(&workinfo);
+	return find_in_ktree(workinfo_root, &look, cmp_workinfo, ctx);
+}
+
+static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
+				char *transactiontree, char *merklehash, char *prevhash,
+				char *coinbase1, char *coinbase2, char *version, char *bits,
+				char *ntime, char *reward, char *by, char *code, char *inet)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n;
+	int64_t workinfoid = -1;
+	WORKINFO *row;
+	char *ins;
+	char *params[16];
+	int par;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(workinfo_list);
+	item = k_unlink_head(workinfo_list);
+	K_WUNLOCK(workinfo_list);
+
+	row = DATA_WORKINFO(item);
+
+	TXT_TO_BIGINT("workinfoid", workinfoidstr, row->workinfoid);
+	STRNCPY(row->poolinstance, poolinstance);
+	row->transactiontree = strdup(transactiontree);
+	row->merklehash = strdup(merklehash);
+	STRNCPY(row->prevhash, prevhash);
+	STRNCPY(row->coinbase1, coinbase1);
+	STRNCPY(row->coinbase2, coinbase2);
+	STRNCPY(row->version, version);
+	STRNCPY(row->bits, bits);
+	STRNCPY(row->ntime, ntime);
+	TXT_TO_BIGINT("reward", reward, row->reward);
+
+	HISTORYDATEINIT(row, by, code, inet);
+	HISTORYDATETRANSFER(row);
+
+	par = 0;
+	params[par++] = bigint_to_buf(row->workinfoid, NULL, 0);
+	params[par++] = str_to_buf(row->transactiontree, NULL, 0);
+	params[par++] = str_to_buf(row->merklehash, NULL, 0);
+	params[par++] = str_to_buf(row->prevhash, NULL, 0);
+	params[par++] = str_to_buf(row->coinbase1, NULL, 0);
+	params[par++] = str_to_buf(row->coinbase2, NULL, 0);
+	params[par++] = str_to_buf(row->version, NULL, 0);
+	params[par++] = str_to_buf(row->bits, NULL, 0);
+	params[par++] = str_to_buf(row->ntime, NULL, 0);
+	params[par++] = bigint_to_buf(row->reward, NULL, 0);
+	HISTORYDATEPARAMS(params, par, row);
+	PARCHK(par, params);
+
+	ins = "insert into workinfo "
+		"(workinfoid,transactiontree,merklehash,prevhash,"
+		"coinbase1,coinbase2,version,bits,ntime,reward"
+		HISTORYDATECONTROL ") values (" PQPARAM16 ")";
+
+	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
+	rescode = PQresultStatus(res);
+	if (rescode != PGRES_COMMAND_OK) {
+		PGLOGERR("Insert", rescode, conn);
+		goto unparam;
+	}
+
+	workinfoid = row->workinfoid;
+
+unparam:
+	PQclear(res);
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	K_WLOCK(workinfo_list);
+	if (workinfoid == -1) {
+		free(row->transactiontree);
+		free(row->merklehash);
+		k_add_head(workinfo_list, item);
+	} else {
+		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
+		k_add_head(workinfo_store, item);
+	}
+	K_WUNLOCK(workinfo_list);
+
+	return workinfoid;
+}
+
+static bool workinfo_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	WORKINFO *row;
+	char *params[1];
+	int par;
+	char *field;
+	char *sel;
+	int fields = 8;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: select the data based on sharesummary since old data isn't needed
+	//  however, the ageing rules for workinfo will decide that also
+	//  keep the last block + current?
+	sel = "select "
+		"workinfoid,poolinstance,transactiontree,merklehash,prevhash,"
+		"coinbase1,coinbase2,version,bits,ntime,reward"
+		HISTORYDATECONTROL
+		" from workinfo where expirydate=$1";
+	par = 0;
+	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
+	PARCHK(par, params);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0);
+	rescode = PQresultStatus(res);
+	if (rescode != PGRES_TUPLES_OK) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(workinfo_list);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(workinfo_list);
+		row = DATA_WORKINFO(item);
+
+		PQ_GET_FLD(res, i, "workinfoid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
+
+		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "transactiontree", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BLOB("transactiontree", field, row->transactiontree);
+
+		PQ_GET_FLD(res, i, "merklehash", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BLOB("merklehash", field, row->merklehash);
+
+		PQ_GET_FLD(res, i, "prevhash", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("prevhash", field, row->prevhash);
+
+		PQ_GET_FLD(res, i, "coinbase1", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("coinbase1", field, row->coinbase1);
+
+		PQ_GET_FLD(res, i, "coinbase2", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("coinbase2", field, row->coinbase2);
+
+		PQ_GET_FLD(res, i, "version", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("version", field, row->version);
+
+		PQ_GET_FLD(res, i, "bits", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("bits", field, row->bits);
+
+		PQ_GET_FLD(res, i, "ntime", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("ntime", field, row->ntime);
+
+		PQ_GET_FLD(res, i, "reward", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("reward", field, row->reward);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
+		k_add_head(workinfo_store, item);
+	}
+	if (!ok)
+		k_add_head(workinfo_list, item);
+
+	K_WUNLOCK(workinfo_list);
+	PQclear(res);
+
+	if (ok)
+		LOGDEBUG("%s(): built", __func__);
+
+	return true;
+}
+
+void workinfo_reload()
+{
+	// TODO: ??? a bad idea?
+/*
+	PGconn *conn = dbconnect();
+
+	K_WLOCK(workinfo_list);
+	workinfo_root = free_ktree(workinfo_root, ???); free transactiontree and merklehash
+	k_list_transfer_to_head(workinfo_store, workinfo_list);
+	K_WUNLOCK(workinfo_list);
+
+	workinfo_fill(conn);
+
+	PQfinish(conn);
+*/
+}
+
+// order by workinfoid asc, userid asc, createdate asc, nonce asc, expirydate desc
+static double cmp_shares(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)(DATA_SHARES(a)->workinfoid) - (double)(DATA_SHARES(b)->workinfoid);
+	if (c == 0) {
+		c = (double)(DATA_SHARES(b)->userid) - (double)(DATA_SHARES(a)->userid);
+		if (c == 0) {
+			c = tvdiff(&(DATA_SHARES(b)->createdate), &(DATA_SHARES(a)->createdate));
+			if (c == 0) {
+				c = strcmp(DATA_SHARES(a)->nonce, DATA_SHARES(b)->nonce);
+				if (c == 0)
+					c = tvdiff(&(DATA_SHARES(b)->expirydate), &(DATA_SHARES(a)->expirydate));
+			}
+		}
+	}
+	return c;
+}
+
+// Memory (and log file) only
+static bool shares_add(char *workinfoid, char *username, char *workername, char *clientid,
+			char *enonce1, char *nonce2, char *nonce, char *diff, char *sdiff,
+			char *secondaryuserid, char *by, char *code, char *inet)
+{
+	K_ITEM *s_item, *u_item, *w_item;
+	SHARES *shares;
+	bool ok = false;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(shares_list);
+	s_item = k_unlink_head(shares_list);
+	K_WUNLOCK(shares_list);
+
+	shares = DATA_SHARES(s_item);
+
+	// TODO: allow BTC address later?
+	u_item = find_users(username);
+	if (!u_item)
+		goto unitem;
+
+	shares->userid = DATA_USERS(u_item)->userid;
+
+	TXT_TO_BIGINT("workinfoid", workinfoid, shares->workinfoid);
+	STRNCPY(shares->workername, workername);
+	TXT_TO_INT("clientid", clientid, shares->clientid);
+	STRNCPY(shares->enonce1, enonce1);
+	STRNCPY(shares->nonce2, nonce2);
+	STRNCPY(shares->nonce, nonce);
+	TXT_TO_DOUBLE("diff", diff, shares->diff);
+	TXT_TO_DOUBLE("sdiff", sdiff, shares->sdiff);
+	STRNCPY(shares->secondaryuserid, secondaryuserid);
+
+	HISTORYDATEINIT(shares, by, code, inet);
+	HISTORYDATETRANSFER(shares);
+
+	w_item = find_workinfo(shares->workinfoid);
+	if (!w_item)
+		goto unitem;
+
+	w_item = find_workers(shares->userid, shares->workername);
+	if (!w_item)
+		goto unitem;
+
+// TODO: update stats - log file load will have to do all these checks also
+
+	ok = true;
+unitem:
+	K_WLOCK(shares_list);
+	if (!ok)
+		k_add_head(shares_list, s_item);
+	else {
+		shares_root = add_to_ktree(shares_root, s_item, cmp_shares);
+		k_add_head(shares_store, s_item);
+	}
+	K_WUNLOCK(shares_list);
+
+	return ok;
+}
+
+static bool shares_fill()
+{
+	// TODO: reload shares from workinfo from log file
+	// and verify workinfo while doing that
+
+	return true;
+}
+
+// order by workinfoid asc, userid asc, createdate asc, nonce asc, expirydate desc
+static double cmp_shareerrors(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)(DATA_SHAREERRORS(a)->workinfoid) - (double)(DATA_SHAREERRORS(b)->workinfoid);
+	if (c == 0) {
+		c = (double)(DATA_SHAREERRORS(b)->userid) - (double)(DATA_SHAREERRORS(a)->userid);
+		if (c == 0) {
+			c = tvdiff(&(DATA_SHAREERRORS(b)->createdate), &(DATA_SHAREERRORS(a)->createdate));
+			if (c == 0)
+				c = tvdiff(&(DATA_SHAREERRORS(b)->expirydate), &(DATA_SHAREERRORS(a)->expirydate));
+		}
+	}
+	return c;
+}
+
+// Memory (and log file) only
+static bool shareerrors_add(char *workinfoid, char *username, char *workername, char *clientid,
+			char *errn, char *error, char *secondaryuserid, char *by, char *code, char *inet)
+{
+	K_ITEM *s_item, *u_item, *w_item;
+	SHAREERRORS *shareerrors;
+	bool ok = false;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(shareerrors_list);
+	s_item = k_unlink_head(shareerrors_list);
+	K_WUNLOCK(shareerrors_list);
+
+	shareerrors = DATA_SHAREERRORS(s_item);
+
+	// TODO: allow BTC address later?
+	u_item = find_users(username);
+	if (!u_item)
+		goto unitem;
+
+	shareerrors->userid = DATA_USERS(u_item)->userid;
+
+	TXT_TO_BIGINT("workinfoid", workinfoid, shareerrors->workinfoid);
+	STRNCPY(shareerrors->workername, workername);
+	TXT_TO_INT("clientid", clientid, shareerrors->clientid);
+	TXT_TO_INT("errno", errn, shareerrors->errn);
+	STRNCPY(shareerrors->error, error);
+	STRNCPY(shareerrors->secondaryuserid, secondaryuserid);
+
+	HISTORYDATEINIT(shareerrors, by, code, inet);
+	HISTORYDATETRANSFER(shareerrors);
+
+	w_item = find_workinfo(shareerrors->workinfoid);
+	if (!w_item)
+		goto unitem;
+
+	w_item = find_workers(shareerrors->userid, shareerrors->workername);
+	if (!w_item)
+		goto unitem;
+
+// TODO: update stats - log file load will have to do all these checks also
+
+	ok = true;
+unitem:
+	K_WLOCK(shareerrors_list);
+	if (!ok)
+		k_add_head(shareerrors_list, s_item);
+	else {
+		shareerrors_root = add_to_ktree(shareerrors_root, s_item, cmp_shareerrors);
+		k_add_head(shareerrors_store, s_item);
+	}
+	K_WUNLOCK(shareerrors_list);
+
+	return ok;
+}
+
+static bool shareerrors_fill()
+{
+	// TODO: reload shareerrors from workinfo from log file
+	// and verify workinfo while doing that
+
+	return true;
+}
+
+static double cmp_auths(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)(DATA_SHAREERRORS(a)->workinfoid) - (double)(DATA_SHAREERRORS(b)->workinfoid);
+	if (c == 0) {
+		c = (double)(DATA_SHAREERRORS(b)->userid) - (double)(DATA_SHAREERRORS(a)->userid);
+		if (c == 0) {
+			c = tvdiff(&(DATA_SHAREERRORS(b)->createdate), &(DATA_SHAREERRORS(a)->createdate));
+			if (c == 0)
+				c = tvdiff(&(DATA_SHAREERRORS(b)->expirydate), &(DATA_SHAREERRORS(a)->expirydate));
+		}
+	}
+	return c;
+}
+
+static char *auths_add(PGconn *conn, char *username, char *workername,
+				char *clientid, char *enonce1, char *useragent,
+				char *by, char *code, char *inet)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *a_item, *u_item, *w_item;
+	int n;
+	AUTHS *row;
+	char *ins;
+	char *secuserid = NULL;
+	char *params[11];
+	int par;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(auths_list);
+	a_item = k_unlink_head(auths_list);
+	K_WUNLOCK(auths_list);
+
+	row = DATA_AUTHS(a_item);
+
+	u_item = find_users(username);
+	if (!u_item)
+		goto unitem;
+
+	row->userid = DATA_USERS(u_item)->userid;
+
+	w_item = find_workers(row->userid, workername);
+	if (!w_item)
+		goto unitem;
+
+	row->authid = nextid(conn, "authid", (int64_t)1, by, code, inet);
+	if (row->authid == 0)
+		goto unitem;
+
+	STRNCPY(row->workername, workername);
+	TXT_TO_INT("clientid", clientid, row->clientid);
+	STRNCPY(row->enonce1, enonce1);
+	STRNCPY(row->useragent, useragent);
+
+	HISTORYDATEINIT(row, by, code, inet);
+	HISTORYDATETRANSFER(row);
+
+	row->authid = nextid(conn, "authid", (int64_t)1, by, code, inet);
+	if (row->authid == 0)
+		goto unitem;
+
+	par = 0;
+	params[par++] = bigint_to_buf(row->authid, NULL, 0);
+	params[par++] = bigint_to_buf(row->userid, NULL, 0);
+	params[par++] = str_to_buf(row->workername, NULL, 0);
+	params[par++] = int_to_buf(row->clientid, NULL, 0);
+	params[par++] = str_to_buf(row->enonce1, NULL, 0);
+	params[par++] = str_to_buf(row->useragent, NULL, 0);
+	HISTORYDATEPARAMS(params, par, row);
+	PARCHK(par, params);
+
+	ins = "insert into auths "
+		"(authid,userid,workername,clientid,enonce1,useragent"
+		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+
+	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
+	rescode = PQresultStatus(res);
+	if (rescode != PGRES_COMMAND_OK) {
+		PGLOGERR("Insert", rescode, conn);
+		goto unparam;
+	}
+
+	secuserid = DATA_USERS(u_item)->secondaryuserid;
+
+unparam:
+	PQclear(res);
+	for (n = 0; n < par; n++)
+		free(params[n]);
+unitem:
+	K_WLOCK(auths_list);
+	if (!secuserid)
+		k_add_head(auths_list, a_item);
+	else {
+		auths_root = add_to_ktree(auths_root, a_item, cmp_auths);
+		k_add_head(auths_store, a_item);
+	}
+	K_WUNLOCK(auths_list);
+
+	return secuserid;
+}
+
+static bool auths_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	AUTHS *row;
+	char *params[1];
+	int par;
+	char *field;
+	char *sel;
+	int fields = 11;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: keep last x - since a user may login and mine for 100 days
+	sel = "select "
+		"authid,userid,workername,clientid,enonce1,useragent"
+		HISTORYDATECONTROL
+		" from auths where expirydate=$1";
+	par = 0;
+	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
+	PARCHK(par, params);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0);
+	rescode = PQresultStatus(res);
+	if (rescode != PGRES_TUPLES_OK) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(auths_list);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(auths_list);
+		row = DATA_AUTHS(item);
+
+		PQ_GET_FLD(res, i, "authid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("authid", field, row->authid);
+
+		PQ_GET_FLD(res, i, "userid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userid", field, row->userid);
+
+		PQ_GET_FLD(res, i, "workername", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("workername", field, row->workername);
+
+		PQ_GET_FLD(res, i, "clientid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("clientid", field, row->clientid);
+
+		PQ_GET_FLD(res, i, "enonce1", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BLOB("enonce1", field, row->enonce1);
+
+		PQ_GET_FLD(res, i, "useragent", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("useragent", field, row->useragent);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		auths_root = add_to_ktree(auths_root, item, cmp_auths);
+		k_add_head(auths_store, item);
+	}
+	if (!ok)
+		k_add_head(auths_list, item);
+
+	K_WUNLOCK(auths_list);
+	PQclear(res);
+
+	if (ok)
+		LOGDEBUG("%s(): built", __func__);
+
+	return true;
+}
+
+void auths_reload()
+{
+	PGconn *conn = dbconnect();
+
+	K_WLOCK(auths_list);
+	auths_root = free_ktree(auths_root, NULL);
+	k_list_transfer_to_head(auths_store, auths_list);
+	K_WUNLOCK(auths_list);
+
+	auths_fill(conn);
+
+	PQfinish(conn);
+}
+
 static void getdata()
 {
 	PGconn *conn = dbconnect();
@@ -1376,6 +2264,10 @@ static void getdata()
 	users_fill(conn);
 	workers_fill(conn);
 	payments_fill(conn);
+	workinfo_fill(conn);
+	shares_fill();
+	shareerrors_fill();
+	auths_fill(conn);
 
 	PQfinish(conn);
 }
@@ -1489,61 +2381,23 @@ static void setup_data()
 	idcontrol_list = k_new_list("IDControl", sizeof(IDCONTROL), ALLOC_IDCONTROL, LIMIT_IDCONTROL, true);
 	idcontrol_store = k_new_store(idcontrol_list);
 
+	workinfo_list = k_new_list("WorkInfo", sizeof(WORKINFO), ALLOC_WORKINFO, LIMIT_WORKINFO, true);
+	workinfo_store = k_new_store(workinfo_list);
+	workinfo_root = new_ktree();
+
+	shares_list = k_new_list("Shares", sizeof(SHARES), ALLOC_SHARES, LIMIT_SHARES, true);
+	shares_store = k_new_store(shares_list);
+	shares_root = new_ktree();
+
+	shareerrors_list = k_new_list("Shareerrors", sizeof(SHAREERRORS), ALLOC_SHAREERRORS, LIMIT_SHAREERRORS, true);
+	shareerrors_store = k_new_store(shareerrors_list);
+	shareerrors_root = new_ktree();
+
+	auths_list = k_new_list("Auths", sizeof(AUTHS), ALLOC_AUTHS, LIMIT_AUTHS, true);
+	auths_store = k_new_store(auths_list);
+	auths_root = new_ktree();
+
 	getdata();
-}
-
-static double transfer_cmp(K_ITEM *a, K_ITEM *b)
-{
-	double c = strcmp(DATA_TRANSFER(a)->name, DATA_TRANSFER(b)->name);
-	return c;
-}
-
-static K_ITEM *find_transfer(char *name)
-{
-	TRANSFER transfer;
-	K_TREE_CTX ctx;
-	K_ITEM look;
-
-	STRNCPY(transfer.name, name);
-	look.data = (void *)(&transfer);
-	return find_in_ktree(transfer_root, &look, transfer_cmp, &ctx);
-}
-
-static K_ITEM *require_name(char *name, int len, char *patt, char *reply, size_t siz)
-{
-	K_ITEM *item;
-	char *value;
-	regex_t re;
-	int ret;
-
-	item = find_transfer(name);
-	if (!item) {
-		snprintf(reply, siz, "failed.missing %s", name);
-		return NULL;
-	}
-
-	value = DATA_TRANSFER(item)->value;
-	if (!*value || (int)strlen(value) < len) {
-		snprintf(reply, siz, "failed.short %s", name);
-		return NULL;
-	}
-
-	if (patt) {
-		if (regcomp(&re, patt, REG_NOSUB) != 0) {
-			snprintf(reply, siz, "failed.REC %s", name);
-			return NULL;
-		}
-
-		ret = regexec(&re, value, (size_t)0, NULL, 0);
-		regfree(&re);
-
-		if (ret != 0) {
-			snprintf(reply, siz, "failed.invalid %s", name);
-			return NULL;
-		}
-	}
-
-	return item;
 }
 
 static char *cmd_adduser(char *id, char *by, char *code, char *inet)
@@ -1568,9 +2422,9 @@ static char *cmd_adduser(char *id, char *by, char *code, char *inet)
 		return strdup(reply);
 
 	conn = dbconnect();
-	ok = users_add(conn, DATA_TRANSFER(i_username)->value,
-				DATA_TRANSFER(i_emailaddress)->value,
-				DATA_TRANSFER(i_passwordhash)->value,
+	ok = users_add(conn, DATA_TRANSFER(i_username)->data,
+				DATA_TRANSFER(i_emailaddress)->data,
+				DATA_TRANSFER(i_passwordhash)->data,
 				by, code, inet);
 	PQfinish(conn);
 
@@ -1579,17 +2433,15 @@ static char *cmd_adduser(char *id, char *by, char *code, char *inet)
 		return strdup(reply);
 	}
 
-	LOGDEBUG("%s.added.%s", id, DATA_TRANSFER(i_username)->value);
-	snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_username)->value);
+	LOGDEBUG("%s.added.%s", id, DATA_TRANSFER(i_username)->data);
+	snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_username)->data);
 
 	return strdup(reply);
 }
 
 static char *cmd_chkpass(char *id, __maybe_unused char *by, __maybe_unused char *code, __maybe_unused char *inet)
 {
-	K_ITEM *i_username, *i_passwordhash, *look, *find;
-	K_TREE_CTX ctx[1];
-	USERS *row;
+	K_ITEM *i_username, *i_passwordhash, *u_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	bool ok;
@@ -1602,35 +2454,21 @@ static char *cmd_chkpass(char *id, __maybe_unused char *by, __maybe_unused char 
 	if (!i_passwordhash)
 		return strdup(reply);
 
-	K_WLOCK(users_list);
-	look = k_unlink_head(users_list);
-	K_WUNLOCK(users_list);
+	u_item = find_users(DATA_TRANSFER(i_username)->data);
 
-	row = DATA_USERS(look);
-
-	STRNCPY(row->username, DATA_TRANSFER(i_username)->value);
-	row->expirydate.tv_sec = default_expiry.tv_sec;
-	row->expirydate.tv_usec = default_expiry.tv_usec;
-
-	find = find_in_ktree(users_root, look, users_cmp, ctx);
-
-	if (!find)
+	if (!u_item)
 		ok = false;
 	else {
-		if (strcasecmp(DATA_TRANSFER(i_passwordhash)->value, DATA_USERS(find)->passwordhash) == 0)
+		if (strcasecmp(DATA_TRANSFER(i_passwordhash)->data, DATA_USERS(u_item)->passwordhash) == 0)
 			ok = true;
 		else
 			ok = false;
 	}
 
-	K_WLOCK(users_list);
-	k_add_head(users_list, look);
-	K_WUNLOCK(users_list);
-
 	if (!ok)
 		return strdup("bad");
 
-	LOGDEBUG("%s.login.%s", id, DATA_TRANSFER(i_username)->value);
+	LOGDEBUG("%s.login.%s", id, DATA_TRANSFER(i_username)->data);
 	return strdup("ok");
 }
 
@@ -1676,8 +2514,8 @@ static char *cmd_newid(char *id, char *by, char *code, char *inet)
 
 	row = DATA_IDCONTROL(look);
 
-	STRNCPY(row->idname, DATA_TRANSFER(i_idname)->value);
-	TXT_TO_BIGINT("idvalue", DATA_TRANSFER(i_idvalue)->value, row->lastid);
+	STRNCPY(row->idname, DATA_TRANSFER(i_idname)->data);
+	TXT_TO_BIGINT("idvalue", DATA_TRANSFER(i_idvalue)->data, row->lastid);
 	MODIFYDATEINIT(row, by, code, inet);
 
 	par = 0;
@@ -1714,17 +2552,16 @@ foil:
 		return strdup(reply);
 	}
 
-	LOGDEBUG("%s.added.%s", id, DATA_TRANSFER(i_idname)->value);
-	snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_idname)->value);
+	LOGDEBUG("%s.added.%s", id, DATA_TRANSFER(i_idname)->data);
+	snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_idname)->data);
 	return strdup(reply);
 }
 
 static char *cmd_payments(char *id, __maybe_unused char *by, __maybe_unused char *code, __maybe_unused char *inet)
 {
-	K_ITEM *i_username, *ulook, *plook, *ufind, *pfind;
+	K_ITEM *i_username, *look, *u_item, *p_item;
 	K_TREE_CTX ctx[1];
-	USERS *urow;
-	PAYMENTS *prow;
+	PAYMENTS *row;
 	char reply[1024] = "";
 	char tmp[1024];
 	size_t siz = sizeof(reply);
@@ -1736,29 +2573,18 @@ static char *cmd_payments(char *id, __maybe_unused char *by, __maybe_unused char
 	if (!i_username)
 		return strdup(reply);
 
-	K_WLOCK(users_list);
-	ulook = k_unlink_head(users_list);
-	K_WUNLOCK(users_list);
-	urow = DATA_USERS(ulook);
-	STRNCPY(urow->username, DATA_TRANSFER(i_username)->value);
-	urow->expirydate.tv_sec = default_expiry.tv_sec;
-	urow->expirydate.tv_usec = default_expiry.tv_usec;
-	ufind = find_in_ktree(users_root, ulook, users_cmp, ctx);
-	if (!ufind) {
-		K_WLOCK(users_list);
-		k_add_head(users_list, ulook);
-		K_WUNLOCK(users_list);
+	u_item = find_users(DATA_TRANSFER(i_username)->data);
+	if (!u_item)
 		return strdup("bad");
-	}
 
 	K_WLOCK(payments_list);
-	plook = k_unlink_head(payments_list);
+	look = k_unlink_head(payments_list);
 	K_WUNLOCK(payments_list);
-	prow = DATA_PAYMENTS(plook);
-	prow->userid = DATA_USERS(ufind)->userid;
-	prow->paydate.tv_sec = 0;
-	prow->paydate.tv_usec = 0;
-	pfind = find_after_in_ktree(payments_root, plook, payments_cmp, ctx);
+	row = DATA_PAYMENTS(look);
+	row->userid = DATA_USERS(u_item)->userid;
+	row->paydate.tv_sec = 0;
+	row->paydate.tv_usec = 0;
+	p_item = find_after_in_ktree(payments_root, look, cmp_payments, ctx);
 	len = 1024;
 	buf = malloc(len);
 	if (!buf)
@@ -1766,35 +2592,296 @@ static char *cmd_payments(char *id, __maybe_unused char *by, __maybe_unused char
 	strcpy(buf, "ok.");
 	off = strlen(buf);
 	rows = 0;
-	while (pfind && DATA_PAYMENTS(pfind)->userid == DATA_USERS(ufind)->userid) {
-		tv_to_buf(&(DATA_PAYMENTS(pfind)->paydate), reply, sizeof(reply));
+	while (p_item && DATA_PAYMENTS(p_item)->userid == DATA_USERS(u_item)->userid) {
+		tv_to_buf(&(DATA_PAYMENTS(p_item)->paydate), reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "paydate%d=%s%c", rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
-		str_to_buf(DATA_PAYMENTS(pfind)->payaddress, reply, sizeof(reply));
+		str_to_buf(DATA_PAYMENTS(p_item)->payaddress, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "payaddress%d=%s%c", rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
-		bigint_to_buf(DATA_PAYMENTS(pfind)->amount, reply, sizeof(reply));
+		bigint_to_buf(DATA_PAYMENTS(p_item)->amount, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "amount%d=%s%c", rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		rows++;
-		pfind = next_in_ktree(ctx);
+		p_item = next_in_ktree(ctx);
 	}
 	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	K_WLOCK(users_list);
-	k_add_head(users_list, ulook);
-	K_WUNLOCK(users_list);
-
 	K_WLOCK(payments_list);
-	k_add_head(payments_list, plook);
+	k_add_head(payments_list, look);
 	K_WUNLOCK(payments_list);
 
-	LOGDEBUG("%s.payments.%s", id, DATA_TRANSFER(i_username)->value);
+	LOGDEBUG("%s.payments.%s", id, DATA_TRANSFER(i_username)->data);
 	return buf;
+}
+
+static char *cmd_sharelog(char *id, char *by, char *code, char *inet)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	K_ITEM *i_method;
+	PGconn *conn;
+
+	// log to logfile with processing success/failure code
+
+	i_method = require_name("method", 1, NULL, reply, siz);
+	if (!i_method)
+		return strdup(reply);
+
+	if (strcasecmp(DATA_TRANSFER(i_method)->data, METHOD_WORKINFO) == 0) {
+		K_ITEM *i_workinfoid, *i_poolinstance, *i_transactiontree, *i_merklehash;
+		K_ITEM *i_prevhash, *i_coinbase1, *i_coinbase2, *i_version, *i_bits;
+		K_ITEM *i_ntime, *i_reward;
+		int64_t workinfoid;
+
+		i_workinfoid = require_name("workinfoid", 1, NULL, reply, siz);
+		if (!i_workinfoid)
+			return strdup(reply);
+
+		i_poolinstance = require_name("poolinstance", 1, NULL, reply, siz);
+		if (!i_poolinstance)
+			return strdup(reply);
+
+		i_transactiontree = require_name("transactiontree", 1, NULL, reply, siz);
+		if (!i_transactiontree)
+			return strdup(reply);
+
+		i_merklehash = require_name("merklehash", 1, NULL, reply, siz);
+		if (!i_merklehash)
+			return strdup(reply);
+
+		i_prevhash = require_name("prevhash", 1, NULL, reply, siz);
+		if (!i_prevhash)
+			return strdup(reply);
+
+		i_coinbase1 = require_name("coinbase1", 1, NULL, reply, siz);
+		if (!i_coinbase1)
+			return strdup(reply);
+
+		i_coinbase2 = require_name("coinbase2", 1, NULL, reply, siz);
+		if (!i_coinbase2)
+			return strdup(reply);
+
+		i_version = require_name("version", 1, NULL, reply, siz);
+		if (!i_version)
+			return strdup(reply);
+
+		i_bits = require_name("bits", 1, NULL, reply, siz);
+		if (!i_bits)
+			return strdup(reply);
+
+		i_ntime = require_name("ntime", 1, NULL, reply, siz);
+		if (!i_ntime)
+			return strdup(reply);
+
+		i_reward = require_name("reward", 1, NULL, reply, siz);
+		if (!i_reward)
+			return strdup(reply);
+
+		conn = dbconnect();
+		workinfoid = workinfo_add(conn, DATA_TRANSFER(i_workinfoid)->data,
+						DATA_TRANSFER(i_poolinstance)->data,
+						DATA_TRANSFER(i_transactiontree)->data,
+						DATA_TRANSFER(i_merklehash)->data,
+						DATA_TRANSFER(i_prevhash)->data,
+						DATA_TRANSFER(i_coinbase1)->data,
+						DATA_TRANSFER(i_coinbase2)->data,
+						DATA_TRANSFER(i_version)->data,
+						DATA_TRANSFER(i_bits)->data,
+						DATA_TRANSFER(i_ntime)->data,
+						DATA_TRANSFER(i_reward)->data,
+						by, code, inet);
+		PQfinish(conn);
+
+		if (workinfoid == -1) {
+			STRNCPY(reply, "bad.DBE");
+			return strdup(reply);
+		}
+
+		LOGDEBUG("added.%s.%"PRId64, DATA_TRANSFER(i_method)->data, workinfoid);
+		snprintf(reply, siz, "%s.added.%"PRId64, id, workinfoid);
+		return strdup(reply);
+	} else if (strcasecmp(DATA_TRANSFER(i_method)->data, METHOD_SHARES) == 0) {
+		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_enonce1;
+		K_ITEM *i_nonce2, *i_nonce, *i_diff, *i_sdiff, *i_secondaryuserid;
+		bool ok;
+
+		i_workinfoid = require_name("workinfoid", 1, NULL, reply, siz);
+		if (!i_workinfoid)
+			return strdup(reply);
+
+		i_username = require_name("username", 1, NULL, reply, siz);
+		if (!i_username)
+			return strdup(reply);
+
+		i_workername = require_name("workername", 1, NULL, reply, siz);
+		if (!i_workername)
+			return strdup(reply);
+
+		i_clientid = require_name("clientid", 1, NULL, reply, siz);
+		if (!i_clientid)
+			return strdup(reply);
+
+		i_enonce1 = require_name("enonce1", 1, NULL, reply, siz);
+		if (!i_enonce1)
+			return strdup(reply);
+
+		i_nonce2 = require_name("nonce2", 1, NULL, reply, siz);
+		if (!i_nonce2)
+			return strdup(reply);
+
+		i_nonce = require_name("nonce", 1, NULL, reply, siz);
+		if (!i_nonce)
+			return strdup(reply);
+
+		i_diff = require_name("diff", 1, NULL, reply, siz);
+		if (!i_diff)
+			return strdup(reply);
+
+		i_sdiff = require_name("sdiff", 1, NULL, reply, siz);
+		if (!i_sdiff)
+			return strdup(reply);
+
+		i_secondaryuserid = require_name("secondaryuserid", 1, NULL, reply, siz);
+		if (!i_secondaryuserid)
+			return strdup(reply);
+
+		ok = shares_add(DATA_TRANSFER(i_workinfoid)->data,
+				DATA_TRANSFER(i_username)->data,
+				DATA_TRANSFER(i_workername)->data,
+				DATA_TRANSFER(i_clientid)->data,
+				DATA_TRANSFER(i_enonce1)->data,
+				DATA_TRANSFER(i_nonce2)->data,
+				DATA_TRANSFER(i_nonce)->data,
+				DATA_TRANSFER(i_diff)->data,
+				DATA_TRANSFER(i_sdiff)->data,
+				DATA_TRANSFER(i_secondaryuserid)->data,
+				by, code, inet);
+		if (!ok) {
+			STRNCPY(reply, "bad.DATA");
+			return strdup(reply);
+		}
+
+		LOGDEBUG("added.%s.%s", DATA_TRANSFER(i_method)->data,
+					DATA_TRANSFER(i_nonce)->data);
+		snprintf(reply, siz, "%s.added.%s", id, DATA_TRANSFER(i_nonce)->data);
+		return strdup(reply);
+	} else if (strcasecmp(DATA_TRANSFER(i_method)->data, METHOD_SHAREERRORS) == 0) {
+		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
+		K_ITEM *i_error, *i_secondaryuserid;
+		bool ok;
+
+		i_workinfoid = require_name("workinfoid", 1, NULL, reply, siz);
+		if (!i_workinfoid)
+			return strdup(reply);
+
+		i_username = require_name("username", 1, NULL, reply, siz);
+		if (!i_username)
+			return strdup(reply);
+
+		i_workername = require_name("workername", 1, NULL, reply, siz);
+		if (!i_workername)
+			return strdup(reply);
+
+		i_clientid = require_name("clientid", 1, NULL, reply, siz);
+		if (!i_clientid)
+			return strdup(reply);
+
+		i_errn = require_name("errno", 1, NULL, reply, siz);
+		if (!i_errn)
+			return strdup(reply);
+
+		i_error = require_name("error", 1, NULL, reply, siz);
+		if (!i_error)
+			return strdup(reply);
+
+		i_secondaryuserid = require_name("secondaryuserid", 1, NULL, reply, siz);
+		if (!i_secondaryuserid)
+			return strdup(reply);
+
+		ok = shareerrors_add(DATA_TRANSFER(i_workinfoid)->data,
+					DATA_TRANSFER(i_username)->data,
+					DATA_TRANSFER(i_workername)->data,
+					DATA_TRANSFER(i_clientid)->data,
+					DATA_TRANSFER(i_errn)->data,
+					DATA_TRANSFER(i_error)->data,
+					DATA_TRANSFER(i_secondaryuserid)->data,
+					by, code, inet);
+		if (!ok) {
+			STRNCPY(reply, "bad.DATA");
+			return strdup(reply);
+		}
+
+		LOGDEBUG("added.%s.%s", DATA_TRANSFER(i_method)->data,
+					DATA_TRANSFER(i_username)->data);
+		snprintf(reply, siz, "%s.added.%s", id, DATA_TRANSFER(i_username)->data);
+		return strdup(reply);
+	}
+
+	STRNCPY(reply, "bad.method");
+	return strdup(reply);
+}
+
+static char *cmd_auth(char *id, char *by, char *code, char *inet)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	K_ITEM *i_method;
+	PGconn *conn;
+
+	i_method = require_name("method", 1, NULL, reply, siz);
+	if (!i_method)
+		return strdup(reply);
+
+	if (strcasecmp(DATA_TRANSFER(i_method)->data, METHOD_AUTH) == 0) {
+		K_ITEM *i_username, *i_workername, *i_clientid, *i_enonce1, *i_useragent;
+		char *secuserid;
+
+		i_username = require_name("username", 1, NULL, reply, siz);
+		if (!i_username)
+			return strdup(reply);
+
+		i_workername = require_name("workername", 1, NULL, reply, siz);
+		if (!i_workername)
+			return strdup(reply);
+
+		i_clientid = require_name("clientid", 1, NULL, reply, siz);
+		if (!i_clientid)
+			return strdup(reply);
+
+		i_enonce1 = require_name("enonce1", 1, NULL, reply, siz);
+		if (!i_enonce1)
+			return strdup(reply);
+
+		i_useragent = require_name("useragent", 1, NULL, reply, siz);
+		if (!i_useragent)
+			return strdup(reply);
+
+		conn = dbconnect();
+		secuserid = auths_add(conn, DATA_TRANSFER(i_username)->data,
+					    DATA_TRANSFER(i_workername)->data,
+					    DATA_TRANSFER(i_clientid)->data,
+					    DATA_TRANSFER(i_enonce1)->data,
+					    DATA_TRANSFER(i_useragent)->data,
+					    by, code, inet);
+		PQfinish(conn);
+
+		if (!secuserid) {
+			STRNCPY(reply, "bad.DBE");
+			return strdup(reply);
+		}
+
+		LOGDEBUG("added.%s.%s", DATA_TRANSFER(i_method)->data, secuserid);
+		snprintf(reply, siz, "%s.added.%s", id, secuserid);
+		return strdup(reply);
+	}
+
+	STRNCPY(reply, "bad.method");
+	return strdup(reply);
 }
 
 enum cmd_values {
@@ -1802,6 +2889,8 @@ enum cmd_values {
 	CMD_REPLY, // Means something was wrong - send back reply
 	CMD_SHUTDOWN,
 	CMD_PING,
+	CMD_LOGSHARE,
+	CMD_AUTH,
 	CMD_ADDUSER,
 	CMD_CHKPASS,
 	CMD_POOLSTAT,
@@ -1823,7 +2912,8 @@ static struct CMDS {
 } cmds[] = {
 	{ CMD_SHUTDOWN,	"shutdown",	NULL,		ACCESS_SYSTEM },
 	{ CMD_PING,	"ping",		NULL,		ACCESS_SYSTEM ACCESS_WEB },
-//	{ CMD_LOGSHARE,	"logshares",	cmd_logshares,	ACCESS_POOL },
+	{ CMD_LOGSHARE,	"sharelog",	cmd_sharelog,	ACCESS_POOL }, // Workinfo and Shares
+	{ CMD_AUTH,	"authorise",	cmd_auth,	ACCESS_POOL },
 	{ CMD_ADDUSER,	"adduser",	cmd_adduser,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	cmd_chkpass,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	cmd_poolstats,	ACCESS_WEB },
@@ -1832,6 +2922,7 @@ static struct CMDS {
 	{ CMD_END,	NULL,		NULL,		NULL }
 };
 
+// TODO: size limits?
 static enum cmd_values breakdown(char *buf, int *which_cmds, char *id)
 {
 	K_TREE_CTX ctx[1];
@@ -1866,31 +2957,90 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *id)
 	}
 
 	next = data;
-	K_WLOCK(transfer_list);
-	while (next && *next) {
-		data = next;
-		next = strchr(data, 0x02);
-		if (next)
-			*(next++) = '\0';
+	if (strncmp(next, JSON_TRANSFER, JSON_TRANSFER_LEN) == 0) {
+		json_t *json_data;
+		json_error_t err_val;
+		void *json_iter;
+		const char *json_key, *json_str;
+		json_t *json_value;
+		size_t siz;
 
-		eq = strchr(data, '=');
-		if (!eq)
-			eq = "";
-		else
-			*(eq++) = '\0';
-
-		item = k_unlink_head(transfer_list);
-		STRNCPY(DATA_TRANSFER(item)->name, data);
-		STRNCPY(DATA_TRANSFER(item)->value, eq);
-
-		if (find_in_ktree(transfer_root, item, transfer_cmp, ctx))
-			k_add_head(transfer_list, item);
-		else {
-			transfer_root = add_to_ktree(transfer_root, item, transfer_cmp);
-			k_add_head(transfer_store, item);
+		next += JSON_TRANSFER_LEN;
+		json_data = json_loads(next, JSON_DISABLE_EOF_CHECK, &err_val);
+		if (!json_data) {
+			LOGINFO("Json decode error from command: '%s'", cmd);
+			free(copy);
+			return CMD_REPLY;
 		}
+		json_iter = json_object_iter(json_data);
+		K_WLOCK(transfer_list);
+		while (json_iter) {
+			json_key = json_object_iter_key(json_iter);
+			json_value = json_object_iter_value(json_iter);
+			if (json_is_string(json_value) || json_is_integer(json_value)) {
+				item = k_unlink_head(transfer_list);
+				STRNCPY(DATA_TRANSFER(item)->name, json_key);
+
+				if (json_is_string(json_value)) {
+					json_str = json_string_value(json_value);
+					siz = strlen(json_str);
+					if (siz >= sizeof(DATA_TRANSFER(item)->value))
+						DATA_TRANSFER(item)->data = strdup(json_str);
+					else {
+						STRNCPY(DATA_TRANSFER(item)->value, json_str);
+						DATA_TRANSFER(item)->data = DATA_TRANSFER(item)->value;
+					}
+				} else {
+					snprintf(DATA_TRANSFER(item)->value,
+						 sizeof(DATA_TRANSFER(item)->value),
+						 "%"PRId64,
+						 (int64_t)json_integer_value(json_value));
+					DATA_TRANSFER(item)->data = DATA_TRANSFER(item)->value;
+				}
+
+				if (find_in_ktree(transfer_root, item, cmp_transfer, ctx)) {
+					if (DATA_TRANSFER(item)->data != DATA_TRANSFER(item)->value)
+						free(DATA_TRANSFER(item)->data);
+					k_add_head(transfer_list, item);
+				} else {
+					transfer_root = add_to_ktree(transfer_root, item, cmp_transfer);
+					k_add_head(transfer_store, item);
+				}
+			}
+			json_iter = json_object_iter_next(json_data, json_iter);
+		}
+		K_WUNLOCK(transfer_list);
+		json_decref(json_data);
+	} else {
+		K_WLOCK(transfer_list);
+		while (next && *next) {
+			data = next;
+			next = strchr(data, 0x02);
+			if (next)
+				*(next++) = '\0';
+
+			eq = strchr(data, '=');
+			if (!eq)
+				eq = "";
+			else
+				*(eq++) = '\0';
+
+			item = k_unlink_head(transfer_list);
+			STRNCPY(DATA_TRANSFER(item)->name, data);
+			STRNCPY(DATA_TRANSFER(item)->value, eq);
+			DATA_TRANSFER(item)->data = DATA_TRANSFER(item)->value;
+
+			if (find_in_ktree(transfer_root, item, cmp_transfer, ctx)) {
+				if (DATA_TRANSFER(item)->data != DATA_TRANSFER(item)->value)
+					free(DATA_TRANSFER(item)->data);
+				k_add_head(transfer_list, item);
+			} else {
+				transfer_root = add_to_ktree(transfer_root, item, cmp_transfer);
+				k_add_head(transfer_store, item);
+			}
+		}
+		K_WUNLOCK(transfer_list);
 	}
-	K_WUNLOCK(transfer_list);
 
 	free(copy);
 	return cmds[*which_cmds].cmd_val;
@@ -1905,6 +3055,7 @@ static void *listener(void *arg)
 	char id[ID_SIZ+1], reply[1024+1];
 	enum cmd_values cmd;
 	int sockd, which_cmds;
+	K_ITEM *item;
 	size_t siz;
 	tv_t now;
 
@@ -1955,7 +3106,7 @@ static void *listener(void *arg)
 					send_unix_msg(sockd, reply);
 					break;
 				default:
-					// TODO: optionally get by/inet from transfer?
+					// TODO: optionally get by/code/inet from transfer here instead?
 					ans = cmds[which_cmds].func(id, (char *)"code",
 								    (char *)__func__,
 								    (char *)"127.0.0.1");
@@ -1978,6 +3129,12 @@ static void *listener(void *arg)
 
 		K_WLOCK(transfer_list);
 		transfer_root = free_ktree(transfer_root, NULL);
+		item = transfer_store->head;
+		while (item) {
+			if (DATA_TRANSFER(item)->data != DATA_TRANSFER(item)->value)
+				free(DATA_TRANSFER(item)->data);
+			item = item->next;
+		}
 		k_list_transfer_to_head(transfer_store, transfer_list);
 		K_WUNLOCK(transfer_list);
 	}

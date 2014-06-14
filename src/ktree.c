@@ -23,7 +23,7 @@ static const int dbg = 0;
 #define Yo true
 #define No false
 
-static K_TREE nil[1] = { Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 };
+static K_TREE nil[1] = { { Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 } };
 
 K_TREE *new_ktree()
 {

@@ -23,4 +23,13 @@ addid()
  process "$msg"
 }
 #
-addid userid 7
+# Default to yyyymmddXXXXXX
+# thus on reinit it will always be above old values
+# XXXXXX should allow enough per day to avoid overlap with other ids
+#  but of course overlapping with another id doesn't technically matter
+now="`date +%Y%m%d`"
+#
+addid userid ${now}100000
+addid workerid ${now}200000
+addid paymentid ${now}300000
+addid authid ${now}400000
