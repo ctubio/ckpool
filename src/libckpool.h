@@ -232,6 +232,7 @@ static const char __maybe_unused *share_errs[] = {
 	"No job_id",
 	"No username",
 	"Invalid array size",
+	"Params not array",
 	"Valid",
 	"Invalid JobID",
 	"Stale",
