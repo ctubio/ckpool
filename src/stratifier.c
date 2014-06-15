@@ -1539,7 +1539,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	int len;
 
 	ts_realtime(&now);
-	sprintf(cdfield, "%lu.%lu", now.tv_sec, now.tv_nsec);
+	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
 	if (unlikely(!json_is_array(params_val))) {
 		err = SE_NOT_ARRAY;
@@ -2120,49 +2120,52 @@ static void *statsupdate(void *arg)
 	cksleep_prepare_r(&stats.last_update);
 
 	while (42) {
-		char suffix1[16], suffix5[16], suffix15[16], suffix60[16];
-		char suffix360[16], suffix1440[16], logout[512] = {};
+		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
+		double ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
+		char suffix360[16], suffix1440[16];
 		const double nonces = 4294967296;
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
-		double ghs, tdiff, bias;
 		int64_t pplns_shares;
 		char fname[512] = {};
 		tv_t now, diff;
+		int users, i;
+		ts_t ts_now;
+		json_t *val;
 		FILE *fp;
-		int i;
+		char *s;
 
 		tv_time(&now);
 		timersub(&now, &stats.start_time, &diff);
 		tdiff = diff.tv_sec + (double)diff.tv_usec / 1000000;
 
 		bias = time_bias(tdiff, 60);
-		ghs = stats.dsps1 * nonces / bias;
-		suffix_string(ghs, suffix1, 16, 0);
+		ghs1 = stats.dsps1 * nonces / bias;
+		suffix_string(ghs1, suffix1, 16, 0);
 		sps1 = stats.sps1 / bias;
 
 		bias = time_bias(tdiff, 300);
-		ghs = stats.dsps5 * nonces / bias;
-		suffix_string(ghs, suffix5, 16, 0);
+		ghs5 = stats.dsps5 * nonces / bias;
+		suffix_string(ghs5, suffix5, 16, 0);
 		sps5 = stats.sps5 / bias;
 
 		bias = time_bias(tdiff, 900);
-		ghs = stats.dsps15 * nonces / bias;
-		suffix_string(ghs, suffix15, 16, 0);
+		ghs15 = stats.dsps15 * nonces / bias;
+		suffix_string(ghs15, suffix15, 16, 0);
 		sps15 = stats.sps15 / bias;
 
 		bias = time_bias(tdiff, 3600);
-		ghs = stats.dsps60 * nonces / bias;
-		suffix_string(ghs, suffix60, 16, 0);
+		ghs60 = stats.dsps60 * nonces / bias;
+		suffix_string(ghs60, suffix60, 16, 0);
 		sps60 = stats.sps60 / bias;
 
 		bias = time_bias(tdiff, 21600);
-		ghs = stats.dsps360 * nonces / bias;
-		suffix_string(ghs, suffix360, 16, 0);
+		ghs360 = stats.dsps360 * nonces / bias;
+		suffix_string(ghs360, suffix360, 16, 0);
 
 		bias = time_bias(tdiff, 86400);
-		ghs = stats.dsps1440 * nonces / bias;
-		suffix_string(ghs, suffix1440, 16, 0);
+		ghs1440 = stats.dsps1440 * nonces / bias;
+		suffix_string(ghs1440, suffix1440, 16, 0);
 
 		snprintf(fname, 511, "%s/pool.status", ckp->logdir);
 		fp = fopen(fname, "w");
@@ -2171,26 +2174,49 @@ static void *statsupdate(void *arg)
 
 		pplns_shares = stats.pplns_shares + 1;
 
-		snprintf(logout, 511, "runtime: %lus  Live clients: %d  Dead clients: %d  "
-			 "Reusable clients: %d  Reused clients: %d",
-			 diff.tv_sec, stats.live_clients, stats.dead_clients,
-			 stats.reusable_clients, stats.reused_clients);
-		LOGNOTICE("Pool %s", logout);
-		fprintf(fp, "%s\n", logout);
-		snprintf(logout, 511, "hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
-			 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
-		LOGNOTICE("Pool %s", logout);
-		fprintf(fp, "%s\n", logout);
-		snprintf(logout, 511, "round shares: %ld  Absolute per second: (1m):%.1f  (5m):%.1f  (15m):%.1f  (1h):%.1f",
-			 stats.round_shares, sps1, sps5, sps15, sps60);
-		LOGNOTICE("Pool %s", logout);
-		fprintf(fp, "%s\n", logout);
+		val = json_pack("{si,si,si,si,si}",
+				"runtime", diff.tv_sec,
+				"Live clients", stats.live_clients,
+				"Dead clients", stats.dead_clients,
+				"Reusable clients",stats.reusable_clients,
+				"Reused clients", stats.reused_clients);
+		s = json_dumps(val, 0);
+		json_decref(val);
+		LOGNOTICE("Pool:%s", s);
+		fprintf(fp, "%s\n", s);
+		dealloc(s);
+
+		val = json_pack("{ss,ss,ss,ss,ss,ss}",
+				"hashrate1m", suffix1,
+				"hashrate5m", suffix5,
+				"hashrate15m", suffix15,
+				"hashrate1hr", suffix60,
+				"hashrate6hr", suffix360,
+				"hashrate1d", suffix1440);
+		s = json_dumps(val, 0);
+		json_decref(val);
+		LOGNOTICE("Pool:%s", s);
+		fprintf(fp, "%s\n", s);
+		dealloc(s);
+
+		val = json_pack("{si,sf,sf,sf,sf}",
+				"Round shares", stats.round_shares,
+				"SPS1m", sps1,
+				"SPS5m", sps5,
+				"SPS15m", sps15,
+				"SPS1h", sps60);
+		s = json_dumps(val, 0);
+		json_decref(val);
+		LOGNOTICE("Pool:%s", s);
+		fprintf(fp, "%s\n", s);
+		dealloc(s);
 		fclose(fp);
 
 		ck_rlock(&instance_lock);
+		users = HASH_COUNT(user_instances);
 		HASH_ITER(hh, user_instances, instance, tmp) {
+			double reward, ghs;
 			bool idle = false;
-			double reward;
 
 			if (now.tv_sec - instance->last_share.tv_sec > 60) {
 				idle = true;
@@ -2217,26 +2243,51 @@ static void *statsupdate(void *arg)
 
 			reward = 25 * instance->pplns_shares;
 			reward /= pplns_shares;
-			snprintf(logout, 511, "A: %ld  R: %ld  Est Reward: %f  "
-				 "Hashrate: (1m):%s  (5m):%s  (15m):%s  (1h):%s  (6h):%s  (1d):%s",
-				 instance->diff_accepted, instance->diff_rejected, reward,
-				 suffix1, suffix5, suffix15, suffix60, suffix360, suffix1440);
+			val = json_pack("{si,si,sf,ss,ss,ss,ss,ss,ss}",
+					"Accepted", instance->diff_accepted,
+					"Rejected", instance->diff_rejected,
+					"Est reward", reward,
+					"hashrate1m", suffix1,
+					"hashrate5m", suffix5,
+					"hashrate15m", suffix15,
+					"hashrate1hr", suffix60,
+					"hashrate6hr", suffix360,
+					"hashrate1d", suffix1440);
 
-			/* Only display the status of connected users to the
-			 * console log. */
-			if (!idle)
-				LOGNOTICE("User %s: %s", instance->username, logout);
 			snprintf(fname, 511, "%s/%s", ckp->logdir, instance->username);
 			fp = fopen(fname, "w");
 			if (unlikely(!fp)) {
 				LOGERR("Failed to fopen %s", fname);
 				continue;
 			}
-			fprintf(fp, "%s\n", logout);
+			s = json_dumps(val, 0);
+			fprintf(fp, "%s\n", s);
+			/* Only display the status of connected users to the
+			 * console log. */
+			if (!idle)
+				LOGNOTICE("User %s:%s", instance->username, s);
+			dealloc(s);
+			json_decref(val);
 			fclose(fp);
 		}
 		ck_runlock(&instance_lock);
 
+		/* FIXME : Output this json to database */
+		ts_realtime(&ts_now);
+		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
+		val = json_pack("{ss,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
+				"poolinstance", ckp->name,
+				"users", users,
+				"workers", stats.live_clients,
+				"hashrate", ghs1,
+				"hashrate5m", ghs5,
+				"hashrate1hr", ghs60,
+				"hashrate24hr", ghs1440,
+				"createdate", cdfield,
+				"createby", "code",
+				"createcode", __func__,
+				"createinet", "127.0.0.1");
+		json_decref(val);
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
