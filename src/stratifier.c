@@ -1211,7 +1211,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
 
-		sscanf(buf, "is.%*d.%s", response);
+		sscanf(buf, "id.%*d.%s", response);
 		secondaryuserid = response;
 		strsep(&secondaryuserid, ".");
 		LOGWARNING("Got auth response: %s  response: %s  suid: %s", buf,

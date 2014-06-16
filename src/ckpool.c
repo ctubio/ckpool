@@ -335,7 +335,7 @@ char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
 		LOGWARNING("Json dump failed in json_ckdb_call from %s %s:%d", file, func, line);
 		goto out;
 	}
-	ASPRINTF(&msg, "is.%s.json=%s", idmsg, dump);
+	ASPRINTF(&msg, "id.%s.json=%s", idmsg, dump);
 	free(dump);
 	LOGDEBUG("Sending ckdb: %s", msg);
 	buf = _send_recv_ckdb(ckp, msg, file, func, line);
