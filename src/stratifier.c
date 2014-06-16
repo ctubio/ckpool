@@ -2177,6 +2177,7 @@ static void *statsupdate(void *arg)
 		const double nonces = 4294967296;
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
+		char *msg, *dump, *buf;
 		int64_t pplns_shares;
 		char fname[512] = {};
 		tv_t now, diff;
@@ -2338,7 +2339,17 @@ static void *statsupdate(void *arg)
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
+		dump = json_dumps(val, 0);
 		json_decref(val);
+		ASPRINTF(&msg, "id.stats.json=%s", dump);
+		dealloc(dump);
+		buf = send_recv_ckdb(ckp, msg);
+		if (likely(buf)) {
+			LOGWARNING("Got stats response: %s", buf);
+			dealloc(buf);
+		} else
+			LOGWARNING("Got no stats response :(");
+		dealloc(msg);
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
