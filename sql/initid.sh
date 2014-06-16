@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 fldsep="`echo -e '\x02'`"
 #
