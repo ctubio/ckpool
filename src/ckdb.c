@@ -1556,7 +1556,7 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	char idlenot;
 	int32_t nottime;
 
-	LOGDEBUG("%s(): add", __func__);
+	LOGDEBUG("%s(): update", __func__);
 
 	row = DATA_WORKERS(item);
 
@@ -3319,7 +3319,10 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *id)
 		while (json_iter) {
 			json_key = json_object_iter_key(json_iter);
 			json_value = json_object_iter_value(json_iter);
-			if (json_is_string(json_value) || json_is_integer(json_value)) {
+			if (json_is_string(json_value) ||
+			    json_is_integer(json_value) ||
+			    json_is_real(json_value) ||
+			    json_is_array(json_value)) {
 				item = k_unlink_head(transfer_list);
 				STRNCPY(DATA_TRANSFER(item)->name, json_key);
 
@@ -3332,12 +3335,44 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *id)
 						STRNCPY(DATA_TRANSFER(item)->value, json_str);
 						DATA_TRANSFER(item)->data = DATA_TRANSFER(item)->value;
 					}
-				} else {
+				} else if (json_is_integer(json_value)) {
 					snprintf(DATA_TRANSFER(item)->value,
 						 sizeof(DATA_TRANSFER(item)->value),
 						 "%"PRId64,
 						 (int64_t)json_integer_value(json_value));
 					DATA_TRANSFER(item)->data = DATA_TRANSFER(item)->value;
+				} else if (json_is_real(json_value)) {
+					snprintf(DATA_TRANSFER(item)->value,
+						 sizeof(DATA_TRANSFER(item)->value),
+						 "%f", json_real_value(json_value));
+					DATA_TRANSFER(item)->data = DATA_TRANSFER(item)->value;
+				} else {
+					/* Array - only one level array of strings for now (merkletree)
+					 * ignore other data */
+					size_t i, len, off, count = json_array_size(json_value);
+					json_t *json_element;
+					bool first = true;
+
+					len = 1024;
+					DATA_TRANSFER(item)->data = malloc(len);
+					if (!(DATA_TRANSFER(item)->data))
+						quithere(1, "malloc data (%d) OOM", (int)len);
+					off = 0;
+					for (i = 0; i < count; i++) {
+						json_element = json_array_get(json_value, i);
+						if (json_is_string(json_element)) {
+							json_str = json_string_value(json_element);
+							siz = strlen(json_str);
+							if (first)
+								first = false;
+							else {
+								APPEND_REALLOC(DATA_TRANSFER(item)->data,
+										off, len, " ");
+							}
+							APPEND_REALLOC(DATA_TRANSFER(item)->data,
+									off, len, json_str);
+						}
+					}
 				}
 
 				if (find_in_ktree(transfer_root, item, cmp_transfer, ctx)) {
