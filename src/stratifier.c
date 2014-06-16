@@ -401,6 +401,7 @@ static void purge_share_hashtable(int64_t wb_id)
 /* FIXME This message will be sent to the database once it's hooked in */
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
+	char *msg, *dump, *buf;
 	char cdfield[64];
 	json_t *val;
 
@@ -423,8 +424,17 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-char *dump = json_dumps(val, 0); LOGDEBUG("id.sharelog.json=%s",dump); dealloc(dump);
+	dump = json_dumps(val, 0);
 	json_decref(val);
+	ASPRINTF(&msg, "id.sharelog.json=%s", dump);
+	dealloc(dump);
+	buf = send_recv_ckdb(ckp, msg);
+	if (likely(buf)) {
+		LOGWARNING("Got workinfo response: %s", buf);
+		dealloc(buf);
+	} else
+		LOGWARNING("Got no workinfo response :(");
+	dealloc(msg);
 }
 
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
