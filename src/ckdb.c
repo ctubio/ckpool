@@ -1988,7 +1988,7 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 	int64_t workinfoid = -1;
 	WORKINFO *row;
 	char *ins;
-	char *params[10 + HISTORYDATECOUNT];
+	char *params[11 + HISTORYDATECOUNT];
 	int par;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -2016,6 +2016,7 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->workinfoid, NULL, 0);
+	params[par++] = str_to_buf(row->poolinstance, NULL, 0);
 	params[par++] = str_to_buf(row->transactiontree, NULL, 0);
 	params[par++] = str_to_buf(row->merklehash, NULL, 0);
 	params[par++] = str_to_buf(row->prevhash, NULL, 0);
@@ -2029,9 +2030,9 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 	PARCHK(par, params);
 
 	ins = "insert into workinfo "
-		"(workinfoid,transactiontree,merklehash,prevhash,"
-		"coinbase1,coinbase2,version,bits,ntime,reward"
-		HISTORYDATECONTROL ") values (" PQPARAM15 ")";
+		"(workinfoid,poolinstance,transactiontree,merklehash,"
+		"prevhash,coinbase1,coinbase2,version,bits,ntime,reward"
+		HISTORYDATECONTROL ") values (" PQPARAM16 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
