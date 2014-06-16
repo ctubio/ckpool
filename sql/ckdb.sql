@@ -33,7 +33,7 @@ CREATE TABLE workers (
     workerid bigint NOT NULL, -- unique per record
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
-    difficultydefault integer DEFAULT 128 NOT NULL,
+    difficultydefault integer DEFAULT 0 NOT NULL, -- 0 means default
     idlenotificationenabled char DEFAULT 'n'::character varying NOT NULL,
     idlenotificationtime integer DEFAULT 10 NOT NULL,
     createdate timestamp with time zone NOT NULL,
