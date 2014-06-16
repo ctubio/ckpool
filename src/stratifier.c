@@ -406,7 +406,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 
 	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
 
-	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,so,ss,ss,ss,ss}",
+	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,si,so,ss,ss,ss,ss}",
 			"method", "workinfo",
 			"workinfoid", wb->id,
 			"poolinstance", ckp->name,
@@ -417,6 +417,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"version", wb->bbversion,
 			"ntime", wb->ntime,
 			"bits", wb->nbit,
+			"reward", wb->coinbasevalue,
 			"merklehash", json_deep_copy(wb->merkle_array),
 			"createdate", cdfield,
 			"createby", "code",
