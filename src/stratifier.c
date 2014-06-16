@@ -1194,6 +1194,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 {
 	char *msg, *dump, *buf;
 	char cdfield[64];
+	bool ret = false;
 	json_t *val;
 	ts_t now;
 
@@ -1217,12 +1218,20 @@ static bool send_recv_auth(stratum_instance_t *client)
 	dealloc(dump);
 	buf = send_recv_ckdb(client->ckp, msg);
 	if (likely(buf)) {
+		char *secondaryuserid, *response = alloca(128);
+
 		LOGWARNING("Got auth response: %s", buf);
-		dealloc(buf);
+		sscanf(buf, "id.%*d.%s", response);
+		secondaryuserid = response;
+		strsep(&secondaryuserid, ".");
+		if (!strcmp(response, "added")) {
+			client->secondaryuserid = strdup(secondaryuserid);
+			ret = true;
+		}
 	} else
 		LOGWARNING("Got no auth response :(");
 	dealloc(msg);
-	return true;
+	return ret;
 }
 
 static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val)
