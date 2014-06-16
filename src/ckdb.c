@@ -2031,7 +2031,7 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 	ins = "insert into workinfo "
 		"(workinfoid,transactiontree,merklehash,prevhash,"
 		"coinbase1,coinbase2,version,bits,ntime,reward"
-		HISTORYDATECONTROL ") values (" PQPARAM16 ")";
+		HISTORYDATECONTROL ") values (" PQPARAM15 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
