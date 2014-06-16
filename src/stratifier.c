@@ -401,13 +401,13 @@ static void purge_share_hashtable(int64_t wb_id)
 /* FIXME This message will be sent to the database once it's hooked in */
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
-	char *msg, *dump, *buf;
 	char cdfield[64];
 	json_t *val;
+	char *buf;
 
 	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
 
-	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,si,so,ss,ss,ss,ss}",
+	val = json_pack("{ss,sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
 			"method", "workinfo",
 			"workinfoid", wb->id,
 			"poolinstance", ckp->name,
@@ -424,17 +424,12 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	dump = json_dumps(val, 0);
-	json_decref(val);
-	ASPRINTF(&msg, "id.sharelog.json=%s", dump);
-	dealloc(dump);
-	buf = send_recv_ckdb(ckp, msg);
+	buf = json_ckdb_call(ckp, "sharelog", val);
 	if (likely(buf)) {
 		LOGWARNING("Got workinfo response: %s", buf);
 		dealloc(buf);
 	} else
 		LOGWARNING("Got no workinfo response :(");
-	dealloc(msg);
 }
 
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
@@ -1192,10 +1187,10 @@ static user_instance_t *authorise_user(const char *workername)
  * and get parameters back */
 static bool send_recv_auth(stratum_instance_t *client)
 {
-	char *msg, *dump, *buf;
 	char cdfield[64];
 	bool ret = false;
 	json_t *val;
+	char *buf;
 	ts_t now;
 
 	ts_realtime(&now);
@@ -1212,25 +1207,21 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	dump = json_dumps(val, 0);
-	json_decref(val);
-	ASPRINTF(&msg, "id.authorise.json=%s", dump);
-	dealloc(dump);
-	buf = send_recv_ckdb(client->ckp, msg);
+	buf = json_ckdb_call(client->ckp, "authorise", val);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
 
-		LOGWARNING("Got auth response: %s", buf);
-		sscanf(buf, "id.%*d.%s", response);
+		sscanf(buf, "is.%*d.%s", response);
 		secondaryuserid = response;
 		strsep(&secondaryuserid, ".");
+		LOGWARNING("Got auth response: %s  response: %s  suid: %s", buf,
+			   response, secondaryuserid);
 		if (!strcmp(response, "added")) {
 			client->secondaryuserid = strdup(secondaryuserid);
 			ret = true;
 		}
 	} else
 		LOGWARNING("Got no auth response :(");
-	dealloc(msg);
 	return ret;
 }
 
@@ -1274,7 +1265,7 @@ static void stratum_send_diff(stratum_instance_t *client)
 {
 	json_t *json_msg;
 
-	json_msg = json_pack("{s[i]soss}", "params", client->diff, "id", json_null(),
+	json_msg = json_pack("{s[I]soss}", "params", client->diff, "id", json_null(),
 			     "method", "mining.set_difficulty");
 	stratum_add_send(json_msg, client->id);
 }
@@ -1560,10 +1551,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	double diff, wdiff = 0, sdiff = -1;
 	enum share_err err = SE_NONE;
-	char *msg, *dump, *buf;
+	char *fname, *s, *buf;
 	char idstring[20];
 	uint32_t ntime32;
-	char *fname, *s;
 	workbase_t *wb;
 	uchar hash[32];
 	int64_t id;
@@ -1751,21 +1741,15 @@ out_unlock:
 			LOGERR("Failed to fwrite to %s", fname);
 	} else
 		LOGERR("Failed to fopen %s", fname);
-	/* FIXME : Send val json to database here */
-	dump = json_dumps(val, 0);
-	json_decref(val);
-	ASPRINTF(&msg, "id.sharelog.json=%s", dump);
-	dealloc(dump);
-	buf = send_recv_ckdb(client->ckp, msg);
+	buf = json_ckdb_call(client->ckp, "sharelog", val);
 	if (likely(buf)) {
 		LOGWARNING("Got sharelog response: %s", buf);
 		dealloc(buf);
 	} else
 		LOGWARNING("Got no sharelog response :(");
-	dealloc(msg);
 out:
 	if (!share) {
-		val = json_pack("{ss,si,ss,ss,si,ss,ss,so,si,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"method", "shareerror",
 				"clientid", client->id,
 				"secondaryuserid", client->secondaryuserid,
@@ -1780,17 +1764,12 @@ out:
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
 		/* FIXME : Send val json to database here */
-		dump = json_dumps(val, 0);
-		json_decref(val);
-		ASPRINTF(&msg, "id.sharelog.json=%s", dump);
-		dealloc(dump);
-		buf = send_recv_ckdb(client->ckp, msg);
+		buf = json_ckdb_call(client->ckp, "sharelog", val);
 		if (likely(buf)) {
 			LOGWARNING("Got sharelog response: %s", buf);
 			dealloc(buf);
 		} else
 			LOGWARNING("Got no sharelog response :(");
-		dealloc(msg);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
 	return json_boolean(result);
@@ -2186,15 +2165,14 @@ static void *statsupdate(void *arg)
 		const double nonces = 4294967296;
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
-		char *msg, *dump, *buf;
 		int64_t pplns_shares;
 		char fname[512] = {};
 		tv_t now, diff;
+		char *s, *buf;
 		int users, i;
 		ts_t ts_now;
 		json_t *val;
 		FILE *fp;
-		char *s;
 
 		tv_time(&now);
 		timersub(&now, &stats.start_time, &diff);
@@ -2260,7 +2238,7 @@ static void *statsupdate(void *arg)
 		fprintf(fp, "%s\n", s);
 		dealloc(s);
 
-		val = json_pack("{si,sf,sf,sf,sf}",
+		val = json_pack("{sI,sf,sf,sf,sf}",
 				"Round shares", stats.round_shares,
 				"SPS1m", sps1,
 				"SPS5m", sps5,
@@ -2304,7 +2282,7 @@ static void *statsupdate(void *arg)
 
 			reward = 25 * instance->pplns_shares;
 			reward /= pplns_shares;
-			val = json_pack("{si,si,sf,ss,ss,ss,ss,ss,ss}",
+			val = json_pack("{sI,sI,sf,ss,ss,ss,ss,ss,ss}",
 					"Accepted", instance->diff_accepted,
 					"Rejected", instance->diff_rejected,
 					"Est reward", reward,
@@ -2348,17 +2326,12 @@ static void *statsupdate(void *arg)
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
-		dump = json_dumps(val, 0);
-		json_decref(val);
-		ASPRINTF(&msg, "id.stats.json=%s", dump);
-		dealloc(dump);
-		buf = send_recv_ckdb(ckp, msg);
+		buf = json_ckdb_call(ckp, "stats", val);
 		if (likely(buf)) {
 			LOGWARNING("Got stats response: %s", buf);
 			dealloc(buf);
 		} else
 			LOGWARNING("Got no stats response :(");
-		dealloc(msg);
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
