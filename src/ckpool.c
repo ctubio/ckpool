@@ -278,7 +278,7 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 	}
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s", path);
+		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
 		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, msg)))
@@ -289,6 +289,36 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 out:
 	if (unlikely(!buf))
 		LOGERR("Failure in send_recv_proc from %s %s:%d", file, func, line);
+	return buf;
+}
+
+/* As send_recv_proc but only to ckdb */
+char *_send_recv_ckdb(const char *path, const char *msg, const char *file, const char *func, const int line)
+{
+	char *buf = NULL;
+	int sockd;
+
+	if (unlikely(!path || !strlen(path))) {
+		LOGERR("Attempted to send message %s to null path in send_recv_ckdb", msg ? msg : "");
+		goto out;
+	}
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to ckdb in send_recv_ckdb");
+		goto out;
+	}
+	sockd = open_unix_client(path);
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Failed to open socket %s in send_recv_ckdb", path);
+		goto out;
+	}
+	if (unlikely(!send_unix_msg(sockd, msg)))
+		LOGWARNING("Failed to send %s to ckdb", msg);
+	else
+		buf = recv_unix_msg(sockd);
+	close(sockd);
+out:
+	if (unlikely(!buf))
+		LOGERR("Failure in send_recv_ckdb from %s %s:%d", file, func, line);
 	return buf;
 }
 
@@ -750,10 +780,13 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:g:kl:n:ps:")) != -1) {
+	while ((c = getopt(argc, argv, "c:d:g:kl:n:pS:s:")) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
+				break;
+			case 'd':
+				ckp.ckdb_name = optarg;
 				break;
 			case 'g':
 				ckp.grpnam = optarg;
@@ -774,6 +807,8 @@ int main(int argc, char **argv)
 			case 'p':
 				ckp.proxy = true;
 				break;
+			case 'S':
+				ckp.ckdb_sockdir = strdup(optarg);
 			case 's':
 				ckp.socket_dir = strdup(optarg);
 				break;
@@ -808,6 +843,16 @@ int main(int argc, char **argv)
 		realloc_strcat(&ckp.socket_dir, ckp.name);
 	}
 	trail_slash(&ckp.socket_dir);
+
+	if (!ckp.ckdb_name)
+		ckp.ckdb_name = "ckdb";
+	if (!ckp.ckdb_sockdir) {
+		ckp.ckdb_sockdir = strdup("/opt/");
+		realloc_strcat(&ckp.ckdb_sockdir, ckp.ckdb_name);
+	}
+	trail_slash(&ckp.ckdb_sockdir);
+	ckp.ckdb_sockname = ckp.ckdb_sockdir;
+	realloc_strcat(&ckp.ckdb_sockdir, "listener");
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
