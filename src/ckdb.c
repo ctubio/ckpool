@@ -2823,7 +2823,7 @@ static char *cmd_poolstats(char *id, __maybe_unused tv_t *now, __maybe_unused ch
 	return strdup(reply);
 }
 
-static char *cmd_newid(char *id, tv_t *now, char *by, char *code, char *inet)
+static char *cmd_newid(__maybe_unused char *id, tv_t *now, char *by, char *code, char *inet)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -2892,7 +2892,7 @@ foil:
 		return strdup(reply);
 	}
 
-	LOGDEBUG("%s.added.%s", id, DATA_TRANSFER(i_idname)->data);
+	LOGDEBUG("added.%s", DATA_TRANSFER(i_idname)->data);
 	snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_idname)->data);
 	return strdup(reply);
 }
@@ -2960,7 +2960,7 @@ static char *cmd_payments(char *id, __maybe_unused tv_t *now, __maybe_unused cha
 	return buf;
 }
 
-static char *cmd_sharelog(char *id, tv_t *now, char *by, char *code, char *inet)
+static char *cmd_sharelog(__maybe_unused char *id, tv_t *now, char *by, char *code, char *inet)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -3044,7 +3044,7 @@ static char *cmd_sharelog(char *id, tv_t *now, char *by, char *code, char *inet)
 		}
 
 		LOGDEBUG("added.%s.%"PRId64, DATA_TRANSFER(i_method)->data, workinfoid);
-		snprintf(reply, siz, "%s.added.%"PRId64, id, workinfoid);
+		snprintf(reply, siz, "added.%"PRId64, workinfoid);
 		return strdup(reply);
 	} else if (strcasecmp(DATA_TRANSFER(i_method)->data, METHOD_SHARES) == 0) {
 		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_enonce1;
@@ -3109,7 +3109,7 @@ static char *cmd_sharelog(char *id, tv_t *now, char *by, char *code, char *inet)
 
 		LOGDEBUG("added.%s.%s", DATA_TRANSFER(i_method)->data,
 					DATA_TRANSFER(i_nonce)->data);
-		snprintf(reply, siz, "%s.added.%s", id, DATA_TRANSFER(i_nonce)->data);
+		snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_nonce)->data);
 		return strdup(reply);
 	} else if (strcasecmp(DATA_TRANSFER(i_method)->data, METHOD_SHAREERRORS) == 0) {
 		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
@@ -3159,7 +3159,7 @@ static char *cmd_sharelog(char *id, tv_t *now, char *by, char *code, char *inet)
 
 		LOGDEBUG("added.%s.%s", DATA_TRANSFER(i_method)->data,
 					DATA_TRANSFER(i_username)->data);
-		snprintf(reply, siz, "%s.added.%s", id, DATA_TRANSFER(i_username)->data);
+		snprintf(reply, siz, "added.%s", DATA_TRANSFER(i_username)->data);
 		return strdup(reply);
 	}
 
@@ -3167,7 +3167,7 @@ static char *cmd_sharelog(char *id, tv_t *now, char *by, char *code, char *inet)
 	return strdup(reply);
 }
 
-static char *cmd_auth(char *id, tv_t *now, char *by, char *code, char *inet)
+static char *cmd_auth(__maybe_unused char *id, tv_t *now, char *by, char *code, char *inet)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -3217,7 +3217,7 @@ static char *cmd_auth(char *id, tv_t *now, char *by, char *code, char *inet)
 		}
 
 		LOGDEBUG("added.%s.%s", DATA_TRANSFER(i_method)->data, secuserid);
-		snprintf(reply, siz, "%s.added.%s", id, secuserid);
+		snprintf(reply, siz, "added.%s", secuserid);
 		return strdup(reply);
 	}
 
