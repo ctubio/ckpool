@@ -242,6 +242,7 @@ struct stratum_instance {
 	user_instance_t *user_instance;
 	char *useragent;
 	char *workername;
+	char *secondaryuserid;
 	int user_id;
 
 	ckpool_t *ckp;
@@ -397,7 +398,7 @@ static void purge_share_hashtable(int64_t wb_id)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
 }
 
-/* This message will be sent to the database once it's hooked in */
+/* FIXME This message will be sent to the database once it's hooked in */
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
 	char cdfield[64];
@@ -405,7 +406,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 
 	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
 
-	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,so,ss,ss,ss,ss}",
+	val = json_pack("{ss,si,ss,ss,ss,ss,ss,ss,ss,ss,si,so,ss,ss,ss,ss}",
 			"method", "workinfo",
 			"workinfoid", wb->id,
 			"poolinstance", ckp->name,
@@ -416,11 +417,13 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"version", wb->bbversion,
 			"ntime", wb->ntime,
 			"bits", wb->nbit,
+			"reward", wb->coinbasevalue,
 			"merklehash", json_deep_copy(wb->merkle_array),
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
+char *dump = json_dumps(val, 0); LOGDEBUG("id.sharelog.json=%s",dump); dealloc(dump);
 	json_decref(val);
 }
 
@@ -1175,8 +1178,8 @@ static user_instance_t *authorise_user(const char *workername)
 	return instance;
 }
 
-/* Send this to the database and parse the response to authorise a user and
- * get paramters back */
+/* FIXME Send this to the database and parse the response to authorise a user
+ * and get paramters back */
 static bool send_recv_auth(stratum_instance_t *client)
 {
 	char cdfield[64];
@@ -1191,12 +1194,13 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"useragent", client->useragent,
-			"client_id", client->id,
+			"clientid", client->id,
 			"enonce1", client->enonce1,
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
+char *dump = json_dumps(val, 0); LOGDEBUG("id.authorise.json=%s",dump); dealloc(dump);
 	json_decref(val);
 	return true;
 }
@@ -1676,6 +1680,9 @@ out_unlock:
 
 	val = json_object();
 	json_set_int(val, "workinfoid", id);
+	json_set_int(val, "clientid", client->id);
+	json_set_string(val, "enonce1", client->enonce1);
+	json_set_string(val, "secondaryuserid", client->secondaryuserid);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
 	json_set_string(val, "ntime", ntime);
@@ -1685,7 +1692,7 @@ out_unlock:
 	json_set_bool(val, "result", result);
 	json_object_set(val, "reject-reason", json_object_dup(json_msg, "reject-reason"));
 	json_object_set(val, "error", *err_val);
-	json_set_int(val, "errno", err);
+	json_set_int(val, "errn", err);
 	json_set_string(val, "createdate", cdfield);
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
@@ -1701,7 +1708,7 @@ out_unlock:
 	/* Now write to the pool's sharelog, adding workername to json */
 	sprintf(fname, "%s.sharelog", logdir);
 	json_set_string(val, "method", "shares");
-	json_set_string(val, "worker", client->workername);
+	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", client->user_instance->username);
 	fp = fopen(fname, "a");
 	if (likely(fp)) {
@@ -1715,21 +1722,26 @@ out_unlock:
 	} else
 		LOGERR("Failed to fopen %s", fname);
 	/* FIXME : Send val json to database here */
+s = json_dumps(val, 0); LOGDEBUG("id.sharelog.json=%s",s); dealloc(s);
 	json_decref(val);
 out:
 	if (!share) {
-		val = json_pack("{ss,si,ss,ss,so,si,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,ss,ss,si,ss,ss,so,si,ss,ss,ss,ss}",
 				"method", "shareerror",
+				"clientid", client->id,
+				"secondaryuserid", client->secondaryuserid,
+				"enonce1", client->enonce1,
 				"workinfoid", current_workbase->id,
-				"worker", client->workername,
+				"workername", client->workername,
 				"username", client->user_instance->username,
 				"error", json_copy(*err_val),
-				"errno", err,
+				"errn", err,
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
 		/* FIXME : Send val json to database here */
+s = json_dumps(val, 0); LOGDEBUG("id.sharelog.json=%s",s); dealloc(s);
 		json_decref(val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
