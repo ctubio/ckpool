@@ -278,7 +278,7 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 	}
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s", path);
+		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
 		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, msg)))
@@ -289,6 +289,36 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 out:
 	if (unlikely(!buf))
 		LOGERR("Failure in send_recv_proc from %s %s:%d", file, func, line);
+	return buf;
+}
+
+/* As send_recv_proc but only to ckdb */
+char *_send_recv_ckdb(const char *path, const char *msg, const char *file, const char *func, const int line)
+{
+	char *buf = NULL;
+	int sockd;
+
+	if (unlikely(!path || !strlen(path))) {
+		LOGERR("Attempted to send message %s to null path in send_recv_ckdb", msg ? msg : "");
+		goto out;
+	}
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to ckdb in send_recv_ckdb");
+		goto out;
+	}
+	sockd = open_unix_client(path);
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Failed to open socket %s in send_recv_ckdb", path);
+		goto out;
+	}
+	if (unlikely(!send_unix_msg(sockd, msg)))
+		LOGWARNING("Failed to send %s to ckdb", msg);
+	else
+		buf = recv_unix_msg(sockd);
+	close(sockd);
+out:
+	if (unlikely(!buf))
+		LOGERR("Failure in send_recv_ckdb from %s %s:%d", file, func, line);
 	return buf;
 }
 

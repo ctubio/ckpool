@@ -134,6 +134,8 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
+char *_send_recv_ckdb(const char *path, const char *msg, const char *file, const char *func, const int line);
+#define send_recv_ckdb(path, msg) _send_recv_ckdb(path, msg, __FILE__, __func__, __LINE__)
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
