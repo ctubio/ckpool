@@ -293,8 +293,9 @@ out:
 }
 
 /* As send_recv_proc but only to ckdb */
-char *_send_recv_ckdb(const char *path, const char *msg, const char *file, const char *func, const int line)
+char *_send_recv_ckdb(const ckpool_t *ckp, const char *msg, const char *file, const char *func, const int line)
 {
+	const char *path = ckp->ckdb_sockname;
 	char *buf = NULL;
 	int sockd;
 

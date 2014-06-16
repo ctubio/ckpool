@@ -1178,10 +1178,11 @@ static user_instance_t *authorise_user(const char *workername)
 	return instance;
 }
 
-/* FIXME Send this to the database and parse the response to authorise a user
- * and get paramters back */
+/* FIXME: Send this to the database and parse the response to authorise a user
+ * and get parameters back */
 static bool send_recv_auth(stratum_instance_t *client)
 {
+	char *msg, *dump, *buf;
 	char cdfield[64];
 	json_t *val;
 	ts_t now;
@@ -1200,8 +1201,17 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-char *dump = json_dumps(val, 0); LOGDEBUG("id.authorise.json=%s",dump); dealloc(dump);
+	dump = json_dumps(val, 0);
 	json_decref(val);
+	ASPRINTF(&msg, "id.authorise.json=%s", dump);
+	dealloc(dump);
+	buf = send_recv_ckdb(client->ckp, msg);
+	if (likely(buf)) {
+		LOGWARNING("Got auth response: %s", buf);
+		dealloc(buf);
+	} else
+		LOGWARNING("Got no auth response :(");
+	dealloc(msg);
 	return true;
 }
 
@@ -1531,6 +1541,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	double diff, wdiff = 0, sdiff = -1;
 	enum share_err err = SE_NONE;
+	char *msg, *dump, *buf;
 	char idstring[20];
 	uint32_t ntime32;
 	char *fname, *s;
@@ -1722,8 +1733,17 @@ out_unlock:
 	} else
 		LOGERR("Failed to fopen %s", fname);
 	/* FIXME : Send val json to database here */
-s = json_dumps(val, 0); LOGDEBUG("id.sharelog.json=%s",s); dealloc(s);
+	dump = json_dumps(val, 0);
 	json_decref(val);
+	ASPRINTF(&msg, "id.sharelog.json=%s", dump);
+	dealloc(dump);
+	buf = send_recv_ckdb(client->ckp, msg);
+	if (likely(buf)) {
+		LOGWARNING("Got sharelog response: %s", buf);
+		dealloc(buf);
+	} else
+		LOGWARNING("Got no sharelog response :(");
+	dealloc(msg);
 out:
 	if (!share) {
 		val = json_pack("{ss,si,ss,ss,si,ss,ss,so,si,ss,ss,ss,ss}",
@@ -1741,8 +1761,17 @@ out:
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
 		/* FIXME : Send val json to database here */
-s = json_dumps(val, 0); LOGDEBUG("id.sharelog.json=%s",s); dealloc(s);
+		dump = json_dumps(val, 0);
 		json_decref(val);
+		ASPRINTF(&msg, "id.sharelog.json=%s", dump);
+		dealloc(dump);
+		buf = send_recv_ckdb(client->ckp, msg);
+		if (likely(buf)) {
+			LOGWARNING("Got sharelog response: %s", buf);
+			dealloc(buf);
+		} else
+			LOGWARNING("Got no sharelog response :(");
+		dealloc(msg);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
 	return json_boolean(result);
