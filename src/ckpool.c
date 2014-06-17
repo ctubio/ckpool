@@ -58,7 +58,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 				tm->tm_min,
 				tm->tm_sec,
 				buf);
-			if (loglevel <= LOG_ERR)
+			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno));
 			fprintf(LOGFP, "\n");
 			fflush(LOGFP);
@@ -66,7 +66,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		}
 		if (loglevel <= LOG_WARNING) {\
 			fprintf(stderr, "%s", buf);
-			if (loglevel <= LOG_ERR)
+			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(stderr, " with errno %d: %s", errno, strerror(errno));
 			fprintf(stderr, "\n");
 			fflush(stderr);
