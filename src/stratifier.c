@@ -209,6 +209,7 @@ struct user_instance {
 	int id;
 
 	tv_t last_share;
+	time_t last_stats;
 
 	double dsps1;
 	double dsps5;
@@ -224,7 +225,7 @@ typedef struct user_instance user_instance_t;
 
 static user_instance_t *user_instances;
 
-/* Per client stratum instance, to be further expanded */
+/* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
 	int id;
@@ -2138,6 +2139,50 @@ static void *ckdbqueue(void *arg)
 	return NULL;
 }
 
+static const double nonces = 4294967296;
+
+/* Called every 15 seconds, we send the updated stats to ckdb of those users
+ * who have gone 10 minutes between updates. This ends up staggering stats to
+ * avoid floods of stat data coming at once. */
+static void update_userstats(ckpool_t *ckp)
+{
+	user_instance_t *instance, *tmp;
+	char cdfield[64];
+	time_t now_t;
+	ts_t ts_now;
+	json_t *val;
+
+	ts_realtime(&ts_now);
+	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
+	now_t = ts_now.tv_sec;
+
+	ck_rlock(&instance_lock);
+	HASH_ITER(hh, user_instances, instance, tmp) {
+		double ghs1, ghs5, ghs60, ghs1440;
+
+		if (instance->last_stats > now_t - 600)
+			continue;
+		instance->last_stats = now_t;
+		ghs1 = instance->dsps1 * nonces;
+		ghs5 = instance->dsps5 * nonces;
+		ghs60 = instance->dsps60 * nonces;
+		ghs1440 = instance->dsps1440 * nonces;
+		val = json_pack("{ss,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
+				"poolinstance", ckp->name,
+				"username", instance->username,
+				"hashrate", ghs1,
+				"hashrate5m", ghs5,
+				"hashrate1hr", ghs60,
+				"hashrate24hr", ghs1440,
+				"createdate", cdfield,
+				"createby", "code",
+				"createcode", __func__,
+				"createinet", "127.0.0.1");
+		ckdbq_add(ID_USERSTATS, val);
+	}
+	ck_runlock(&instance_lock);
+}
+
 static void *statsupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
@@ -2152,7 +2197,6 @@ static void *statsupdate(void *arg)
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		double ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
 		char suffix360[16], suffix1440[16];
-		const double nonces = 4294967296;
 		double sps1, sps5, sps15, sps60;
 		user_instance_t *instance, *tmp;
 		char fname[512] = {};
@@ -2289,7 +2333,6 @@ static void *statsupdate(void *arg)
 		}
 		ck_runlock(&instance_lock);
 
-		/* FIXME : Output this json to database */
 		ts_realtime(&ts_now);
 		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 		val = json_pack("{ss,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
@@ -2311,6 +2354,7 @@ static void *statsupdate(void *arg)
 		for (i = 0; i < 4; i++) {
 			cksleep_ms_r(&stats.last_update, 15000);
 			cksleep_prepare_r(&stats.last_update);
+			update_userstats(ckp);
 
 			mutex_lock(&stats_lock);
 			stats.accounted_shares += stats.unaccounted_shares;
