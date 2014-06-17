@@ -244,6 +244,8 @@ void *receiver(void *arg)
 
 retry:
 	nfds = 0;
+	while (!ci->accept)
+		sleep(1);
 
 	ck_rlock(&ci->lock);
 	HASH_ITER(fdhh, fdclients, client, tmp) {
