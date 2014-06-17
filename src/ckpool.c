@@ -881,13 +881,18 @@ int main(int argc, char **argv)
 		realloc_strcat(&ckp.ckdb_sockdir, ckp.ckdb_name);
 	}
 	trail_slash(&ckp.ckdb_sockdir);
+
+	ret = mkdir(ckp.ckdb_sockdir, 0750);
+	if (ret && errno != EEXIST)
+		quit(1, "Failed to make directory %s", ckp.ckdb_sockdir);
+
 	ckp.ckdb_sockname = ckp.ckdb_sockdir;
 	realloc_strcat(&ckp.ckdb_sockdir, "listener");
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
 
-	ret = mkdir(ckp.socket_dir, 0700);
+	ret = mkdir(ckp.socket_dir, 0750);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
 
@@ -927,7 +932,7 @@ int main(int argc, char **argv)
 
 	/* Create the log directory */
 	trail_slash(&ckp.logdir);
-	ret = mkdir(ckp.logdir, 0700);
+	ret = mkdir(ckp.logdir, 0750);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make log directory %s", ckp.logdir);
 
