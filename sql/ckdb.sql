@@ -169,7 +169,7 @@ CREATE TABLE shares ( -- not stored in the db - only in log files
     nonce character varying(64) NOT NULL,
     diff float NOT NULL,
     sdiff float NOT NULL,
-    errno integer NOT NULL,
+    errn integer NOT NULL,
     error character varying(64) DEFAULT ''::character varying NOT NULL, -- optional
     secondaryuserid character varying(64) NOT NULL,
     createdate timestamp with time zone NOT NULL,
@@ -186,7 +186,7 @@ CREATE TABLE shareerrors ( -- not stored in the db - only in log files
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
     clientid integer NOT NULL,
-    errno integer NOT NULL,
+    errn integer NOT NULL,
     error character varying(64) DEFAULT ''::character varying NOT NULL, -- optional
     secondaryuserid character varying(64) NOT NULL,
     createdate timestamp with time zone NOT NULL,

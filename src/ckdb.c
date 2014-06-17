@@ -2422,7 +2422,7 @@ static bool shareerrors_add(char *workinfoid, char *username, char *workername,
 	TXT_TO_BIGINT("workinfoid", workinfoid, shareerrors->workinfoid);
 	STRNCPY(shareerrors->workername, workername);
 	TXT_TO_INT("clientid", clientid, shareerrors->clientid);
-	TXT_TO_INT("errno", errn, shareerrors->errn);
+	TXT_TO_INT("errn", errn, shareerrors->errn);
 	STRNCPY(shareerrors->error, error);
 	STRNCPY(shareerrors->secondaryuserid, secondaryuserid);
 
@@ -3484,7 +3484,7 @@ static char *cmd_sharelog(__maybe_unused char *id, tv_t *now, char *by, char *co
 		if (!i_clientid)
 			return strdup(reply);
 
-		i_errn = require_name("errno", 1, NULL, reply, siz);
+		i_errn = require_name("errn", 1, NULL, reply, siz);
 		if (!i_errn)
 			return strdup(reply);
 
