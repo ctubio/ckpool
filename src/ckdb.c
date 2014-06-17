@@ -3339,7 +3339,7 @@ static char *cmd_sharelog(__maybe_unused char *id, tv_t *now, char *by, char *co
 		if (!i_poolinstance)
 			return strdup(reply);
 
-		i_transactiontree = require_name("transactiontree", 1, NULL, reply, siz);
+		i_transactiontree = require_name("transactiontree", 0, NULL, reply, siz);
 		if (!i_transactiontree)
 			return strdup(reply);
 
