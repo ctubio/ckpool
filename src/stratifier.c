@@ -41,10 +41,8 @@ struct pool_stats {
 	tv_t start_time;
 	ts_t last_update;
 
-	int live_clients;
-	int dead_clients;
-	int reused_clients;
-	int reusable_clients;
+	int workers;
+	int users;
 
 	/* Absolute shares stats */
 	int64_t unaccounted_shares;
@@ -218,6 +216,8 @@ struct user_instance {
 	double dsps60;
 	double dsps360;
 	double dsps1440;
+
+	int workers;
 };
 
 typedef struct user_instance user_instance_t;
@@ -582,14 +582,12 @@ static void drop_allclients(ckpool_t *ckp)
 	ck_wlock(&instance_lock);
 	HASH_ITER(hh, stratum_instances, client, tmp) {
 		HASH_DEL(stratum_instances, client);
-		stats.live_clients--;
 		sprintf(buf, "dropclient=%d", client->id);
 		send_proc(ckp->connector, buf);
 	}
-	HASH_ITER(hh, disconnected_instances, client, tmp) {
-		stats.reusable_clients--;
+	HASH_ITER(hh, disconnected_instances, client, tmp)
 		HASH_DEL(disconnected_instances, client);
-	}
+	stats.users = stats.workers = 0;
 	ck_wunlock(&instance_lock);
 }
 
@@ -751,7 +749,6 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 
-	stats.live_clients++;
 	instance->id = id;
 	instance->diff = instance->old_diff = ckp->startdiff;
 	instance->ckp = ckp;
@@ -872,17 +869,15 @@ static void drop_client(int id)
 	if (client) {
 		stratum_instance_t *old_client = NULL;
 
-		stats.live_clients--;
-		stats.dead_clients++;
-
 		ck_ulock(&instance_lock);
+		if (client->authorised && !--stats.workers)
+			stats.users--;
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client */
-		if (!old_client) {
-			stats.reusable_clients++;
+		if (!old_client)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		} else // Keep around instance so we don't get a dereference
+		else // Keep around instance so we don't get a dereference
 			HASH_ADD(hh, dead_instances, enonce1_64, sizeof(uint64_t), client);
 		ck_dwilock(&instance_lock);
 	}
@@ -1096,7 +1091,6 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 			if (disconnected_sessionid_exists(buf, client_id)) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
-				stats.reused_clients++;
 			}
 		}
 	}
@@ -1229,6 +1223,12 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	client->workername = strdup(buf);
 	ret = send_recv_auth(client);
 	client->authorised = ret;
+	if (client->authorised) {
+		mutex_lock(&stats_lock);
+		if (!stats.workers++)
+			stats.users++;
+		mutex_unlock(&stats_lock);
+	}
 out:
 	return json_boolean(ret);
 }
@@ -2157,11 +2157,11 @@ static void *statsupdate(void *arg)
 		user_instance_t *instance, *tmp;
 		char fname[512] = {};
 		tv_t now, diff;
-		int users, i;
 		ts_t ts_now;
 		json_t *val;
 		FILE *fp;
 		char *s;
+		int i;
 
 		tv_time(&now);
 		timersub(&now, &stats.start_time, &diff);
@@ -2200,12 +2200,10 @@ static void *statsupdate(void *arg)
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
 
-		val = json_pack("{si,si,si,si,si}",
+		val = json_pack("{si,si,si}",
 				"runtime", diff.tv_sec,
-				"Live clients", stats.live_clients,
-				"Dead clients", stats.dead_clients,
-				"Reusable clients",stats.reusable_clients,
-				"Reused clients", stats.reused_clients);
+				"Users", stats.users,
+				"Workers", stats.workers);
 		s = json_dumps(val, 0);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
@@ -2238,7 +2236,6 @@ static void *statsupdate(void *arg)
 		fclose(fp);
 
 		ck_rlock(&instance_lock);
-		users = HASH_COUNT(user_instances);
 		HASH_ITER(hh, user_instances, instance, tmp) {
 			bool idle = false;
 			double ghs;
@@ -2297,8 +2294,8 @@ static void *statsupdate(void *arg)
 		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 		val = json_pack("{ss,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
-				"users", users,
-				"workers", stats.live_clients,
+				"users", stats.users,
+				"workers", stats.workers,
 				"hashrate", ghs1,
 				"hashrate5m", ghs5,
 				"hashrate1hr", ghs60,
