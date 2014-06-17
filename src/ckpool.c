@@ -323,6 +323,29 @@ out:
 	return buf;
 }
 
+/* Send a json msg to ckdb with its idmsg and return the response, consuming
+ * the json */
+char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
+		      const char *file, const char *func, const int line)
+{
+	char *msg = NULL, *dump, *buf = NULL;
+
+	dump = json_dumps(val, JSON_COMPACT);
+	if (unlikely(!dump)) {
+		LOGWARNING("Json dump failed in json_ckdb_call from %s %s:%d", file, func, line);
+		goto out;
+	}
+	ASPRINTF(&msg, "id.%s.json=%s", idmsg, dump);
+	free(dump);
+	LOGDEBUG("Sending ckdb: %s", msg);
+	buf = _send_recv_ckdb(ckp, msg, file, func, line);
+	LOGDEBUG("Received from ckdb: %s", buf);
+	free(msg);
+out:
+	json_decref(val);
+	return buf;
+}
+
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
