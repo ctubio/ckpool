@@ -1763,6 +1763,27 @@ static K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *worke
 	return item;
 }
 
+static K_ITEM *new_default_worker(PGconn *conn, bool update, int64_t userid, char *workername,
+			  tv_t *now, char *by, char *code, char *inet)
+{
+	bool conned = false;
+	K_ITEM *item;
+
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+
+	item = new_worker(conn, update, userid, workername, DIFFICULTYDEFAULT_DEF_STR,
+				IDLENOTIFICATIONENABLED_DEF, IDLENOTIFICATIONTIME_DEF_STR,
+				now, by, code, inet);
+
+	if (conned)
+		PQfinish(conn);
+
+	return item;
+}
+
 /* unused
 static K_ITEM *new_worker_find_user(PGconn *conn, bool update, char *username,
 				    char *workername, char *diffdef,
@@ -2048,6 +2069,8 @@ static K_ITEM *find_workinfo(int64_t workinfoid)
 	K_ITEM look;
 
 	workinfo.workinfoid = workinfoid;
+	workinfo.expirydate.tv_sec = default_expiry.tv_sec;
+	workinfo.expirydate.tv_usec = default_expiry.tv_usec;
 
 	look.data = (void *)(&workinfo);
 	return find_in_ktree(workinfo_root, &look, cmp_workinfo, ctx);
@@ -2347,7 +2370,8 @@ static bool shares_add(char *workinfoid, char *username, char *workername, char 
 	if (!w_item)
 		goto unitem;
 
-	w_item = find_workers(shares->userid, shares->workername);
+	w_item = new_default_worker(NULL, false, shares->userid, shares->workername,
+					now, by, code, inet);
 	if (!w_item)
 		goto unitem;
 
@@ -2433,7 +2457,8 @@ static bool shareerrors_add(char *workinfoid, char *username, char *workername,
 	if (!w_item)
 		goto unitem;
 
-	w_item = find_workers(shareerrors->userid, shareerrors->workername);
+	w_item = new_default_worker(NULL, false, shareerrors->userid, shareerrors->workername,
+					now, by, code, inet);
 	if (!w_item)
 		goto unitem;
 
