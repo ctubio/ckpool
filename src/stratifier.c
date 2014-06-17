@@ -516,7 +516,8 @@ static void update_base(ckpool_t *ckp)
 	if (wb->transactions) {
 		json_strdup(&wb->txn_data, val, "txn_data");
 		json_strdup(&wb->txn_hashes, val, "txn_hashes");
-	}
+	} else
+		wb->txn_hashes = ckzalloc(1);
 	json_intcpy(&wb->merkles, val, "merkles");
 	wb->merkle_array = json_array();
 	if (wb->merkles) {
