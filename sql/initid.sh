@@ -19,7 +19,7 @@ process()
 #
 addid()
 {
- msg="1.newid.idname=$1${fldsep}idvalue=$2"
+ msg="newid.$1.idname=$1${fldsep}idvalue=$2"
  process "$msg"
 }
 #
