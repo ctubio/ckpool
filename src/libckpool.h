@@ -397,6 +397,8 @@ const char *__json_array_string(json_t *val, unsigned int entry);
 char *json_array_string(json_t *val, unsigned int entry);
 json_t *json_object_dup(json_t *val, const char *entry);
 
+bool rotating_log(const char *path, const char *msg);
+
 void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
 void trail_slash(char **buf);
