@@ -325,7 +325,7 @@ out:
 
 /* Send a json msg to ckdb with its idmsg and return the response, consuming
  * the json on success */
-char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
+char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val, bool logged,
 		      const char *file, const char *func, const int line)
 {
 	char *msg = NULL, *dump, *buf = NULL;
@@ -336,6 +336,12 @@ char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
 		return buf;
 	}
 	ASPRINTF(&msg, "id.%s.json=%s", idmsg, dump);
+	if (!logged) {
+		char logname[512];
+
+		snprintf(logname, 511, "%s%s", ckp->logdir, ckp->ckdb_name);
+		rotating_log(logname, msg);
+	}
 	free(dump);
 	LOGDEBUG("Sending ckdb: %s", msg);
 	buf = _send_recv_ckdb(ckp, msg, file, func, line);

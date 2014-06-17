@@ -1171,7 +1171,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	buf = json_ckdb_call(client->ckp, ckdb_ids[ID_AUTH], val);
+	buf = json_ckdb_call(client->ckp, ckdb_ids[ID_AUTH], val, false);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
 
@@ -2106,6 +2106,7 @@ static void *ckdbqueue(void *arg)
 	rename_proc("ckdbqueue");
 
 	while (42) {
+		bool logged = false;
 		char *buf = NULL;
 		ckdb_msg_t *msg;
 
@@ -2121,11 +2122,12 @@ static void *ckdbqueue(void *arg)
 			continue;
 
 		while (!buf) {
-			buf = json_ckdb_call(ckp, ckdb_ids[msg->idtype], msg->val);
+			buf = json_ckdb_call(ckp, ckdb_ids[msg->idtype], msg->val, logged);
 			if (unlikely(!buf)) {
 				LOGWARNING("Failed to talk to ckdb, queueing messages");
 				sleep(5);
 			}
+			logged = true;
 		}
 		LOGINFO("Got %s ckdb response: %s", ckdb_ids[msg->idtype], buf);
 		free(buf);

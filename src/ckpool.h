@@ -136,9 +136,9 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 #define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_ckdb(const ckpool_t *ckp, const char *msg, const char *file, const char *func, const int line);
 #define send_recv_ckdb(ckp, msg) _send_recv_ckdb(ckp, msg, __FILE__, __func__, __LINE__)
-char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
+char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val, bool logged,
 		      const char *file, const char *func, const int line);
-#define json_ckdb_call(ckp, idmsg, val) _json_ckdb_call(ckp, idmsg, val, __FILE__, __func__, __LINE__)
+#define json_ckdb_call(ckp, idmsg, val, logged) _json_ckdb_call(ckp, idmsg, val, logged, __FILE__, __func__, __LINE__)
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
