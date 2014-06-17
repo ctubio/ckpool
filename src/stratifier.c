@@ -263,6 +263,16 @@ static share_t *shares;
 
 static cklock_t share_lock;
 
+#define ID_AUTH 0
+#define ID_SHARELOG 1
+#define ID_STATS 2
+
+static const char *ckdb_ids[] = {
+	"authorise",
+	"sharelog",
+	"stats"
+};
+
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 {
 	char header[228];
@@ -416,7 +426,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	buf = json_ckdb_call(ckp, "sharelog", val);
+	buf = json_ckdb_call(ckp, ckdb_ids[ID_SHARELOG], val);
 	if (likely(buf)) {
 		LOGINFO("Got workinfo response: %s", buf);
 		dealloc(buf);
@@ -1138,7 +1148,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	buf = json_ckdb_call(client->ckp, "authorise", val);
+	buf = json_ckdb_call(client->ckp, ckdb_ids[ID_AUTH], val);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
 
@@ -1661,7 +1671,7 @@ out_unlock:
 			LOGERR("Failed to fwrite to %s", fname);
 	} else
 		LOGERR("Failed to fopen %s", fname);
-	buf = json_ckdb_call(client->ckp, "sharelog", val);
+	buf = json_ckdb_call(client->ckp, ckdb_ids[ID_SHARELOG], val);
 	if (likely(buf)) {
 		LOGINFO("Got shares response: %s", buf);
 		dealloc(buf);
@@ -1684,7 +1694,7 @@ out:
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
 		/* FIXME : Send val json to database here */
-		buf = json_ckdb_call(client->ckp, "sharelog", val);
+		buf = json_ckdb_call(client->ckp, ckdb_ids[ID_SHARELOG], val);
 		if (likely(buf)) {
 			LOGINFO("Got shareerror response: %s", buf);
 			dealloc(buf);
@@ -2237,12 +2247,12 @@ static void *statsupdate(void *arg)
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
-		buf = json_ckdb_call(ckp, "stats", val);
+		buf = json_ckdb_call(ckp, ckdb_ids[ID_STATS], val);
 		if (likely(buf)) {
-			LOGWARNING("Got stats response: %s", buf);
+			LOGINFO("Got stats response: %s", buf);
 			dealloc(buf);
 		} else
-			LOGWARNING("Got no stats response :(");
+			LOGWARNING("Got no stats response from ckdb :(");
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
