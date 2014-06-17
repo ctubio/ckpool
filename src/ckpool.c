@@ -324,7 +324,7 @@ out:
 }
 
 /* Send a json msg to ckdb with its idmsg and return the response, consuming
- * the json */
+ * the json on success */
 char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
 		      const char *file, const char *func, const int line)
 {
@@ -333,7 +333,7 @@ char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
 	dump = json_dumps(val, JSON_COMPACT);
 	if (unlikely(!dump)) {
 		LOGWARNING("Json dump failed in json_ckdb_call from %s %s:%d", file, func, line);
-		goto out;
+		return buf;
 	}
 	ASPRINTF(&msg, "id.%s.json=%s", idmsg, dump);
 	free(dump);
@@ -341,8 +341,8 @@ char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val,
 	buf = _send_recv_ckdb(ckp, msg, file, func, line);
 	LOGDEBUG("Received from ckdb: %s", buf);
 	free(msg);
-out:
-	json_decref(val);
+	if (likely(buf))
+		json_decref(val);
 	return buf;
 }
 
