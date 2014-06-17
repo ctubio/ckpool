@@ -278,13 +278,19 @@ static share_t *shares;
 static cklock_t share_lock;
 
 #define ID_AUTH 0
-#define ID_SHARELOG 1
-#define ID_STATS 2
+#define ID_WORKINFO 1
+#define ID_SHARES 2
+#define ID_SHAREERR 3
+#define ID_POOLSTATS 4
+#define ID_USERSTATS 5
 
 static const char *ckdb_ids[] = {
 	"authorise",
-	"sharelog",
-	"stats"
+	"workinfo",
+	"shares",
+	"shareerror",
+	"poolstats",
+	"userstats"
 };
 
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
@@ -434,8 +440,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 
 	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
 
-	val = json_pack("{ss,sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
-			"method", "workinfo",
+	val = json_pack("{sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
 			"workinfoid", wb->id,
 			"poolinstance", ckp->name,
 			"transactiontree", wb->txn_hashes,
@@ -451,7 +456,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	ckdbq_add(ID_SHARELOG, val);
+	ckdbq_add(ID_WORKINFO, val);
 }
 
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
@@ -1160,8 +1165,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,si,ss,ss,ss,ss}",
-			"method", "authorise",
+	val = json_pack("{ss,ss,ss,si,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"useragent", client->useragent,
@@ -1181,7 +1185,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 		LOGINFO("User %s Worker %s got auth response: %s  suid: %s",
 			client->user_instance->username, client->workername,
 			response, secondaryuserid);
-		if (!strcmp(response, "added") && secondaryuserid) {
+		if (!strcmp(response, "ok") && secondaryuserid) {
 			client->secondaryuserid = strdup(secondaryuserid);
 			ret = true;
 		}
@@ -1683,7 +1687,6 @@ out_unlock:
 
 	/* Now write to the pool's sharelog, adding workername to json */
 	sprintf(fname, "%s.sharelog", logdir);
-	json_set_string(val, "method", "shares");
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", client->user_instance->username);
 	fp = fopen(fname, "a");
@@ -1697,11 +1700,10 @@ out_unlock:
 			LOGERR("Failed to fwrite to %s", fname);
 	} else
 		LOGERR("Failed to fopen %s", fname);
-	ckdbq_add(ID_SHARELOG, val);
+	ckdbq_add(ID_SHARES, val);
 out:
 	if (!share) {
-		val = json_pack("{ss,si,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
-				"method", "shareerror",
+		val = json_pack("{si,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"clientid", client->id,
 				"secondaryuserid", client->secondaryuserid,
 				"enonce1", client->enonce1,
@@ -1714,7 +1716,7 @@ out:
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
-		ckdbq_add(ID_SHARELOG, val);
+		ckdbq_add(ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
 	return json_boolean(result);
@@ -2305,7 +2307,7 @@ static void *statsupdate(void *arg)
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
-		ckdbq_add(ID_STATS, val);
+		ckdbq_add(ID_POOLSTATS, val);
 
 		/* Update stats 4 times per minute for smooth values, displaying
 		 * status every minute. */
