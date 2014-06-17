@@ -3709,11 +3709,11 @@ static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by, char *code, char
 	PQfinish(conn);
 
 	if (!secuserid) {
-		LOGDEBUG("%s.bad.DBE", id);
-		return strdup("bad.DBE");
+		LOGDEBUG("%s.failed.DBE", id);
+		return strdup("failed.DBE");
 	}
 
-	LOGDEBUG("%s.ok.added, %s", id, secuserid);
+	LOGDEBUG("%s.ok.auth added for %s", id, secuserid);
 	snprintf(reply, siz, "ok.%s", secuserid);
 	return strdup(reply);
 }
