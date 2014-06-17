@@ -196,9 +196,6 @@ struct user_instance {
 	char username[128];
 	int id;
 
-	int64_t diff_accepted;
-	int64_t diff_rejected;
-
 	tv_t last_share;
 
 	double dsps1;
@@ -231,8 +228,6 @@ struct stratum_instance {
 	int ssdc; /* Shares since diff change */
 	tv_t first_share;
 	tv_t last_share;
-	int64_t absolute_shares;
-	int64_t diff_shares;
 
 	bool authorised;
 
@@ -1243,21 +1238,16 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	network_diff = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
-	if (valid) {
-		tdiff = sane_tdiff(&now_t, &instance->last_share);
-		if (unlikely(!client->absolute_shares++))
-			tv_time(&client->first_share);
-		client->diff_shares += diff;
-		instance->diff_accepted += diff;
-		decay_time(&instance->dsps1, diff, tdiff, 60);
-		decay_time(&instance->dsps5, diff, tdiff, 300);
-		decay_time(&instance->dsps15, diff, tdiff, 900);
-		decay_time(&instance->dsps60, diff, tdiff, 3600);
-		decay_time(&instance->dsps360, diff, tdiff, 21600);
-		decay_time(&instance->dsps1440, diff, tdiff, 86400);
-		copy_tv(&instance->last_share, &now_t);
-	} else
-		instance->diff_rejected += diff;
+	tdiff = sane_tdiff(&now_t, &instance->last_share);
+	if (unlikely(!client->first_share.tv_sec))
+		copy_tv(&client->first_share, &now_t);
+	decay_time(&instance->dsps1, diff, tdiff, 60);
+	decay_time(&instance->dsps5, diff, tdiff, 300);
+	decay_time(&instance->dsps15, diff, tdiff, 900);
+	decay_time(&instance->dsps60, diff, tdiff, 3600);
+	decay_time(&instance->dsps360, diff, tdiff, 21600);
+	decay_time(&instance->dsps1440, diff, tdiff, 86400);
+	copy_tv(&instance->last_share, &now_t);
 
 	tdiff = sane_tdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
@@ -2204,9 +2194,7 @@ static void *statsupdate(void *arg)
 			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
 
-			val = json_pack("{sI,sI,ss,ss,ss,ss,ss,ss}",
-					"Accepted", instance->diff_accepted,
-					"Rejected", instance->diff_rejected,
+			val = json_pack("{ss,ss,ss,ss,ss,ss}",
 					"hashrate1m", suffix1,
 					"hashrate5m", suffix5,
 					"hashrate15m", suffix15,
