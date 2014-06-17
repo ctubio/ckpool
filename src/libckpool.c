@@ -672,13 +672,12 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 		LOGWARNING("Invalid message length zero sent to recv_unix_msg");
 		goto out;
 	}
-	buf = ckalloc(msglen + 1);
-	buf[msglen] = 0;
 	ret = wait_read_select(sockd, 5);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select2 failed in recv_unix_msg");
 		goto out;
 	}
+	buf = ckzalloc(msglen + 1);
 	ret = read_length(sockd, buf, msglen);
 	if (unlikely(ret < (int)msglen)) {
 		LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
