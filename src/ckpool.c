@@ -839,6 +839,7 @@ int main(int argc, char **argv)
 				break;
 			case 'S':
 				ckp.ckdb_sockdir = strdup(optarg);
+				break;
 			case 's':
 				ckp.socket_dir = strdup(optarg);
 				break;
