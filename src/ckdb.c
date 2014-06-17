@@ -847,6 +847,7 @@ static K_STORE *poolstats_store;
 
 // USERSTATS
 // Pool sends each user (staggered) once per 10m
+// TODO: When to discard?
 typedef struct userstats {
 	char poolinstance[TXT_BIG+1];
 	int64_t userid;
@@ -2909,6 +2910,58 @@ void poolstats_reload()
 	PQfinish(conn);
 }
 
+// order by poolinstance asc, userid asc, createdate asc
+static double cmp_userstats(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)strcmp(DATA_USERSTATS(a)->poolinstance,
+				  DATA_USERSTATS(b)->poolinstance);
+	if (c == 0) {
+		c = (double)(DATA_USERSTATS(a)->userid) -
+		    (double)(DATA_USERSTATS(b)->userid);
+		if (c == 0) {
+			c = tvdiff(&(DATA_USERSTATS(a)->createdate),
+				   &(DATA_USERSTATS(b)->createdate));
+		}
+	}
+	return c;
+}
+
+static bool userstats_add(char *poolinstance, char *username, char *hashrate,
+			  char *hashrate5m, char *hashrate1hr, char *hashrate24hr,
+			  tv_t *now, char *by, char *code, char *inet)
+{
+	K_ITEM *s_item, *u_item;
+	USERSTATS *row;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(userstats_list);
+	s_item = k_unlink_head(userstats_list);
+	K_WUNLOCK(userstats_list);
+
+	row = DATA_USERSTATS(s_item);
+
+	STRNCPY(row->poolinstance, poolinstance);
+	u_item = find_users(username);
+	if (!u_item)
+		return false;
+	row->userid = DATA_USERS(u_item)->userid;
+	TXT_TO_DOUBLE("hashrate", hashrate, row->hashrate);
+	TXT_TO_DOUBLE("hashrate5m", hashrate5m, row->hashrate5m);
+	TXT_TO_DOUBLE("hashrate1hr", hashrate1hr, row->hashrate1hr);
+	TXT_TO_DOUBLE("hashrate24hr", hashrate24hr, row->hashrate24hr);
+
+	SIMPLEDATEINIT(row, now, by, code, inet);
+	SIMPLEDATETRANSFER(row);
+
+	K_WLOCK(userstats_list);
+	userstats_root = add_to_ktree(userstats_root, s_item, cmp_userstats);
+	k_add_head(userstats_store, s_item);
+	K_WUNLOCK(userstats_list);
+
+	return true;
+}
+
 static void getdata()
 {
 	PGconn *conn = dbconnect();
@@ -2925,12 +2978,14 @@ static void getdata()
 	PQfinish(conn);
 }
 
+/* TODO:
 static PGconn *dbquit(PGconn *conn)
 {
 	if (conn != NULL)
 		PQfinish(conn);
 	return NULL;
 }
+*/
 
 /* Open the file in path, check if there is a pid in there that still exists
  * and if not, write the pid into that file. */
@@ -3216,6 +3271,60 @@ static char *cmd_poolstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 	if (!ok) {
 		LOGDEBUG("%s.failed.DBE", id);
 		return strdup("failed.DBE");
+	}
+	LOGDEBUG("%s.ok.", id);
+	snprintf(reply, siz, "ok.");
+	return strdup(reply);
+}
+
+static char *cmd_userstats(char *cmd, __maybe_unused char *id, tv_t *now, char *by, char *code, char *inet)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+
+	// log to logfile
+
+	K_ITEM *i_poolinstance, *i_username, *i_hashrate, *i_hashrate5m;
+	K_ITEM *i_hashrate1hr, *i_hashrate24hr;
+	bool ok = false;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_poolinstance = require_name("poolinstance", 1, NULL, reply, siz);
+	if (!i_poolinstance)
+		return strdup(reply);
+
+	i_username = require_name("username", 1, NULL, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	i_hashrate = require_name("hashrate", 1, NULL, reply, siz);
+	if (!i_hashrate)
+		return strdup(reply);
+
+	i_hashrate5m = require_name("hashrate5m", 1, NULL, reply, siz);
+	if (!i_hashrate5m)
+		return strdup(reply);
+
+	i_hashrate1hr = require_name("hashrate1hr", 1, NULL, reply, siz);
+	if (!i_hashrate1hr)
+		return strdup(reply);
+
+	i_hashrate24hr = require_name("hashrate24hr", 1, NULL, reply, siz);
+	if (!i_hashrate24hr)
+		return strdup(reply);
+
+	ok = userstats_add(DATA_TRANSFER(i_poolinstance)->data,
+			   DATA_TRANSFER(i_username)->data,
+			   DATA_TRANSFER(i_hashrate)->data,
+			   DATA_TRANSFER(i_hashrate5m)->data,
+			   DATA_TRANSFER(i_hashrate1hr)->data,
+			   DATA_TRANSFER(i_hashrate24hr)->data,
+			   now, by, code, inet);
+
+	if (!ok) {
+		LOGDEBUG("%s.failed.DATA", id);
+		return strdup("failed.DATA");
 	}
 	LOGDEBUG("%s.ok.", id);
 	snprintf(reply, siz, "ok.");
@@ -3619,6 +3728,7 @@ enum cmd_values {
 	CMD_ADDUSER,
 	CMD_CHKPASS,
 	CMD_POOLSTAT,
+	CMD_USERSTAT,
 	CMD_NEWID,
 	CMD_PAYMENTS,
 	CMD_END
@@ -3644,7 +3754,7 @@ static struct CMDS {
 	{ CMD_ADDUSER,	"adduser",	cmd_adduser,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	cmd_chkpass,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	cmd_poolstats,	ACCESS_POOL },
-//	{ CMD_USERSTAT,	"userstats",	cmd_userstats,	ACCESS_POOL },
+	{ CMD_USERSTAT,	"userstats",	cmd_userstats,	ACCESS_POOL },
 	{ CMD_NEWID,	"newid",	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	cmd_payments,	ACCESS_WEB },
 	{ CMD_END,	NULL,		NULL,		NULL }
