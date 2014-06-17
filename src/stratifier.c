@@ -1185,7 +1185,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 		LOGINFO("User %s Worker %s got auth response: %s  suid: %s",
 			client->user_instance->username, client->workername,
 			response, secondaryuserid);
-		if (!strcmp(response, "added") && secondaryuserid) {
+		if (!strcmp(response, "ok") && secondaryuserid) {
 			client->secondaryuserid = strdup(secondaryuserid);
 			ret = true;
 		}
