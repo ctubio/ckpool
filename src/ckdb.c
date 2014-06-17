@@ -922,7 +922,7 @@ static K_ITEM *require_name(char *name, int len, char *patt, char *reply, size_t
 	}
 
 	value = DATA_TRANSFER(item)->data;
-	if (!*value || (int)strlen(value) < len) {
+	if (!value || (int)strlen(value) < len) {
 		snprintf(reply, siz, "failed.short %s", name);
 		return NULL;
 	}
