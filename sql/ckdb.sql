@@ -328,3 +328,19 @@ CREATE TABLE auths (
     PRIMARY KEY (authid, expirydate)
 );
 
+
+CREATE TABLE poolstats (
+    poolinstance character varying(256) NOT NULL,
+    users integer NOT NULL,
+    workers integer NOT NULL,
+    hashrate float NOT NULL,
+    hashrate5m float NOT NULL,
+    hashrate1hr float NOT NULL,
+    hashrate24hr float NOT NULL,
+    createdate timestamp with time zone NOT NULL,
+    createby character varying(64) DEFAULT ''::character varying NOT NULL,
+    createcode character varying(128) DEFAULT ''::character varying NOT NULL,
+    createinet character varying(128) DEFAULT ''::character varying NOT NULL,
+    PRIMARY KEY (poolinstance, createdate)
+);
+

@@ -540,15 +540,15 @@ K_ITEM *find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *,
 
 K_ITEM *find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx)
 {
-	K_TREE *prev = NULL;
-	double cmp = -1.0, prevcmp = -1;
+	K_TREE *old = NULL;
+	double cmp = -1.0, oldcmp = -1;
 
 	while (ktree->isNil == No && cmp != 0.0)
 	{
 		if ((cmp = (*cmp_funct)(ktree->data, data)))
 		{
-			prev = ktree;
-			prevcmp = cmp;
+			old = ktree;
+			oldcmp = cmp;
 			if (cmp > 0.0)
 				ktree = ktree->left;
 			else
@@ -563,16 +563,58 @@ K_ITEM *find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_I
 	}
 	else
 	{
-		if (prev)
+		if (old)
 		{
-			if (prevcmp > 0.0)
+			if (oldcmp > 0.0)
 			{
-				*ctx = prev;
-				return(prev->data);
+				*ctx = old;
+				return(old->data);
 			}
 
-			*ctx = prev;
+			*ctx = old;
 			return next_in_ktree(ctx);
+		}
+
+		*ctx = NULL;
+		return(NULL);
+	}
+}
+
+K_ITEM *find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx)
+{
+	K_TREE *old = NULL;
+	double cmp = 1.0, oldcmp = 1;
+
+	while (ktree->isNil == No && cmp != 0.0)
+	{
+		if ((cmp = (*cmp_funct)(ktree->data, data)))
+		{
+			old = ktree;
+			oldcmp = cmp;
+			if (cmp > 0.0)
+				ktree = ktree->left;
+			else
+				ktree = ktree->right;
+		}
+	}
+
+	if (ktree->isNil == No)
+	{
+		*ctx = ktree;
+		return prev_in_ktree(ctx);
+	}
+	else
+	{
+		if (old)
+		{
+			if (oldcmp > 0.0)
+			{
+				*ctx = old;
+				return(old->data);
+			}
+
+			*ctx = old;
+			return prev_in_ktree(ctx);
 		}
 
 		*ctx = NULL;

@@ -178,6 +178,11 @@ enum data_type {
 
 static const tv_t default_expiry = { DEFAULT_EXPIRY, 0L };
 
+// 31-Dec-9999 23:59:59+00
+#define DATE_S_EOT 253402300799L
+#define DATE_uS_EOT 0L
+static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
+
 #define HISTORYDATEINIT(_row, _now, _by, _code, _inet) do { \
 		_row->createdate.tv_sec = (_now)->tv_sec; \
 		_row->createdate.tv_usec = (_now)->tv_usec; \
@@ -288,6 +293,78 @@ static const tv_t default_expiry = { DEFAULT_EXPIRY, 0L };
 		_row->modifyby[0] = '\0'; \
 		_row->modifycode[0] = '\0'; \
 		_row->modifyinet[0] = '\0'; \
+	} while (0)
+
+// SIMPLE FIELDS
+#define SIMPLEDATECONTROL ",createdate,createby,createcode,createinet"
+#define SIMPLEDATECOUNT 4
+
+#define SIMPLEDATEFLDS(_res, _row, _data, _ok) do { \
+		char *_fld; \
+		PQ_GET_FLD(_res, _row, "createdate", _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_TV("createdate", _fld, (_data)->createdate); \
+		PQ_GET_FLD(_res, _row, "createby", _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_STR("createby", _fld, (_data)->createby); \
+		PQ_GET_FLD(_res, _row, "createcode", _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_STR("createcode", _fld, (_data)->createcode); \
+		PQ_GET_FLD(_res, _row, "createinet", _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_STR("createinet", _fld, (_data)->createinet); \
+	} while (0)
+
+#define SIMPLEDATECONTROLFIELDS \
+	tv_t createdate; \
+	char createby[TXT_SML+1]; \
+	char createcode[TXT_MED+1]; \
+	char createinet[TXT_MED+1]
+
+#define SIMPLEDATEPARAMS(_params, _his_pos, _row) do { \
+		_params[_his_pos++] = tv_to_buf(&(_row->createdate), NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->createby, NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->createcode, NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->createinet, NULL, 0); \
+	} while (0)
+
+#define SIMPLEDATEINIT(_row, _now, _by, _code, _inet) do { \
+		_row->createdate.tv_sec = (_now)->tv_sec; \
+		_row->createdate.tv_usec = (_now)->tv_usec; \
+		STRNCPY(_row->createby, _by); \
+		STRNCPY(_row->createcode, _code); \
+		STRNCPY(_row->createinet, _inet); \
+	} while (0)
+
+// Override _row defaults if transfer fields are present
+#define SIMPLEDATETRANSFER(_row) do { \
+		K_ITEM *item; \
+		item = optional_name("createdate", 10, NULL); \
+		if (item) { \
+			long sec, usec; \
+			int n; \
+			n = sscanf(DATA_TRANSFER(item)->data, "%ld,%ld", &sec, &usec); \
+			if (n > 0) { \
+				_row->createdate.tv_sec = (time_t)sec; \
+				if (n > 1) \
+					_row->createdate.tv_usec = usec; \
+				else \
+					_row->createdate.tv_usec = 0L; \
+			} \
+		} \
+		item = optional_name("createby", 1, NULL); \
+		if (item) \
+			STRNCPY(_row->createby, DATA_TRANSFER(item)->data); \
+		item = optional_name("createcode", 1, NULL); \
+		if (item) \
+			STRNCPY(_row->createcode, DATA_TRANSFER(item)->data); \
+		item = optional_name("createinet", 1, NULL); \
+		if (item) \
+			STRNCPY(_row->createinet, DATA_TRANSFER(item)->data); \
 	} while (0)
 
 // For easy parameter constant strings
@@ -747,21 +824,23 @@ static K_TREE *auths_root;
 static K_LIST *auths_list;
 static K_STORE *auths_store;
 
-/*
 // POOLSTATS
-// TODO: not in DB yet - design incomplete
-// poll pool(s) every 10min - no - get every 1m: pool sending it
+// TODO: get every 1m: pool sending it
 // so web page is kept up to date
-// Store every 10m?
+
+// Store every > 9.5m?
+#define STATS_PER (9.5*60.0)
+
 typedef struct poolstats {
 	char poolinstance[TXT_BIG+1];
+	tv_t when;
 	int32_t users;
 	int32_t workers;
-	int64_t hashrate; // ... etc
-	int64_t hashrate5m;
-	int64_t hashrate1hr;
-	int64_t hashrate24hr;
-	HISTORYDATECONTROLFIELDS;
+	double hashrate;
+	double hashrate5m;
+	double hashrate1hr;
+	double hashrate24hr;
+	SIMPLEDATECONTROLFIELDS;
 } POOLSTATS;
 
 #define ALLOC_POOLSTATS 10000
@@ -771,7 +850,6 @@ typedef struct poolstats {
 static K_TREE *poolstats_root;
 static K_LIST *poolstats_list;
 static K_STORE *poolstats_store;
-*/
 
 static void setnow(tv_t *now)
 {
@@ -2385,17 +2463,17 @@ static bool shareerrors_fill()
 
 static double cmp_auths(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHAREERRORS(a)->workinfoid) -
-		   (double)(DATA_SHAREERRORS(b)->workinfoid);
+	double c = (double)(DATA_AUTHS(a)->authid) -
+		   (double)(DATA_AUTHS(b)->authid);
 	if (c == 0) {
-		c = (double)(DATA_SHAREERRORS(b)->userid) -
-		    (double)(DATA_SHAREERRORS(a)->userid);
+		c = (double)(DATA_AUTHS(b)->userid) -
+		    (double)(DATA_AUTHS(a)->userid);
 		if (c == 0) {
-			c = tvdiff(&(DATA_SHAREERRORS(b)->createdate),
-				   &(DATA_SHAREERRORS(a)->createdate));
+			c = tvdiff(&(DATA_AUTHS(b)->createdate),
+				   &(DATA_AUTHS(a)->createdate));
 			if (c == 0) {
-				c = tvdiff(&(DATA_SHAREERRORS(b)->expirydate),
-					   &(DATA_SHAREERRORS(a)->expirydate));
+				c = tvdiff(&(DATA_AUTHS(b)->expirydate),
+					   &(DATA_AUTHS(a)->expirydate));
 			}
 		}
 	}
@@ -2595,6 +2673,203 @@ void auths_reload()
 	PQfinish(conn);
 }
 
+// order by poolinstance asc, createdate asc
+static double cmp_poolstats(K_ITEM *a, K_ITEM *b)
+{
+	double c = (double)strcmp(DATA_POOLSTATS(a)->poolinstance,
+				  DATA_POOLSTATS(b)->poolinstance);
+	if (c == 0) {
+		c = tvdiff(&(DATA_POOLSTATS(a)->createdate),
+			   &(DATA_POOLSTATS(b)->createdate));
+	}
+	return c;
+}
+
+static bool poolstats_add(PGconn *conn, bool store, char *poolinstance, char *users,
+				char *workers, char *hashrate, char *hashrate5m,
+				char *hashrate1hr, char *hashrate24hr,
+				tv_t *now, char *by, char *code, char *inet)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *p_item;
+	int n;
+	POOLSTATS *row;
+	char *ins;
+	char *params[7 + SIMPLEDATECOUNT];
+	int par;
+	bool ok = false;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(poolstats_list);
+	p_item = k_unlink_head(poolstats_list);
+	K_WUNLOCK(poolstats_list);
+
+	row = DATA_POOLSTATS(p_item);
+
+	STRNCPY(row->poolinstance, poolinstance);
+	TXT_TO_INT("users", users, row->users);
+	TXT_TO_INT("workers", workers, row->workers);
+	TXT_TO_DOUBLE("hashrate", hashrate, row->hashrate);
+	TXT_TO_DOUBLE("hashrate5m", hashrate5m, row->hashrate5m);
+	TXT_TO_DOUBLE("hashrate1hr", hashrate1hr, row->hashrate1hr);
+	TXT_TO_DOUBLE("hashrate24hr", hashrate24hr, row->hashrate24hr);
+
+	SIMPLEDATEINIT(row, now, by, code, inet);
+	SIMPLEDATETRANSFER(row);
+
+	par = 0;
+	if (store) {
+		params[par++] = str_to_buf(row->poolinstance, NULL, 0);
+		params[par++] = int_to_buf(row->users, NULL, 0);
+		params[par++] = int_to_buf(row->workers, NULL, 0);
+		params[par++] = bigint_to_buf(row->hashrate, NULL, 0);
+		params[par++] = bigint_to_buf(row->hashrate5m, NULL, 0);
+		params[par++] = bigint_to_buf(row->hashrate1hr, NULL, 0);
+		params[par++] = bigint_to_buf(row->hashrate24hr, NULL, 0);
+		SIMPLEDATEPARAMS(params, par, row);
+		PARCHK(par, params);
+
+		ins = "insert into poolstats "
+			"(poolinstance,users,workers,hashrate,hashrate5m,hashrate1hr,hashrate24hr"
+			SIMPLEDATECONTROL ") values (" PQPARAM11 ")";
+
+		res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
+		rescode = PQresultStatus(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Insert", rescode, conn);
+			goto unparam;
+		}
+	}
+
+	ok = true;
+unparam:
+	if (store) {
+		PQclear(res);
+		for (n = 0; n < par; n++)
+			free(params[n]);
+	}
+
+	K_WLOCK(poolstats_list);
+	if (!ok)
+		k_add_head(poolstats_list, p_item);
+	else {
+		poolstats_root = add_to_ktree(poolstats_root, p_item, cmp_poolstats);
+		k_add_head(poolstats_store, p_item);
+	}
+	K_WUNLOCK(poolstats_list);
+
+	return ok;
+}
+
+// TODO: data selection - only require ?
+static bool poolstats_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	POOLSTATS *row;
+	char *field;
+	char *sel;
+	int fields = 7;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	sel = "select "
+		"poolinstance,users,workers,hashrate,hashrate5m,hashrate1hr,hashrate24hr"
+		SIMPLEDATECONTROL
+		" from poolstats";
+	res = PQexec(conn, sel);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + SIMPLEDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + SIMPLEDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(poolstats_list);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(poolstats_list);
+		row = DATA_POOLSTATS(item);
+
+		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "users", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("users", field, row->users);
+
+		PQ_GET_FLD(res, i, "workers", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("workers", field, row->workers);
+
+		PQ_GET_FLD(res, i, "hashrate", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate", field, row->hashrate);
+
+		PQ_GET_FLD(res, i, "hashrate5m", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate5m", field, row->hashrate5m);
+
+		PQ_GET_FLD(res, i, "hashrate1hr", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate1hr", field, row->hashrate1hr);
+
+		PQ_GET_FLD(res, i, "hashrate24hr", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate24hr", field, row->hashrate24hr);
+
+		poolstats_root = add_to_ktree(poolstats_root, item, cmp_poolstats);
+		k_add_head(poolstats_store, item);
+	}
+	if (!ok)
+		k_add_head(poolstats_list, item);
+
+	K_WUNLOCK(poolstats_list);
+	PQclear(res);
+
+	if (ok)
+		LOGDEBUG("%s(): built", __func__);
+
+	return true;
+}
+
+void poolstats_reload()
+{
+	PGconn *conn = dbconnect();
+
+	K_WLOCK(poolstats_list);
+	poolstats_root = free_ktree(poolstats_root, NULL);
+	k_list_transfer_to_head(poolstats_store, poolstats_list);
+	K_WUNLOCK(poolstats_list);
+
+	poolstats_fill(conn);
+
+	PQfinish(conn);
+}
+
 static void getdata()
 {
 	PGconn *conn = dbconnect();
@@ -2606,6 +2881,7 @@ static void getdata()
 	shares_fill();
 	shareerrors_fill();
 	auths_fill(conn);
+	poolstats_fill(conn);
 
 	PQfinish(conn);
 }
@@ -2728,13 +3004,17 @@ static void setup_data()
 	shares_store = k_new_store(shares_list);
 	shares_root = new_ktree();
 
-	shareerrors_list = k_new_list("Shareerrors", sizeof(SHAREERRORS), ALLOC_SHAREERRORS, LIMIT_SHAREERRORS, true);
+	shareerrors_list = k_new_list("ShareErrors", sizeof(SHAREERRORS), ALLOC_SHAREERRORS, LIMIT_SHAREERRORS, true);
 	shareerrors_store = k_new_store(shareerrors_list);
 	shareerrors_root = new_ktree();
 
 	auths_list = k_new_list("Auths", sizeof(AUTHS), ALLOC_AUTHS, LIMIT_AUTHS, true);
 	auths_store = k_new_store(auths_list);
 	auths_root = new_ktree();
+
+	poolstats_list = k_new_list("PoolStats", sizeof(POOLSTATS), ALLOC_POOLSTATS, LIMIT_POOLSTATS, true);
+	poolstats_store = k_new_store(poolstats_list);
+	poolstats_root = new_ktree();
 
 	getdata();
 }
@@ -2812,15 +3092,86 @@ static char *cmd_chkpass(char *id, __maybe_unused tv_t *now, __maybe_unused char
 	return strdup("ok");
 }
 
-static char *cmd_poolstats(char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
-				__maybe_unused char *code, __maybe_unused char *inet)
+static char *cmd_poolstats(__maybe_unused char *id, tv_t *now, char *by, char *code, char *inet)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	K_TREE_CTX ctx[1];
+	PGconn *conn;
+	bool store;
 
-	LOGDEBUG("%s.stats.ok", id);
-	printf("%s.stats", id);
-	snprintf(reply, siz, "stats.ok");
+	// log to logfile
+
+	K_ITEM *i_poolinstance, *i_users, *i_workers, *i_hashrate, *i_hashrate5m;
+	K_ITEM *i_hashrate1hr, *i_hashrate24hr, *i_createdate, look, *ps;
+	tv_t createdate;
+	POOLSTATS row;
+	bool ok = false;
+
+	i_poolinstance = require_name("poolinstance", 1, NULL, reply, siz);
+	if (!i_poolinstance)
+		return strdup(reply);
+
+	i_users = require_name("users", 1, NULL, reply, siz);
+	if (!i_users)
+		return strdup(reply);
+
+	i_workers = require_name("workers", 1, NULL, reply, siz);
+	if (!i_workers)
+		return strdup(reply);
+
+	i_hashrate = require_name("hashrate", 1, NULL, reply, siz);
+	if (!i_hashrate)
+		return strdup(reply);
+
+	i_hashrate5m = require_name("hashrate5m", 1, NULL, reply, siz);
+	if (!i_hashrate5m)
+		return strdup(reply);
+
+	i_hashrate1hr = require_name("hashrate1hr", 1, NULL, reply, siz);
+	if (!i_hashrate1hr)
+		return strdup(reply);
+
+	i_hashrate24hr = require_name("hashrate24hr", 1, NULL, reply, siz);
+	if (!i_hashrate24hr)
+		return strdup(reply);
+
+	STRNCPY(row.poolinstance, DATA_TRANSFER(i_poolinstance)->data);
+	row.createdate.tv_sec = date_eot.tv_sec;
+	row.createdate.tv_usec = date_eot.tv_usec;
+	look.data = (void *)(&row);
+	ps = find_before_in_ktree(poolstats_root, &look, cmp_poolstats, ctx);
+	if (!ps)
+		store = true;
+	else {
+		i_createdate = require_name("createdate", 1, NULL, reply, siz);
+		if (!i_createdate)
+			return strdup(reply);
+		TXT_TO_TV("createdate", DATA_TRANSFER(i_createdate)->data, createdate);
+		if (tvdiff(&createdate, &(row.createdate)) > STATS_PER)
+			store = true;
+		else
+			store = false;
+	}
+
+	conn = dbconnect();
+	ok = poolstats_add(conn, store, DATA_TRANSFER(i_poolinstance)->data,
+					DATA_TRANSFER(i_users)->data,
+					DATA_TRANSFER(i_workers)->data,
+					DATA_TRANSFER(i_hashrate)->data,
+					DATA_TRANSFER(i_hashrate5m)->data,
+					DATA_TRANSFER(i_hashrate1hr)->data,
+					DATA_TRANSFER(i_hashrate24hr)->data,
+					now, by, code, inet);
+	PQfinish(conn);
+
+	if (!ok) {
+		STRNCPY(reply, "bad.DBE");
+		return strdup(reply);
+	}
+
+	LOGDEBUG("%s.added.ok", id);
+	snprintf(reply, siz, "added.ok");
 	return strdup(reply);
 }
 

@@ -38,6 +38,7 @@ extern K_ITEM *prev_in_ktree(K_TREE_CTX *ctx);
 extern K_TREE *add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_func)(K_ITEM *, K_ITEM *));
 extern K_ITEM *find_in_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx);
 extern K_ITEM *find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx);
+extern K_ITEM *find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx);
 extern K_TREE *remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx);
 extern K_TREE *free_ktree(K_TREE *root, void (*free_funct)(void *));
 
