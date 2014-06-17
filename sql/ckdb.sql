@@ -344,3 +344,11 @@ CREATE TABLE poolstats (
     PRIMARY KEY (poolinstance, createdate)
 );
 
+
+CREATE TABLE version (
+    vlock integer NOT NULL,
+    version character varying(256) NOT NULL,
+    PRIMARY KEY (vlock)
+);
+
+insert into version (vlock,version) values (1,'0.1');
