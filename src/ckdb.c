@@ -868,6 +868,9 @@ static K_TREE *userstats_root;
 static K_LIST *userstats_list;
 static K_STORE *userstats_store;
 
+static char logname[512];
+#define LOGFILE(_msg) rotating_log(logname, _msg)
+
 static void setnow(tv_t *now)
 {
 	ts_t spec;
@@ -3995,6 +3998,8 @@ static void *listener(void *arg)
 			else
 				LOGWARNING("Empty message in listener");
 		} else {
+			// Log everything we get (for now)
+			LOGFILE(buf);
 			cmdnum = breakdown(buf, &which_cmds, cmd, id);
 			switch (cmdnum) {
 				case CMD_REPLY:
@@ -4144,6 +4149,9 @@ int main(int argc, char **argv)
 	if (!ckp.logfp)
 		quit(1, "Failed to open log file %s", buf);
 	ckp.logfd = fileno(ckp.logfp);
+
+	snprintf(logname, sizeof(logname), "%s%s",
+				ckp.logdir, ckp.ckdb_name);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
