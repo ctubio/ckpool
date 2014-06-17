@@ -3505,7 +3505,7 @@ static char *cmd_sharelog(char *cmd, char *id, tv_t *now, char *by, char *code, 
 			return strdup("failed.DATA");
 		}
 		LOGDEBUG("%s.ok.added %s", id, DATA_TRANSFER(i_nonce)->data);
-		snprintf(reply, siz, "ok,added %s", DATA_TRANSFER(i_nonce)->data);
+		snprintf(reply, siz, "ok.added %s", DATA_TRANSFER(i_nonce)->data);
 		return strdup(reply);
 	} else if (strcasecmp(cmd, METHOD_SHAREERRORS) == 0) {
 		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
