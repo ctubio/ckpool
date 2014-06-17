@@ -110,13 +110,13 @@ function show_reg($menu, $name)
 	$flds = array('username' => $user,
 			'emailaddress' => $mail,
 			'passwordhash' => $passhash);
-	$msg = msgEncode('reg', 'adduser', $flds);
+	$msg = msgEncode('adduser', 'reg', $flds);
 	$rep = sendsockreply('show_reg', $msg);
 	if (!$rep)
 		dbdown();
 
 	$ans = repDecode($rep);
-	if ($ans['STATUS'] == 'added')
+	if ($ans['STATUS'] == 'ok')
 		gopage($data, 'doreg2', $menu, $name, true, true, false);
 	else
 		$data['error'] = "Invalid details";

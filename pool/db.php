@@ -46,11 +46,11 @@ function repDecode($rep)
  return $ans;
 }
 #
-function msgEncode($id, $cmd, $fields)
+function msgEncode($cmd, $id, $fields)
 {
  global $send_sep, $fld_sep, $val_sep;
 
- $msg = $id . $send_sep . $cmd;
+ $msg = $cmd . $send_sep . $id;
  $first = true;
  foreach ($fields as $name => $value)
  {
@@ -105,23 +105,37 @@ function checkpass($user, $pass)
 {
  $passhash = myhash($pass);
  $flds = array('username' => $user, 'passwordhash' => $passhash);
- $msg = msgEncode('log', 'chkpass', $flds);
+ $msg = msgEncode('chkpass', 'log', $flds);
  $rep = sendsockreply('checkpass', $msg);
  if (!$rep)
 	dbdown();
  return $rep;
 }
 #
-function getpayments()
+function getWorkers()
 {
  list($who, $whoid) = validate();
  if ($who == false)
 	showIndex();
  $flds = array('username' => $who);
- $msg = msgEncode('pay', 'payments', $flds);
+ $msg = msgEncode('workers', 'work', $flds);
+ $rep = sendsockreply('getworkers', $msg);
+ if (!$rep)
+	dbdown();
+ return $rep;
+}
+#
+function getPayments()
+{
+ list($who, $whoid) = validate();
+ if ($who == false)
+	showIndex();
+ $flds = array('username' => $who);
+ $msg = msgEncode('payments', 'pay', $flds);
  $rep = sendsockreply('getpayments', $msg);
  if (!$rep)
 	dbdown();
  return $rep;
 }
+#
 ?>
