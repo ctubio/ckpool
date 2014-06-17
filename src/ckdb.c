@@ -109,6 +109,7 @@ enum data_type {
 	TYPE_BIGINT,
 	TYPE_INT,
 	TYPE_TV,
+	TYPE_CTV,
 	TYPE_BLOB,
 	TYPE_DOUBLE
 };
@@ -117,6 +118,7 @@ enum data_type {
 #define TXT_TO_BIGINT(__nam, __fld, __data) txt_to_bigint(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_INT(__nam, __fld, __data) txt_to_int(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_TV(__nam, __fld, __data) txt_to_tv(__nam, __fld, &(__data), sizeof(__data))
+#define TXT_TO_CTV(__nam, __fld, __data) txt_to_ctv(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_BLOB(__nam, __fld, __data) txt_to_blob(__nam, __fld, __data)
 #define TXT_TO_DOUBLE(__nam, __fld, __data) txt_to_double(__nam, __fld, &(__data), sizeof(__data))
 
@@ -1024,6 +1026,27 @@ static void txt_to_data(enum data_type typ, char *nam, char *fld, void *data, si
 				((tv_t *)data)->tv_usec = uS;
 			}
 			break;
+		case TYPE_CTV:
+			if (siz != sizeof(tv_t)) {
+				quithere(1, "Field %s timeval incorrect structure size %d - should be %d",
+						nam, (int)siz, (int)sizeof(tv_t));
+			}
+			long sec, usec;
+			int c;
+			((tv_t *)data)->tv_sec = 0L;
+			((tv_t *)data)->tv_usec = 0L;
+			c = sscanf(fld, "%ld,%ld", &sec, &usec);
+			// For converting msg fields - so not fatal if it's no good
+			if (c > 0) {
+				((tv_t *)data)->tv_sec = (time_t)sec;
+				if (c > 1)
+					((tv_t *)data)->tv_usec = usec;
+				if (((tv_t *)data)->tv_sec >= COMPARE_EXPIRY) {
+					((tv_t *)data)->tv_sec = default_expiry.tv_sec;
+					((tv_t *)data)->tv_usec = default_expiry.tv_usec;
+				}
+			}
+			break;
 		case TYPE_BLOB:
 			tmp = strdup(fld);
 			if (!tmp)
@@ -1062,6 +1085,12 @@ static void txt_to_int(char *nam, char *fld, int32_t *data, size_t siz)
 static void txt_to_tv(char *nam, char *fld, tv_t *data, size_t siz)
 {
 	txt_to_data(TYPE_TV, nam, fld, (void *)data, siz);
+}
+
+// Convert msg S,nS to tv_t
+static void txt_to_ctv(char *nam, char *fld, tv_t *data, size_t siz)
+{
+	txt_to_data(TYPE_CTV, nam, fld, (void *)data, siz);
 }
 
 static void txt_to_blob(char *nam, char *fld, char *data)
@@ -1113,6 +1142,7 @@ static char *data_to_buf(enum data_type typ, void *data, char *buf, size_t siz)
 			snprintf(buf, siz, "%"PRId32, *((uint32_t *)data));
 			break;
 		case TYPE_TV:
+		case TYPE_CTV:
 			buf2 = malloc(siz);
 			if (!buf2)
 				quithere(1, "OOM (%d)", (int)siz);
@@ -3250,7 +3280,7 @@ static char *cmd_poolstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 		i_createdate = require_name("createdate", 1, NULL, reply, siz);
 		if (!i_createdate)
 			return strdup(reply);
-		TXT_TO_TV("createdate", DATA_TRANSFER(i_createdate)->data, createdate);
+		TXT_TO_CTV("createdate", DATA_TRANSFER(i_createdate)->data, createdate);
 		if (tvdiff(&createdate, &(row.createdate)) > STATS_PER)
 			store = true;
 		else
