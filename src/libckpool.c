@@ -559,7 +559,7 @@ int _open_unix_server(const char *server_path, const char *file, const char *fun
 		goto out;
 	}
 
-	ret = listen(sockd, 1);
+	ret = listen(sockd, 10);
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to listen to socket in open_unix_server");
 		close_unix_socket(sockd, server_path);
