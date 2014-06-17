@@ -888,7 +888,7 @@ int main(int argc, char **argv)
 		quit(1, "Failed to make directory %s", ckp.ckdb_sockdir);
 
 	ckp.ckdb_sockname = ckp.ckdb_sockdir;
-	realloc_strcat(&ckp.ckdb_sockdir, "listener");
+	realloc_strcat(&ckp.ckdb_sockname, "listener");
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
