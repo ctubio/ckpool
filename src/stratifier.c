@@ -418,10 +418,10 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createinet", "127.0.0.1");
 	buf = json_ckdb_call(ckp, "sharelog", val);
 	if (likely(buf)) {
-		LOGWARNING("Got workinfo response: %s", buf);
+		LOGINFO("Got workinfo response: %s", buf);
 		dealloc(buf);
 	} else
-		LOGWARNING("Got no workinfo response :(");
+		LOGWARNING("Got no workinfo response from ckdb :(");
 }
 
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
@@ -1086,8 +1086,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 	return ret;
 }
 
-/* FIXME: Talk to database here instead. This simply strips off the first part
- * of the workername and matches it to a user or creates a new one. */
+/* This simply strips off the first part of the workername and matches it to a
+ * user or creates a new one. */
 static user_instance_t *authorise_user(const char *workername)
 {
 	char *fullname = strdupa(workername);
@@ -1114,8 +1114,8 @@ static user_instance_t *authorise_user(const char *workername)
 	return instance;
 }
 
-/* FIXME: Send this to the database and parse the response to authorise a user
- * and get parameters back */
+/* Send this to the database and parse the response to authorise a user
+ * and get SUID parameters back */
 static bool send_recv_auth(stratum_instance_t *client)
 {
 	char cdfield[64];
@@ -1145,14 +1145,15 @@ static bool send_recv_auth(stratum_instance_t *client)
 		sscanf(buf, "id.%*d.%s", response);
 		secondaryuserid = response;
 		strsep(&secondaryuserid, ".");
-		LOGWARNING("Got auth response: %s  response: %s  suid: %s", buf,
-			   response, secondaryuserid);
-		if (!strcmp(response, "added")) {
+		LOGINFO("User %s Worker %s got auth response: %s  suid: %s",
+			client->user_instance->username, client->workername,
+			response, secondaryuserid);
+		if (!strcmp(response, "added") && secondaryuserid) {
 			client->secondaryuserid = strdup(secondaryuserid);
 			ret = true;
 		}
 	} else
-		LOGWARNING("Got no auth response :(");
+		LOGWARNING("Got no auth response from ckdb :(");
 	return ret;
 }
 
@@ -1662,10 +1663,10 @@ out_unlock:
 		LOGERR("Failed to fopen %s", fname);
 	buf = json_ckdb_call(client->ckp, "sharelog", val);
 	if (likely(buf)) {
-		LOGWARNING("Got sharelog response: %s", buf);
+		LOGINFO("Got shares response: %s", buf);
 		dealloc(buf);
 	} else
-		LOGWARNING("Got no sharelog response :(");
+		LOGWARNING("Got no shares response from ckdb :(");
 out:
 	if (!share) {
 		val = json_pack("{ss,si,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
@@ -1685,10 +1686,10 @@ out:
 		/* FIXME : Send val json to database here */
 		buf = json_ckdb_call(client->ckp, "sharelog", val);
 		if (likely(buf)) {
-			LOGWARNING("Got sharelog response: %s", buf);
+			LOGINFO("Got shareerror response: %s", buf);
 			dealloc(buf);
 		} else
-			LOGWARNING("Got no sharelog response :(");
+			LOGWARNING("Got no shareerror response from ckdb :(");
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
 	return json_boolean(result);
