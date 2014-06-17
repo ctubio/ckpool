@@ -1076,6 +1076,9 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		return NULL;
 	}
 
+	if (unlikely(!current_workbase))
+		return json_string("Initialising");
+
 	arr_size = json_array_size(params_val);
 	if (arr_size > 0) {
 		const char *buf;
