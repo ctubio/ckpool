@@ -123,10 +123,10 @@ function pgtop($dotop, $user, $douser)
  global $site_title;
 
  $info = homeInfo($user);
- $phr = '&nbsp;';
- $plb = '&nbsp;';
- $nlb = '&nbsp;';
- $uhr = '&nbsp;';
+ $phr = '?THs';
+ $plb = '?';
+ $nlb = '?';
+ $uhr = '?GHs';
  if ($info !== false)
  {
 	$now = time();
@@ -135,9 +135,15 @@ function pgtop($dotop, $user, $douser)
 	{
 		$phr = $info['p_hashrate5m'];
 		if ($phr == '?')
-			$phr .= 'THs';
+			$phr = '?THs';
 		else
-			$phr = (round($phr/10)/100).'THs';
+		{
+			$phr /= 10000000;
+			if ($phr < 100000)
+				$phr = (round($phr)/100).'GHs';
+			else
+				$phr = (round($phr/1000)/100).'THs';
+		}
 	}
 
 	if (isset($info['lastblock']))
@@ -174,7 +180,10 @@ function pgtop($dotop, $user, $douser)
 		{
 			$sec = $now - $info['lastlp'];
 			$min = round($sec / 60);
-			$nlb = $min.'m';
+			$nlb = '~'.$min.'m';
+#			$s = $sec % 60;
+#			if ($s > 0)
+#				$nlb .= " ${s}s";
 		}
 	}
 
@@ -182,15 +191,14 @@ function pgtop($dotop, $user, $douser)
 	{
 		$uhr = $info['u_hashrate5m'];
 		if ($uhr == '?')
-		{
-			$uhr .= 'GHs';
-		}
+			$uhr = '?GHs';
 		else
 		{
-			if ($uhr < 1000)
-				$uhr .= 'GHs';
+			$uhr /= 10000000;
+			if ($uhr < 100000)
+				$uhr = (round($uhr)/100).'GHs';
 			else
-				$uhr = (round($uhr/10)/100).'THs';
+				$uhr = (round($uhr/1000)/100).'THs';
 		}
 	}
  }
