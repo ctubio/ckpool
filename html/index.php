@@ -1,3 +1,3 @@
 <?php
-include_once('../pool/index.php');
+include_once('../pool/prime.php');
 ?>
