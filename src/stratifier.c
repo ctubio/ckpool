@@ -482,7 +482,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	}
 	if (*new_block) {
 		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
-		ret = mkdir(wb->logdir, 0700);
+		ret = mkdir(wb->logdir, 0750);
 		if (unlikely(ret && errno != EEXIST))
 			quit(1, "Failed to create log directory %s", wb->logdir);
 	}
