@@ -4343,7 +4343,7 @@ int main(int argc, char **argv)
 	ckp.logfd = fileno(ckp.logfp);
 
 	snprintf(logname, sizeof(logname), "%s%s",
-				ckp.logdir, ckp.ckdb_name);
+				ckp.logdir, ckp.name);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
