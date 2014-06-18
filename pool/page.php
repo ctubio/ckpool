@@ -131,46 +131,67 @@ function pgtop($dotop, $user, $douser)
  {
 	$now = time();
 
-	if (isset($info['PoolHashRate']))
-		$phr = $info['PoolHashRate'].'TH/s';
-
-	if (isset($info['PoolLastBlock']))
+	if (isset($info['p_hashrate5m']))
 	{
-		$sec = $now - $info['PoolLastBlock'];
-		if ($sec < 60)
-			$plb = $sec.'s';
+		$phr = $info['p_hashrate5m'];
+		if ($phr == '?')
+			$phr .= 'THs';
 		else
+			$phr = (round($phr/10)/100).'THs';
+	}
+
+	if (isset($info['lastblock']))
+	{
+		$plb = $info['lastblock'];
+		if ($plb != '?')
 		{
-			if ($sec < 3600)
-			{
-				$min = round($sec / 60);
-				$plb = $min.'m';
-			}
+			$sec = $now - $plb;
+			if ($sec < 60)
+				$plb = $sec.'s';
 			else
 			{
-				$min = round(($sec % 3600) / 60);
-				$hr = round($sec / 3600);
-				$plb = $hr.'h';
-				if ($min != 0)
-					$plb .= ' '.$min.'m';
+				if ($sec < 3600)
+				{
+					$min = round($sec / 60);
+					$plb = $min.'m';
+				}
+				else
+				{
+					$min = round(($sec % 3600) / 60);
+					$hr = round($sec / 3600);
+					$plb = $hr.'h';
+					if ($min != 0)
+						$plb .= ' '.$min.'m';
+				}
 			}
 		}
 	}
 
-	if (isset($info['NetLastBlock']))
+	if (isset($info['lastlp']))
 	{
-		$sec = $now - $info['NetLastBlock'];
-		$min = round($sec / 60);
-		$nlb = $min.'m';
+		$nlb = $info['lastlp'];
+		if ($nlb != '?')
+		{
+			$sec = $now - $info['lastlp'];
+			$min = round($sec / 60);
+			$nlb = $min.'m';
+		}
 	}
 
-	if (isset($info['UserHashRate']))
+	if (isset($info['u_hashrate5m']))
 	{
-		$uhr = $info['UserHashRate'];
-		if ($uhr < 1000)
+		$uhr = $info['u_hashrate5m'];
+		if ($uhr == '?')
+		{
 			$uhr .= 'GHs';
+		}
 		else
-			$uhr = (round($uhr/10)/100).'THs';
+		{
+			if ($uhr < 1000)
+				$uhr .= 'GHs';
+			else
+				$uhr = (round($uhr/10)/100).'THs';
+		}
 	}
  }
 

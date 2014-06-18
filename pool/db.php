@@ -71,34 +71,25 @@ function getStats($user)
 {
  global $fld_sep;
  if ($user === null)
-	$msg = "s$fld_sep";
+	$msg = msgEncode('homepage', 'home', array());
  else
-	$msg = "s$fld_sep$user";
+	$msg = msgEncode('homepage', 'home', array('username'=>$user));
  return $msg;
 }
 #
 function homeInfo($user)
 {
  $msg = getStats($user);
-/*
- $rep = sendsockreply('homeInfo', $msg);
+ $rep = sendsockreply('homepage', $msg);
  if ($rep === false)
 	$ans = false;
  else
+ {
 	$ans = repDecode($rep);
+	$ans['lastblock'] = 1401237522;
+ }
 
  return $ans;
-*/
- if ($user !== null)
-	$uhr = rand(500, 2500);
- else
-	$uhr = 0;
-
- $plb = 1401237522;
-
- $nlb = time() - rand(200,500);
-
- return array('PoolHashRate' => '250', 'PoolLastBlock' => "$plb", 'NetLastBlock' => "$nlb", 'UserHashRate' => "$uhr");
 }
 #
 function checkpass($user, $pass)
