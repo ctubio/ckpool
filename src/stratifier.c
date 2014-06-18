@@ -1668,7 +1668,7 @@ out_unlock:
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
 	json_set_string(val, "ntime", ntime);
-	json_set_int(val, "diff", diff);
+	json_set_double(val, "diff", diff);
 	json_set_double(val, "sdiff", sdiff);
 	json_set_string(val, "hash", hexhash);
 	json_set_bool(val, "result", result);
