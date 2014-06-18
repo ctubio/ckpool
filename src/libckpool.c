@@ -866,13 +866,11 @@ bool rotating_log(const char *path, const char *msg)
 	}
 	if (unlikely(flock(fd, LOCK_EX))) {
 		fclose(fp);
-		close(fd);
 		LOGERR("Failed to flock %s in rotating_log!", filename);
 		return false;
 	}
 	fprintf(fp, "%s\n", msg);
 	fclose(fp);
-	close(fd);
 
 	return true;
 }
