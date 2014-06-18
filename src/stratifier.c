@@ -468,7 +468,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	ts_realtime(&wb->gentime);
 	wb->network_diff = diff_from_nbits(wb->headerbin + 72);
 
-	len = strlen(ckp->logdir) + 8 + 1 + 16;
+	len = strlen(ckp->logdir) + 8 + 1 + 16 + 1;
 	wb->logdir = ckalloc(len);
 
 	ck_wlock(&workbase_lock);
@@ -489,7 +489,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	sprintf(wb->idstring, "%016lx", wb->id);
 	/* Do not store the trailing slash for the subdir */
 	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
-	ret = mkdir(wb->logdir, 0700);
+	ret = mkdir(wb->logdir, 0750);
 	if (unlikely(ret && errno != EEXIST))
 		quit(1, "Failed to create log directory %s", wb->logdir);
 	HASH_ITER(hh, workbases, tmp, tmpa) {
