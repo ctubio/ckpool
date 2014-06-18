@@ -1513,7 +1513,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	bool share = false, result = false, invalid = true, submit = false;
 	char hexhash[68] = {}, sharehash[32], cdfield[64], *logdir;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
-	double diff, wdiff = 0, sdiff = -1;
+	double diff = client->diff, wdiff = 0, sdiff = -1;
 	enum share_err err = SE_NONE;
 	char idstring[20];
 	uint32_t ntime32;
@@ -1623,8 +1623,6 @@ out_unlock:
 	/* Accept the lower of new and old diffs until the next update */
 	if (id < client->diff_change_job_id && client->old_diff < client->diff)
 		diff = client->old_diff;
-	else
-		diff = client->diff;
 	if (!invalid) {
 		char wdiffsuffix[16];
 
