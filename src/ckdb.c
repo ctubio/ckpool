@@ -119,6 +119,7 @@ enum data_type {
 	TYPE_BIGINT,
 	TYPE_INT,
 	TYPE_TV,
+	TYPE_TVS,
 	TYPE_CTV,
 	TYPE_BLOB,
 	TYPE_DOUBLE
@@ -1136,6 +1137,8 @@ static char *data_to_buf(enum data_type typ, void *data, char *buf, size_t siz)
 			case TYPE_BIGINT:
 			case TYPE_INT:
 			case TYPE_TV:
+			case TYPE_TVS:
+			case TYPE_CTV:
 			case TYPE_DOUBLE:
 				siz = 64; // More than big enough
 				break;
@@ -1171,6 +1174,9 @@ static char *data_to_buf(enum data_type typ, void *data, char *buf, size_t siz)
 					   (((struct timeval *)data)->tv_usec));
 			free(buf2);
 			break;
+		case TYPE_TVS:
+			snprintf(buf, siz, "%ld", (((struct timeval *)data)->tv_sec));
+			break;
 		case TYPE_DOUBLE:
 			snprintf(buf, siz, "%f", *((double *)data));
 			break;
@@ -1197,6 +1203,11 @@ static char *int_to_buf(int32_t data, char *buf, size_t siz)
 static char *tv_to_buf(tv_t *data, char *buf, size_t siz)
 {
 	return data_to_buf(TYPE_TV, (void *)data, buf, siz);
+}
+
+static char *tvs_to_buf(tv_t *data, char *buf, size_t siz)
+{
+	return data_to_buf(TYPE_TVS, (void *)data, buf, siz);
 }
 
 /* unused yet
@@ -3838,7 +3849,7 @@ static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by, char *code, char
 	return strdup(reply);
 }
 
-static char *cmd_homepage(char *cmd, char *id, tv_t *now, __maybe_unused char *by,
+static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
 				__maybe_unused char *code, __maybe_unused char *inet)
 {
 	K_ITEM *i_username, *u_item, *p_item, *us_item, look;
@@ -3846,8 +3857,6 @@ static char *cmd_homepage(char *cmd, char *id, tv_t *now, __maybe_unused char *b
 	USERSTATS userstats;
 	char reply[1024], tmp[1024], *buf;
 	size_t len, off;
-	double lastlp = 0;
-//	double lastblock = 0;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -3861,8 +3870,7 @@ static char *cmd_homepage(char *cmd, char *id, tv_t *now, __maybe_unused char *b
 	off = strlen(buf);
 
 	if (workinfo_lp) {
-		lastlp = tvdiff(now, &(DATA_WORKINFO(workinfo_lp)->createdate));
-		double_to_buf(lastlp, reply, sizeof(reply));
+		tvs_to_buf(&(DATA_WORKINFO(workinfo_lp)->createdate), reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastlp=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
@@ -3873,8 +3881,7 @@ static char *cmd_homepage(char *cmd, char *id, tv_t *now, __maybe_unused char *b
 /*
 	b_item = last_in_tree(blocks_root, ctx);
 	if (b_item) {
-		lastblock = tdiff(now, &(DATA_BLOCKS(b_item)->createdate));
-		double_to_buf(lastblock, reply, sizeof(reply));
+		tvs_to_buf(&(DATA_BLOCKS(b_item)->createdate), reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastblock=%s%cconfirmed=%s%c",
 					   reply, FLDSEP,
 					   &(DATA_BLOCKS(b_item)->confirmed), FLDSEP);
