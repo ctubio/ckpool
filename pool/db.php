@@ -5,7 +5,7 @@ include_once('base.php');
 #
 global $send_sep, $fld_sep, $val_sep;
 $send_sep = '.';
-$fld_sep = Chr(0x2);
+$fld_sep = Chr(0x9);
 $val_sep = '=';
 #
 function myhash($str)
@@ -69,7 +69,6 @@ function msgEncode($cmd, $id, $fields)
 #
 function getStats($user)
 {
- global $fld_sep;
  if ($user === null)
 	$msg = msgEncode('homepage', 'home', array());
  else
