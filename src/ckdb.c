@@ -37,7 +37,17 @@
 #include "ktree.h"
 
 // TODO: a lot of the tree access isn't locked
-// will need to be if threading is required
+// will need to be if threading is added
+
+#define WHERE_FFL " - from %s %s() line %d"
+#define WHERE_FFL_HERE __FILE__, __func__, __LINE__
+#define WHERE_FFL_PASS file, func, line
+#define WHERE_FFL_ARGS __maybe_unused const char *file, \
+			__maybe_unused const char *func, \
+			__maybe_unused const int line
+
+#define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
+#define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
 
 static char *db_user;
 static char *db_pass;
@@ -635,8 +645,14 @@ typedef struct workinfo {
 #define DATA_WORKINFO(_item) ((WORKINFO *)(_item->data))
 
 static K_TREE *workinfo_root;
+// created during data load then destroyed since not needed later
+static K_TREE *workinfo_height_root;
 static K_LIST *workinfo_list;
 static K_STORE *workinfo_store;
+// one in the current block
+static K_ITEM *workinfo_current;
+// last of previous block
+static K_ITEM *workinfo_lp;
 
 // SHARES id.sharelog.json={...}
 typedef struct shares {
@@ -1188,12 +1204,12 @@ static char *blob_to_buf(char *data, char *buf, size_t siz)
 {
 	return data_to_buf(TYPE_BLOB, (void *)data, buf, siz);
 }
+*/
 
 static char *double_to_buf(double data, char *buf, size_t siz)
 {
 	return data_to_buf(TYPE_DOUBLE, (void *)(&data), buf, siz);
 }
-*/
 
 static PGconn *dbconnect()
 {
@@ -2110,6 +2126,51 @@ static double cmp_workinfo(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
+inline int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS)
+{
+	int32_t height = 0;
+	uchar *cb1;
+	int siz;
+
+	cb1 = ((uchar *)coinbase1) + 84;
+	siz = ((hex2bin_tbl[*cb1]) << 4) + (hex2bin_tbl[*(cb1+1)]);
+
+	// limit to 4 for int32_t and since ... that should last a while :)
+	if (siz < 1 || siz > 4) {
+		LOGERR("%s(): Invalid coinbase1 block height size (%d)"
+			" require: 1..4" WHERE_FFL,
+			__func__, siz, WHERE_FFL_PASS);
+		return height;
+	}
+
+	siz *= 2;
+	while (siz-- > 0) {
+		height <<= 4;
+		height += (int32_t)hex2bin_tbl[*(cb1+(siz^1)+2)];
+	}
+
+	return height;
+}
+
+static double _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS)
+{
+	double c = (double)(_coinbase1height(coinbase1a, WHERE_FFL_PASS) -
+			    _coinbase1height(coinbase1b, WHERE_FFL_PASS));
+	return c;
+}
+
+// order by height asc, createdate asc
+static double cmp_workinfo_height(K_ITEM *a, K_ITEM *b)
+{
+	double c = cmp_height(DATA_WORKINFO(a)->coinbase1,
+			      DATA_WORKINFO(b)->coinbase1);
+	if (c == 0) {
+		c = tvdiff(&(DATA_WORKINFO(b)->createdate),
+			   &(DATA_WORKINFO(a)->createdate));
+	}
+	return c;
+}
+
 static K_ITEM *find_workinfo(int64_t workinfoid)
 {
 	WORKINFO workinfo;
@@ -2205,6 +2266,15 @@ unparam:
 	} else {
 		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
 		k_add_head(workinfo_store, item);
+
+		// Remember last workinfo of last height
+		if (workinfo_current) {
+			if (cmp_height(DATA_WORKINFO(workinfo_current)->coinbase1,
+				       DATA_WORKINFO(item)->coinbase1) != 0)
+				workinfo_lp = workinfo_current;
+		}
+
+		workinfo_current = item;
 	}
 	K_WUNLOCK(workinfo_list);
 
@@ -2322,6 +2392,7 @@ static bool workinfo_fill(PGconn *conn)
 			break;
 
 		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
+		workinfo_height_root = add_to_ktree(workinfo_height_root, item, cmp_workinfo_height);
 		k_add_head(workinfo_store, item);
 	}
 	if (!ok)
@@ -3103,6 +3174,10 @@ static void clean_up(ckpool_t *ckp)
 
 static void setup_data()
 {
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+	WORKINFO wi;
+
 	transfer_list = k_new_list("Transfer", sizeof(TRANSFER), ALLOC_TRANSFER, LIMIT_TRANSFER, true);
 	transfer_store = k_new_store(transfer_list);
 	transfer_root = new_ktree();
@@ -3126,6 +3201,7 @@ static void setup_data()
 	workinfo_list = k_new_list("WorkInfo", sizeof(WORKINFO), ALLOC_WORKINFO, LIMIT_WORKINFO, true);
 	workinfo_store = k_new_store(workinfo_list);
 	workinfo_root = new_ktree();
+	workinfo_height_root = new_ktree();
 
 	shares_list = k_new_list("Shares", sizeof(SHARES), ALLOC_SHARES, LIMIT_SHARES, true);
 	shares_store = k_new_store(shares_list);
@@ -3148,6 +3224,17 @@ static void setup_data()
 	userstats_root = new_ktree();
 
 	getdata();
+
+	workinfo_current = last_in_ktree(workinfo_height_root, ctx);
+	if (workinfo_current) {
+		STRNCPY(wi.coinbase1, DATA_WORKINFO(workinfo_current)->coinbase1);
+		wi.createdate.tv_sec = 0L;
+		wi.createdate.tv_usec = 0L;
+		look.data = (void *)(&wi);
+		workinfo_lp = find_before_in_ktree(workinfo_height_root, &look, cmp_workinfo_height, ctx);
+		// No longer needed
+		workinfo_height_root = free_ktree(workinfo_height_root, NULL);
+	}
 }
 
 static char *cmd_adduser(char *cmd, char *id, tv_t *now, char *by, char *code, char *inet)
@@ -3751,6 +3838,102 @@ static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by, char *code, char
 	return strdup(reply);
 }
 
+static char *cmd_homepage(char *cmd, char *id, tv_t *now, __maybe_unused char *by,
+				__maybe_unused char *code, __maybe_unused char *inet)
+{
+	K_ITEM *i_username, *u_item, *p_item, *us_item, look;
+	K_TREE_CTX ctx[1];
+	USERSTATS userstats;
+	char reply[1024], tmp[1024], *buf;
+	size_t len, off;
+	double lastlp = 0;
+//	double lastblock = 0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = optional_name("username", 1, NULL);
+
+	len = 1024;
+	buf = malloc(len);
+	if (!buf)
+		quithere(1, "malloc buf (%d) OOM", (int)len);
+	strcpy(buf, "ok.");
+	off = strlen(buf);
+
+	if (workinfo_lp) {
+		lastlp = tvdiff(now, &(DATA_WORKINFO(workinfo_lp)->createdate));
+		double_to_buf(lastlp, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "lastlp=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else {
+		snprintf(tmp, sizeof(tmp), "lastlp=?%c", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	}
+
+/*
+	b_item = last_in_tree(blocks_root, ctx);
+	if (b_item) {
+		lastblock = tdiff(now, &(DATA_BLOCKS(b_item)->createdate));
+		double_to_buf(lastblock, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "lastblock=%s%cconfirmed=%s%c",
+					   reply, FLDSEP,
+					   &(DATA_BLOCKS(b_item)->confirmed), FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else
+*/
+	snprintf(tmp, sizeof(tmp), "lastblock=?%cconfirmed=?%c", FLDSEP, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	// TODO: assumes only one poolinstance (for now)
+	p_item = last_in_ktree(poolstats_root, ctx);
+
+	if (p_item) {
+		int_to_buf(DATA_POOLSTATS(p_item)->users, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "users=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		int_to_buf(DATA_POOLSTATS(p_item)->workers, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "workers=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		double_to_buf(DATA_POOLSTATS(p_item)->hashrate5m, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "p_hashrate5m=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else {
+		snprintf(tmp, sizeof(tmp), "users=?%cworkers=?%cp_hashrate5m=?%c",
+					   FLDSEP, FLDSEP, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	}
+
+	u_item = NULL;
+	if (i_username)
+		u_item = find_users(DATA_TRANSFER(i_username)->data);
+
+	us_item = NULL;
+	if (p_item && u_item) {
+		STRNCPY(userstats.poolinstance,
+			DATA_POOLSTATS(p_item)->poolinstance);
+		userstats.userid = DATA_USERS(u_item)->userid;
+		userstats.createdate.tv_sec = date_eot.tv_sec;
+		userstats.createdate.tv_usec = date_eot.tv_usec;
+		look.data = (void *)(&userstats);
+		us_item = find_before_in_ktree(userstats_root, &look, cmp_userstats, ctx);
+	}
+
+	if (us_item) {
+		double_to_buf(DATA_USERSTATS(u_item)->hashrate5m, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "u_hashrate5m=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else {
+		snprintf(tmp, sizeof(tmp), "u_hashrate5m=?%c", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	}
+
+	LOGDEBUG("%s.ok.home,user=%s", id,
+		 i_username ? DATA_TRANSFER(i_username)->data : "N");
+	return buf;
+}
+
 enum cmd_values {
 	CMD_UNSET,
 	CMD_REPLY, // Means something was wrong - send back reply
@@ -3764,6 +3947,7 @@ enum cmd_values {
 	CMD_USERSTAT,
 	CMD_NEWID,
 	CMD_PAYMENTS,
+	CMD_HOMEPAGE,
 	CMD_END
 };
 
@@ -3790,6 +3974,7 @@ static struct CMDS {
 	{ CMD_USERSTAT,	"userstats",	cmd_userstats,	ACCESS_POOL },
 	{ CMD_NEWID,	"newid",	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	cmd_payments,	ACCESS_WEB },
+	{ CMD_HOMEPAGE,	"homepage",	cmd_homepage,	ACCESS_WEB },
 	{ CMD_END,	NULL,		NULL,		NULL }
 };
 
