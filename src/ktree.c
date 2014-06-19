@@ -607,7 +607,7 @@ K_ITEM *find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_
 	{
 		if (old)
 		{
-			if (oldcmp > 0.0)
+			if (oldcmp < 0.0)
 			{
 				*ctx = old;
 				return(old->data);

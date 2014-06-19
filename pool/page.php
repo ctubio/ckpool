@@ -333,7 +333,7 @@ function pgfoot()
  return $foot;
 }
 #
-function gopage($data, $page, $menu, $name, $ispage = true, $dotop = true, $douser = true)
+function gopage($data, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
 {
  global $dbg;
  global $page_scripts;
@@ -347,7 +347,7 @@ function gopage($data, $page, $menu, $name, $ispage = true, $dotop = true, $dous
 	$pg = '';
 
  if ($ispage == true)
-	$pg .= $page($data);
+	$pg .= $page($data, $user);
  else
 	$pg .= $page;
 
@@ -355,7 +355,7 @@ function gopage($data, $page, $menu, $name, $ispage = true, $dotop = true, $dous
 //	unset($_SESSION['logkey']);
 
  $head = pghead($script_marker, $name);
- $body = pgbody($menu, $dotop, $name, $douser);
+ $body = pgbody($menu, $dotop, $user, $douser);
  $foot = pgfoot();
 
  if ($dbg === true)

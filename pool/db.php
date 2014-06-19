@@ -102,12 +102,11 @@ function checkpass($user, $pass)
  return $rep;
 }
 #
-function getWorkers()
+function getWorkers($user)
 {
- list($who, $whoid) = validate();
- if ($who == false)
+ if ($user == false)
 	showIndex();
- $flds = array('username' => $who);
+ $flds = array('username' => $user);
  $msg = msgEncode('workers', 'work', $flds);
  $rep = sendsockreply('getworkers', $msg);
  if (!$rep)
@@ -115,12 +114,11 @@ function getWorkers()
  return $rep;
 }
 #
-function getPayments()
+function getPayments($user)
 {
- list($who, $whoid) = validate();
- if ($who == false)
+ if ($user == false)
 	showIndex();
- $flds = array('username' => $who);
+ $flds = array('username' => $user);
  $msg = msgEncode('payments', 'pay', $flds);
  $rep = sendsockreply('getpayments', $msg);
  if (!$rep)
