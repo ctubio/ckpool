@@ -46,6 +46,7 @@ typedef struct k_list {
 	void **item_memory;	// allocated item memory buffers
 	int data_mem_count;	// how many item data memory buffers have been allocated
 	void **data_memory;	// allocated item data memory buffers
+	void (*dsp_func)(K_ITEM *, FILE *); // optional data display to a file
 } K_LIST;
 
 /*
