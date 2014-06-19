@@ -173,12 +173,12 @@ function pgtop($dotop, $user, $douser)
 		}
 	}
 
-	if (isset($info['lastlp']))
+	if (isset($info['lastbc']))
 	{
-		$nlb = $info['lastlp'];
+		$nlb = $info['lastbc'];
 		if ($nlb != '?')
 		{
-			$sec = $now - $info['lastlp'];
+			$sec = $now - $info['lastbc'];
 			$min = round($sec / 60);
 			$nlb = $min.'m';
 			$s = $sec % 60;

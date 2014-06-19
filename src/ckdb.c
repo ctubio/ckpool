@@ -655,7 +655,7 @@ static K_STORE *workinfo_store;
 static K_ITEM *workinfo_current;
 // first workinfo of current block
 // TODO: have it's own memory?
-static tv_t *last_lp;
+static tv_t *last_bc;
 
 // SHARES id.sharelog.json={...}
 typedef struct shares {
@@ -2339,11 +2339,11 @@ unparam:
 		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
 		k_add_head(workinfo_store, item);
 
-		// Remember the lp 'now' when the height changes
+		// Remember the bc 'now' when the height changes
 		if (workinfo_current) {
 			if (cmp_height(DATA_WORKINFO(workinfo_current)->coinbase1,
 				       DATA_WORKINFO(item)->coinbase1) != 0)
-				last_lp = &(DATA_WORKINFO(item)->createdate);
+				last_bc = &(DATA_WORKINFO(item)->createdate);
 		}
 
 		workinfo_current = item;
@@ -3307,7 +3307,7 @@ static void setup_data()
 		// Find the first workinfo for this height
 		found = find_after_in_ktree(workinfo_height_root, &look, cmp_workinfo_height, ctx);
 		if (found)
-			last_lp = &(DATA_WORKINFO(found)->createdate);
+			last_bc = &(DATA_WORKINFO(found)->createdate);
 		// No longer needed
 		workinfo_height_root = free_ktree(workinfo_height_root, NULL);
 	}
@@ -3934,17 +3934,17 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	strcpy(buf, "ok.");
 	off = strlen(buf);
 
-	if (last_lp) {
-		tvs_to_buf(last_lp, reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "lastlp=%s%c", reply, FLDSEP);
+	if (last_bc) {
+		tvs_to_buf(last_bc, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "lastbc=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "lastlp=?%c", FLDSEP);
+		snprintf(tmp, sizeof(tmp), "lastbc=?%c", FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
 /*
-	// TODO: have a last_block - like last_lp - only updated when we find a block
+	// TODO: have a last_block - like last_bc - only updated when we find a block
 	b_item = last_in_tree(blocks_root, ctx);
 	if (b_item) {
 		tvs_to_buf(&(DATA_BLOCKS(b_item)->createdate), reply, sizeof(reply));
