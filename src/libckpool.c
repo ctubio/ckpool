@@ -16,6 +16,7 @@
 #else
 #include <sys/un.h>
 #endif
+#include <sys/file.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <netdb.h>
@@ -29,7 +30,6 @@
 #include <time.h>
 #include <math.h>
 
-#include "ckpool.h"
 #include "libckpool.h"
 #include "sha2.h"
 #include "utlist.h"
