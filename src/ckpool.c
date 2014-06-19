@@ -64,10 +64,10 @@ void logmsg(int loglevel, const char *fmt, ...) {
 			flock(logfd, LOCK_UN);
 		}
 		if (loglevel <= LOG_WARNING) {\
-			fprintf(stderr, "%s", buf);
 			if (loglevel <= LOG_ERR && errno != 0)
-				fprintf(stderr, " with errno %d: %s", errno, strerror(errno));
-			fprintf(stderr, "\n");
+				fprintf(stderr, "%s with errno %d: %s\n", buf, errno, strerror(errno));
+			else
+				fprintf(stderr, "%s\n", buf);
 			fflush(stderr);
 		}
 		free(buf);
