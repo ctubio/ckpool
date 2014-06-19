@@ -126,6 +126,28 @@ struct ckpool_instance {
 	char **proxypass;
 };
 
+struct ckmsg {
+	struct ckmsg *next;
+	struct ckmsg *prev;
+	void *data;
+};
+
+typedef struct ckmsg ckmsg_t;
+
+struct ckmsgq {
+	ckpool_t *ckp;
+	char name[16];
+	pthread_t pth;
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	ckmsg_t *msgs;
+	void (*func)(ckpool_t *, void *);
+};
+
+typedef struct ckmsgq ckmsgq_t;
+ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
+void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
+
 ckpool_t *global_ckp;
 
 bool ping_main(ckpool_t *ckp);

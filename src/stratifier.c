@@ -188,7 +188,6 @@ static json_params_t *sshares;
 static json_params_t *sauths;
 
 struct ckdb_msg {
-	ckpool_t *ckp;
 	json_t *val;
 	int idtype;
 };
@@ -2094,13 +2093,13 @@ static void *authoriser(void *arg)
 	return NULL;
 }
 
-static void ckdbq_process(ckdb_msg_t *data)
+static void ckdbq_process(ckpool_t *ckp, ckdb_msg_t *data)
 {
 	bool logged = false;
 	char *buf = NULL;
 
 	while (!buf) {
-		buf = json_ckdb_call(data->ckp, ckdb_ids[data->idtype], data->val, logged);
+		buf = json_ckdb_call(ckp, ckdb_ids[data->idtype], data->val, logged);
 		if (unlikely(!buf)) {
 			LOGWARNING("Failed to talk to ckdb, queueing messages");
 			sleep(5);
@@ -2400,7 +2399,7 @@ int stratifier(proc_instance_t *pi)
 	cond_init(&sauth_cond);
 	create_pthread(&pth_authoriser, authoriser, ckp);
 
-	ckdbq = create_ckmsgq("ckdbqueue", &ckdbq_process);
+	ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 
 	cklock_init(&workbase_lock);
 	if (!ckp->proxy)
