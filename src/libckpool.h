@@ -32,6 +32,8 @@
 # include <sys/endian.h>
 #endif
 
+#include "utlist.h"
+
 #ifndef bswap_16
  #define bswap_16 __builtin_bswap16
  #define bswap_32 __builtin_bswap32

@@ -32,6 +32,7 @@
 #include "ckpool.h"
 #include "libckpool.h"
 #include "sha2.h"
+#include "utlist.h"
 
 #ifndef UNIX_PATH_MAX
 #define UNIX_PATH_MAX 108
@@ -74,7 +75,6 @@ void join_pthread(pthread_t thread)
 	if (!pthread_kill(thread, 0))
 		pthread_join(thread, NULL);
 }
-
 
 /* Place holders for when we add lock debugging */
 #define GETLOCK(_lock, _file, _func, _line)

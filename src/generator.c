@@ -18,7 +18,6 @@
 #include "libckpool.h"
 #include "generator.h"
 #include "bitcoin.h"
-#include "stratifier.h"
 #include "uthash.h"
 #include "utlist.h"
 
@@ -53,6 +52,16 @@ struct share_msg {
 };
 
 typedef struct share_msg share_msg_t;
+
+struct stratum_msg {
+	struct stratum_msg *next;
+	struct stratum_msg *prev;
+
+	json_t *json_msg;
+	int client_id;
+};
+
+typedef struct stratum_msg stratum_msg_t;
 
 /* Per proxied pool instance data */
 struct proxy_instance {

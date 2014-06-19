@@ -74,6 +74,62 @@ void logmsg(int loglevel, const char *fmt, ...) {
 	}
 }
 
+/* Generic function for creating a message queue receiving and parsing thread */
+static void *ckmsg_queue(void *arg)
+{
+	ckmsgq_t *ckmsgq = (ckmsgq_t *)arg;
+	ckpool_t *ckp = ckmsgq->ckp;
+
+	pthread_detach(pthread_self());
+	rename_proc(ckmsgq->name);
+
+	while (42) {
+		ckmsg_t *msg;
+
+		mutex_lock(&ckmsgq->lock);
+		if (!ckmsgq->msgs)
+			pthread_cond_wait(&ckmsgq->cond, &ckmsgq->lock);
+		msg = ckmsgq->msgs;
+		if (likely(msg))
+			DL_DELETE(ckmsgq->msgs, msg);
+		mutex_unlock(&ckmsgq->lock);
+
+		if (unlikely(!msg))
+			continue;
+		ckmsgq->func(ckp, msg->data);
+		free(msg);
+	}
+	return NULL;
+}
+
+ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func)
+{
+	ckmsgq_t *ckmsgq = ckzalloc(sizeof(ckmsgq_t));
+
+	strncpy(ckmsgq->name, name, 15);
+	ckmsgq->func = func;
+	ckmsgq->ckp = ckp;
+	mutex_init(&ckmsgq->lock);
+	cond_init(&ckmsgq->cond);
+	create_pthread(&ckmsgq->pth, ckmsg_queue, ckmsgq);
+
+	return ckmsgq;
+}
+
+/* Generic function for adding messages to a ckmsgq linked list and signal the ckmsgq
+ * parsing thread to wake up and process it. */
+void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
+{
+	ckmsg_t *msg = ckalloc(sizeof(ckmsg_t));
+
+	msg->data = data;
+
+	mutex_lock(&ckmsgq->lock);
+	DL_APPEND(ckmsgq->msgs, msg);
+	pthread_cond_signal(&ckmsgq->cond);
+	mutex_unlock(&ckmsgq->lock);
+}
+
 /* Listen for incoming global requests. Always returns a response if possible */
 static void *listener(void *arg)
 {
