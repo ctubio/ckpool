@@ -956,6 +956,22 @@ static void setnow(tv_t *now)
 	now->tv_usec = spec.tv_nsec / 1000;
 }
 
+static void dsp_transfer(K_ITEM *item, FILE *stream)
+{
+	TRANSFER *t = NULL;
+
+	if (!stream)
+		LOGERR("%s() called with (null) stream", __func__);
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+
+	t = DATA_TRANSFER(item);
+
+	fprintf(stream, " name='%s' data='%s' malloc=%c\n",
+			t->name, t->data,
+			(t->value == t->data) ? 'N' : 'Y');
+}
+
 // order by name asc
 static double cmp_transfer(K_ITEM *a, K_ITEM *b)
 {
@@ -3087,6 +3103,25 @@ void poolstats_reload()
 	PQfinish(conn);
 }
 
+static void dsp_userstats(K_ITEM *item, FILE *stream)
+{
+	USERSTATS *u = NULL;
+	char *createdate_buf;
+
+	if (!stream)
+		LOGERR("%s() called with (null) stream", __func__);
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+
+	u = DATA_USERSTATS(item);
+
+	createdate_buf = tv_to_buf(&(u->createdate), NULL, 0);
+	fprintf(stream, " pi='%s' uid=%"PRId64" Hs=%f Hs5m=%f Hs1hr=%f Hs24hr=%f cd=%s\n",
+			u->poolinstance, u->userid, u->hashrate, u->hashrate5m,
+			u->hashrate1hr, u->hashrate24hr, createdate_buf);
+	free(createdate_buf);
+}
+
 // order by poolinstance asc,userid asc,createdate asc
 static double cmp_userstats(K_ITEM *a, K_ITEM *b)
 {
@@ -3254,6 +3289,7 @@ static void setup_data()
 	transfer_list = k_new_list("Transfer", sizeof(TRANSFER), ALLOC_TRANSFER, LIMIT_TRANSFER, true);
 	transfer_store = k_new_store(transfer_list);
 	transfer_root = new_ktree();
+	transfer_list->dsp_func = dsp_transfer;
 
 	users_list = k_new_list("Users", sizeof(USERS), ALLOC_USERS, LIMIT_USERS, true);
 	users_store = k_new_store(users_list);
@@ -3295,6 +3331,7 @@ static void setup_data()
 	userstats_list = k_new_list("UserStats", sizeof(USERSTATS), ALLOC_USERSTATS, LIMIT_USERSTATS, true);
 	userstats_store = k_new_store(userstats_list);
 	userstats_root = new_ktree();
+	userstats_list->dsp_func = dsp_userstats;
 
 	getdata();
 
@@ -3994,7 +4031,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	}
 
 	if (us_item) {
-		double_to_buf(DATA_USERSTATS(u_item)->hashrate5m, reply, sizeof(reply));
+		double_to_buf(DATA_USERSTATS(us_item)->hashrate5m, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "u_hashrate5m=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
@@ -4005,6 +4042,33 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	LOGDEBUG("%s.ok.home,user=%s", id,
 		 i_username ? DATA_TRANSFER(i_username)->data : "N");
 	return buf;
+}
+
+static __maybe_unused char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *now,
+				    __maybe_unused char *by, __maybe_unused char *code,
+				    __maybe_unused char *inet)
+{
+	__maybe_unused K_ITEM *i_file;
+	__maybe_unused char reply[1024] = "";
+	__maybe_unused size_t siz = sizeof(reply);
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	// WARNING: This is a gaping security hole - only use in development
+	LOGDEBUG("%s.disabled.dsp", id);
+	return strdup("disabled.dsp");
+
+/*
+	i_file = require_name("file", 1, NULL, reply, siz);
+	if (!i_file)
+		return strdup(reply);
+
+	// Only one implemented so far
+	dsp_ktree(userstats_list, userstats_root, DATA_TRANSFER(i_file)->data);
+
+	LOGDEBUG("%s.ok.dsp.file='%s'", id, DATA_TRANSFER(i_file)->data);
+	return strdup("ok.dsp");
+*/
 }
 
 enum cmd_values {
@@ -4021,6 +4085,7 @@ enum cmd_values {
 	CMD_NEWID,
 	CMD_PAYMENTS,
 	CMD_HOMEPAGE,
+	CMD_DSP,
 	CMD_END
 };
 
@@ -4048,6 +4113,7 @@ static struct CMDS {
 	{ CMD_NEWID,	"newid",	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	cmd_payments,	ACCESS_WEB },
 	{ CMD_HOMEPAGE,	"homepage",	cmd_homepage,	ACCESS_WEB },
+	{ CMD_DSP,	"dsp",		cmd_dsp,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		NULL,		NULL }
 };
 
@@ -4208,7 +4274,6 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 		}
 		K_WUNLOCK(transfer_list);
 	}
-matane:
 	free(cmdptr);
 	return cmds[*which_cmds].cmd_val;
 }

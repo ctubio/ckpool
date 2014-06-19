@@ -124,6 +124,49 @@ void dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *))
 		printf(" Empty ktree\n");
 }
 
+void dsp_ktree(K_LIST *list, K_TREE *root, char *filename)
+{
+	K_TREE_CTX ctx[1];
+	K_ITEM *item;
+	FILE *stream;
+	struct tm *tm;
+	time_t now_t;
+	char stamp[128];
+
+	now_t = time(NULL);
+	tm = localtime(&now_t);
+	snprintf(stamp, sizeof(stamp),
+			"[%d-%02d-%02d %02d:%02d:%02d]",
+			tm->tm_year + 1900,
+			tm->tm_mon + 1,
+			tm->tm_mday,
+			tm->tm_hour,
+			tm->tm_min,
+			tm->tm_sec);
+
+	stream = fopen(filename, "w");
+	if (!stream)
+		fprintf(stderr, "%s %s() failed to open '%s' (%d) %s",
+				stamp, __func__, filename, errno, strerror(errno));
+
+	fprintf(stream, "%s Dump of ktree '%s':\n", stamp, list->name);
+
+	if (root->isNil == No)
+	{
+		item = first_in_ktree(root, ctx);
+		while (item)
+		{
+			list->dsp_func(item, stream);
+			item = next_in_ktree(ctx);
+		}
+		fprintf(stream, "End\n");
+	}
+	else
+		fprintf(stream, "Empty ktree\n");
+
+	fclose(stream);
+}
+
 static int nilTest(K_TREE *node, char *msg, int depth, int count, K_TREE *nil2)
 {
 	if (node->isNil == Yo || node == nil2)

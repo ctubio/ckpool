@@ -31,6 +31,7 @@ typedef void *K_TREE_CTX;
 
 extern K_TREE *new_ktree();
 extern void dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *));
+extern void dsp_ktree(K_LIST *list, K_TREE *root, char *filename);
 extern K_ITEM *first_in_ktree(K_TREE *root, K_TREE_CTX *ctx);
 extern K_ITEM *last_in_ktree(K_TREE *root, K_TREE_CTX *ctx);
 extern K_ITEM *next_in_ktree(K_TREE_CTX *ctx);
