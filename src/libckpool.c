@@ -77,7 +77,7 @@ void join_pthread(pthread_t thread)
 }
 
 /* Generic function for creating a message queue receiving and parsing thread */
-void *ckmsg_queue(void *arg)
+static void *ckmsg_queue(void *arg)
 {
 	ckmsgq_t *ckmsgq = (ckmsgq_t *)arg;
 
@@ -103,7 +103,7 @@ void *ckmsg_queue(void *arg)
 	return NULL;
 }
 
-void create_ckmsgq(const char *name, const void *func)
+ckmsgq_t *create_ckmsgq(const char *name, const void *func)
 {
 	ckmsgq_t *ckmsgq = ckzalloc(sizeof(ckmsgq_t));
 
@@ -112,6 +112,8 @@ void create_ckmsgq(const char *name, const void *func)
 	mutex_init(&ckmsgq->lock);
 	cond_init(&ckmsgq->cond);
 	create_pthread(&ckmsgq->pth, ckmsg_queue, ckmsgq);
+
+	return ckmsgq;
 }
 
 /* Generic function for adding messages to a ckmsgq linked list and signal the ckmsgq

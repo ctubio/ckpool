@@ -280,6 +280,8 @@ struct ckmsgq {
 };
 
 typedef struct ckmsgq ckmsgq_t;
+ckmsgq_t *create_ckmsgq(const char *name, const void *func);
+void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
 
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
