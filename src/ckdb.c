@@ -4208,7 +4208,6 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 		}
 		K_WUNLOCK(transfer_list);
 	}
-matane:
 	free(cmdptr);
 	return cmds[*which_cmds].cmd_val;
 }
