@@ -1,17 +1,18 @@
 <?php
 #
-function dopayments($data, $user)
+function doworkers($data, $user)
 {
- $pg = '<h1>Payments</h1>';
+ $pg = '<h1>Workers</h1>';
 
- $rep = getPayments($user);
+ $rep = getWorkers($user);
  $ans = repDecode($rep);
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
- $pg .= "<td class=dl>Date</td>";
- $pg .= "<td class=dl>Address</td>";
- $pg .= "<td class=dr>BTC</td>";
+ $pg .= "<td class=dl>Name</td>";
+ $pg .= "<td class=dl>Difficulty</td>";
+ $pg .= "<td class=dr>Idle Notifications</td>";
+ $pg .= "<td class=dr>Idle Notification Time</td>";
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
@@ -35,9 +36,9 @@ function dopayments($data, $user)
  return $pg;
 }
 #
-function show_payments($menu, $name, $user)
+function show_workers($menu, $name, $user)
 {
- gopage(NULL, 'dopayments', $menu, $name, $user);
+ gopage(NULL, 'doworkers', $menu, $name, $user);
 }
 #
 ?>

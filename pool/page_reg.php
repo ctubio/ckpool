@@ -2,7 +2,7 @@
 #
 include_once('socket.php');
 #
-function doreg($data)
+function doreg($data, $u)
 {
  if (isset($data['user']))
 	$user = htmlspecialchars($data['user']);
@@ -72,7 +72,7 @@ function safepass($pass)
  return true;
 }
 #
-function show_reg($menu, $name)
+function show_reg($menu, $name, $u)
 {
  $user = getparam('user', false);
  $mail = getparam('mail', false);
@@ -117,12 +117,12 @@ function show_reg($menu, $name)
 
 	$ans = repDecode($rep);
 	if ($ans['STATUS'] == 'ok')
-		gopage($data, 'doreg2', $menu, $name, true, true, false);
+		gopage($data, 'doreg2', $menu, $name, $u, true, true, false);
 	else
 		$data['error'] = "Invalid details";
  }
 
- gopage($data, 'doreg', $menu, $name, true, true, false);
+ gopage($data, 'doreg', $menu, $name, $u, true, true, false);
 }
 #
 ?>

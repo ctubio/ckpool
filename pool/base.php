@@ -102,14 +102,14 @@ function safetext($txt, $len = 1024)
  return $res;
 }
 #
-function dbd($data)
+function dbd($data, $user)
 {
  return "<font color=red size=+10><br>Web site is currently down</font>";
 }
 #
 function dbdown()
 {
- gopage(NULL, 'dbd', NULL, '', true, false);
+ gopage(NULL, 'dbd', NULL, '', false, true, false);
 }
 #
 function f404($data)
@@ -119,10 +119,10 @@ function f404($data)
 #
 function do404()
 {
- gopage(NULL, 'f404', NULL, '', true, false);
+ gopage(NULL, 'f404', NULL, '', false, true, false);
 }
 #
-function showPage($page, $menu, $name)
+function showPage($page, $menu, $name, $user)
 {
 # If you are doing development, use without '@'
 # Then switch to '@' when finished
@@ -131,14 +131,14 @@ function showPage($page, $menu, $name)
 
  $fun = 'show_' . $page;
  if (function_exists($fun))
-	$fun($menu, $name);
+	$fun($menu, $name, $user);
  else
 	do404();
 }
 #
 function showIndex()
 {
- showPage('index', NULL, '');
+ showPage('index', NULL, '', false);
 }
 #
 function offline()
@@ -147,7 +147,7 @@ function offline()
  {
 	$ip = $_SERVER['REMOTE_ADDR'];
 	if ($ip != '192.168.7.74')
-		gopage(NULL, file_get_contents('./maintenance.txt'), NULL, '', false, false);
+		gopage(NULL, file_get_contents('./maintenance.txt'), NULL, '', false, false, false, false);
  }
 }
 #
@@ -260,10 +260,8 @@ function validate()
 function loggedIn()
 {
  list($who, $whoid) = validate();
- if ($who == false)
-	return false;
-
- return true;
+ // false if not logged in
+ return $who;
 }
 #
 ?>

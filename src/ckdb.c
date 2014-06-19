@@ -4089,7 +4089,7 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 	}
 
 	next = data;
-	if (strncmp(next, JSON_TRANSFER, JSON_TRANSFER_LEN) == 0) {
+	if (next && strncmp(next, JSON_TRANSFER, JSON_TRANSFER_LEN) == 0) {
 		json_t *json_data;
 		json_error_t err_val;
 		void *json_iter;
@@ -4182,7 +4182,7 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 		K_WLOCK(transfer_list);
 		while (next && *next) {
 			data = next;
-			next = strchr(data, 0x02);
+			next = strchr(data, FLDSEP);
 			if (next)
 				*(next++) = '\0';
 
@@ -4208,7 +4208,7 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 		}
 		K_WUNLOCK(transfer_list);
 	}
-
+matane:
 	free(cmdptr);
 	return cmds[*which_cmds].cmd_val;
 }

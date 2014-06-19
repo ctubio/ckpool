@@ -3,7 +3,7 @@
 include_once('param.php');
 include_once('base.php');
 #
-function process($p)
+function process($p, $user)
 {
  $menu = array(
 	'Home' => array(
@@ -34,26 +34,26 @@ function process($p)
 			}
 
  if ($page === '')
-	showPage('index', $menu, '');
+	showPage('index', $menu, '', $user);
  else
-	showPage($page, $menu, $n);
+	showPage($page, $menu, $n, $user);
 }
 #
 function check()
 {
  tryLogInOut();
- $in = loggedIn();
- if ($in == false)
+ $who = loggedIn();
+ if ($who === false)
  {
 	if (requestRegister() == true)
-		showPage('reg', NULL, '');
+		showPage('reg', NULL, '', $who);
 	else
 		showIndex();
  }
  else
  {
 	$p = getparam('k', true);
-	process($p);
+	process($p, $who);
  }
 }
 #
