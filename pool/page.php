@@ -127,6 +127,7 @@ function pgtop($dotop, $user, $douser)
  $plb = '?';
  $nlb = '?';
  $uhr = '?GHs';
+ $u1hr = '';
  if ($info !== false)
  {
 	$now = time();
@@ -201,6 +202,24 @@ function pgtop($dotop, $user, $douser)
 				$uhr = (round($uhr/1000)/100).'THs';
 		}
 	}
+
+	if (isset($info['u_hashrate1hr']))
+	{
+		$u1hr = $info['u_hashrate1hr'];
+		if ($u1hr == '?')
+			$u1hr = '';
+		else
+		{
+			$u1hr /= 10000000;
+			if ($u1hr < 100000)
+				$u1hr = '/'.(round($u1hr)/100).'GHs';
+			else
+				$u1hr = '/'.(round($u1hr/1000)/100).'THs';
+
+			if (substr($u1hr, -3) == substr($uhr, -3))
+				$uhr = substr($uhr, 0, -3);
+		}
+	}
  }
 
  addscript("function jst(){document.getElementById('jst').style.visibility='hidden';}");
@@ -236,7 +255,7 @@ Pass: <input type=password name=Pass size=10 value=''>
 			$top .= "
 <span class=topwho>$who&nbsp;</span>
 <span class=topdes>Hash Rate:</span>
-<span class=topdat>$uhr</span>
+<span class=topdat>$uhr$u1hr</span>
 <form action=index.php method=POST>
 &nbsp;<input type=submit name=Logout value=Logout>
 </form>";
