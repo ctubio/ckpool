@@ -96,7 +96,7 @@ static void *ckmsg_queue(void *arg)
 
 		if (unlikely(!msg))
 			continue;
-		ckmsgq->func(ckp, msg);
+		ckmsgq->func(ckp, msg->data);
 		free(msg);
 	}
 	return NULL;
