@@ -4034,8 +4034,12 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		double_to_buf(DATA_USERSTATS(us_item)->hashrate5m, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "u_hashrate5m=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
+
+		double_to_buf(DATA_USERSTATS(us_item)->hashrate1hr, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "u_hashrate1hr=%s", reply);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "u_hashrate5m=?%c", FLDSEP);
+		snprintf(tmp, sizeof(tmp), "u_hashrate5m=?%cu_hashrate1hr=?", FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
