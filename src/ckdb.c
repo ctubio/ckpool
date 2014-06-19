@@ -653,7 +653,8 @@ static K_LIST *workinfo_list;
 static K_STORE *workinfo_store;
 // one in the current block
 static K_ITEM *workinfo_current;
-// last of previous block
+// first workinfo of current block
+// TODO: have it's own memory?
 static tv_t *last_lp;
 
 // SHARES id.sharelog.json={...}
@@ -3943,6 +3944,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	}
 
 /*
+	// TODO: have a last_block - like last_lp - only updated when we find a block
 	b_item = last_in_tree(blocks_root, ctx);
 	if (b_item) {
 		tvs_to_buf(&(DATA_BLOCKS(b_item)->createdate), reply, sizeof(reply));
