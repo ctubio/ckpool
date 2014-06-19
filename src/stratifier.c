@@ -963,6 +963,8 @@ retry:
 	} else if (!strncasecmp(buf, "block", 5)) {
 		block_solve(ckp);
 		update_base(ckp);
+	} else if (!strncasecmp(buf, "loglevel", 8)) {
+		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {
 		json_t *val = json_loads(buf, 0, NULL);
 

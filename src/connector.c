@@ -506,6 +506,10 @@ retry:
 		ci->accept = false;
 		goto retry;
 	}
+	if (!strncasecmp(buf, "loglevel", 8)) {
+		sscanf(buf, "loglevel=%d", &ckp->loglevel);
+		goto retry;
+	}
 
 	LOGDEBUG("Connector received message: %s", buf);
 	if (!strncasecmp(buf, "shutdown", 8))
