@@ -654,7 +654,7 @@ static K_STORE *workinfo_store;
 // one in the current block
 static K_ITEM *workinfo_current;
 // last of previous block
-static K_ITEM *workinfo_lp;
+static tv_t *last_lp;
 
 // SHARES id.sharelog.json={...}
 typedef struct shares {
@@ -888,6 +888,62 @@ static K_STORE *userstats_store;
 
 static char logname[512];
 #define LOGFILE(_msg) rotating_log(logname, _msg)
+
+void logmsg(int loglevel, const char *fmt, ...)
+{
+	int logfd = 0;
+	char *buf = NULL;
+	struct tm *tm;
+	time_t now_t;
+	va_list ap;
+	char stamp[128];
+	char *extra = "";
+
+	now_t = time(NULL);
+	tm = localtime(&now_t);
+	snprintf(stamp, sizeof(stamp),
+			"[%d-%02d-%02d %02d:%02d:%02d]",
+			tm->tm_year + 1900,
+			tm->tm_mon + 1,
+			tm->tm_mday,
+			tm->tm_hour,
+			tm->tm_min,
+			tm->tm_sec);
+
+	if (!fmt) {
+		fprintf(stderr, "%s %s() called without fmt\n", stamp, __func__);
+		return;
+	}
+
+	if (!global_ckp)
+		extra = " !!NULL global_ckp!!";
+	else
+		logfd = global_ckp->logfd;
+
+	va_start(ap, fmt);
+	VASPRINTF(&buf, fmt, ap);
+	va_end(ap);
+
+	if (logfd) {
+		FILE *LOGFP = global_ckp->logfp;
+
+		flock(logfd, LOCK_EX);
+		fprintf(LOGFP, "%s %s", stamp, buf);
+		if (loglevel <= LOG_ERR && errno != 0)
+			fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno));
+		fprintf(LOGFP, "\n");
+		flock(logfd, LOCK_UN);
+	}
+	if (loglevel <= LOG_WARNING) {
+		if (loglevel <= LOG_ERR && errno != 0) {
+			fprintf(stderr, "%s %s with errno %d: %s%s\n",
+					stamp, buf, errno, strerror(errno), extra);
+		} else
+			fprintf(stderr, "%s %s%s\n", stamp, buf, extra);
+		fflush(stderr);
+	}
+	free(buf);
+}
 
 static void setnow(tv_t *now)
 {
@@ -2282,11 +2338,11 @@ unparam:
 		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
 		k_add_head(workinfo_store, item);
 
-		// Remember last workinfo of last height
+		// Remember the lp 'now' when the height changes
 		if (workinfo_current) {
 			if (cmp_height(DATA_WORKINFO(workinfo_current)->coinbase1,
 				       DATA_WORKINFO(item)->coinbase1) != 0)
-				workinfo_lp = workinfo_current;
+				last_lp = &(DATA_WORKINFO(item)->createdate);
 		}
 
 		workinfo_current = item;
@@ -3191,7 +3247,7 @@ static void clean_up(ckpool_t *ckp)
 static void setup_data()
 {
 	K_TREE_CTX ctx[1];
-	K_ITEM look;
+	K_ITEM look, *found;
 	WORKINFO wi;
 
 	transfer_list = k_new_list("Transfer", sizeof(TRANSFER), ALLOC_TRANSFER, LIMIT_TRANSFER, true);
@@ -3247,7 +3303,10 @@ static void setup_data()
 		wi.createdate.tv_sec = 0L;
 		wi.createdate.tv_usec = 0L;
 		look.data = (void *)(&wi);
-		workinfo_lp = find_before_in_ktree(workinfo_height_root, &look, cmp_workinfo_height, ctx);
+		// Find the first workinfo for this height
+		found = find_after_in_ktree(workinfo_height_root, &look, cmp_workinfo_height, ctx);
+		if (found)
+			last_lp = &(DATA_WORKINFO(found)->createdate);
 		// No longer needed
 		workinfo_height_root = free_ktree(workinfo_height_root, NULL);
 	}
@@ -3874,8 +3933,8 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	strcpy(buf, "ok.");
 	off = strlen(buf);
 
-	if (workinfo_lp) {
-		tvs_to_buf(&(DATA_WORKINFO(workinfo_lp)->createdate), reply, sizeof(reply));
+	if (last_lp) {
+		tvs_to_buf(last_lp, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastlp=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
@@ -4260,6 +4319,7 @@ int main(int argc, char **argv)
 	int c, ret;
 	char *kill;
 
+	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
