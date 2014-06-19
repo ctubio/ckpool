@@ -32,6 +32,8 @@
 # include <sys/endian.h>
 #endif
 
+#include "utlist.h"
+
 #ifndef bswap_16
  #define bswap_16 __builtin_bswap16
  #define bswap_32 __builtin_bswap32
@@ -259,6 +261,25 @@ struct unixsock {
 typedef struct unixsock unixsock_t;
 
 typedef struct proc_instance proc_instance_t;
+
+struct ckmsg {
+	struct ckmsg *next;
+	struct ckmsg *prev;
+	void *data;
+};
+
+typedef struct ckmsg ckmsg_t;
+
+struct ckmsgq {
+	char name[16];
+	pthread_t pth;
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	ckmsg_t *msgs;
+	void (*func)(void *);
+};
+
+typedef struct ckmsgq ckmsgq_t;
 
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
