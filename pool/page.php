@@ -180,10 +180,10 @@ function pgtop($dotop, $user, $douser)
 		{
 			$sec = $now - $info['lastlp'];
 			$min = round($sec / 60);
-			$nlb = '~'.$min.'m';
-#			$s = $sec % 60;
-#			if ($s > 0)
-#				$nlb .= " ${s}s";
+			$nlb = $min.'m';
+			$s = $sec % 60;
+			if ($s > 0)
+				$nlb .= " ${s}s";
 		}
 	}
 
