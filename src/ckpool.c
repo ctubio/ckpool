@@ -95,6 +95,7 @@ retry:
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
+		send_unix_msg(sockd, "failed");
 	} else if (!strncasecmp(buf, "shutdown", 8)) {
 		LOGWARNING("Listener received shutdown message, terminating ckpool");
 		send_unix_msg(sockd, "exiting");
