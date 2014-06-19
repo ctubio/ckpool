@@ -4031,7 +4031,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	}
 
 	if (us_item) {
-		double_to_buf(DATA_USERSTATS(u_item)->hashrate5m, reply, sizeof(reply));
+		double_to_buf(DATA_USERSTATS(us_item)->hashrate5m, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "u_hashrate5m=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
