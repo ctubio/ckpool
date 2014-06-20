@@ -130,6 +130,17 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 	mutex_unlock(&ckmsgq->lock);
 }
 
+static void broadcast_proc(ckpool_t *ckp, const char *buf)
+{
+	int i;
+
+	for (i = 0; i < ckp->proc_instances; i++) {
+		proc_instance_t *pi = ckp->children[i];
+
+		send_proc(pi, buf);
+	}
+}
+
 /* Listen for incoming global requests. Always returns a response if possible */
 static void *listener(void *arg)
 {
@@ -159,6 +170,20 @@ retry:
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Listener received ping request");
 		send_unix_msg(sockd, "pong");
+	} else if (!strncasecmp(buf, "loglevel", 8)) {
+		int loglevel;
+
+		if (sscanf(buf, "loglevel=%d", &loglevel) != 1) {
+			LOGWARNING("Failed to parse loglevel message %s", buf);
+			send_unix_msg(sockd, "Failed");
+		} else if (loglevel < LOG_EMERG || loglevel > LOG_DEBUG) {
+			LOGWARNING("Invalid loglevel %d sent", loglevel);
+			send_unix_msg(sockd, "Invalid");
+		} else {
+			ckp->loglevel = loglevel;
+			broadcast_proc(ckp, buf);
+			send_unix_msg(sockd, "success");
+		}
 	} else if (!strncasecmp(buf, "getfd", 5)) {
 		char *msg;
 
@@ -504,7 +529,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 	if (!stat(path, &statbuf)) {
 		int oldpid;
 
-		LOGWARNING("File %s exists", path);
+		LOGNOTICE("File %s exists", path);
 		fp = fopen(path, "r");
 		if (!fp) {
 			LOGEMERG("Failed to open file %s", path);

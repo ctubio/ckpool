@@ -279,6 +279,8 @@ retry:
 		LOGNOTICE("Submitting block data!");
 		if (submit_block(cs, buf + 12))
 			send_proc(ckp->stratifier, "block");
+	} else if (!strncasecmp(buf, "loglevel", 8)) {
+		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Generator received ping request");
 		send_unix_msg(sockd, "pong");
@@ -1253,6 +1255,8 @@ retry:
 		pthread_cancel(proxi->pth_precv);
 		pthread_cancel(proxi->pth_psend);
 		goto reconnect;
+	} else if (!strncasecmp(buf, "loglevel", 8)) {
+		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (!strncasecmp(buf, "ping", 4)) {
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");

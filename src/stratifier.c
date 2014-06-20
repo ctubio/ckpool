@@ -195,6 +195,7 @@ struct user_instance {
 
 	tv_t last_share;
 	time_t last_stats;
+	time_t start_time;
 
 	double dsps1;
 	double dsps5;
@@ -962,6 +963,8 @@ retry:
 	} else if (!strncasecmp(buf, "block", 5)) {
 		block_solve(ckp);
 		update_base(ckp);
+	} else if (!strncasecmp(buf, "loglevel", 8)) {
+		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {
 		json_t *val = json_loads(buf, 0, NULL);
 
@@ -1110,9 +1113,13 @@ static user_instance_t *authorise_user(const char *workername)
 	ck_ilock(&instance_lock);
 	HASH_FIND_STR(user_instances, username, instance);
 	if (!instance) {
+		ts_t now;
+
 		/* New user instance */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
+		ts_realtime(&now);
+		instance->start_time = now.tv_sec;
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
@@ -2020,16 +2027,19 @@ static void update_userstats(ckpool_t *ckp)
 	ck_rlock(&instance_lock);
 	HASH_ITER(hh, user_instances, instance, tmp) {
 		double ghs1, ghs5, ghs60, ghs1440;
+		int elapsed;
 
 		if (instance->last_stats > now_t - 600)
 			continue;
+		elapsed = now_t - instance->start_time;
 		instance->last_stats = now_t;
 		ghs1 = instance->dsps1 * nonces;
 		ghs5 = instance->dsps5 * nonces;
 		ghs60 = instance->dsps60 * nonces;
 		ghs1440 = instance->dsps1440 * nonces;
-		val = json_pack("{ss,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
+				"elapsed", elapsed,
 				"username", instance->username,
 				"hashrate", ghs1,
 				"hashrate5m", ghs5,
@@ -2196,8 +2206,9 @@ static void *statsupdate(void *arg)
 
 		ts_realtime(&ts_now);
 		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
-		val = json_pack("{ss,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
+				"elapsed", diff.tv_sec,
 				"users", stats.users,
 				"workers", stats.workers,
 				"hashrate", ghs1,
