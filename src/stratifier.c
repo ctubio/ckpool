@@ -2045,11 +2045,12 @@ static void update_userstats(ckpool_t *ckp)
 		ghs5 = client->dsps5 * nonces;
 		ghs60 = client->dsps60 * nonces;
 		ghs1440 = client->dsps1440 * nonces;
-		val = json_pack("{ss,si,si,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,si,ss,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
 				"instanceid", client->id,
 				"elapsed", elapsed,
 				"username", client->user_instance->username,
+				"workername", client->workername,
 				"hashrate", ghs1,
 				"hashrate5m", ghs5,
 				"hashrate1hr", ghs60,
