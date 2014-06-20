@@ -529,7 +529,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 	if (!stat(path, &statbuf)) {
 		int oldpid;
 
-		LOGWARNING("File %s exists", path);
+		LOGNOTICE("File %s exists", path);
 		fp = fopen(path, "r");
 		if (!fp) {
 			LOGEMERG("Failed to open file %s", path);
