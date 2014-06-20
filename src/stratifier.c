@@ -2007,7 +2007,7 @@ static void ckdbq_process(ckpool_t *ckp, ckdb_msg_t *data)
 
 static const double nonces = 4294967296;
 
-/* Called every 15 seconds, we send the updated stats to ckdb of those users
+/* Called every 20 seconds, we send the updated stats to ckdb of those users
  * who have gone 10 minutes between updates. This ends up staggering stats to
  * avoid floods of stat data coming at once. */
 static void update_userstats(ckpool_t *ckp)
@@ -2035,7 +2035,7 @@ static void update_userstats(ckpool_t *ckp)
 		 * the last 10 minutes */
 		if (client->idle)
 			continue;
-		/* Select clients using a mask to return each users's stats once
+		/* Select clients using a mask to return each user's stats once
 		 * every ~10 minutes */
 		cycle_mask = client->user_id & 0x1f;
 		if (cycle_mask != stats.userstats_cycle)
