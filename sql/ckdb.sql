@@ -331,6 +331,7 @@ CREATE TABLE auths (
 
 CREATE TABLE poolstats (
     poolinstance character varying(256) NOT NULL,
+    elapsed bigint NOT NULL,
     users integer NOT NULL,
     workers integer NOT NULL,
     hashrate float NOT NULL,
@@ -345,10 +346,27 @@ CREATE TABLE poolstats (
 );
 
 
+-- memory only
+CREATE TABLE userstats (
+    poolinstance character varying(256) NOT NULL,
+    userid bigint NOT NULL,
+    elapsed bigint NOT NULL,
+    hashrate float NOT NULL,
+    hashrate5m float NOT NULL,
+    hashrate1hr float NOT NULL,
+    hashrate24hr float NOT NULL,
+    createdate timestamp with time zone NOT NULL,
+    createby character varying(64) DEFAULT ''::character varying NOT NULL,
+    createcode character varying(128) DEFAULT ''::character varying NOT NULL,
+    createinet character varying(128) DEFAULT ''::character varying NOT NULL,
+    PRIMARY KEY (poolinstance, userid, createdate)
+);
+
+
 CREATE TABLE version (
     vlock integer NOT NULL,
     version character varying(256) NOT NULL,
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'0.1');
+insert into version (vlock,version) values (1,'0.2');

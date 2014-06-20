@@ -133,18 +133,22 @@ function pgtop($dotop, $user, $douser)
 	$now = time();
 
 	if (isset($info['p_hashrate5m']))
-	{
 		$phr = $info['p_hashrate5m'];
-		if ($phr == '?')
-			$phr = '?THs';
+
+	if (isset($info['p_elapsed'])
+	and isset($info['p_hashrate1hr'])
+	and $info['p_elapsed'] > 3600)
+		$phr = $info['p_hashrate1hr'];
+
+	if ($phr == '?')
+		$phr = '?THs';
+	else
+	{
+		$phr /= 10000000;
+		if ($phr < 100000)
+			$phr = (round($phr)/100).'GHs';
 		else
-		{
-			$phr /= 10000000;
-			if ($phr < 100000)
-				$phr = (round($phr)/100).'GHs';
-			else
-				$phr = (round($phr/1000)/100).'THs';
-		}
+			$phr = (round($phr/1000)/100).'THs';
 	}
 
 	if (isset($info['lastblock']))
@@ -203,7 +207,9 @@ function pgtop($dotop, $user, $douser)
 		}
 	}
 
-	if (isset($info['u_hashrate1hr']))
+	if (isset($info['u_hashrate1hr'])
+	and isset($info['u_elapsed'])
+	and $info['u_elapsed'] > 3600)
 	{
 		$u1hr = $info['u_hashrate1hr'];
 		if ($u1hr == '?')

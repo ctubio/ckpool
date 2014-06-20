@@ -849,6 +849,7 @@ static K_STORE *auths_store;
 
 typedef struct poolstats {
 	char poolinstance[TXT_BIG+1];
+	int64_t elapsed;
 	int32_t users;
 	int32_t workers;
 	double hashrate;
@@ -871,6 +872,7 @@ static K_STORE *poolstats_store;
 // TODO: When to discard?
 typedef struct userstats {
 	char poolinstance[TXT_BIG+1];
+	int64_t elapsed;
 	int64_t userid;
 	double hashrate;
 	double hashrate5m;
@@ -2918,8 +2920,9 @@ static double cmp_poolstats(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-static bool poolstats_add(PGconn *conn, bool store, char *poolinstance, char *users,
-				char *workers, char *hashrate, char *hashrate5m,
+static bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
+				char *elapsed, char *users, char *workers,
+				char *hashrate, char *hashrate5m,
 				char *hashrate1hr, char *hashrate24hr,
 				tv_t *now, char *by, char *code, char *inet)
 {
@@ -2929,7 +2932,7 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance, char *us
 	int n;
 	POOLSTATS *row;
 	char *ins;
-	char *params[7 + SIMPLEDATECOUNT];
+	char *params[8 + SIMPLEDATECOUNT];
 	int par;
 	bool ok = false;
 
@@ -2942,6 +2945,7 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance, char *us
 	row = DATA_POOLSTATS(p_item);
 
 	STRNCPY(row->poolinstance, poolinstance);
+	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
 	TXT_TO_INT("users", users, row->users);
 	TXT_TO_INT("workers", workers, row->workers);
 	TXT_TO_DOUBLE("hashrate", hashrate, row->hashrate);
@@ -2955,6 +2959,7 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance, char *us
 	par = 0;
 	if (store) {
 		params[par++] = str_to_buf(row->poolinstance, NULL, 0);
+		params[par++] = bigint_to_buf(row->elapsed, NULL, 0);
 		params[par++] = int_to_buf(row->users, NULL, 0);
 		params[par++] = int_to_buf(row->workers, NULL, 0);
 		params[par++] = bigint_to_buf(row->hashrate, NULL, 0);
@@ -2965,7 +2970,8 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance, char *us
 		PARCHK(par, params);
 
 		ins = "insert into poolstats "
-			"(poolinstance,users,workers,hashrate,hashrate5m,hashrate1hr,hashrate24hr"
+			"(poolinstance,elapsed,users,workers,hashrate,"
+			"hashrate5m,hashrate1hr,hashrate24hr"
 			SIMPLEDATECONTROL ") values (" PQPARAM11 ")";
 
 		res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
@@ -3138,9 +3144,10 @@ static double cmp_userstats(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-static bool userstats_add(char *poolinstance, char *username, char *hashrate,
-			  char *hashrate5m, char *hashrate1hr, char *hashrate24hr,
-			  tv_t *now, char *by, char *code, char *inet)
+static bool userstats_add(char *poolinstance, char *elapsed, char *username,
+			  char *hashrate, char *hashrate5m, char *hashrate1hr,
+			  char *hashrate24hr, tv_t *now, char *by, char *code,
+			  char *inet)
 {
 	K_ITEM *s_item, *u_item;
 	USERSTATS *row;
@@ -3154,6 +3161,7 @@ static bool userstats_add(char *poolinstance, char *username, char *hashrate,
 	row = DATA_USERSTATS(s_item);
 
 	STRNCPY(row->poolinstance, poolinstance);
+	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
 	u_item = find_users(username);
 	if (!u_item)
 		return false;
@@ -3436,8 +3444,9 @@ static char *cmd_poolstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 
 	// log to logfile
 
-	K_ITEM *i_poolinstance, *i_users, *i_workers, *i_hashrate, *i_hashrate5m;
-	K_ITEM *i_hashrate1hr, *i_hashrate24hr, *i_createdate, look, *ps;
+	K_ITEM *i_poolinstance, *i_elapsed, *i_users, *i_workers;
+	K_ITEM *i_hashrate, *i_hashrate5m, *i_hashrate1hr, *i_hashrate24hr;
+	K_ITEM *i_createdate, look, *ps;
 	tv_t createdate;
 	POOLSTATS row;
 	bool ok = false;
@@ -3446,6 +3455,10 @@ static char *cmd_poolstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 
 	i_poolinstance = require_name("poolinstance", 1, NULL, reply, siz);
 	if (!i_poolinstance)
+		return strdup(reply);
+
+	i_elapsed = require_name("elapsed", 1, NULL, reply, siz);
+	if (!i_elapsed)
 		return strdup(reply);
 
 	i_users = require_name("users", 1, NULL, reply, siz);
@@ -3492,6 +3505,7 @@ static char *cmd_poolstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 
 	conn = dbconnect();
 	ok = poolstats_add(conn, store, DATA_TRANSFER(i_poolinstance)->data,
+					DATA_TRANSFER(i_elapsed)->data,
 					DATA_TRANSFER(i_users)->data,
 					DATA_TRANSFER(i_workers)->data,
 					DATA_TRANSFER(i_hashrate)->data,
@@ -3517,14 +3531,18 @@ static char *cmd_userstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 
 	// log to logfile
 
-	K_ITEM *i_poolinstance, *i_username, *i_hashrate, *i_hashrate5m;
-	K_ITEM *i_hashrate1hr, *i_hashrate24hr;
+	K_ITEM *i_poolinstance, *i_elapsed, *i_username, *i_hashrate;
+	K_ITEM *i_hashrate5m, *i_hashrate1hr, *i_hashrate24hr;
 	bool ok = false;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
 	i_poolinstance = require_name("poolinstance", 1, NULL, reply, siz);
 	if (!i_poolinstance)
+		return strdup(reply);
+
+	i_elapsed = require_name("elapsed", 1, NULL, reply, siz);
+	if (!i_elapsed)
 		return strdup(reply);
 
 	i_username = require_name("username", 1, NULL, reply, siz);
@@ -3548,6 +3566,7 @@ static char *cmd_userstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 		return strdup(reply);
 
 	ok = userstats_add(DATA_TRANSFER(i_poolinstance)->data,
+			   DATA_TRANSFER(i_elapsed)->data,
 			   DATA_TRANSFER(i_username)->data,
 			   DATA_TRANSFER(i_hashrate)->data,
 			   DATA_TRANSFER(i_hashrate5m)->data,
@@ -4009,9 +4028,18 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		double_to_buf(DATA_POOLSTATS(p_item)->hashrate5m, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "p_hashrate5m=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
+
+		double_to_buf(DATA_POOLSTATS(p_item)->hashrate1hr, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "p_hashrate1hr=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		bigint_to_buf(DATA_POOLSTATS(p_item)->elapsed, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "p_elapsed=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "users=?%cworkers=?%cp_hashrate5m=?%c",
-					   FLDSEP, FLDSEP, FLDSEP);
+		snprintf(tmp, sizeof(tmp), "users=?%cworkers=?%cp_hashrate5m=?%c"
+					   "p_hashrate1hr=?%cp_elapsed=?%c",
+					   FLDSEP, FLDSEP, FLDSEP, FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
@@ -4036,10 +4064,15 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		double_to_buf(DATA_USERSTATS(us_item)->hashrate1hr, reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "u_hashrate1hr=%s", reply);
+		snprintf(tmp, sizeof(tmp), "u_hashrate1hr=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		bigint_to_buf(DATA_USERSTATS(us_item)->elapsed, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "u_elapsed=%s", reply);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "u_hashrate5m=?%cu_hashrate1hr=?", FLDSEP);
+		snprintf(tmp, sizeof(tmp), "u_hashrate5m=?%cu_hashrate1hr=?%cu_elapsed=?",
+					   FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
