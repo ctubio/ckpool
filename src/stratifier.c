@@ -2013,10 +2013,10 @@ static const double nonces = 4294967296;
 static void update_userstats(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
+	json_t *val = NULL;
 	char cdfield[64];
 	time_t now_t;
 	ts_t ts_now;
-	json_t *val;
 
 	if (++stats.userstats_cycle > 0x1f)
 		stats.userstats_cycle = 0;
@@ -2040,6 +2040,12 @@ static void update_userstats(ckpool_t *ckp)
 		cycle_mask = client->user_id & 0x1f;
 		if (cycle_mask != stats.userstats_cycle)
 			continue;
+
+		if (val) {
+			json_set_bool(val,"eos", false);
+			ckdbq_add(ID_USERSTATS, val);
+			val = NULL;
+		}
 		elapsed = now_t - client->start_time;
 		ghs1 = client->dsps1 * nonces;
 		ghs5 = client->dsps5 * nonces;
@@ -2059,6 +2065,11 @@ static void update_userstats(ckpool_t *ckp)
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
+	}
+	/* Mark the last userstats sent on this pass of stats with an end of
+	 * stats marker. */
+	if (val) {
+		json_set_bool(val,"eos", true);
 		ckdbq_add(ID_USERSTATS, val);
 	}
 	ck_runlock(&instance_lock);
