@@ -48,6 +48,9 @@ struct pool_stats {
 	int64_t unaccounted_shares;
 	int64_t accounted_shares;
 
+	/* Cycle of 24 to determine which users to dump stats on */
+	uint8_t userstats_cycle;
+
 	/* Shares per second for 1/5/15/60 minute rolling averages */
 	double sps1;
 	double sps5;
@@ -193,17 +196,6 @@ struct user_instance {
 	char username[128];
 	int id;
 
-	tv_t last_share;
-	time_t last_stats;
-	time_t start_time;
-
-	double dsps1;
-	double dsps5;
-	double dsps15;
-	double dsps60;
-	double dsps360;
-	double dsps1440;
-
 	int workers;
 };
 
@@ -224,13 +216,18 @@ struct stratum_instance {
 	int64_t diff; /* Current diff */
 	int64_t old_diff; /* Previous diff */
 	int64_t diff_change_job_id; /* Last job_id we changed diff */
-	double dsps5; /* Diff shares per second, 5 minute rolling average */
+	double dsps1; /* Diff shares per second, 1 minute rolling average */
+	double dsps5; /* ... 5 minute ... */
+	double dsps60;/* etc */
+	double dsps1440;
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
 	tv_t first_share;
 	tv_t last_share;
+	time_t start_time;
 
 	bool authorised;
+	bool idle;
 
 	user_instance_t *user_instance;
 	char *useragent;
@@ -1113,13 +1110,9 @@ static user_instance_t *authorise_user(const char *workername)
 	ck_ilock(&instance_lock);
 	HASH_FIND_STR(user_instances, username, instance);
 	if (!instance) {
-		ts_t now;
-
 		/* New user instance */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
-		ts_realtime(&now);
-		instance->start_time = now.tv_sec;
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
@@ -1183,6 +1176,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	bool ret = false;
 	const char *buf;
 	int arr_size;
+	ts_t now;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -1202,8 +1196,14 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty workername parameter");
 		goto out;
 	}
+	if (!memcmp(buf, ".", 1)) {
+		*err_val = json_string("Empty username parameter");
+		goto out;
+	}
 	client->user_instance = authorise_user(buf);
 	client->user_id = client->user_instance->id;
+	ts_realtime(&now);
+	client->start_time = now.tv_sec;
 
 	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
 		  client->user_instance->username);
@@ -1253,8 +1253,7 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 	return tdiff;
 }
 
-static void add_submit(stratum_instance_t *client, user_instance_t *instance, int diff,
-		       bool valid)
+static void add_submit(stratum_instance_t *client, int diff, bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	int64_t next_blockid, optimal;
@@ -1267,16 +1266,15 @@ static void add_submit(stratum_instance_t *client, user_instance_t *instance, in
 	network_diff = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
-	tdiff = sane_tdiff(&now_t, &instance->last_share);
+	tdiff = sane_tdiff(&now_t, &client->last_share);
 	if (unlikely(!client->first_share.tv_sec))
 		copy_tv(&client->first_share, &now_t);
-	decay_time(&instance->dsps1, diff, tdiff, 60);
-	decay_time(&instance->dsps5, diff, tdiff, 300);
-	decay_time(&instance->dsps15, diff, tdiff, 900);
-	decay_time(&instance->dsps60, diff, tdiff, 3600);
-	decay_time(&instance->dsps360, diff, tdiff, 21600);
-	decay_time(&instance->dsps1440, diff, tdiff, 86400);
-	copy_tv(&instance->last_share, &now_t);
+	decay_time(&client->dsps1, diff, tdiff, 60);
+	decay_time(&client->dsps5, diff, tdiff, 300);
+	decay_time(&client->dsps60, diff, tdiff, 3600);
+	decay_time(&client->dsps1440, diff, tdiff, 86400);
+	copy_tv(&client->last_share, &now_t);
+	client->idle = false;
 
 	tdiff = sane_tdiff(&now_t, &client->last_share);
 	copy_tv(&client->last_share, &now_t);
@@ -1629,7 +1627,7 @@ out_unlock:
 		}
 	}  else
 		LOGINFO("Rejected client %d invalid share", client->id);
-	add_submit(client, client->user_instance, diff, result);
+	add_submit(client, diff, result);
 
 	/* Log shares here */
 	len = strlen(logdir) + strlen(client->workername) + 12;
@@ -2014,33 +2012,44 @@ static const double nonces = 4294967296;
  * avoid floods of stat data coming at once. */
 static void update_userstats(ckpool_t *ckp)
 {
-	user_instance_t *instance, *tmp;
+	stratum_instance_t *client, *tmp;
 	char cdfield[64];
 	time_t now_t;
 	ts_t ts_now;
 	json_t *val;
+
+	if (++stats.userstats_cycle > 0x1f)
+		stats.userstats_cycle = 0;
 
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 	now_t = ts_now.tv_sec;
 
 	ck_rlock(&instance_lock);
-	HASH_ITER(hh, user_instances, instance, tmp) {
+	HASH_ITER(hh, stratum_instances, client, tmp) {
 		double ghs1, ghs5, ghs60, ghs1440;
+		uint8_t cycle_mask;
 		int elapsed;
 
-		if (instance->last_stats > now_t - 600)
+		/* Only show stats from clients that have returned shares in
+		 * the last 10 minutes */
+		if (client->idle)
 			continue;
-		elapsed = now_t - instance->start_time;
-		instance->last_stats = now_t;
-		ghs1 = instance->dsps1 * nonces;
-		ghs5 = instance->dsps5 * nonces;
-		ghs60 = instance->dsps60 * nonces;
-		ghs1440 = instance->dsps1440 * nonces;
-		val = json_pack("{ss,si,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
+		/* Select clients using a mask to return each users's stats once
+		 * every ~10 minutes */
+		cycle_mask = client->user_id & 0x1f;
+		if (cycle_mask != stats.userstats_cycle)
+			continue;
+		elapsed = now_t - client->start_time;
+		ghs1 = client->dsps1 * nonces;
+		ghs5 = client->dsps5 * nonces;
+		ghs60 = client->dsps60 * nonces;
+		ghs1440 = client->dsps1440 * nonces;
+		val = json_pack("{ss,si,si,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
+				"instanceid", client->id,
 				"elapsed", elapsed,
-				"username", instance->username,
+				"username", client->user_instance->username,
 				"hashrate", ghs1,
 				"hashrate5m", ghs5,
 				"hashrate1hr", ghs60,
@@ -2069,7 +2078,7 @@ static void *statsupdate(void *arg)
 		double ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
 		char suffix360[16], suffix1440[16];
 		double sps1, sps5, sps15, sps60;
-		user_instance_t *instance, *tmp;
+		stratum_instance_t *client, *tmp;
 		char fname[512] = {};
 		tv_t now, diff;
 		ts_t ts_now;
@@ -2151,42 +2160,36 @@ static void *statsupdate(void *arg)
 		fclose(fp);
 
 		ck_rlock(&instance_lock);
-		HASH_ITER(hh, user_instances, instance, tmp) {
+		HASH_ITER(hh, stratum_instances, client, tmp) {
 			bool idle = false;
 			double ghs;
 
-			if (now.tv_sec - instance->last_share.tv_sec > 60) {
+			if (now.tv_sec - client->last_share.tv_sec > 60) {
 				idle = true;
 				/* No shares for over a minute, decay to 0 */
-				decay_time(&instance->dsps1, 0, tdiff, 60);
-				decay_time(&instance->dsps5, 0, tdiff, 300);
-				decay_time(&instance->dsps15, 0, tdiff, 900);
-				decay_time(&instance->dsps60, 0, tdiff, 3600);
-				decay_time(&instance->dsps360, 0, tdiff, 21600);
-				decay_time(&instance->dsps1440, 0, tdiff, 86400);
+				decay_time(&client->dsps1, 0, tdiff, 60);
+				decay_time(&client->dsps5, 0, tdiff, 300);
+				decay_time(&client->dsps60, 0, tdiff, 3600);
+				decay_time(&client->dsps1440, 0, tdiff, 86400);
+				if (now.tv_sec - client->last_share.tv_sec > 600)
+					client->idle = true;
 			}
-			ghs = instance->dsps1 * nonces;
+			ghs = client->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
-			ghs = instance->dsps5 * nonces;
+			ghs = client->dsps5 * nonces;
 			suffix_string(ghs, suffix5, 16, 0);
-			ghs = instance->dsps15 * nonces;
-			suffix_string(ghs, suffix15, 16, 0);
-			ghs = instance->dsps60 * nonces;
+			ghs = client->dsps60 * nonces;
 			suffix_string(ghs, suffix60, 16, 0);
-			ghs = instance->dsps360 * nonces;
-			suffix_string(ghs, suffix360, 16, 0);
-			ghs = instance->dsps1440 * nonces;
+			ghs = client->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
 
-			val = json_pack("{ss,ss,ss,ss,ss,ss}",
+			val = json_pack("{ss,ss,ss,ss}",
 					"hashrate1m", suffix1,
 					"hashrate5m", suffix5,
-					"hashrate15m", suffix15,
 					"hashrate1hr", suffix60,
-					"hashrate6hr", suffix360,
 					"hashrate1d", suffix1440);
 
-			snprintf(fname, 511, "%s/%s", ckp->logdir, instance->username);
+			snprintf(fname, 511, "%s/%s", ckp->logdir, client->workername);
 			fp = fopen(fname, "w");
 			if (unlikely(!fp)) {
 				LOGERR("Failed to fopen %s", fname);
@@ -2197,7 +2200,7 @@ static void *statsupdate(void *arg)
 			/* Only display the status of connected users to the
 			 * console log. */
 			if (!idle)
-				LOGNOTICE("User %s:%s", instance->username, s);
+				LOGNOTICE("Worker %s:%s", client->workername, s);
 			dealloc(s);
 			json_decref(val);
 			fclose(fp);
@@ -2221,10 +2224,10 @@ static void *statsupdate(void *arg)
 				"createinet", "127.0.0.1");
 		ckdbq_add(ID_POOLSTATS, val);
 
-		/* Update stats 4 times per minute for smooth values, displaying
+		/* Update stats 3 times per minute for smooth values, displaying
 		 * status every minute. */
-		for (i = 0; i < 4; i++) {
-			cksleep_ms_r(&stats.last_update, 15000);
+		for (i = 0; i < 3; i++) {
+			cksleep_ms_r(&stats.last_update, 20000);
 			cksleep_prepare_r(&stats.last_update);
 			update_userstats(ckp);
 
