@@ -267,6 +267,7 @@ static cklock_t share_lock;
 #define ID_SHAREERR 3
 #define ID_POOLSTATS 4
 #define ID_USERSTATS 5
+#define ID_BLOCK 6
 
 static const char *ckdb_ids[] = {
 	"authorise",
@@ -274,7 +275,8 @@ static const char *ckdb_ids[] = {
 	"shares",
 	"shareerror",
 	"poolstats",
-	"userstats"
+	"userstats",
+	"block"
 };
 
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
@@ -871,11 +873,46 @@ static void stratum_broadcast_message(const char *msg)
 /* FIXME: Speak to database here. */
 static void block_solve(ckpool_t *ckp)
 {
+	char cdfield[64];
+	ts_t ts_now;
+	json_t *val;
 	char *msg;
 
-	ASPRINTF(&msg, "Block solved by %s!", ckp->name);
+	ts_realtime(&ts_now);
+	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
+
+	ck_rlock(&workbase_lock);
+	ASPRINTF(&msg, "Block %d solved by %s!", current_workbase->height, ckp->name);
+	/* We send blank settings to ckdb with only the matching data from what we submitted
+	 * to say the block has been confirmed. */
+	val = json_pack("{si,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
+			"height", current_workbase->height,
+			"confirmed", "1",
+			"workinfoid", current_workbase->id,
+			"username", "",
+			"workername", "",
+			"clientid", 0,
+			"enonce1", "",
+			"nonce2", "",
+			"nonce", "",
+			"reward", current_workbase->coinbasevalue,
+			"createdate", cdfield,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", "127.0.0.1");
+	ck_runlock(&workbase_lock);
+
+	update_base(ckp);
+
+	ck_rlock(&workbase_lock);
+	json_set_string(val, "blockhash", current_workbase->prevhash);
+	ck_runlock(&workbase_lock);
+
+	ckdbq_add(ID_BLOCK, val);
+
 	stratum_broadcast_message(msg);
 	free(msg);
+
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -959,7 +996,6 @@ retry:
 			drop_client(client_id);
 	} else if (!strncasecmp(buf, "block", 5)) {
 		block_solve(ckp);
-		update_base(ckp);
 	} else if (!strncasecmp(buf, "loglevel", 8)) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {
@@ -1343,12 +1379,15 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 }
 
 /* We should already be holding the workbase_lock */
-static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, const char *coinbase,
-			    int cblen)
+static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, double diff, const char *coinbase,
+			    int cblen, const char *nonce2, const char *nonce)
 {
 	int transactions = wb->transactions + 1;
 	char *gbt_block, varint[12];
 	char hexcoinbase[512];
+	json_t *val = NULL;
+	char cdfield[64];
+	ts_t ts_now;
 
 	/* Submit anything over 95% of the diff in case of rounding errors */
 	if (diff < current_workbase->network_diff * 0.95)
@@ -1357,6 +1396,9 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 	LOGWARNING("Possible block solve diff %f !", diff);
 	if (wb->proxy)
 		return;
+
+	ts_realtime(&ts_now);
+	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
 	gbt_block = ckalloc(512);
 	sprintf(gbt_block, "submitblock:");
@@ -1383,6 +1425,23 @@ static void test_blocksolve(workbase_t *wb, const uchar *data, double diff, cons
 		realloc_strcat(&gbt_block, wb->txn_data);
 	send_proc(wb->ckp->generator, gbt_block);
 	free(gbt_block);
+	val = json_pack("{si,ss,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
+			"height", wb->height,
+			"blockhash", data,
+			"confirmed", "n",
+			"workinfoid", wb->id,
+			"username", client->user_instance->username,
+			"workername", client->workername,
+			"clientid", client->id,
+			"enonce1", client->enonce1,
+			"nonce2", nonce2,
+			"nonce", nonce,
+			"reward", wb->coinbasevalue,
+			"createdate", cdfield,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", "127.0.0.1");
+	ckdbq_add(ID_BLOCK, val);
 }
 
 static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
@@ -1440,7 +1499,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	ret = diff_from_target(hash);
 
 	/* Test we haven't solved a block regardless of share status */
-	test_blocksolve(wb, swap, ret, coinbase, cblen);
+	test_blocksolve(client, wb, swap, ret, coinbase, cblen, nonce2, nonce);
 
 	return ret;
 }
