@@ -53,6 +53,7 @@
 #define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
 #define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
 
+static char *EMPTY = "";
 static char *db_user;
 static char *db_pass;
 
@@ -635,7 +636,7 @@ static K_STORE *optioncontrol_store;
 */
 
 // TODO: aging/discarding workinfo,shares
-// WORKINFO id.sharelog.json={...}
+// WORKINFO workinfo.id.json={...}
 typedef struct workinfo {
 	int64_t workinfoid;
 	char poolinstance[TXT_BIG+1];
@@ -667,7 +668,7 @@ static K_ITEM *workinfo_current;
 // TODO: have it's own memory?
 static tv_t *last_bc;
 
-// SHARES id.sharelog.json={...}
+// SHARES shares.id.json={...}
 typedef struct shares {
 	int64_t workinfoid;
 	int64_t userid;
@@ -692,7 +693,7 @@ static K_TREE *shares_root;
 static K_LIST *shares_list;
 static K_STORE *shares_store;
 
-// SHAREERRORS id.sharelog.json={...}
+// SHAREERRORS shareerrors.id.json={...}
 typedef struct shareerrorss {
 	int64_t workinfoid;
 	int64_t userid;
@@ -771,8 +772,9 @@ typedef struct blocksummary {
 static K_TREE *blocksummary_root;
 static K_LIST *blocksummary_list;
 static K_STORE *blocksummary_store;
+*/
 
-// BLOCKS
+// BLOCKS block.id.json={...}
 typedef struct blocks {
 	int32_t height;
 	char blockhash[TXT_BIG+1];
@@ -788,14 +790,18 @@ typedef struct blocks {
 	HISTORYDATECONTROLFIELDS;
 } BLOCKS;
 
-#define ALLOC_BLOCKS 10000
+#define ALLOC_BLOCKS 100
 #define LIMIT_BLOCKS 0
-#define DATA_BLOCKS ((BLOCKS *)(_item->data))
+#define DATA_BLOCKS(_item) ((BLOCKS *)(_item->data))
+
+#define BLOCKS_NEW 'n'
+#define BLOCKS_CONFIRM '1'
 
 static K_TREE *blocks_root;
 static K_LIST *blocks_list;
 static K_STORE *blocks_store;
 
+/*
 // MININGPAYOUTS
 typedef struct miningpayouts {
 	int64_t miningpayoutid;
@@ -831,7 +837,7 @@ static K_LIST *eventlog_list;
 static K_STORE *eventlog_store;
 */
 
-// AUTHS
+// AUTHS authorise.id.json={...}
 typedef struct auths {
 	int64_t authid;
 	int64_t userid;
@@ -850,10 +856,7 @@ static K_TREE *auths_root;
 static K_LIST *auths_list;
 static K_STORE *auths_store;
 
-// POOLSTATS
-// TODO: get every 1m: pool sending it
-// so web page is kept up to date
-
+// POOLSTATS poolstats.id.json={...}
 // Store every > 9.5m?
 #define STATS_PER (9.5*60.0)
 
@@ -877,7 +880,7 @@ static K_TREE *poolstats_root;
 static K_LIST *poolstats_list;
 static K_STORE *poolstats_store;
 
-// USERSTATS
+// USERSTATS userstats.id.json={...}
 // Pool sends each user (staggered) once per 10m
 // TODO: When to discard?
 typedef struct userstats {
@@ -1884,7 +1887,6 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 		rescode = PQresultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Begin", rescode, conn);
-			PQclear(res);
 			goto unparam;
 		}
 		PQclear(res);
@@ -1893,9 +1895,8 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 		rescode = PQresultStatus(res);
 		PQclear(res);
 		if (!PGOK(rescode)) {
-			PGLOGERR("Insert", rescode, conn);
+			PGLOGERR("Update", rescode, conn);
 			res = PQexec(conn, "Rollback");
-			PQclear(res);
 			goto unparam;
 		}
 
@@ -1929,16 +1930,15 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 		if (!PGOK(rescode)) {
 			PGLOGERR("Insert", rescode, conn);
 			res = PQexec(conn, "Rollback");
-			PQclear(res);
 			goto unparam;
 		}
 
 		res = PQexec(conn, "Commit");
-		PQclear(res);
 	}
 
 	ok = true;
 unparam:
+	PQclear(res);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -2260,8 +2260,8 @@ static double cmp_workinfo(K_ITEM *a, K_ITEM *b)
 	double c = (double)(DATA_WORKINFO(a)->workinfoid) -
 		   (double)(DATA_WORKINFO(b)->workinfoid);
 	if (c == 0) {
-		c = tvdiff(&(DATA_WORKINFO(b)->expirydate),
-			   &(DATA_WORKINFO(a)->expirydate));
+		c = tvdiff(&(DATA_WORKINFO(a)->expirydate),
+			   &(DATA_WORKINFO(b)->expirydate));
 	}
 	return c;
 }
@@ -2305,8 +2305,8 @@ static double cmp_workinfo_height(K_ITEM *a, K_ITEM *b)
 	double c = cmp_height(DATA_WORKINFO(a)->coinbase1,
 			      DATA_WORKINFO(b)->coinbase1);
 	if (c == 0) {
-		c = tvdiff(&(DATA_WORKINFO(b)->createdate),
-			   &(DATA_WORKINFO(a)->createdate));
+		c = tvdiff(&(DATA_WORKINFO(a)->createdate),
+			   &(DATA_WORKINFO(b)->createdate));
 	}
 	return c;
 }
@@ -2743,6 +2743,317 @@ static bool shareerrors_fill()
 	// and verify workinfo while doing that
 
 	return true;
+}
+
+// order by height asc,blockhash asc,expirydate desc
+static double cmp_blocks(K_ITEM *a, K_ITEM *b)
+{
+	double c = DATA_BLOCKS(a)->height - DATA_BLOCKS(b)->height;
+	if (c == 0) {
+		c = strcmp(DATA_BLOCKS(a)->blockhash,
+			   DATA_BLOCKS(b)->blockhash);
+		if (c == 0) {
+			c = tvdiff(&(DATA_BLOCKS(a)->expirydate),
+				   &(DATA_BLOCKS(b)->expirydate));
+		}
+	}
+	return c;
+}
+
+/* unused
+static K_ITEM *find_blocks(int32_t height, char *blockhash)
+{
+	BLOCKS blocks;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	blocks.height = height;
+	STRNCPY(blocks.blockhash, blockhash);
+	blocks.expirydate.tv_sec = default_expiry.tv_sec;
+	blocks.expirydate.tv_usec = default_expiry.tv_usec;
+
+	look.data = (void *)(&blocks);
+	return find_in_ktree(blocks_root, &look, cmp_blocks, ctx);
+}
+*/
+
+static bool blocks_add(PGconn *conn, char *height, char *blockhash,
+				char *workinfoid, char *username, char *workername,
+				char *clientid, char *enonce1, char *nonce2,
+				char *nonce, char *reward, char *confirmed,
+				tv_t *now, char *by, char *code, char *inet)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item, *u_item;
+	BLOCKS *row;
+	char *upd, *ins;
+	char *params[11 + HISTORYDATECOUNT];
+	bool ok = false;
+	int par;
+	int n;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(blocks_list);
+	item = k_unlink_head(blocks_list);
+	K_WUNLOCK(blocks_list);
+
+	row = DATA_BLOCKS(item);
+
+	TXT_TO_INT("height", height, row->height);
+	STRNCPY(row->blockhash, blockhash);
+	STRNCPY(row->confirmed, confirmed);
+
+	HISTORYDATEINIT(row, now, by, code, inet);
+
+	switch (confirmed[0]) {
+		case BLOCKS_NEW:
+			u_item = find_users(username);
+			if (!u_item)
+				goto unparam;
+
+			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
+			STRNCPY(row->workername, workername);
+			TXT_TO_INT("clientid", clientid, row->clientid);
+			STRNCPY(row->enonce1, enonce1);
+			STRNCPY(row->nonce2, nonce2);
+			STRNCPY(row->nonce, nonce);
+			TXT_TO_BIGINT("reward", reward, row->reward);
+
+			HISTORYDATETRANSFER(row);
+
+			par = 0;
+			params[par++] = int_to_buf(row->height, NULL, 0);
+			params[par++] = str_to_buf(row->blockhash, NULL, 0);
+			params[par++] = bigint_to_buf(row->workinfoid, NULL, 0);
+			params[par++] = bigint_to_buf(row->userid, NULL, 0);
+			params[par++] = str_to_buf(row->workername, NULL, 0);
+			params[par++] = int_to_buf(row->clientid, NULL, 0);
+			params[par++] = str_to_buf(row->enonce1, NULL, 0);
+			params[par++] = str_to_buf(row->nonce2, NULL, 0);
+			params[par++] = str_to_buf(row->nonce, NULL, 0);
+			params[par++] = bigint_to_buf(row->reward, NULL, 0);
+			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			HISTORYDATEPARAMS(params, par, row);
+			PARCHK(par, params);
+
+			ins = "insert into blocks "
+				"(height,blockhash,workinfoid,userid,workername,"
+				"clientid,enonce1,nonce2,nonce,reward,confirmed"
+				HISTORYDATECONTROL ") values (" PQPARAM16 ")";
+
+			res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
+			rescode = PQresultStatus(res);
+			if (!PGOK(rescode)) {
+				PGLOGERR("Insert", rescode, conn);
+				goto unparam;
+			}
+			break;
+		case BLOCKS_CONFIRM:
+			upd = "update blocks set expirydate=$1 where blockhash=$2 and expirydate=$3";
+			par = 0;
+			params[par++] = tv_to_buf(now, NULL, 0);
+			params[par++] = str_to_buf(row->blockhash, NULL, 0);
+			params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+			// Not the full size of params[] so no PARCHK()
+
+			res = PQexec(conn, "Begin");
+			rescode = PQresultStatus(res);
+			if (!PGOK(rescode)) {
+				PGLOGERR("Begin", rescode, conn);
+				goto unparam;
+			}
+			PQclear(res);
+
+			res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0);
+			rescode = PQresultStatus(res);
+			PQclear(res);
+			if (!PGOK(rescode)) {
+				PGLOGERR("Update", rescode, conn);
+				res = PQexec(conn, "Rollback");
+				goto unparam;
+			}
+
+			for (n = 0; n < par; n++)
+				free(params[n]);
+
+			par = 0;
+			params[par++] = int_to_buf(row->height, NULL, 0);
+			params[par++] = str_to_buf(row->blockhash, NULL, 0);
+			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			HISTORYDATEPARAMS(params, par, row);
+
+			ins = "insert into blocks "
+				"(height,blockhash,workinfoid,userid,workername,"
+				"clientid,enonce1,nonce2,nonce,reward,confirmed"
+				HISTORYDATECONTROL ") values (" PQPARAM16 ")";
+
+			res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
+			rescode = PQresultStatus(res);
+			PQclear(res);
+			if (!PGOK(rescode)) {
+				PGLOGERR("Insert", rescode, conn);
+				res = PQexec(conn, "Rollback");
+				goto unparam;
+			}
+
+			res = PQexec(conn, "Commit");
+			break;
+	}
+
+	ok = true;
+unparam:
+	PQclear(res);
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	K_WLOCK(blocks_list);
+	if (!ok)
+		k_add_head(blocks_list, item);
+	else {
+		blocks_root = add_to_ktree(blocks_root, item, cmp_blocks);
+		k_add_head(blocks_store, item);
+	}
+	K_WUNLOCK(blocks_list);
+
+	return ok;
+}
+
+static bool blocks_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	BLOCKS *row;
+	char *params[1];
+	int par;
+	char *field;
+	char *sel;
+	int fields = 11;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	sel = "select "
+		"height,blockhash,workinfoid,userid,workername,"
+		"clientid,enonce1,nonce2,nonce,reward,confirmed"
+		HISTORYDATECONTROL
+		" from blocks where expirydate=$1";
+	par = 0;
+	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
+	PARCHK(par, params);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(blocks_list);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(blocks_list);
+		row = DATA_BLOCKS(item);
+
+		PQ_GET_FLD(res, i, "height", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("height", field, row->height);
+
+		PQ_GET_FLD(res, i, "blockhash", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("blockhash", field, row->blockhash);
+
+		PQ_GET_FLD(res, i, "workinfoid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
+
+		PQ_GET_FLD(res, i, "userid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userid", field, row->userid);
+
+		PQ_GET_FLD(res, i, "workername", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BLOB("workername", field, row->workername);
+
+		PQ_GET_FLD(res, i, "clientid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("clientid", field, row->clientid);
+
+		PQ_GET_FLD(res, i, "enonce1", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("enonce1", field, row->enonce1);
+
+		PQ_GET_FLD(res, i, "nonce2", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("nonce2", field, row->nonce2);
+
+		PQ_GET_FLD(res, i, "nonce", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("nonce", field, row->nonce);
+
+		PQ_GET_FLD(res, i, "reward", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("reward", field, row->reward);
+
+		PQ_GET_FLD(res, i, "confirmed", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("confirmed", field, row->confirmed);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		blocks_root = add_to_ktree(blocks_root, item, cmp_blocks);
+		k_add_head(blocks_store, item);
+	}
+	if (!ok)
+		k_add_head(blocks_list, item);
+
+	K_WUNLOCK(blocks_list);
+	PQclear(res);
+
+	if (ok)
+		LOGDEBUG("%s(): built", __func__);
+
+	return true;
+}
+
+void blocks_reload()
+{
+	PGconn *conn = dbconnect();
+
+	K_WLOCK(blocks_list);
+	blocks_root = free_ktree(blocks_root, NULL);
+	k_list_transfer_to_head(blocks_store, blocks_list);
+	K_WUNLOCK(blocks_list);
+
+	blocks_fill(conn);
+
+	PQfinish(conn);
 }
 
 // order by userid asc,createdate asc,authid asc,expirydate desc
@@ -3452,6 +3763,10 @@ static void setup_data()
 	shareerrors_store = k_new_store(shareerrors_list);
 	shareerrors_root = new_ktree();
 
+	blocks_list = k_new_list("Blocks", sizeof(BLOCKS), ALLOC_BLOCKS, LIMIT_BLOCKS, true);
+	blocks_store = k_new_store(blocks_list);
+	blocks_root = new_ktree();
+
 	auths_list = k_new_list("Auths", sizeof(AUTHS), ALLOC_AUTHS, LIMIT_AUTHS, true);
 	auths_store = k_new_store(auths_list);
 	auths_root = new_ktree();
@@ -3514,7 +3829,7 @@ static char *cmd_adduser(char *cmd, char *id, tv_t *now, char *by, char *code, c
 	PQfinish(conn);
 
 	if (!ok) {
-		LOGDEBUG("%s.failed.DBE", id);
+		LOGERR("%s.failed.DBE", id);
 		return strdup("failed.DBE");
 	}
 	LOGDEBUG("%s.ok.added %s", id, DATA_TRANSFER(i_username)->data);
@@ -3552,7 +3867,7 @@ static char *cmd_chkpass(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 	}
 
 	if (!ok) {
-		LOGDEBUG("%s.failed.%s", id, DATA_TRANSFER(i_username)->data);
+		LOGERR("%s.failed.%s", id, DATA_TRANSFER(i_username)->data);
 		return strdup("failed.");
 	}
 	LOGDEBUG("%s.ok.%s", id, DATA_TRANSFER(i_username)->data);
@@ -3641,7 +3956,7 @@ static char *cmd_poolstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 	PQfinish(conn);
 
 	if (!ok) {
-		LOGDEBUG("%s.failed.DBE", id);
+		LOGERR("%s.failed.DBE", id);
 		return strdup("failed.DBE");
 	}
 	LOGDEBUG("%s.ok.", id);
@@ -3712,7 +4027,7 @@ static char *cmd_userstats(char *cmd, __maybe_unused char *id, tv_t *now, char *
 			   eos, now, by, code, inet);
 
 	if (!ok) {
-		LOGDEBUG("%s.failed.DATA", id);
+		LOGERR("%s.failed.DATA", id);
 		return strdup("failed.DATA");
 	}
 	LOGDEBUG("%s.ok.", id);
@@ -3785,7 +4100,7 @@ foil:
 	K_WUNLOCK(idcontrol_list);
 
 	if (!ok) {
-		LOGDEBUG("%s.failed.DBE", id);
+		LOGERR("%s.failed.DBE", id);
 		return strdup("failed.DBE");
 	}
 	LOGDEBUG("%s.ok.added %s %"PRId64, id, DATA_TRANSFER(i_idname)->data, row->lastid);
@@ -3935,7 +4250,7 @@ static char *cmd_sharelog(char *cmd, char *id, tv_t *now, char *by, char *code, 
 		PQfinish(conn);
 
 		if (workinfoid == -1) {
-			LOGDEBUG("%s.failed.DBE", id);
+			LOGERR("%s.failed.DBE", id);
 			return strdup("failed.DBE");
 		}
 		LOGDEBUG("%s.ok.added %"PRId64, id, workinfoid);
@@ -3999,7 +4314,7 @@ static char *cmd_sharelog(char *cmd, char *id, tv_t *now, char *by, char *code, 
 				now, by, code, inet);
 
 		if (!ok) {
-			LOGDEBUG("%s.failed.DATA", id);
+			LOGERR("%s.failed.DATA", id);
 			return strdup("failed.DATA");
 		}
 		LOGDEBUG("%s.ok.added %s", id, DATA_TRANSFER(i_nonce)->data);
@@ -4047,15 +4362,117 @@ static char *cmd_sharelog(char *cmd, char *id, tv_t *now, char *by, char *code, 
 					DATA_TRANSFER(i_secondaryuserid)->data,
 					now, by, code, inet);
 		if (!ok) {
-			LOGDEBUG("%s.failed.DATA", id);
+			LOGERR("%s.failed.DATA", id);
 			return strdup("failed.DATA");
 		}
 		LOGDEBUG("%s.ok.added %s", id, DATA_TRANSFER(i_username)->data);
 		snprintf(reply, siz, "ok.added %s", DATA_TRANSFER(i_username)->data);
 	}
 
-	LOGDEBUG("%s.bad.cmd %s", cmd);
+	LOGERR("%s.bad.cmd %s", cmd);
 	return strdup("bad.cmd");
+}
+
+static char *cmd_blocks(char *cmd, char *id, tv_t *now, char *by, char *code, char *inet)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	PGconn *conn;
+	K_ITEM *i_height, *i_blockhash, *i_confirmed, *i_workinfoid, *i_username;
+	K_ITEM *i_workername, *i_clientid, *i_enonce1, *i_nonce2, *i_nonce, *i_reward;
+	char *msg;
+	bool ok;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_height = require_name("height", 1, NULL, reply, siz);
+	if (!i_height)
+		return strdup(reply);
+
+	i_blockhash = require_name("blockhash", 1, NULL, reply, siz);
+	if (!i_blockhash)
+		return strdup(reply);
+
+	i_confirmed = require_name("confirmed", 1, NULL, reply, siz);
+	if (!i_confirmed)
+		return strdup(reply);
+
+	DATA_TRANSFER(i_confirmed)->data[0] = tolower(DATA_TRANSFER(i_confirmed)->data[0]);
+	switch(DATA_TRANSFER(i_confirmed)->data[0]) {
+		case BLOCKS_NEW:
+			i_workinfoid = require_name("workinfoid", 1, NULL, reply, siz);
+			if (!i_workinfoid)
+				return strdup(reply);
+
+			i_username = require_name("username", 1, NULL, reply, siz);
+			if (!i_username)
+				return strdup(reply);
+
+			i_workername = require_name("workername", 1, NULL, reply, siz);
+			if (!i_workername)
+				return strdup(reply);
+
+			i_clientid = require_name("clientid", 1, NULL, reply, siz);
+			if (!i_clientid)
+				return strdup(reply);
+
+			i_enonce1 = require_name("enonce1", 1, NULL, reply, siz);
+			if (!i_enonce1)
+				return strdup(reply);
+
+			i_nonce2 = require_name("nonce2", 1, NULL, reply, siz);
+			if (!i_nonce2)
+				return strdup(reply);
+
+			i_nonce = require_name("nonce", 1, NULL, reply, siz);
+			if (!i_nonce)
+				return strdup(reply);
+
+			i_reward = require_name("reward", 1, NULL, reply, siz);
+			if (!i_reward)
+				return strdup(reply);
+
+			msg = "added";
+			conn = dbconnect();
+			ok = blocks_add(conn, DATA_TRANSFER(i_height)->data,
+					      DATA_TRANSFER(i_blockhash)->data,
+					      DATA_TRANSFER(i_confirmed)->data,
+					      DATA_TRANSFER(i_workinfoid)->data,
+					      DATA_TRANSFER(i_username)->data,
+					      DATA_TRANSFER(i_workername)->data,
+					      DATA_TRANSFER(i_clientid)->data,
+					      DATA_TRANSFER(i_enonce1)->data,
+					      DATA_TRANSFER(i_nonce2)->data,
+					      DATA_TRANSFER(i_nonce)->data,
+					      DATA_TRANSFER(i_reward)->data,
+					      now, by, code, inet);
+			break;
+		case BLOCKS_CONFIRM:
+			msg = "confirmed";
+			conn = dbconnect();
+			ok = blocks_add(conn, DATA_TRANSFER(i_height)->data,
+					      DATA_TRANSFER(i_blockhash)->data,
+					      DATA_TRANSFER(i_confirmed)->data,
+					      EMPTY, EMPTY, EMPTY, EMPTY,
+					      EMPTY, EMPTY, EMPTY, EMPTY,
+					      now, by, code, inet);
+			break;
+		default:
+			LOGERR("%s.failed.invalid conf='%s'",
+			       id, DATA_TRANSFER(i_confirmed)->data);
+			return strdup("failed.DATA");
+	}
+
+	PQfinish(conn);
+
+	if (!ok) {
+		LOGERR("%s.failed.DBE", id);
+		return strdup("failed.DBE");
+	}
+
+	LOGDEBUG("%s.ok.blocks %s", id, msg);
+	snprintf(reply, siz, "ok.%s", msg);
+	return strdup(reply);
 }
 
 static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by, char *code, char *inet)
@@ -4281,7 +4698,7 @@ enum cmd_values {
 	CMD_CHKPASS,
 	CMD_POOLSTAT,
 	CMD_USERSTAT,
-//	CMD_BLOCK,
+	CMD_BLOCK,
 	CMD_NEWID,
 	CMD_PAYMENTS,
 	CMD_HOMEPAGE,
@@ -4311,7 +4728,7 @@ static struct CMDS {
 	{ CMD_CHKPASS,	"chkpass",	cmd_chkpass,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	cmd_poolstats,	ACCESS_POOL },
 	{ CMD_USERSTAT,	"userstats",	cmd_userstats,	ACCESS_POOL },
-// TODO	{ CMD_BLOCK,	"block",	cmd_block,	ACCESS_POOL },
+	{ CMD_BLOCK,	"block",	cmd_blocks,	ACCESS_POOL },
 	{ CMD_NEWID,	"newid",	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	cmd_payments,	ACCESS_WEB },
 	{ CMD_HOMEPAGE,	"homepage",	cmd_homepage,	ACCESS_WEB },
