@@ -4844,6 +4844,7 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 					if (!(DATA_TRANSFER(item)->data))
 						quithere(1, "malloc data (%d) OOM", (int)len);
 					off = 0;
+					DATA_TRANSFER(item)->data[0] = '\0';
 					for (i = 0; i < count; i++) {
 						json_element = json_array_get(json_value, i);
 						if (json_is_string(json_element)) {
