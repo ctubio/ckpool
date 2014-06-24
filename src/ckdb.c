@@ -114,10 +114,22 @@ ASSERT2(sizeof(int64_t) == 8);
 		trg[siz - 1] = '\0'; \
 	} while (0)
 
+#define AR_SIZ 1024
+
+#define APPEND_REALLOC_INIT(_buf, _off, _len) do { \
+		_len = AR_SIZ; \
+		(_buf) = malloc(_len); \
+		if (!(_buf)) \
+			quithere(1, "malloc (%d) OOM", (int)_len); \
+		(_buf)[0] = '\0'; \
+		_off = 0; \
+	} while(0)
+
 #define APPEND_REALLOC(_dst, _dstoff, _dstsiz, _src) do { \
-		size_t _srclen = strlen(_src); \
-		if ((_dstoff) + _srclen >= (_dstsiz)) { \
-			_dstsiz += 1024; \
+		size_t _newlen, _srclen = strlen(_src); \
+		_newlen = (_dstoff) + _srclen; \
+		if (_newlen >= (_dstsiz)) { \
+			_dstsiz = _newlen + AR_SIZ - (_newlen % AR_SIZ); \
 			_dst = realloc(_dst, _dstsiz); \
 			if (!(_dst)) \
 				quithere(1, "realloc (%d) OOM", (int)_dstsiz); \
@@ -4140,12 +4152,8 @@ static char *cmd_payments(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	row->paydate.tv_sec = 0;
 	row->paydate.tv_usec = 0;
 	p_item = find_after_in_ktree(payments_root, look, cmp_payments, ctx);
-	len = 1024;
-	buf = malloc(len);
-	if (!buf)
-		quithere(1, "malloc buf (%d) OOM", (int)len);
-	strcpy(buf, "ok.");
-	off = strlen(buf);
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
 	rows = 0;
 	while (p_item && DATA_PAYMENTS(p_item)->userid == DATA_USERS(u_item)->userid) {
 		tv_to_buf(&(DATA_PAYMENTS(p_item)->paydate), reply, sizeof(reply));
@@ -4540,13 +4548,8 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 
 	i_username = optional_name("username", 1, NULL);
 
-	len = 1024;
-	buf = malloc(len);
-	if (!buf)
-		quithere(1, "malloc buf (%d) OOM", (int)len);
-	strcpy(buf, "ok.");
-	off = strlen(buf);
-
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
 	if (last_bc) {
 		tvs_to_buf(last_bc, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastbc=%s%c", reply, FLDSEP);
@@ -4839,12 +4842,7 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 					json_t *json_element;
 					bool first = true;
 
-					len = 1024;
-					DATA_TRANSFER(item)->data = malloc(len);
-					if (!(DATA_TRANSFER(item)->data))
-						quithere(1, "malloc data (%d) OOM", (int)len);
-					off = 0;
-					DATA_TRANSFER(item)->data[0] = '\0';
+					APPEND_REALLOC_INIT(DATA_TRANSFER(item)->data, off, len);
 					for (i = 0; i < count; i++) {
 						json_element = json_array_get(json_value, i);
 						if (json_is_string(json_element)) {
