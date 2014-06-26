@@ -949,11 +949,9 @@ retry:
 
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
-		if (interrupted())
-			goto retry;
-		LOGERR("Failed to accept on stratifier socket, retrying in 5s");
-		sleep(5);
-		goto retry;
+		LOGERR("Failed to accept on stratifier socket, exiting");
+		ret = 1;
+		goto out;
 	}
 
 	dealloc(buf);
