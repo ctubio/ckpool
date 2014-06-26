@@ -477,7 +477,7 @@ retry:
 	close(sockd);
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
-		LOGERR("Failed to accept on connector socket, retrying in 5s");
+		LOGEMERG("Failed to accept on connector socket, exiting");
 		ret = 1;
 		goto out;
 	}
