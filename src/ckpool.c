@@ -230,7 +230,6 @@ int read_socket_line(connsock_t *cs, int timeout)
 	char *eom = NULL;
 	size_t buflen;
 	int ret = -1;
-	fd_set rd;
 
 	if (unlikely(cs->fd < 0))
 		goto out;
@@ -692,6 +691,8 @@ static void sighandler(int sig)
 {
 	ckpool_t *ckp = global_ckp;
 
+	LOGWARNING("Parent process %s received signal %d, shutting down",
+		   ckp->name, sig);
 	pthread_cancel(ckp->pth_watchdog);
 	join_pthread(ckp->pth_watchdog);
 
