@@ -248,7 +248,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 
-		wait_read_select(cs->fd, eom ? 0 : timeout);
+		ret = wait_read_select(cs->fd, eom ? 0 : timeout);
 		if (eom && !ret)
 			break;
 		if (ret < 1) {
