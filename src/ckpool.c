@@ -700,17 +700,12 @@ static void sighandler(int sig)
 	pthread_cancel(ckp->pth_watchdog);
 	join_pthread(ckp->pth_watchdog);
 
-	if (sig != 9) {
-		__shutdown_children(ckp, SIGTERM);
-		/* Wait a second, then send SIGKILL */
-		sleep(1);
-		__shutdown_children(ckp, SIGKILL);
-		pthread_cancel(ckp->pth_listener);
-		exit(0);
-	} else {
-		__shutdown_children(ckp, SIGKILL);
-		exit(1);
-	}
+	__shutdown_children(ckp, SIGTERM);
+	/* Wait a second, then send SIGKILL */
+	sleep(1);
+	__shutdown_children(ckp, SIGKILL);
+	pthread_cancel(ckp->pth_listener);
+	exit(0);
 }
 
 static void json_get_string(char **store, json_t *val, const char *res)
