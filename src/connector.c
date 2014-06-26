@@ -260,7 +260,9 @@ retry:
 		cksleep_ms(100);
 		goto retry;
 	}
-	ret = poll(fds, nfds, 1000);
+	do {
+		ret = poll(fds, nfds, 1000);
+	} while (unlikely(ret < 0 && interrupted()));
 	if (ret < 0) {
 		LOGERR("Failed to poll in receiver");
 		goto out;
@@ -308,7 +310,6 @@ void *sender(void *arg)
 	while (42) {
 		sender_send_t *sender_send;
 		client_instance_t *client;
-		tv_t timeout_tv = {0, 0};
 		bool only_send = false;
 		int ret, fd, ofs = 0;
 
@@ -346,11 +347,7 @@ void *sender(void *arg)
 		 * ready to receive data from us, put the send back on the
 		 * list. */
 		if (!only_send) {
-			fd_set writefds;
-
-			FD_ZERO(&writefds);
-			FD_SET(fd, &writefds);
-			ret = select(fd + 1, NULL, &writefds, NULL, &timeout_tv);
+			ret = wait_write_select(fd, 0);
 			if (ret < 1) {
 				LOGDEBUG("Client %d not ready for writes", client->id);
 

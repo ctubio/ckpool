@@ -227,7 +227,6 @@ void empty_buffer(connsock_t *cs)
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, int timeout)
 {
-	tv_t tv_timeout = {timeout, 0};
 	char *eom = NULL;
 	size_t buflen;
 	int ret = -1;
@@ -250,11 +249,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 
-		FD_ZERO(&rd);
-		FD_SET(cs->fd, &rd);
-		if (eom)
-			tv_timeout.tv_sec = tv_timeout.tv_usec = 0;
-		ret = select(cs->fd + 1, &rd, NULL, NULL, &tv_timeout);
+		wait_read_select(cs->fd, eom ? 0 : timeout);
 		if (eom && !ret)
 			break;
 		if (ret < 1) {
