@@ -269,8 +269,6 @@ static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 // MODIFY FIELDS
 #define MODIFYDATECONTROL ",createdate,createby,createcode,createinet" \
 			  ",modifydate,modifyby,modifycode,modifyinet"
-#define MODIFYUPDATECONTROL(p) ",modifydate=$"STRINT(p+1)",modifyby=$"STRINT(p+2) \
-				",modifycode=$"STRINT(p+3)",modifyinet$"STRINT(p+4)
 
 #define MODIFYDATECOUNT 8
 #define MODIFYUPDATECOUNT 4
@@ -3042,7 +3040,7 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 	} else {
 		MODIFYUPDATE(row, now, by, code, inet);
 
-		if (row->countlastupdate < (row->sharecount + row->errorcount - 10)) {
+		if ((row->countlastupdate + 10) < (row->sharecount + row->errorcount)) {
 			par = 0;
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
 			params[par++] = str_to_buf(row->workername, NULL, 0);
@@ -3060,14 +3058,14 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 			params[par++] = tv_to_buf(&(row->firstshare), NULL, 0);
 			params[par++] = tv_to_buf(&(row->lastshare), NULL, 0);
 			MODIFYUPDATEPARAMS(params, par, row);
-			PARCHKVAL(par, 15 + MODIFYUPDATECOUNT, params);
+			PARCHKVAL(par, 19, params);
 
 			upd = "update sharesummary "
 				"set diffacc=$4,diffsta=$5,diffdup=$6,diffhi=$7,diffrej=$8,"
 				"shareacc=$9,sharesta=$10,sharedup=$11,sharehi=$12,"
 				"sharerej=$13,firstshare=$14,lastshare=$15"
-				MODIFYUPDATECONTROL(15)
-				"where userid=$1,workername=$2,workinfoid=$3";
+				",modifydate=$16,modifyby=$17,modifycode=$18,modifyinet=$19 "
+				"where userid=$1 and workername=$2 and workinfoid=$3";
 
 			res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0);
 			rescode = PQresultStatus(res);
