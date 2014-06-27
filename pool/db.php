@@ -86,6 +86,7 @@ function homeInfo($user)
  {
 	$ans = repDecode($rep);
 	$ans['lastblock'] = 1401237522;
+	$ans['lastblock'] = 1403819191;
  }
 
  return $ans;
