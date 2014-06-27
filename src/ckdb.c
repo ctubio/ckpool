@@ -2796,13 +2796,13 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				tv_t *now, char *by, char *code, char *inet)
 {
 	ExecStatusType rescode;
-	PGresult *res;
+	PGresult *res = NULL;
 	K_ITEM *item, *u_item;
 	BLOCKS *row;
 	char *upd, *ins;
 	char *params[11 + HISTORYDATECOUNT];
 	bool ok = false;
-	int par;
+	int par = 0;
 	int n;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -2823,7 +2823,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 		case BLOCKS_NEW:
 			u_item = find_users(username);
 			if (!u_item)
-				goto unparam;
+				goto early;
 
 			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
 			STRNCPY(row->workername, workername);
@@ -2919,7 +2919,7 @@ unparam:
 	PQclear(res);
 	for (n = 0; n < par; n++)
 		free(params[n]);
-
+early:
 	K_WLOCK(blocks_list);
 	if (!ok)
 		k_add_head(blocks_list, item);
