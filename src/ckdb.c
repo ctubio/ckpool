@@ -1884,10 +1884,12 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 
 	HISTORYDATEINIT(row, now, by, code, inet);
 
-	if (diffdef != row->difficultydefault ||
-	    idlenot != row->idlenotificationenabled[0] ||
-	    nottime != row->idlenotificationtime) {
-
+	if (diffdef == row->difficultydefault &&
+	    idlenot == row->idlenotificationenabled[0] &&
+	    nottime == row->idlenotificationtime) {
+		ok = true;
+		goto early;
+	} else {
 		upd = "update workers set expirydate=$1 where workerid=$2 and expirydate=$3";
 		par = 0;
 		params[par++] = tv_to_buf(now, NULL, 0);
@@ -1953,7 +1955,7 @@ unparam:
 	PQclear(res);
 	for (n = 0; n < par; n++)
 		free(params[n]);
-
+early:
 	return ok;
 }
 
@@ -4210,7 +4212,7 @@ static char *cmd_sharelog(char *cmd, char *id, tv_t *now, char *by, char *code, 
 		if (!i_transactiontree)
 			return strdup(reply);
 
-		i_merklehash = require_name("merklehash", 1, NULL, reply, siz);
+		i_merklehash = require_name("merklehash", 0, NULL, reply, siz);
 		if (!i_merklehash)
 			return strdup(reply);
 
