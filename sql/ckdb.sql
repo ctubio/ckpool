@@ -198,63 +198,80 @@ CREATE TABLE shareerrors ( -- not stored in the db - only in log files
 );
 
 
--- memory only?
 CREATE TABLE sharesummary ( -- per workinfo for each user+worker
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
     workinfoid bigint NOT NULL,
-    diff_acc bigint NOT NULL,
-    diff_sta bigint NOT NULL,
-    diff_dup bigint NOT NULL,
-    diff_low bigint NOT NULL,
-    diff_rej bigint NOT NULL,
-    share_acc bigint NOT NULL,
-    share_sta bigint NOT NULL,
-    share_dup bigint NOT NULL,
-    share_low bigint NOT NULL,
-    share_rej bigint NOT NULL,
-    first_share timestamp with time zone NOT NULL,
-    last_share timestamp with time zone NOT NULL,
-    complete char DEFAULT ''::char NOT NULL,
+    diffacc float NOT NULL,
+    diffsta float NOT NULL,
+    diffdup float NOT NULL,
+    diffhi float NOT NULL,
+    diffrej float NOT NULL,
+    shareacc float NOT NULL,
+    sharesta float NOT NULL,
+    sharedup float NOT NULL,
+    sharehi float NOT NULL,
+    sharerej float NOT NULL,
+    sharecount bigint NOT NULL,
+    errorcount bigint NOT NULL,
+    firstshare timestamp with time zone NOT NULL,
+    lastshare timestamp with time zone NOT NULL,
+    complete char NOT NULL,
     createdate timestamp with time zone NOT NULL,
-    createby character varying(64) DEFAULT ''::character varying NOT NULL,
-    createcode character varying(128) DEFAULT ''::character varying NOT NULL,
-    createinet character varying(128) DEFAULT ''::character varying NOT NULL,
-    modifydate timestamp with time zone DEFAULT '6666-06-06 06:06:06+00',
-    modifyby character varying(64) DEFAULT ''::character varying NOT NULL,
-    modifycode character varying(128) DEFAULT ''::character varying NOT NULL,
-    modifyinet character varying(128) DEFAULT ''::character varying NOT NULL,
+    createby character varying(64) NOT NULL,
+    createcode character varying(128) NOT NULL,
+    createinet character varying(128) NOT NULL,
+    modifydate timestamp with time zone NOT NULL,
+    modifyby character varying(64) NOT NULL,
+    modifycode character varying(128) NOT NULL,
+    modifyinet character varying(128) NOT NULL,
     PRIMARY KEY (userid, workername, workinfoid)
 );
 
 
-CREATE TABLE blocksummary ( -- summation of sharesummary per block found for each user+worker
-    height integer not NULL,
-    blockhash character varying(256) NOT NULL,
-    userid bigint NOT NULL,
-    workername character varying(256) NOT NULL,
-    diff_acc bigint NOT NULL,
-    diff_sta bigint NOT NULL,
-    diff_dup bigint NOT NULL,
-    diff_low bigint NOT NULL,
-    diff_rej bigint NOT NULL,
-    share_acc bigint NOT NULL,
-    share_sta bigint NOT NULL,
-    share_dup bigint NOT NULL,
-    share_low bigint NOT NULL,
-    share_rej bigint NOT NULL,
-    first_share timestamp with time zone NOT NULL,
-    last_share timestamp with time zone NOT NULL,
-    complete char DEFAULT ''::char NOT NULL,
+CREATE TABLE workmarkers ( -- range of workinfo for share accounting
+    markerid bigint NOT NULL,
+    workinfoidend bigint NOT NULL,
+    workinfoidstart bigint NOT NULL,
+    description character varying(256) DEFAULT ''::character varying NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
     createinet character varying(128) DEFAULT ''::character varying NOT NULL,
-    modifydate timestamp with time zone DEFAULT '6666-06-06 06:06:06+00',
-    modifyby character varying(64) DEFAULT ''::character varying NOT NULL,
-    modifycode character varying(128) DEFAULT ''::character varying NOT NULL,
-    modifyinet character varying(128) DEFAULT ''::character varying NOT NULL,
-    PRIMARY KEY (userid, workername, height, blockhash)
+    expirydate timestamp with time zone DEFAULT '6666-06-06 06:06:06+00',
+    PRIMARY KEY (workinfoidstart)
+);
+CREATE UNIQUE INDEX workmarkersid ON workmarkers USING btree (markerid);
+
+
+CREATE TABLE markersummary ( -- sum of sharesummary for a workinfo range
+    markerid bigint NOT NULL,
+    userid bigint NOT NULL,
+    workername character varying(256) NOT NULL,
+    diffacc float NOT NULL,
+    diffsta float NOT NULL,
+    diffdup float NOT NULL,
+    diffhi float NOT NULL,
+    diffrej float NOT NULL,
+    shareacc float NOT NULL,
+    sharesta float NOT NULL,
+    sharedup float NOT NULL,
+    sharehi float NOT NULL,
+    sharerej float NOT NULL,
+    sharecount bigint NOT NULL,
+    errorcount bigint NOT NULL,
+    firstshare timestamp with time zone NOT NULL,
+    lastshare timestamp with time zone NOT NULL,
+    complete char NOT NULL,
+    createdate timestamp with time zone NOT NULL,
+    createby character varying(64) NOT NULL,
+    createcode character varying(128) NOT NULL,
+    createinet character varying(128) NOT NULL,
+    modifydate timestamp with time zone NOT NULL,
+    modifyby character varying(64) NOT NULL,
+    modifycode character varying(128) NOT NULL,
+    modifyinet character varying(128) NOT NULL,
+    PRIMARY KEY (markerid, userid, workername)
 );
 
 
@@ -302,6 +319,7 @@ CREATE UNIQUE INDEX minpayuserid ON miningpayouts USING btree (userid, blockhash
 
 CREATE TABLE eventlog (
     eventlogid bigint NOT NULL,
+    poolinstance character varying(256) NOT NULL,
     eventlogcode character varying(64) NOT NULL,
     eventlogdescription text NOT NULL,
     createdate timestamp with time zone NOT NULL,
@@ -315,6 +333,7 @@ CREATE TABLE eventlog (
 
 CREATE TABLE auths (
     authid bigint NOT NULL, -- unique per record
+    poolinstance character varying(256) NOT NULL,
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
     clientid integer NOT NULL,
@@ -346,10 +365,10 @@ CREATE TABLE poolstats (
 );
 
 
--- memory only
 CREATE TABLE userstats (
     poolinstance character varying(256) NOT NULL,
     userid bigint NOT NULL,
+    workername character varying(256) NOT NULL,
     elapsed bigint NOT NULL,
     hashrate float NOT NULL,
     hashrate5m float NOT NULL,
@@ -369,4 +388,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'0.2');
+insert into version (vlock,version) values (1,'0.3');
