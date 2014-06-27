@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-fldsep="`echo -e '\x02'`"
+fldsep="`echo -e '\x09'`"
 #
 dsp()
 {
@@ -33,3 +33,4 @@ addid workerid ${now}100000
 addid paymentid ${now}200000
 addid authid ${now}300000
 addid userid ${now}400000
+addid markerid ${now}500000
