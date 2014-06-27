@@ -250,7 +250,7 @@ static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 			if (n > 0) { \
 				_row->createdate.tv_sec = (time_t)sec; \
 				if (n > 1) \
-					_row->createdate.tv_usec = usec; \
+					_row->createdate.tv_usec = usec / 1000; \
 				else \
 					_row->createdate.tv_usec = 0L; \
 			} \
@@ -269,7 +269,7 @@ static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 // MODIFY FIELDS
 #define MODIFYDATECONTROL ",createdate,createby,createcode,createinet" \
 			  ",modifydate,modifyby,modifycode,modifyinet"
-#define MODIFYUPDATECONTROL(p) "modifydate=$"STRINT(p+1)",modifyby=$"STRINT(p+2) \
+#define MODIFYUPDATECONTROL(p) ",modifydate=$"STRINT(p+1)",modifyby=$"STRINT(p+2) \
 				",modifycode=$"STRINT(p+3)",modifyinet$"STRINT(p+4)
 
 #define MODIFYDATECOUNT 8
@@ -450,7 +450,7 @@ static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 #define PQPARAM15 "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15"
 #define PQPARAM16 "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16"
 #define PQPARAM17 "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17"
-#define PQPARAM24 "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24"
+#define PQPARAM26 "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26"
 
 #define PARCHK(_par, _params) do { \
 		if (_par != (int)(sizeof(_params)/sizeof(_params[0]))) { \
@@ -1022,14 +1022,17 @@ static void dsp_transfer(K_ITEM *item, FILE *stream)
 
 	if (!stream)
 		LOGERR("%s() called with (null) stream", __func__);
-	if (!item)
-		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		if (!item)
+			fprintf(stream, "%s() called with (null) item\n", __func__);
+		else {
+			t = DATA_TRANSFER(item);
 
-	t = DATA_TRANSFER(item);
-
-	fprintf(stream, " name='%s' data='%s' malloc=%c\n",
-			t->name, t->data,
-			(t->value == t->data) ? 'N' : 'Y');
+			fprintf(stream, " name='%s' data='%s' malloc=%c\n",
+					t->name, t->data,
+					(t->value == t->data) ? 'N' : 'Y');
+		}
+	}
 }
 
 // order by name asc
@@ -1501,8 +1504,8 @@ static double cmp_users(K_ITEM *a, K_ITEM *b)
 // order by userid asc,expirydate desc
 static double cmp_userid(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERS(a)->userid) -
-		   (double)(DATA_USERS(b)->userid);
+	double c = (double)(DATA_USERS(a)->userid -
+			    DATA_USERS(b)->userid);
 	if (c == 0.0) {
 		c = tvdiff(&(DATA_USERS(b)->expirydate),
 			   &(DATA_USERS(a)->expirydate));
@@ -1737,8 +1740,8 @@ void users_reload()
 // order by userid asc,workername asc,expirydate desc
 static double cmp_workers(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_WORKERS(a)->userid) -
-		   (double)(DATA_WORKERS(b)->userid);
+	double c = (double)(DATA_WORKERS(a)->userid -
+			    DATA_WORKERS(b)->userid);
 	if (c == 0.0) {
 		c = strcmp(DATA_WORKERS(a)->workername,
 			   DATA_WORKERS(b)->workername);
@@ -2160,8 +2163,8 @@ void workers_reload()
 // order by userid asc,paydate asc,payaddress asc,expirydate desc
 static double cmp_payments(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_PAYMENTS(a)->userid) -
-		   (double)(DATA_PAYMENTS(b)->userid);
+	double c = (double)(DATA_PAYMENTS(a)->userid -
+			    DATA_PAYMENTS(b)->userid);
 	if (c == 0.0) {
 		c = tvdiff(&(DATA_PAYMENTS(a)->paydate),
 			   &(DATA_PAYMENTS(b)->paydate));
@@ -2301,8 +2304,8 @@ void payments_reload()
 // order by workinfoid asc,expirydate asc
 static double cmp_workinfo(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_WORKINFO(a)->workinfoid) -
-		   (double)(DATA_WORKINFO(b)->workinfoid);
+	double c = (double)(DATA_WORKINFO(a)->workinfoid -
+			    DATA_WORKINFO(b)->workinfoid);
 	if (c == 0) {
 		c = tvdiff(&(DATA_WORKINFO(a)->expirydate),
 			   &(DATA_WORKINFO(b)->expirydate));
@@ -2611,11 +2614,11 @@ void workinfo_reload()
 // order by workinfoid asc,userid asc,createdate asc,nonce asc,expirydate desc
 static double cmp_shares(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHARES(a)->workinfoid) -
-		   (double)(DATA_SHARES(b)->workinfoid);
+	double c = (double)(DATA_SHARES(a)->workinfoid -
+			    DATA_SHARES(b)->workinfoid);
 	if (c == 0) {
-		c = (double)(DATA_SHARES(a)->userid) -
-		    (double)(DATA_SHARES(b)->userid);
+		c = (double)(DATA_SHARES(a)->userid -
+			     DATA_SHARES(b)->userid);
 		if (c == 0) {
 			c = tvdiff(&(DATA_SHARES(a)->createdate),
 				   &(DATA_SHARES(b)->createdate));
@@ -2640,7 +2643,7 @@ static bool shares_add(char *workinfoid, char *username, char *workername, char 
 			char *enonce1, char *nonce2, char *nonce, char *diff, char *sdiff,
 			char *secondaryuserid, tv_t *now, char *by, char *code, char *inet)
 {
-	K_ITEM *s_item, *u_item, *w_item;
+	K_ITEM *s_item, *u_item, *wi_item, *w_item;
 	SHARES *shares;
 	bool ok = false;
 
@@ -2672,8 +2675,8 @@ static bool shares_add(char *workinfoid, char *username, char *workername, char 
 	HISTORYDATEINIT(shares, now, by, code, inet);
 	HISTORYDATETRANSFER(shares);
 
-	w_item = find_workinfo(shares->workinfoid);
-	if (!w_item)
+	wi_item = find_workinfo(shares->workinfoid);
+	if (!wi_item)
 		goto unitem;
 
 	w_item = new_default_worker(NULL, false, shares->userid, shares->workername,
@@ -2708,11 +2711,11 @@ static bool shares_fill()
 // order by workinfoid asc,userid asc,createdate asc,nonce asc,expirydate desc
 static double cmp_shareerrors(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHAREERRORS(a)->workinfoid) -
-		   (double)(DATA_SHAREERRORS(b)->workinfoid);
+	double c = (double)(DATA_SHAREERRORS(a)->workinfoid -
+			    DATA_SHAREERRORS(b)->workinfoid);
 	if (c == 0) {
-		c = (double)(DATA_SHAREERRORS(a)->userid) -
-		    (double)(DATA_SHAREERRORS(b)->userid);
+		c = (double)(DATA_SHAREERRORS(a)->userid -
+			     DATA_SHAREERRORS(b)->userid);
 		if (c == 0) {
 			c = tvdiff(&(DATA_SHAREERRORS(a)->createdate),
 				   &(DATA_SHAREERRORS(b)->createdate));
@@ -2730,7 +2733,7 @@ static bool shareerrors_add(char *workinfoid, char *username, char *workername,
 			char *clientid, char *errn, char *error, char *secondaryuserid,
 			tv_t *now, char *by, char *code, char *inet)
 {
-	K_ITEM *s_item, *u_item, *w_item;
+	K_ITEM *s_item, *u_item, *wi_item, *w_item;
 	SHAREERRORS *shareerrors;
 	bool ok = false;
 
@@ -2759,8 +2762,8 @@ static bool shareerrors_add(char *workinfoid, char *username, char *workername,
 	HISTORYDATEINIT(shareerrors, now, by, code, inet);
 	HISTORYDATETRANSFER(shareerrors);
 
-	w_item = find_workinfo(shareerrors->workinfoid);
-	if (!w_item)
+	wi_item = find_workinfo(shareerrors->workinfoid);
+	if (!wi_item)
 		goto unitem;
 
 	w_item = new_default_worker(NULL, false, shareerrors->userid, shareerrors->workername,
@@ -2792,17 +2795,41 @@ static bool shareerrors_fill()
 	return true;
 }
 
+static void dsp_sharesummary(K_ITEM *item, FILE *stream)
+{
+	SHARESUMMARY *s = NULL;
+	char *createdate_buf;
+
+	if (!stream)
+		LOGERR("%s() called with (null) stream", __func__);
+	else {
+		if (!item)
+			fprintf(stream, "%s() called with (null) item\n", __func__);
+		else {
+			s = DATA_SHARESUMMARY(item);
+
+			createdate_buf = tv_to_buf(&(s->createdate), NULL, 0);
+			fprintf(stream, " uid=%"PRId64" wn='%s' wid=%"PRId64" "
+					"da=%f ds=%f ss=%f c='%s' cd=%s\n",
+					s->userid, s->workername, s->workinfoid,
+					s->diffacc, s->diffsta, s->sharesta,
+					s->complete, createdate_buf);
+			free(createdate_buf);
+		}
+	}
+}
+
 // default tree order by userid asc,workername asc,workinfoid asc for reporting
 static double cmp_sharesummary(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHARESUMMARY(a)->userid) -
-		   (double)(DATA_SHARESUMMARY(b)->userid);
+	double c = (double)(DATA_SHARESUMMARY(a)->userid -
+			    DATA_SHARESUMMARY(b)->userid);
 	if (c == 0.0) {
 		c = strcmp(DATA_SHARESUMMARY(a)->workername,
 			   DATA_SHARESUMMARY(b)->workername);
 		if (c == 0.0) {
-			c = (double)(DATA_SHARESUMMARY(a)->workinfoid) -
-			    (double)(DATA_SHARESUMMARY(b)->workinfoid);
+			c = (double)(DATA_SHARESUMMARY(a)->workinfoid -
+				     DATA_SHARESUMMARY(b)->workinfoid);
 		}
 	}
 	return c;
@@ -2811,11 +2838,11 @@ static double cmp_sharesummary(K_ITEM *a, K_ITEM *b)
 // order by workinfoid asc,userid asc,workername asc for flagging complete
 static double cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHARESUMMARY(a)->workinfoid) -
-		   (double)(DATA_SHARESUMMARY(b)->workinfoid);
+	double c = (double)(DATA_SHARESUMMARY(a)->workinfoid -
+			    DATA_SHARESUMMARY(b)->workinfoid);
 	if (c == 0.0) {
-		c = (double)(DATA_SHARESUMMARY(a)->userid) -
-		    (double)(DATA_SHARESUMMARY(b)->userid);
+		c = (double)(DATA_SHARESUMMARY(a)->userid -
+			     DATA_SHARESUMMARY(b)->userid);
 		if (c == 0.0) {
 			c = strcmp(DATA_SHARESUMMARY(a)->workername,
 				   DATA_SHARESUMMARY(b)->workername);
@@ -2850,7 +2877,7 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 	K_ITEM *item;
 	char *ins, *upd;
 	bool ok = false, new;
-	char *params[16 + MODIFYDATECOUNT];
+	char *params[18 + MODIFYDATECOUNT];
 	int n, par;
 	int64_t userid, workinfoid;
 	char *workername;
@@ -2896,6 +2923,7 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 		row->diffrej = row->shareacc = row->sharesta = row->sharedup =
 		row->sharehi = row->sharerej = 0.0;
 		row->sharecount = row->errorcount = row->countlastupdate = 0;
+		row->inserted = false;
 		row->firstshare.tv_sec = sharecreatedate->tv_sec;
 		row->firstshare.tv_usec = sharecreatedate->tv_usec;
 		row->lastshare.tv_sec = row->firstshare.tv_sec;
@@ -2914,8 +2942,8 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 				row->shareacc++;
 				break;
 			case SE_STALE:
-				row->diffacc += s_row->diff;
-				row->shareacc++;
+				row->diffsta += s_row->diff;
+				row->sharesta++;
 				break;
 			case SE_DUPE:
 				row->diffdup += s_row->diff;
@@ -2997,10 +3025,10 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 		PARCHK(par, params);
 
 		ins = "insert into sharesummary "
-			"(userid,workername,workinfoid,diffacc,diffsta,diffdup,diffhi"
+			"(userid,workername,workinfoid,diffacc,diffsta,diffdup,diffhi,"
 			"diffrej,shareacc,sharesta,sharedup,sharehi,sharerej,"
 			"sharecount,errorcount,firstshare,lastshare,complete"
-			MODIFYDATECONTROL ") values (" PQPARAM24 ")";
+			MODIFYDATECONTROL ") values (" PQPARAM26 ")";
 
 		res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 		rescode = PQresultStatus(res);
@@ -3014,7 +3042,7 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 	} else {
 		MODIFYUPDATE(row, now, by, code, inet);
 
-		if (row->countlastupdate > (row->sharecount + row->errorcount + 10)) {
+		if (row->countlastupdate < (row->sharecount + row->errorcount - 10)) {
 			par = 0;
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
 			params[par++] = str_to_buf(row->workername, NULL, 0);
@@ -3047,6 +3075,10 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 				PGLOGERR("Insert", rescode, conn);
 				goto unparam;
 			}
+			row->countlastupdate = row->sharecount + row->errorcount;
+		} else {
+			ok = true;
+			goto late;
 		}
 	}
 
@@ -3055,15 +3087,17 @@ unparam:
 	PQclear(res);
 	for (n = 0; n < par; n++)
 		free(params[n]);
-
+late:
 	if (conned)
 		PQfinish(conn);
 
 	// We keep the new item anyway since it can be inserted next time
 	K_WLOCK(sharesummary_list);
-	if (!new) {
+	if (new) {
 		sharesummary_root = add_to_ktree(sharesummary_root, item, cmp_sharesummary);
-		userid_root = add_to_ktree(userid_root, item, cmp_userid);
+		sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root,
+							    item,
+							    cmp_sharesummary_workinfoid);
 		k_add_head(sharesummary_store, item);
 	}
 	K_WUNLOCK(sharesummary_list);
@@ -3236,7 +3270,7 @@ void sharesummary_reload()
 
 	K_WLOCK(sharesummary_list);
 	sharesummary_root = free_ktree(sharesummary_root, NULL);
-	userid_root = free_ktree(userid_root, NULL);
+	sharesummary_workinfoid_root = free_ktree(sharesummary_workinfoid_root, NULL);
 	k_list_transfer_to_head(sharesummary_store, sharesummary_list);
 	K_WUNLOCK(sharesummary_list);
 
@@ -3563,14 +3597,14 @@ void blocks_reload()
 // order by userid asc,createdate asc,authid asc,expirydate desc
 static double cmp_auths(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_AUTHS(a)->userid) -
-		   (double)(DATA_AUTHS(b)->userid);
+	double c = (double)(DATA_AUTHS(a)->userid -
+			    DATA_AUTHS(b)->userid);
 	if (c == 0) {
 		c = tvdiff(&(DATA_AUTHS(a)->createdate),
 			   &(DATA_AUTHS(b)->createdate));
 		if (c == 0) {
-			c = (double)(DATA_AUTHS(a)->authid) -
-			    (double)(DATA_AUTHS(b)->authid);
+			c = (double)(DATA_AUTHS(a)->authid -
+				     DATA_AUTHS(b)->authid);
 			if (c == 0) {
 				c = tvdiff(&(DATA_AUTHS(b)->expirydate),
 					   &(DATA_AUTHS(a)->expirydate));
@@ -3637,7 +3671,7 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 
 	ins = "insert into auths "
 		"(authid,poolinstance,userid,workername,clientid,enonce1,useragent"
-		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
@@ -3984,26 +4018,29 @@ static void dsp_userstats(K_ITEM *item, FILE *stream)
 
 	if (!stream)
 		LOGERR("%s() called with (null) stream", __func__);
-	if (!item)
-		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		if (!item)
+			fprintf(stream, "%s() called with (null) item\n", __func__);
+		else {
+			u = DATA_USERSTATS(item);
 
-	u = DATA_USERSTATS(item);
-
-	createdate_buf = tv_to_buf(&(u->createdate), NULL, 0);
-	fprintf(stream, " pi='%s' e=%"PRId64" uid=%"PRId64" w='%s' Hs=%f "
-			"Hs5m=%f Hs1hr=%f Hs24hr=%f cd=%s\n",
-			u->poolinstance, u->elapsed, u->userid,
-			u->workername, u->hashrate, u->hashrate5m,
-			u->hashrate1hr, u->hashrate24hr, createdate_buf);
-	free(createdate_buf);
+			createdate_buf = tv_to_buf(&(u->createdate), NULL, 0);
+			fprintf(stream, " pi='%s' e=%"PRId64" uid=%"PRId64" w='%s' Hs=%f "
+					"Hs5m=%f Hs1hr=%f Hs24hr=%f cd=%s\n",
+					u->poolinstance, u->elapsed, u->userid,
+					u->workername, u->hashrate, u->hashrate5m,
+					u->hashrate1hr, u->hashrate24hr, createdate_buf);
+			free(createdate_buf);
+		}
+	}
 }
 
 /* order by userid asc,createdate asc,poolinstance asc,workername asc
    as per required for userstats homepage summarisation */
 static double cmp_userstats(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERSTATS(a)->userid) -
-		   (double)(DATA_USERSTATS(b)->userid);
+	double c = (double)(DATA_USERSTATS(a)->userid -
+			    DATA_USERSTATS(b)->userid);
 	if (c == 0) {
 		c = tvdiff(&(DATA_USERSTATS(a)->createdate),
 			   &(DATA_USERSTATS(b)->createdate));
@@ -4023,8 +4060,8 @@ static double cmp_userstats(K_ITEM *a, K_ITEM *b)
    temporary tree for summing userstats when sending user homepage info */
 static double cmp_userstats_workername(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERSTATS(a)->userid) -
-		   (double)(DATA_USERSTATS(b)->userid);
+	double c = (double)(DATA_USERSTATS(a)->userid -
+			    DATA_USERSTATS(b)->userid);
 	if (c == 0) {
 		c = (double)strcmp(DATA_USERSTATS(a)->workername,
 				   DATA_USERSTATS(b)->workername);
@@ -4350,6 +4387,8 @@ static bool setup_data()
 	sharesummary_list = k_new_list("ShareSummary", sizeof(SHARESUMMARY), ALLOC_SHARESUMMARY, LIMIT_SHARESUMMARY, true);
 	sharesummary_store = k_new_store(sharesummary_list);
 	sharesummary_root = new_ktree();
+	sharesummary_workinfoid_root = new_ktree();
+	sharesummary_list->dsp_func = dsp_sharesummary;
 
 	blocks_list = k_new_list("Blocks", sizeof(BLOCKS), ALLOC_BLOCKS, LIMIT_BLOCKS, true);
 	blocks_store = k_new_store(blocks_list);
@@ -5262,13 +5301,15 @@ static __maybe_unused char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *no
 	// WARNING: This is a gaping security hole - only use in development
 	LOGDEBUG("%s.disabled.dsp", id);
 	return strdup("disabled.dsp");
-
 /*
 	i_file = require_name("file", 1, NULL, reply, siz);
 	if (!i_file)
 		return strdup(reply);
 
-	// Only one implemented so far
+	dsp_ktree(transfer_list, transfer_root, DATA_TRANSFER(i_file)->data);
+
+	dsp_ktree(sharesummary_list, sharesummary_root, DATA_TRANSFER(i_file)->data);
+
 	dsp_ktree(userstats_list, userstats_root, DATA_TRANSFER(i_file)->data);
 
 	LOGDEBUG("%s.ok.dsp.file='%s'", id, DATA_TRANSFER(i_file)->data);
