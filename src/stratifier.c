@@ -1164,6 +1164,7 @@ static user_instance_t *authorise_user(const char *workername)
  * thread so it won't hold anything up but other authorisations. */
 static bool send_recv_auth(stratum_instance_t *client)
 {
+	ckpool_t *ckp = client->ckp;
 	char cdfield[64];
 	bool ret = false;
 	json_t *val;
@@ -1173,9 +1174,10 @@ static bool send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,si,ss,ss,ss,ss}",
+	val = json_pack("{ss,ss,ss,ss,si,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
+			"poolinstance", ckp->name,
 			"useragent", client->useragent,
 			"clientid", client->id,
 			"enonce1", client->enonce1,
@@ -1183,7 +1185,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	buf = json_ckdb_call(client->ckp, ckdb_ids[ID_AUTH], val, false);
+	buf = json_ckdb_call(ckp, ckdb_ids[ID_AUTH], val, false);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
 
