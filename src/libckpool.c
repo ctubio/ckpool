@@ -411,19 +411,15 @@ int connect_socket(char *url, char *port)
 		 * we can connect to quickly. */
 		noblock_socket(sockd);
 		if (connect(sockd, p->ai_addr, p->ai_addrlen) == -1) {
-			struct timeval tv_timeout = {5, 0};
 			int selret;
-			fd_set rw;
 
 			if (!sock_connecting()) {
 				close(sockd);
 				LOGDEBUG("Failed sock connect");
 				continue;
 			}
-			FD_ZERO(&rw);
-			FD_SET(sockd, &rw);
-			selret = select(sockd + 1, NULL, &rw, NULL, &tv_timeout);
-			if  (selret > 0 && FD_ISSET(sockd, &rw)) {
+			selret = wait_write_select(sockd, 5);
+			if  (selret > 0) {
 				socklen_t len;
 				int err, n;
 
@@ -457,13 +453,9 @@ out:
 
 int write_socket(int fd, const void *buf, size_t nbyte)
 {
-	tv_t tv_timeout = {1, 0};
-	fd_set writefds;
 	int ret;
 
-	FD_ZERO(&writefds);
-	FD_SET(fd, &writefds);
-	ret = select(fd + 1, NULL, &writefds, NULL, &tv_timeout);
+	ret = wait_write_select(fd, 5);
 	if (ret < 1) {
 		if (!ret)
 			LOGNOTICE("Select timed out in write_socket");
@@ -487,12 +479,8 @@ void empty_socket(int fd)
 
 	do {
 		char buf[PAGESIZE];
-		tv_t timeout = {0, 0};
-		fd_set rd;
 
-		FD_ZERO(&rd);
-		FD_SET(fd, &rd);
-		ret = select(fd + 1, &rd, NULL, NULL, &timeout);
+		ret = wait_read_select(fd, 0);
 		if (ret > 0) {
 			ret = recv(fd, buf, PAGESIZE - 1, 0);
 			buf[ret] = 0;
@@ -625,7 +613,9 @@ int wait_read_select(int sockd, int timeout)
 
 	FD_ZERO(&readfs);
 	FD_SET(sockd, &readfs);
-	ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
+	do {
+		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
+	} while (unlikely(ret < 0 && interrupted()));
 	return ret;
 }
 
@@ -700,7 +690,9 @@ int wait_write_select(int sockd, int timeout)
 
 	FD_ZERO(&writefds);
 	FD_SET(sockd, &writefds);
-	ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
+	do {
+		ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
+	} while (unlikely(ret < 0 && interrupted()));
 	return ret;
 }
 

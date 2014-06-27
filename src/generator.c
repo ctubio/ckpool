@@ -220,9 +220,7 @@ retry:
 
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
-		if (interrupted())
-			goto retry;
-		LOGERR("Failed to accept on generator socket");
+		LOGEMERG("Failed to accept on generator socket");
 		ret = 1;
 		goto out;
 	}
@@ -1227,9 +1225,7 @@ reconnect:
 retry:
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
-		if (interrupted())
-			goto retry;
-		LOGERR("Failed to accept on proxy socket");
+		LOGEMERG("Failed to accept on proxy socket");
 		ret = 1;
 		goto out;
 	}

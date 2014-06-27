@@ -227,11 +227,9 @@ void empty_buffer(connsock_t *cs)
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, int timeout)
 {
-	tv_t tv_timeout = {timeout, 0};
 	char *eom = NULL;
 	size_t buflen;
 	int ret = -1;
-	fd_set rd;
 
 	if (unlikely(cs->fd < 0))
 		goto out;
@@ -250,11 +248,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 
-		FD_ZERO(&rd);
-		FD_SET(cs->fd, &rd);
-		if (eom)
-			tv_timeout.tv_sec = tv_timeout.tv_usec = 0;
-		ret = select(cs->fd + 1, &rd, NULL, NULL, &tv_timeout);
+		ret = wait_read_select(cs->fd, eom ? 0 : timeout);
 		if (eom && !ret)
 			break;
 		if (ret < 1) {
@@ -697,20 +691,17 @@ static void sighandler(int sig)
 {
 	ckpool_t *ckp = global_ckp;
 
+	LOGWARNING("Parent process %s received signal %d, shutting down",
+		   ckp->name, sig);
 	pthread_cancel(ckp->pth_watchdog);
 	join_pthread(ckp->pth_watchdog);
 
-	if (sig != 9) {
-		__shutdown_children(ckp, SIGTERM);
-		/* Wait a second, then send SIGKILL */
-		sleep(1);
-		__shutdown_children(ckp, SIGKILL);
-		pthread_cancel(ckp->pth_listener);
-		exit(0);
-	} else {
-		__shutdown_children(ckp, SIGKILL);
-		exit(1);
-	}
+	__shutdown_children(ckp, SIGTERM);
+	/* Wait a second, then send SIGKILL */
+	sleep(1);
+	__shutdown_children(ckp, SIGKILL);
+	pthread_cancel(ckp->pth_listener);
+	exit(0);
 }
 
 static void json_get_string(char **store, json_t *val, const char *res)
