@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2014 Andrew Smith
+ * Copyright 1995-2014 Andrew Smith
  * Copyright 2014 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -3040,7 +3040,8 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 	} else {
 		MODIFYUPDATE(row, now, by, code, inet);
 
-		if ((row->countlastupdate + 10) < (row->sharecount + row->errorcount)) {
+		if ((row->countlastupdate + SHARESUMMARY_UPDATE_EVERY) <
+		    (row->sharecount + row->errorcount)) {
 			par = 0;
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
 			params[par++] = str_to_buf(row->workername, NULL, 0);
