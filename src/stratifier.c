@@ -1174,7 +1174,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,si,ss,ss,ss,ss}",
+	val = json_pack("{ss,ss,ss,ss,si,ss,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
