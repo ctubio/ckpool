@@ -662,7 +662,6 @@ static void clean_up(ckpool_t *ckp)
 	for (i = 0; i < children; i++)
 		dealloc(ckp->children[i]);
 	dealloc(ckp->children);
-	fclose(ckp->logfp);
 }
 
 static void __shutdown_children(ckpool_t *ckp, int sig)
