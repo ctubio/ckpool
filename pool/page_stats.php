@@ -33,7 +33,6 @@ function dostats($data, $user)
 
 	usort($all, 'allusersort');
 
-	foreach ($all as $arr)
 	for ($i = 0; $i < $count; $i++)
 	{
 		if (($i % 2) == 0)
