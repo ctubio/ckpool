@@ -107,7 +107,7 @@ function getWorkers($user)
 {
  if ($user == false)
 	showIndex();
- $flds = array('username' => $user);
+ $flds = array('username' => $user, 'stats' => 'Y');
  $msg = msgEncode('workers', 'work', $flds);
  $rep = sendsockreply('getworkers', $msg);
  if (!$rep)

@@ -1065,7 +1065,7 @@ static K_ITEM *optional_name(char *name, int len, char *patt)
 		return NULL;
 
 	value = DATA_TRANSFER(item)->data;
-	if (!*value || (int)strlen(value) < len)
+	if (!value || (int)strlen(value) < len)
 		return NULL;
 
 	if (patt) {
@@ -4742,9 +4742,9 @@ foil:
 static char *cmd_payments(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
 				__maybe_unused char *code, __maybe_unused char *inet)
 {
-	K_ITEM *i_username, *look, *u_item, *p_item;
+	K_ITEM *i_username, look, *u_item, *p_item;
 	K_TREE_CTX ctx[1];
-	PAYMENTS *row;
+	PAYMENTS payments;
 	char reply[1024] = "";
 	char tmp[1024];
 	size_t siz = sizeof(reply);
@@ -4762,14 +4762,11 @@ static char *cmd_payments(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	if (!u_item)
 		return strdup("bad");
 
-	K_WLOCK(payments_list);
-	look = k_unlink_head(payments_list);
-	K_WUNLOCK(payments_list);
-	row = DATA_PAYMENTS(look);
-	row->userid = DATA_USERS(u_item)->userid;
-	row->paydate.tv_sec = 0;
-	row->paydate.tv_usec = 0;
-	p_item = find_after_in_ktree(payments_root, look, cmp_payments, ctx);
+	payments.userid = DATA_USERS(u_item)->userid;
+	payments.paydate.tv_sec = 0;
+	payments.paydate.tv_usec = 0;
+	look.data = (void *)(&payments);
+	p_item = find_after_in_ktree(payments_root, &look, cmp_payments, ctx);
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 	rows = 0;
@@ -4792,9 +4789,138 @@ static char *cmd_payments(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	K_WLOCK(payments_list);
-	k_add_head(payments_list, look);
-	K_WUNLOCK(payments_list);
+	LOGDEBUG("%s.ok.%s", id, DATA_TRANSFER(i_username)->data);
+	return buf;
+}
+
+static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
+				__maybe_unused char *code, __maybe_unused char *inet)
+{
+	K_ITEM *i_username, *i_stats, wlook, *u_item, *w_item, uslook, *us_item;
+	K_TREE_CTX wctx[1], usctx[1];
+	WORKERS workers;
+	USERSTATS userstats;
+	char reply[1024] = "";
+	char tmp[1024];
+	size_t siz = sizeof(reply);
+	char *buf;
+	size_t len, off;
+	bool stats;
+	int rows;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name("username", 3, (char *)userpatt, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	u_item = find_users(DATA_TRANSFER(i_username)->data);
+	if (!u_item)
+		return strdup("bad");
+
+	i_stats = optional_name("stats", 1, NULL);
+	if (!i_stats)
+		stats = false;
+	else
+		stats = (strcasecmp(DATA_TRANSFER(i_stats)->data, TRUE_STR) == 0);
+
+	workers.userid = DATA_USERS(u_item)->userid;
+	workers.workername[0] = '\0';
+	workers.expirydate.tv_sec = 0;
+	workers.expirydate.tv_usec = 0;
+	wlook.data = (void *)(&workers);
+	w_item = find_after_in_ktree(workers_root, &wlook, cmp_workers, wctx);
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	rows = 0;
+	while (w_item && DATA_WORKERS(w_item)->userid == DATA_USERS(u_item)->userid) {
+		if (tvdiff(&(DATA_WORKERS(w_item)->expirydate), (tv_t *)&default_expiry) == 0.0) {
+			str_to_buf(DATA_WORKERS(w_item)->workername, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "workername%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			int_to_buf(DATA_WORKERS(w_item)->difficultydefault, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "difficultydefault%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			str_to_buf(DATA_WORKERS(w_item)->idlenotificationenabled, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "idlenotificationenabled%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			int_to_buf(DATA_WORKERS(w_item)->idlenotificationtime, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "idlenotificationtime%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			if (stats) {
+				K_TREE *userstats_workername_root = new_ktree();
+				K_TREE_CTX uswctx[1];
+				double w_hashrate5m, w_hashrate1hr;
+				int64_t w_elapsed;
+				tv_t w_lastshare;
+
+				w_lastshare.tv_sec = 0;
+				w_hashrate5m = w_hashrate1hr = 0.0;
+				w_elapsed = -1;
+
+				// find last stored userid record
+				userstats.userid = DATA_USERS(u_item)->userid;
+				userstats.createdate.tv_sec = date_eot.tv_sec;
+				userstats.createdate.tv_usec = date_eot.tv_usec;
+				// find/cmp doesn't get to here
+				userstats.poolinstance[0] = '\0';
+				userstats.workername[0] = '\0';
+				uslook.data = (void *)(&userstats);
+				us_item = find_before_in_ktree(userstats_root, &uslook, cmp_userstats, usctx);
+				while (us_item && DATA_USERSTATS(us_item)->userid == userstats.userid) {
+					if (strcmp(DATA_USERSTATS(us_item)->workername, DATA_WORKERS(w_item)->workername) == 0) {
+						// first found is the newest share
+						if (w_lastshare.tv_sec == 0)
+							w_lastshare.tv_sec = DATA_USERSTATS(us_item)->createdate.tv_sec;
+
+						if (tvdiff(now, &(DATA_USERSTATS(us_item)->createdate)) < USERSTATS_PER_S) {
+							// TODO: add together the latest per pool instance (this is the latest per worker)
+							if (!find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, uswctx)) {
+								w_hashrate5m += DATA_USERSTATS(us_item)->hashrate5m;
+								w_hashrate1hr += DATA_USERSTATS(us_item)->hashrate1hr;
+								if (w_elapsed == -1 || w_elapsed > DATA_USERSTATS(us_item)->elapsed)
+									w_elapsed = DATA_USERSTATS(us_item)->elapsed;
+
+								userstats_workername_root = add_to_ktree(userstats_workername_root,
+													 us_item,
+													 cmp_userstats_workername);
+							}
+						} else
+							break;
+
+					}
+					us_item = prev_in_ktree(usctx);
+				}
+
+				double_to_buf(w_hashrate5m, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "w_hashrate5m%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(w_hashrate1hr, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "w_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				bigint_to_buf(w_elapsed, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "w_elapsed%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				int_to_buf((int)(w_lastshare.tv_sec), reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "w_lastshare%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				userstats_workername_root = free_ktree(userstats_workername_root, NULL);
+			}
+
+			rows++;
+		}
+		w_item = next_in_ktree(wctx);
+	}
+	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%s", id, DATA_TRANSFER(i_username)->data);
 	return buf;
@@ -5249,6 +5375,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		while (us_item &&
 		       DATA_USERSTATS(us_item)->userid == userstats.userid &&
 		       tvdiff(now, &(DATA_USERSTATS(us_item)->createdate)) < USERSTATS_PER_S) {
+			// TODO: add the latest per pool instance (this is the latest per worker)
 			if (!find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, wctx)) {
 				u_hashrate5m += DATA_USERSTATS(us_item)->hashrate5m;
 				u_hashrate1hr += DATA_USERSTATS(us_item)->hashrate1hr;
@@ -5331,6 +5458,7 @@ enum cmd_values {
 	CMD_BLOCK,
 	CMD_NEWID,
 	CMD_PAYMENTS,
+	CMD_WORKERS,
 	CMD_HOMEPAGE,
 	CMD_DSP,
 	CMD_END
@@ -5361,6 +5489,7 @@ static struct CMDS {
 	{ CMD_BLOCK,	"block",	cmd_blocks,	ACCESS_POOL },
 	{ CMD_NEWID,	"newid",	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	cmd_payments,	ACCESS_WEB },
+	{ CMD_WORKERS,	"workers",	cmd_workers,	ACCESS_WEB },
 	{ CMD_HOMEPAGE,	"homepage",	cmd_homepage,	ACCESS_WEB },
 	{ CMD_DSP,	"dsp",		cmd_dsp,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		NULL,		NULL }
