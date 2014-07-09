@@ -946,6 +946,9 @@ static K_STORE *userstats_eos_store;
  * any worker with newest stats being older than USERSTATS_PER_S */
 #define USERSTATS_PER_S (int)(600 * 1.5)
 
+/* on the allusers page, show any with stats in the last 1hr */
+#define ALLUSERS_LIMIT_S 3600
+
 static char logname[512];
 #define LOGFILE(_msg) rotating_log(logname, _msg)
 
@@ -1526,7 +1529,6 @@ static K_ITEM *find_users(char *username)
 	return find_in_ktree(users_root, &look, cmp_users, ctx);
 }
 
-/* unused
 static K_ITEM *find_userid(int64_t userid)
 {
 	USERS users;
@@ -1540,7 +1542,6 @@ static K_ITEM *find_userid(int64_t userid)
 	look.data = (void *)(&users);
 	return find_in_ktree(userid_root, &look, cmp_userid, ctx);
 }
-*/
 
 static bool users_add(PGconn *conn, char *username, char *emailaddress, char *passwordhash,
 			tv_t *now, char *by, char *code, char *inet)
@@ -4926,6 +4927,112 @@ static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 	return buf;
 }
 
+static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
+				__maybe_unused char *code, __maybe_unused char *inet)
+{
+	K_TREE *userstats_workername_root = new_ktree();
+	K_ITEM *us_item, *usw_item, *tmp_item, *u_item;
+	K_TREE_CTX usctx[1], uswctx[1];
+	char reply[1024] = "";
+	char tmp[1024];
+	char *buf;
+	size_t len, off;
+	int rows;
+	int64_t userid = -1;
+	double u_hashrate1hr = 0.0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	// Find last records for each user/worker in ALLUSERS_LIMIT_S
+	// TODO: include pool_instance
+	us_item = last_in_ktree(userstats_root, usctx);
+	while (us_item && tvdiff(now, &(DATA_USERSTATS(us_item)->createdate)) < ALLUSERS_LIMIT_S) {
+		usw_item = find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, uswctx);
+		if (!usw_item) {
+			K_WLOCK(userstats_list);
+			usw_item = k_unlink_head(userstats_list);
+			K_WUNLOCK(userstats_list);
+
+			DATA_USERSTATS(usw_item)->userid = DATA_USERSTATS(us_item)->userid;
+			strcpy(DATA_USERSTATS(usw_item)->workername, DATA_USERSTATS(us_item)->workername);
+			DATA_USERSTATS(usw_item)->hashrate1hr = DATA_USERSTATS(us_item)->hashrate1hr;
+
+			userstats_workername_root = add_to_ktree(userstats_workername_root, usw_item, cmp_userstats_workername);
+		}
+		us_item = us_item->prev;
+	}
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	rows = 0;
+	// Add up per user
+	usw_item = first_in_ktree(userstats_workername_root, uswctx);
+	while (usw_item) {
+		if (DATA_USERSTATS(usw_item)->userid != userid) {
+			if (userid != -1) {
+				u_item = find_userid(userid);
+				if (!u_item) {
+					LOGERR("%s() userid %"PRId64" ignored - userstats but not users",
+					       __func__, userid);
+				} else {
+					str_to_buf(DATA_USERS(u_item)->username, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "username%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					bigint_to_buf(userid, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "userid%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(u_hashrate1hr, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "u_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					rows++;
+				}
+			}
+			userid = DATA_USERSTATS(usw_item)->userid;
+			u_hashrate1hr = 0;
+		}
+		u_hashrate1hr += DATA_USERSTATS(usw_item)->hashrate1hr;
+
+		tmp_item = usw_item;
+		usw_item = tmp_item->next;
+
+		K_WLOCK(userstats_list);
+		k_add_head(userstats_list, tmp_item);
+		K_WUNLOCK(userstats_list);
+	}
+	if (userid != -1) {
+		u_item = find_userid(userid);
+		if (!u_item) {
+			LOGERR("%s() userid %"PRId64" ignored - userstats but not users",
+			       __func__, userid);
+		} else {
+			str_to_buf(DATA_USERS(u_item)->username, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "username%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			bigint_to_buf(userid, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "userid%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			double_to_buf(u_hashrate1hr, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "u_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			rows++;
+		}
+	}
+
+	userstats_workername_root = free_ktree(userstats_workername_root, NULL);
+
+	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.allusers", id);
+	return buf;
+}
+
 static char *cmd_sharelog(char *cmd, char *id, tv_t *now, char *by, char *code, char *inet)
 {
 	char reply[1024] = "";
@@ -5459,6 +5566,7 @@ enum cmd_values {
 	CMD_NEWID,
 	CMD_PAYMENTS,
 	CMD_WORKERS,
+	CMD_ALLUSERS,
 	CMD_HOMEPAGE,
 	CMD_DSP,
 	CMD_END
@@ -5490,6 +5598,7 @@ static struct CMDS {
 	{ CMD_NEWID,	"newid",	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	cmd_payments,	ACCESS_WEB },
 	{ CMD_WORKERS,	"workers",	cmd_workers,	ACCESS_WEB },
+	{ CMD_ALLUSERS,	"allusers",	cmd_allusers,	ACCESS_WEB },
 	{ CMD_HOMEPAGE,	"homepage",	cmd_homepage,	ACCESS_WEB },
 	{ CMD_DSP,	"dsp",		cmd_dsp,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		NULL,		NULL }

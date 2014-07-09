@@ -103,13 +103,23 @@ function checkpass($user, $pass)
  return $rep;
 }
 #
+function getAllUsers()
+{
+ $flds = array();
+ $msg = msgEncode('allusers', 'all', $flds);
+ $rep = sendsockreply('getAllUsers', $msg);
+ if (!$rep)
+	dbdown();
+ return $rep;
+}
+#
 function getWorkers($user)
 {
  if ($user == false)
 	showIndex();
  $flds = array('username' => $user, 'stats' => 'Y');
  $msg = msgEncode('workers', 'work', $flds);
- $rep = sendsockreply('getworkers', $msg);
+ $rep = sendsockreply('getWorkers', $msg);
  if (!$rep)
 	dbdown();
  return $rep;
@@ -121,7 +131,7 @@ function getPayments($user)
 	showIndex();
  $flds = array('username' => $user);
  $msg = msgEncode('payments', 'pay', $flds);
- $rep = sendsockreply('getpayments', $msg);
+ $rep = sendsockreply('getPayments', $msg);
  if (!$rep)
 	dbdown();
  return $rep;
