@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fenv.h>
 #include <jansson.h>
 #include <signal.h>
 #include <stdio.h>
@@ -5653,6 +5654,8 @@ int main(int argc, char **argv)
 	ckpool_t ckp;
 	int c, ret;
 	char *kill;
+
+	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
