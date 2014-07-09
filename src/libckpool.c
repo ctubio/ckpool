@@ -1328,11 +1328,15 @@ double tvdiff(tv_t *end, tv_t *start)
 /* Create an exponentially decaying average over interval */
 void decay_time(double *f, double fadd, double fsecs, double interval)
 {
-	double ftotal, fprop;
+	double ftotal, fprop, dexp;
 
 	if (fsecs <= 0)
 		return;
-	fprop = 1.0 - 1 / (exp(fsecs / interval));
+	dexp = fsecs / interval;
+	/* Put Sanity bound on how large the denominator can get */
+	if (unlikely(dexp > 36))
+		dexp = 36;
+	fprop = 1.0 - 1 / exp(dexp);
 	ftotal = 1.0 + fprop;
 	*f += (fadd / fsecs * fprop);
 	*f /= ftotal;
