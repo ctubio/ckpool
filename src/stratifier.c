@@ -1276,7 +1276,12 @@ static void stratum_send_message(stratum_instance_t *client, const char *msg)
 
 static double time_bias(double tdiff, double period)
 {
-	return 1.0 - 1.0 / exp(tdiff / period);
+	double dexp = tdiff / period;
+
+	/* Sanity check to prevent silly numbers for double accuracy **/
+	if (unlikely(dexp > 36))
+		dexp = 36;
+	return 1.0 - 1.0 / exp(dexp);
 }
 
 /* Sanity check to prevent clock adjustments backwards from screwing up stats */
