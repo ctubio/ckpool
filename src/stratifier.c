@@ -228,6 +228,7 @@ struct stratum_instance {
 
 	bool authorised;
 	bool idle;
+	bool notified_idle;
 
 	user_instance_t *user_instance;
 	char *useragent;
@@ -2124,9 +2125,9 @@ static void update_userstats(ckpool_t *ckp)
 		uint8_t cycle_mask;
 		int elapsed;
 
-		/* Only show stats from clients that have returned shares in
-		 * the last 10 minutes */
-		if (client->idle)
+		/* Send one lot of stats once the client is idle if they have submitted
+		 * no shares in the last 10 minutes with the idle bool set. */
+		if (client->idle && client->notified_idle)
 			continue;
 		/* Select clients using a mask to return each user's stats once
 		 * every ~10 minutes */
@@ -2144,7 +2145,7 @@ static void update_userstats(ckpool_t *ckp)
 		ghs5 = client->dsps5 * nonces;
 		ghs60 = client->dsps60 * nonces;
 		ghs1440 = client->dsps1440 * nonces;
-		val = json_pack("{ss,si,si,ss,ss,sf,sf,sf,sf,ss,ss,ss,ss}",
+		val = json_pack("{ss,si,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
 				"instanceid", client->id,
 				"elapsed", elapsed,
@@ -2154,10 +2155,12 @@ static void update_userstats(ckpool_t *ckp)
 				"hashrate5m", ghs5,
 				"hashrate1hr", ghs60,
 				"hashrate24hr", ghs1440,
+				"idle", client->idle,
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
+		client->notified_idle = client->idle;
 	}
 	/* Mark the last userstats sent on this pass of stats with an end of
 	 * stats marker. */
