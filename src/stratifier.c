@@ -263,15 +263,17 @@ static cklock_t share_lock;
 
 #define ID_AUTH 0
 #define ID_WORKINFO 1
-#define ID_SHARES 2
-#define ID_SHAREERR 3
-#define ID_POOLSTATS 4
-#define ID_USERSTATS 5
-#define ID_BLOCK 6
+#define ID_AGEWORKINFO 2
+#define ID_SHARES 3
+#define ID_SHAREERR 4
+#define ID_POOLSTATS 5
+#define ID_USERSTATS 6
+#define ID_BLOCK 7
 
 static const char *ckdb_ids[] = {
 	"authorise",
 	"workinfo",
+	"ageworkinfo",
 	"shares",
 	"shareerror",
 	"poolstats",
@@ -441,9 +443,28 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 	ckdbq_add(ID_WORKINFO, val);
 }
 
+static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
+{
+	char cdfield[64];
+	ts_t ts_now;
+	json_t *val;
+
+	ts_realtime(&ts_now);
+	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
+
+	val = json_pack("{sI,ss,ss,ss,ss,ss}",
+			"workinfoid", id,
+			"poolinstance", ckp->name,
+			"createdate", cdfield,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", "127.0.0.1");
+	ckdbq_add(ID_AGEWORKINFO, val);
+}
+
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 {
-	workbase_t *tmp, *tmpa;
+	workbase_t *tmp, *tmpa, *aged = NULL;
 	int len, ret;
 
 	ts_realtime(&wb->gentime);
@@ -479,7 +500,8 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime.tv_sec < wb->gentime.tv_sec - 600) {
 			HASH_DEL(workbases, tmp);
-			clear_workbase(tmp);
+			aged = tmp;
+			break;
 		}
 	}
 	HASH_ADD_INT(workbases, id, wb);
@@ -490,6 +512,13 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		purge_share_hashtable(wb->id);
 
 	send_workinfo(ckp, wb);
+
+	/* Send the aged work message to ckdb once we have dropped the workbase lock
+	 * to prevent taking recursive locks */
+	if (aged) {
+		send_ageworkinfo(ckp, aged->id);
+		clear_workbase(aged);
+	}
 }
 
 /* This function assumes it will only receive a valid json gbt base template
