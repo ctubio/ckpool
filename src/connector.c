@@ -244,6 +244,7 @@ reparse:
 		char *s;
 
 		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
+		json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		s = json_dumps(val, 0);
 		send_proc(ckp->stratifier, s);
 		free(s);
