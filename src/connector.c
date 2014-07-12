@@ -127,7 +127,7 @@ retry:
 
 	keep_sockalive(fd);
 
-	LOGINFO("Connected new client %d on socket %d", ci->nfds, fd);
+	LOGINFO("Connected new client %d on socket %d from %s", ci->nfds, fd, client->address_name);
 
 	client->fd = fd;
 
