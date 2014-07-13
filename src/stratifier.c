@@ -9,6 +9,7 @@
 
 #include "config.h"
 
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -164,6 +165,7 @@ struct json_params {
 	json_t *params;
 	json_t *id_val;
 	int client_id;
+	char address[INET6_ADDRSTRLEN];
 };
 
 typedef struct json_params json_params_t;
@@ -179,6 +181,7 @@ typedef struct ckdb_msg ckdb_msg_t;
 struct smsg {
 	json_t *json_msg;
 	int client_id;
+	char address[INET6_ADDRSTRLEN];
 };
 
 typedef struct smsg smsg_t;
@@ -226,6 +229,7 @@ struct stratum_instance {
 	tv_t last_share;
 	time_t start_time;
 
+	char address[INET6_ADDRSTRLEN];
 	bool authorised;
 	bool idle;
 	bool notified_idle;
@@ -1214,7 +1218,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", "127.0.0.1");
+			"createinet", client->address);
 	buf = json_ckdb_call(ckp, ckdb_ids[ID_AUTH], val, false);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
@@ -1237,7 +1241,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 	return ret;
 }
 
-static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val)
+static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val, const char *address)
 {
 	bool ret = false;
 	const char *buf;
@@ -1270,6 +1274,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	client->user_id = client->user_instance->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
+	strcpy(client->address, address);
 
 	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
 		  client->user_instance->username);
@@ -1865,18 +1870,19 @@ static void update_client(const int client_id)
 		stratum_send_diff(client);
 }
 
-static json_params_t *create_json_params(const int client_id, const json_t *params, const json_t *id_val)
+static json_params_t *create_json_params(const int client_id, const json_t *params, const json_t *id_val, const char *address)
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
 
 	jp->params = json_deep_copy(params);
 	jp->id_val = json_deep_copy(id_val);
 	jp->client_id = client_id;
+	strcpy(jp->address, address);
 	return jp;
 }
 
 static void parse_method(const int client_id, json_t *id_val, json_t *method_val,
-			 json_t *params_val)
+			 json_t *params_val, char *address)
 {
 	stratum_instance_t *client;
 	const char *method;
@@ -1908,7 +1914,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 	}
 
 	if (!strncasecmp(method, "mining.auth", 11)) {
-		json_params_t *jp = create_json_params(client_id, params_val, id_val);
+		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
 
 		ckmsgq_add(sauthq, jp);
 		return;
@@ -1928,7 +1934,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 	}
 
 	if (!strncasecmp(method, "mining.submit", 13)) {
-		json_params_t *jp = create_json_params(client_id, params_val, id_val);
+		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
 
 		ckmsgq_add(sshareq, jp);
 		return;
@@ -1959,7 +1965,7 @@ static void parse_instance_msg(smsg_t *msg)
 		send_json_err(client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	parse_method(client_id, id_val, method, params);
+	parse_method(client_id, id_val, method, params, msg->address);
 out:
 	json_decref(val);
 	free(msg);
@@ -1968,9 +1974,36 @@ out:
 static void srecv_process(ckpool_t *ckp, smsg_t *msg)
 {
 	stratum_instance_t *instance;
+	json_t *val;
 
-	msg->client_id = json_integer_value(json_object_get(msg->json_msg, "client_id"));
-	json_object_del(msg->json_msg, "client_id");
+	val = json_object_get(msg->json_msg, "client_id");
+	if (unlikely(!val)) {
+		char *s;
+
+		s = json_dumps(msg->json_msg, 0);
+		LOGWARNING("Failed to extract client_id from connector json smsg %s", s);
+		free(s);
+		json_decref(msg->json_msg);
+		free(msg);
+		return;
+	}
+
+	msg->client_id = json_integer_value(val);
+	json_object_clear(val);
+
+	val = json_object_get(msg->json_msg, "address");
+	if (unlikely(!val)) {
+		char *s;
+
+		s = json_dumps(msg->json_msg, 0);
+		LOGWARNING("Failed to extract address from connector json smsg %s", s);
+		free(s);
+		json_decref(msg->json_msg);
+		free(msg);
+		return;
+	}
+	strcpy(msg->address, json_string_value(val));
+	json_object_clear(val);
 
 	/* Parse the message here */
 	ck_ilock(&instance_lock);
@@ -2063,7 +2096,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 		LOGINFO("Authoriser failed to find client id %d in hashtable!", client_id);
 		goto out;
 	}
-	result_val = parse_authorise(client, jp->params, &err_val);
+	result_val = parse_authorise(client, jp->params, &err_val, jp->address);
 	if (json_is_true(result_val)) {
 		char *buf;
 

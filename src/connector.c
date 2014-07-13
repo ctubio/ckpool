@@ -47,7 +47,8 @@ struct client_instance {
 	struct client_instance *next;
 
 	struct sockaddr address;
-	socklen_t address_len;
+	char address_name[INET6_ADDRSTRLEN];
+
 	char buf[PAGESIZE];
 	int bufofs;
 };
@@ -87,24 +88,46 @@ void *acceptor(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
 	client_instance_t *client, *old_client;
+	socklen_t address_len;
 	int fd;
 
 	rename_proc("acceptor");
 
 retry:
 	client = ckzalloc(sizeof(client_instance_t));
-	client->address_len = sizeof(client->address);
+	address_len = sizeof(client->address);
 	while (!ci->accept)
 		sleep(1);
-	fd = accept(ci->serverfd, &client->address, &client->address_len);
+	fd = accept(ci->serverfd, &client->address, &address_len);
 	if (unlikely(fd < 0)) {
 		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
 		dealloc(client);
 		goto out;
 	}
+
+	switch (client->address.sa_family) {
+		const struct sockaddr_in *inet4_in;
+		const struct sockaddr_in6 *inet6_in;
+
+		case AF_INET:
+			inet4_in = (struct sockaddr_in *)&client->address;
+			inet_ntop(AF_INET, &inet4_in->sin_addr, client->address_name, INET6_ADDRSTRLEN);
+			break;
+		case AF_INET6:
+			inet6_in = (struct sockaddr_in6 *)&client->address;
+			inet_ntop(AF_INET6, &inet6_in->sin6_addr, client->address_name, INET6_ADDRSTRLEN);
+			break;
+		default:
+			LOGWARNING("Unknown INET type for client %d on socket %d",
+				   ci->nfds, fd);
+			close(fd);
+			free(client);
+			goto retry;
+	}
+
 	keep_sockalive(fd);
 
-	LOGINFO("Connected new client %d on socket %d", ci->nfds, fd);
+	LOGINFO("Connected new client %d on socket %d from %s", ci->nfds, fd, client->address_name);
 
 	client->fd = fd;
 
@@ -221,6 +244,7 @@ reparse:
 		char *s;
 
 		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
+		json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		s = json_dumps(val, 0);
 		send_proc(ckp->stratifier, s);
 		free(s);
