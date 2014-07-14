@@ -406,7 +406,7 @@ static const char *invalid_toodeep = " >9 levels, recursion?";
 
 static char *_first_invalid(json_t *json_data, int level)
 {
-	const char *json_key;
+	const char *json_key, *json_str;
 	json_t *json_value;
 	void *json_iter;
 	int json_typ;
@@ -425,6 +425,13 @@ static char *_first_invalid(json_t *json_data, int level)
 		json_typ = json_typeof(json_value);
 		switch(json_typ) {
 			case JSON_STRING:
+				json_str = json_string_value(json_value);
+				if (json_str == NULL) {
+					snprintf(buf, sizeof(buf),
+						 " %s is NULL", json_key);
+					found = true;
+				}
+				break;
 			case JSON_REAL:
 			case JSON_INTEGER:
 			case JSON_TRUE:
