@@ -1130,6 +1130,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 		buf = json_string_value(json_array_get(params_val, 0));
 		if (buf && strlen(buf))
 			client->useragent = strdup(buf);
+		else
+			client->useragent = ckzalloc(1); // Set to ""
 		if (arr_size > 1) {
 			/* This would be the session id for reconnect, it will
 			 * not work for clients on a proxied connection. */
