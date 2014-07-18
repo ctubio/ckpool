@@ -1354,10 +1354,7 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	copy_tv(&client->last_share, &now_t);
 	client->idle = false;
 
-	tdiff = sane_tdiff(&now_t, &client->last_share);
-	copy_tv(&client->last_share, &now_t);
 	client->ssdc++;
-	decay_time(&client->dsps5, diff, tdiff, 300);
 	bdiff = sane_tdiff(&now_t, &client->first_share);
 	bias = time_bias(bdiff, 300);
 	tdiff = sane_tdiff(&now_t, &client->ldc);
