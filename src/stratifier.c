@@ -1345,8 +1345,10 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 	ck_runlock(&workbase_lock);
 
 	tdiff = sane_tdiff(&now_t, &client->last_share);
-	if (unlikely(!client->first_share.tv_sec))
+	if (unlikely(!client->first_share.tv_sec)) {
 		copy_tv(&client->first_share, &now_t);
+		copy_tv(&client->ldc, &now_t);
+	}
 	decay_time(&client->dsps1, diff, tdiff, 60);
 	decay_time(&client->dsps5, diff, tdiff, 300);
 	decay_time(&client->dsps60, diff, tdiff, 3600);
