@@ -15,7 +15,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <ctype.h>
 #include <fenv.h>
+#include <getopt.h>
 #include <grp.h>
 #include <jansson.h>
 #include <signal.h>
@@ -945,11 +947,25 @@ static void *watchdog(void *arg)
 	return NULL;
 }
 
+static struct option long_options[] = {
+	{"config",	required_argument,	0,	'c'},
+	{"ckdb-name",	required_argument,	0,	'd'},
+	{"group",	required_argument,	0,	'g'},
+	{"help",	no_argument,		0,	'h'},
+	{"killold",	no_argument,		0,	'k'},
+	{"loglevel",	required_argument,	0,	'l'},
+	{"name",	required_argument,	0,	'n'},
+	{"proxy",	no_argument,		0,	'p'},
+	{"ckdb-sockdir",required_argument,	0,	'S'},
+	{"sockdir",	required_argument,	0,	's'},
+	{0, 0, 0, 0}
+};
+
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
+	int c, ret, i = 0, j;
 	char buf[512] = {};
-	int c, ret, i;
 	ckpool_t ckp;
 
 	/* Make significant floating point errors fatal to avoid subtle bugs being missed */
@@ -959,7 +975,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:d:g:kl:n:pS:s:")) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:g:hkl:n:pS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'c':
 				ckp.config = optarg;
@@ -970,6 +986,23 @@ int main(int argc, char **argv)
 			case 'g':
 				ckp.grpnam = optarg;
 				break;
+			case 'h':
+				for (j = 0; long_options[j].val; j++) {
+					struct option *jopt = &long_options[j];
+
+					if (jopt->has_arg) {
+						char *upper = alloca(strlen(jopt->name) + 1);
+						int offset = 0;
+
+						do {
+							upper[offset] = toupper(jopt->name[offset]);
+						} while (upper[offset++] != '\0');
+						printf("-%c %s | --%s %s\n", jopt->val,
+						       upper, jopt->name, upper);
+					} else
+						printf("-%c | %s\n", jopt->val, jopt->name);
+				}
+				exit(0);
 			case 'k':
 				ckp.killold = true;
 				break;
