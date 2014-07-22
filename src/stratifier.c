@@ -1143,7 +1143,8 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
 				old_match = true;
 			}
 		}
-	}
+	} else
+		client->useragent = ckzalloc(1);
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		new_enonce1(client);
