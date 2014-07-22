@@ -5517,7 +5517,7 @@ static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by, char *code, char
 	if (!i_enonce1)
 		return strdup(reply);
 
-	i_useragent = require_name("useragent", 1, NULL, reply, siz);
+	i_useragent = require_name("useragent", 0, NULL, reply, siz);
 	if (!i_useragent)
 		return strdup(reply);
 
