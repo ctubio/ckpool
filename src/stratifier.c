@@ -413,10 +413,14 @@ static void purge_share_hashtable(int64_t wb_id)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
 }
 
-static void ckdbq_add(const int idtype, json_t *val)
+static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
 {
-	ckdb_msg_t *msg = ckalloc(sizeof(ckdb_msg_t));
+	ckdb_msg_t *msg;
 
+	if (ckp->standalone)
+		return json_decref(val);
+
+	msg = ckalloc(sizeof(ckdb_msg_t));
 	msg->val = val;
 	msg->idtype = idtype;
 	ckmsgq_add(ckdbq, msg);
@@ -445,7 +449,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	ckdbq_add(ID_WORKINFO, val);
+	ckdbq_add(ckp, ID_WORKINFO, val);
 }
 
 static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
@@ -464,7 +468,7 @@ static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	ckdbq_add(ID_AGEWORKINFO, val);
+	ckdbq_add(ckp, ID_AGEWORKINFO, val);
 }
 
 static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
@@ -491,14 +495,11 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
 		ret = mkdir(wb->logdir, 0750);
 		if (unlikely(ret && errno != EEXIST))
-			quit(1, "Failed to create log directory %s", wb->logdir);
+			LOGERR("Failed to create log directory %s", wb->logdir);
 	}
 	sprintf(wb->idstring, "%016lx", wb->id);
-	/* Do not store the trailing slash for the subdir */
 	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
-	ret = mkdir(wb->logdir, 0750);
-	if (unlikely(ret && errno != EEXIST))
-		quit(1, "Failed to create log directory %s", wb->logdir);
+
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		if (HASH_COUNT(workbases) < 3)
 			break;
@@ -904,7 +905,6 @@ static void stratum_broadcast_message(const char *msg)
 	stratum_broadcast(json_msg);
 }
 
-/* FIXME: Speak to database here. */
 static void block_solve(ckpool_t *ckp)
 {
 	char cdfield[64];
@@ -942,7 +942,7 @@ static void block_solve(ckpool_t *ckp)
 	json_set_string(val, "blockhash", current_workbase->prevhash);
 	ck_runlock(&workbase_lock);
 
-	ckdbq_add(ID_BLOCK, val);
+	ckdbq_add(ckp, ID_BLOCK, val);
 
 	stratum_broadcast_message(msg);
 	free(msg);
@@ -1281,7 +1281,10 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
 		  client->user_instance->username);
 	client->workername = strdup(buf);
-	ret = send_recv_auth(client);
+	if (client->ckp->standalone)
+		ret = true;
+	else
+		ret = send_recv_auth(client);
 	client->authorised = ret;
 	if (client->authorised) {
 		mutex_lock(&stats_lock);
@@ -1482,7 +1485,7 @@ static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uc
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", "127.0.0.1");
-	ckdbq_add(ID_BLOCK, val);
+	ckdbq_add(client->ckp, ID_BLOCK, val);
 }
 
 static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
@@ -1592,10 +1595,11 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	bool share = false, result = false, invalid = true, submit = false;
-	char hexhash[68] = {}, sharehash[32], cdfield[64], *logdir;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	double diff = client->diff, wdiff = 0, sdiff = -1;
+	char hexhash[68] = {}, sharehash[32], cdfield[64];
 	enum share_err err = SE_NONE;
+	ckpool_t *ckp = client->ckp;
 	char idstring[20];
 	uint32_t ntime32;
 	char *fname, *s;
@@ -1666,12 +1670,12 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		strcpy(idstring, job_id);
-		logdir = current_workbase->logdir;
+		ASPRINTF(&fname, "%s.sharelog", current_workbase->logdir);
 		goto out_unlock;
 	}
 	wdiff = wb->diff;
 	strcpy(idstring, wb->idstring);
-	logdir = strdupa(wb->logdir);
+	ASPRINTF(&fname, "%s.sharelog", wb->logdir);
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 	bswap_256(sharehash, hash);
 	__bin2hex(hexhash, sharehash, 32);
@@ -1729,18 +1733,7 @@ out_unlock:
 		LOGINFO("Rejected client %d invalid share", client->id);
 	add_submit(client, diff, result);
 
-	/* Log shares here */
-	len = strlen(logdir) + strlen(client->workername) + 12;
-	fname = alloca(len);
-
-	/* First write to the user's sharelog */
-	sprintf(fname, "%s/%s.sharelog", logdir, client->workername);
-	fp = fopen(fname, "a");
-	if (unlikely(!fp)) {
-		LOGERR("Failed to fopen %s", fname);
-		goto out;
-	}
-
+	/* Now write to the pool's sharelog. */
 	val = json_object();
 	json_set_int(val, "workinfoid", id);
 	json_set_int(val, "clientid", client->id);
@@ -1760,18 +1753,9 @@ out_unlock:
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
 	json_set_string(val, "createinet", "127.0.0.1");
-	s = json_dumps(val, 0);
-	len = strlen(s);
-	len = fprintf(fp, "%s\n", s);
-	free(s);
-	fclose(fp);
-	if (unlikely(len < 0))
-		LOGERR("Failed to fwrite to %s", fname);
-
-	/* Now write to the pool's sharelog, adding workername to json */
-	sprintf(fname, "%s.sharelog", logdir);
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", client->user_instance->username);
+
 	fp = fopen(fname, "a");
 	if (likely(fp)) {
 		s = json_dumps(val, 0);
@@ -1783,7 +1767,7 @@ out_unlock:
 			LOGERR("Failed to fwrite to %s", fname);
 	} else
 		LOGERR("Failed to fopen %s", fname);
-	ckdbq_add(ID_SHARES, val);
+	ckdbq_add(ckp, ID_SHARES, val);
 out:
 	if (!share) {
 		val = json_pack("{si,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
@@ -1799,7 +1783,7 @@ out:
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
-		ckdbq_add(ID_SHAREERR, val);
+		ckdbq_add(ckp, ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
 	return json_boolean(result);
@@ -2171,7 +2155,7 @@ static void update_userstats(ckpool_t *ckp)
 
 		if (val) {
 			json_set_bool(val,"eos", false);
-			ckdbq_add(ID_USERSTATS, val);
+			ckdbq_add(ckp, ID_USERSTATS, val);
 			val = NULL;
 		}
 		elapsed = now_t - client->start_time;
@@ -2200,7 +2184,7 @@ static void update_userstats(ckpool_t *ckp)
 	 * stats marker. */
 	if (val) {
 		json_set_bool(val,"eos", true);
-		ckdbq_add(ID_USERSTATS, val);
+		ckdbq_add(ckp, ID_USERSTATS, val);
 	}
 	ck_runlock(&instance_lock);
 }
@@ -2364,7 +2348,7 @@ static void *statsupdate(void *arg)
 				"createby", "code",
 				"createcode", __func__,
 				"createinet", "127.0.0.1");
-		ckdbq_add(ID_POOLSTATS, val);
+		ckdbq_add(ckp, ID_POOLSTATS, val);
 
 		/* Update stats 3 times per minute for smooth values, displaying
 		 * status every minute. */
