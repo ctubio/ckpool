@@ -98,6 +98,9 @@ struct ckpool_instance {
 	/* Are we running as a proxy */
 	bool proxy;
 
+	/* Are we running without ckdb */
+	bool standalone;
+
 	/* Bitcoind data */
 	int btcds;
 	char **btcdurl;

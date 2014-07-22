@@ -948,6 +948,7 @@ static void *watchdog(void *arg)
 }
 
 static struct option long_options[] = {
+	{"standalone",	no_argument,		0,	'A'},
 	{"config",	required_argument,	0,	'c'},
 	{"ckdb-name",	required_argument,	0,	'd'},
 	{"group",	required_argument,	0,	'g'},
@@ -975,8 +976,11 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:g:hkl:n:pS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:d:g:hkl:n:pS:s:", long_options, &i)) != -1) {
 		switch (c) {
+			case 'A':
+				ckp.standalone = true;
+				break;
 			case 'c':
 				ckp.config = optarg;
 				break;
@@ -1000,7 +1004,7 @@ int main(int argc, char **argv)
 						printf("-%c %s | --%s %s\n", jopt->val,
 						       upper, jopt->name, upper);
 					} else
-						printf("-%c | %s\n", jopt->val, jopt->name);
+						printf("-%c | --%s\n", jopt->val, jopt->name);
 				}
 				exit(0);
 			case 'k':
@@ -1057,20 +1061,22 @@ int main(int argc, char **argv)
 	}
 	trail_slash(&ckp.socket_dir);
 
-	if (!ckp.ckdb_name)
-		ckp.ckdb_name = "ckdb";
-	if (!ckp.ckdb_sockdir) {
-		ckp.ckdb_sockdir = strdup("/opt/");
-		realloc_strcat(&ckp.ckdb_sockdir, ckp.ckdb_name);
+	if (!ckp.standalone) {
+		if (!ckp.ckdb_name)
+			ckp.ckdb_name = "ckdb";
+		if (!ckp.ckdb_sockdir) {
+			ckp.ckdb_sockdir = strdup("/opt/");
+			realloc_strcat(&ckp.ckdb_sockdir, ckp.ckdb_name);
+		}
+		trail_slash(&ckp.ckdb_sockdir);
+
+		ret = mkdir(ckp.ckdb_sockdir, 0750);
+		if (ret && errno != EEXIST)
+			quit(1, "Failed to make directory %s", ckp.ckdb_sockdir);
+
+		ckp.ckdb_sockname = ckp.ckdb_sockdir;
+		realloc_strcat(&ckp.ckdb_sockname, "listener");
 	}
-	trail_slash(&ckp.ckdb_sockdir);
-
-	ret = mkdir(ckp.ckdb_sockdir, 0750);
-	if (ret && errno != EEXIST)
-		quit(1, "Failed to make directory %s", ckp.ckdb_sockdir);
-
-	ckp.ckdb_sockname = ckp.ckdb_sockdir;
-	realloc_strcat(&ckp.ckdb_sockname, "listener");
 
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
