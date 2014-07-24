@@ -872,18 +872,38 @@ static void stratum_add_send(json_t *val, int client_id)
 	ckmsgq_add(ssends, msg);
 }
 
+static void inc_worker(user_instance_t *instance)
+{
+	mutex_lock(&stats_lock);
+	stats.workers++;
+	if (!instance->workers++)
+		stats.users++;
+	mutex_unlock(&stats_lock);
+}
+
+static void dec_worker(user_instance_t *instance)
+{
+	mutex_lock(&stats_lock);
+	stats.workers--;
+	if (!--instance->workers)
+		stats.users--;
+	mutex_unlock(&stats_lock);
+}
+
 static void drop_client(int id)
 {
 	stratum_instance_t *client = NULL;
+	bool dec = false;
 
 	ck_ilock(&instance_lock);
 	client = __instance_by_id(id);
 	if (client) {
 		stratum_instance_t *old_client = NULL;
 
+		if (client->authorised)
+			dec = true;
+
 		ck_ulock(&instance_lock);
-		if (client->authorised && !--stats.workers)
-			stats.users--;
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client */
@@ -894,6 +914,9 @@ static void drop_client(int id)
 		ck_dwilock(&instance_lock);
 	}
 	ck_uilock(&instance_lock);
+
+	if (dec)
+		dec_worker(client->user_instance);
 }
 
 static void stratum_broadcast_message(const char *msg)
@@ -1287,12 +1310,8 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	else
 		ret = send_recv_auth(client);
 	client->authorised = ret;
-	if (client->authorised) {
-		mutex_lock(&stats_lock);
-		if (!stats.workers++)
-			stats.users++;
-		mutex_unlock(&stats_lock);
-	}
+	if (client->authorised)
+		inc_worker(client->user_instance);
 out:
 	return json_boolean(ret);
 }
