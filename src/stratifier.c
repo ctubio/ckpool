@@ -2288,8 +2288,11 @@ static void *statsupdate(void *arg)
 
 		ck_rlock(&instance_lock);
 		HASH_ITER(hh, stratum_instances, client, tmp) {
-			bool idle = false;
 			double ghs;
+			bool idle;
+
+			if (!client->authorised)
+				continue;
 
 			if (now.tv_sec - client->last_share.tv_sec > 60) {
 				idle = true;
@@ -2300,7 +2303,8 @@ static void *statsupdate(void *arg)
 				decay_time(&client->dsps1440, 0, tdiff, 86400);
 				if (now.tv_sec - client->last_share.tv_sec > 600)
 					client->idle = true;
-			}
+			} else
+				idle = false;
 			ghs = client->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
 			ghs = client->dsps5 * nonces;
