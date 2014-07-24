@@ -2367,17 +2367,17 @@ static void *statsupdate(void *arg)
 			stats.accounted_diff_shares += stats.unaccounted_diff_shares;
 			stats.accounted_rejects += stats.unaccounted_rejects;
 
-			decay_time(&stats.sps1, stats.unaccounted_shares, 15, 60);
-			decay_time(&stats.sps5, stats.unaccounted_shares, 15, 300);
-			decay_time(&stats.sps15, stats.unaccounted_shares, 15, 900);
-			decay_time(&stats.sps60, stats.unaccounted_shares, 15, 3600);
+			decay_time(&stats.sps1, stats.unaccounted_shares, 20, 60);
+			decay_time(&stats.sps5, stats.unaccounted_shares, 20, 300);
+			decay_time(&stats.sps15, stats.unaccounted_shares, 20, 900);
+			decay_time(&stats.sps60, stats.unaccounted_shares, 20, 3600);
 
-			decay_time(&stats.dsps1, stats.unaccounted_diff_shares, 15, 60);
-			decay_time(&stats.dsps5, stats.unaccounted_diff_shares, 15, 300);
-			decay_time(&stats.dsps15, stats.unaccounted_diff_shares, 15, 900);
-			decay_time(&stats.dsps60, stats.unaccounted_diff_shares, 15, 3600);
-			decay_time(&stats.dsps360, stats.unaccounted_diff_shares, 15, 21600);
-			decay_time(&stats.dsps1440, stats.unaccounted_diff_shares, 15, 86400);
+			decay_time(&stats.dsps1, stats.unaccounted_diff_shares, 20, 60);
+			decay_time(&stats.dsps5, stats.unaccounted_diff_shares, 20, 300);
+			decay_time(&stats.dsps15, stats.unaccounted_diff_shares, 20, 900);
+			decay_time(&stats.dsps60, stats.unaccounted_diff_shares, 20, 3600);
+			decay_time(&stats.dsps360, stats.unaccounted_diff_shares, 20, 21600);
+			decay_time(&stats.dsps1440, stats.unaccounted_diff_shares, 20, 86400);
 
 			stats.unaccounted_shares =
 			stats.unaccounted_diff_shares =
