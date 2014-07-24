@@ -558,6 +558,9 @@ K_ITEM *find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *,
 {
 	double cmp = -1.0;
 
+	if (ktree == NULL)
+		FAIL("%s", "%K_TREE-F-FINDNULL find ktree is NULL");
+
 	while (ktree->isNil == No && cmp != 0.0)
 	{
 		if ((cmp = (*cmp_funct)(ktree->data, data)))
@@ -585,6 +588,9 @@ K_ITEM *find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_I
 {
 	K_TREE *old = NULL;
 	double cmp = -1.0, oldcmp = -1;
+
+	if (ktree == NULL)
+		FAIL("%s", "%K_TREE-F-FINDNULL find_after ktree is NULL");
 
 	while (ktree->isNil == No && cmp != 0.0)
 	{
@@ -627,6 +633,9 @@ K_ITEM *find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_
 {
 	K_TREE *old = NULL;
 	double cmp = 1.0, oldcmp = 1;
+
+	if (ktree == NULL)
+		FAIL("%s", "%K_TREE-F-FINDNULL find_before ktree is NULL");
 
 	while (ktree->isNil == No && cmp != 0.0)
 	{
