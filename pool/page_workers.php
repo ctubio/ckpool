@@ -1,6 +1,6 @@
 <?php
 #
-function doworkers($data, $user)
+function doworker($data, $user)
 {
  $pg = '<h1>Workers</h1>';
 
@@ -48,17 +48,25 @@ function doworkers($data, $user)
 		{
 			$lst = round($lst/60);
 			if ($lst < 60)
-				$lstdes = $lst.'m';
+				$lstdes = $lst.'min';
 			else
 			{
 				$lst = round($lst/60);
 				if ($lst < 24)
+				{
 					$lstdes = $lst.'hr';
+					if ($lst != 1)
+						$lstdes .= 's';
+				}
 				else
 				{
 					$lst = round($lst/24);
 					if ($lst < 9999)
-						$lstdes = $lst.'days';
+					{
+						$lstdes = $lst.'day';
+						if ($lst != 1)
+							$lstdes .= 's';
+					}
 					else
 						$lstdes = 'never';
 				}
@@ -85,6 +93,12 @@ function doworkers($data, $user)
  }
  $pg .= "</table>\n";
 
+ return $pg;
+}
+#
+function doworkers($data, $user)
+{
+ $pg = doworker($data, $user);
  return $pg;
 }
 #
