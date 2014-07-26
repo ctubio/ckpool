@@ -3237,9 +3237,10 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 		if (!new) {
 			double td;
 			td = tvdiff(sharecreatedate, &(row->firstshare));
-				if (td <= 0.0) {
+			// don't LOGERR '=' in case shares come from ckpool with the same timestamp
+			if (td < 0.0) {
 				char *tmp1, *tmp2;
-				LOGERR("%s(): %s createdate (%s) is before summary firstshare (%s)",
+				LOGERR("%s(): %s createdate (%s) is < summary firstshare (%s)",
 					__func__, s_row ? "shares" : "shareerrors",
 					(tmp1 = ctv_to_buf(sharecreatedate, NULL, 0)),
 					(tmp2 = ctv_to_buf(&(row->firstshare), NULL, 0)));
@@ -3249,12 +3250,13 @@ static bool sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row,
 				row->firstshare.tv_usec = sharecreatedate->tv_usec;
 			}
 			td = tvdiff(sharecreatedate, &(row->lastshare));
-			if (td > 0.0) {
+			// don't LOGERR '=' in case shares come from ckpool with the same timestamp
+			if (td >= 0.0) {
 				row->lastshare.tv_sec = sharecreatedate->tv_sec;
 				row->lastshare.tv_usec = sharecreatedate->tv_usec;
 			} else {
 				char *tmp1, *tmp2;
-				LOGERR("%s(): %s createdate (%s) is before summary lastshare (%s)",
+				LOGERR("%s(): %s createdate (%s) is < summary lastshare (%s)",
 					__func__, s_row ? "shares" : "shareerrors",
 					(tmp1 = ctv_to_buf(sharecreatedate, NULL, 0)),
 					(tmp2 = ctv_to_buf(&(row->lastshare), NULL, 0)));
