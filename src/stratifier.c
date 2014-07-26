@@ -2163,6 +2163,9 @@ static void update_userstats(ckpool_t *ckp)
 		uint8_t cycle_mask;
 		int elapsed;
 
+		if (!client->authorised)
+			continue;
+
 		/* Send one lot of stats once the client is idle if they have submitted
 		 * no shares in the last 10 minutes with the idle bool set. */
 		if (client->idle && client->notified_idle)
