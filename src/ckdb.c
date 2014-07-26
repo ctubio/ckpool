@@ -41,7 +41,7 @@
 // will need to be if threading is added
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.3"
+#define DB_VERSION "0.4"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -936,7 +936,7 @@ typedef struct userstats {
 	double hashrate1hr;
 	double hashrate24hr;
 	bool idle; // Non-db field
-	char summarylevel[TXT_FLAG+1]; // Initially '0' in the DB
+	char summarylevel[TXT_FLAG+1]; // Initially SUMMARY_NONE
 	SIMPLEDATECONTROLFIELDS;
 } USERSTATS;
 
@@ -963,6 +963,10 @@ static K_STORE *userstats_eos_store;
 
 /* on the allusers page, show any with stats in the last ... */
 #define ALLUSERS_LIMIT_S 3600
+
+#define SUMMARY_NONE '0'
+#define SUMMARY_DB '1'
+#define SUMMARY_FULL '2'
 
 /* Userstats get stored in the DB for each time band of this
  * amount from midnight (UTC+00)
@@ -4418,6 +4422,8 @@ static bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	TXT_TO_DOUBLE("hashrate1hr", hashrate1hr, row->hashrate1hr);
 	TXT_TO_DOUBLE("hashrate24hr", hashrate24hr, row->hashrate24hr);
 	row->idle = idle;
+	row->summarylevel[0] = SUMMARY_NONE;
+	row->summarylevel[1] = '\0';
 	SIMPLEDATEINIT(row, now, by, code, inet);
 	SIMPLEDATETRANSFER(row);
 

@@ -374,6 +374,7 @@ CREATE TABLE userstats (
     hashrate5m float NOT NULL,
     hashrate1hr float NOT NULL,
     hashrate24hr float NOT NULL,
+    summarylevel char NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -388,4 +389,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'0.3');
+insert into version (vlock,version) values (1,'0.4');
