@@ -65,7 +65,7 @@ typedef struct k_list {
 #define K_RLOCK(_list) ck_rlock(_list->lock)
 #define K_RUNLOCK(_list) ck_runlock(_list->lock)
 #define K_ILOCK(_list) ck_ilock(_list->lock)
-#define K_IUNLOCK(_list) ck_ilock(_list->lock)
+#define K_IUNLOCK(_list) ck_uilock(_list->lock)
 // Upgrade I to W
 #define K_ULOCK(_list) ck_ulock(_list->lock)
 
