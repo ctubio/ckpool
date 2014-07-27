@@ -937,6 +937,7 @@ typedef struct userstats {
 	double hashrate24hr;
 	bool idle; // Non-db field
 	char summarylevel[TXT_FLAG+1]; // Initially SUMMARY_NONE
+	tv_t statsdate;
 	SIMPLEDATECONTROLFIELDS;
 } USERSTATS;
 
@@ -1017,7 +1018,6 @@ static K_STORE *userstats_eos_store;
 				((_old)->tv_usec < (_new)->tv_usec) : \
 				((_old)->tv_sec < (_new)->tv_sec))
 
-// zzz TODO
 // WORKERSTATUS from various incoming data
 typedef struct workerstatus {
 	int64_t userid;
@@ -4493,6 +4493,121 @@ static bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	return true;
 }
 
+// TODO: data selection - only require ?
+static bool userstats_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	USERSTATS *row;
+	char *field;
+	char *sel;
+	int fields = 8;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	sel = "select "
+		"userid,workername,hashrate,hashrate5m,hashrate1hr,"
+		"hashrate24hr,summarylevel,statsdate"
+		SIMPLEDATECONTROL
+		" from userstats";
+	res = PQexec(conn, sel);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + SIMPLEDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + SIMPLEDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(userstats_list);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(userstats_list);
+		row = DATA_USERSTATS(item);
+
+		PQ_GET_FLD(res, i, "userid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userid", field, row->userid);
+
+		PQ_GET_FLD(res, i, "workername", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("workername", field, row->workername);
+
+		PQ_GET_FLD(res, i, "hashrate", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate", field, row->hashrate);
+
+		PQ_GET_FLD(res, i, "hashrate5m", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate5m", field, row->hashrate5m);
+
+		PQ_GET_FLD(res, i, "hashrate1hr", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate1hr", field, row->hashrate1hr);
+
+		PQ_GET_FLD(res, i, "hashrate24hr", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("hashrate24hr", field, row->hashrate24hr);
+
+		PQ_GET_FLD(res, i, "summarylevel", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("summarylevel", field, row->summarylevel);
+
+		PQ_GET_FLD(res, i, "statsdate", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("statsdate", field, row->statsdate);
+
+		userstats_root = add_to_ktree(userstats_root, item, cmp_userstats);
+		k_add_head(userstats_store, item);
+	}
+	if (!ok)
+		k_add_head(userstats_list, item);
+
+	K_WUNLOCK(userstats_list);
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d userstats records", __func__, n);
+	}
+
+	return ok;
+}
+
+void userstats_reload()
+{
+	PGconn *conn = dbconnect();
+
+	K_WLOCK(userstats_list);
+	userstats_root = free_ktree(userstats_root, NULL);
+	k_list_transfer_to_head(userstats_store, userstats_list);
+	K_WUNLOCK(userstats_list);
+
+	userstats_fill(conn);
+
+	PQfinish(conn);
+}
+
 static bool check_db_version(PGconn *conn)
 {
 	ExecStatusType rescode;
@@ -4587,6 +4702,10 @@ static bool getdata()
 	if (!(ok = shareerrors_fill()))
 		goto matane;
 	if (!(ok = auths_fill(conn)))
+		goto matane;
+	if (!(ok = poolstats_fill(conn)))
+		goto matane;
+	if (!(ok = userstats_fill(conn)))
 		goto matane;
 	ok = poolstats_fill(conn);
 
@@ -5956,6 +6075,7 @@ enum cmd_values {
 #define ACCESS_SYSTEM	"s"
 #define ACCESS_WEB	"w"
 #define ACCESS_PROXY	"x"
+#define ACCESS_CKDB	"c"
 
 static struct CMDS {
 	enum cmd_values cmd_val;
@@ -6168,9 +6288,13 @@ static void summarise_poolstats()
 // TODO
 }
 
+// TODO: daily
 static void summarise_userstats()
 {
-// TODO
+// Hourly:
+// get stats of interest (extract from tree/list)
+// summarise them
+// store them in the DB,tree/list
 }
 
 static void *summariser(__maybe_unused void *arg)
