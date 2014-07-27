@@ -386,7 +386,7 @@ void *sender(void *arg)
 		while (sender_send->len) {
 			ret = send(fd, sender_send->buf + ofs, sender_send->len , 0);
 			if (unlikely(ret < 0)) {
-				LOGWARNING("Client id %d disconnected", client->id);
+				LOGINFO("Client id %d disconnected", client->id);
 				invalidate_client(ckp, ci, client);
 				break;
 			}
