@@ -85,8 +85,11 @@ function homeInfo($user)
  else
  {
 	$ans = repDecode($rep);
-	$ans['lastblock'] = 1401237522;
-	$ans['lastblock'] = 1403819191;
+	if ($ans['lastblock'] == '?')
+	{
+//		$ans['lastblock'] = 1401237522;
+		$ans['lastblock'] = 1403819191;
+	}
  }
 
  return $ans;
