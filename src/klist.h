@@ -64,6 +64,10 @@ typedef struct k_list {
 #define K_WUNLOCK(_list) ck_wunlock(_list->lock)
 #define K_RLOCK(_list) ck_rlock(_list->lock)
 #define K_RUNLOCK(_list) ck_runlock(_list->lock)
+#define K_ILOCK(_list) ck_ilock(_list->lock)
+#define K_IUNLOCK(_list) ck_ilock(_list->lock)
+// Upgrade I to W
+#define K_ULOCK(_list) ck_ulock(_list->lock)
 
 extern K_STORE *k_new_store(K_LIST *list);
 extern K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit, bool do_tail, KLIST_FFL_ARGS);
