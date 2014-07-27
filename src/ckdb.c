@@ -37,8 +37,11 @@
 #include "klist.h"
 #include "ktree.h"
 
-// TODO: a lot of the tree access isn't locked
-// will need to be if threading is added
+/* TODO: any tree/list accessed in new threads needs
+ * to ensure all code using those trees/lists use locks
+ * This code's lock implementation is equivalent to table level locking
+ * Consider adding row level locking (a per kitem usage count) if needed
+ * */
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.4"
@@ -5373,6 +5376,7 @@ static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 				userstats.poolinstance[0] = '\0';
 				userstats.workername[0] = '\0';
 				uslook.data = (void *)(&userstats);
+				K_RLOCK(userstats_list);
 				us_item = find_before_in_ktree(userstats_root, &uslook, cmp_userstats, us_ctx);
 				while (us_item && DATA_USERSTATS(us_item)->userid == userstats.userid) {
 					if (strcmp(DATA_USERSTATS(us_item)->workername, DATA_WORKERS(w_item)->workername) == 0) {
@@ -5412,6 +5416,7 @@ static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				userstats_workername_root = free_ktree(userstats_workername_root, NULL);
+				K_RUNLOCK(userstats_list);
 			}
 
 			rows++;
@@ -5443,13 +5448,12 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 
 	// Find last records for each user/worker in ALLUSERS_LIMIT_S
 	// TODO: include pool_instance
+	K_WLOCK(userstats_list);
 	us_item = last_in_ktree(userstats_root, us_ctx);
 	while (us_item && tvdiff(now, &(DATA_USERSTATS(us_item)->statsdate)) < ALLUSERS_LIMIT_S) {
 		usw_item = find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, usw_ctx);
 		if (!usw_item) {
-			K_WLOCK(userstats_list);
 			usw_item = k_unlink_head(userstats_list);
-			K_WUNLOCK(userstats_list);
 
 			DATA_USERSTATS(usw_item)->userid = DATA_USERSTATS(us_item)->userid;
 			strcpy(DATA_USERSTATS(usw_item)->workername, DATA_USERSTATS(us_item)->workername);
@@ -5496,9 +5500,7 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		tmp_item = usw_item;
 		usw_item = next_in_ktree(usw_ctx);
 
-		K_WLOCK(userstats_list);
 		k_add_head(userstats_list, tmp_item);
-		K_WUNLOCK(userstats_list);
 	}
 	if (userid != -1) {
 		u_item = find_userid(userid);
@@ -5523,6 +5525,7 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	}
 
 	userstats_workername_root = free_ktree(userstats_workername_root, NULL);
+	K_WUNLOCK(userstats_list);
 
 	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 	APPEND_REALLOC(buf, off, len, tmp);
@@ -6003,6 +6006,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		STRNCPY(userstats.poolinstance, "");
 		STRNCPY(userstats.workername, "");
 		look.data = (void *)(&userstats);
+		K_RLOCK(userstats_list);
 		us_item = find_before_in_ktree(userstats_root, &look, cmp_userstats, ctx);
 		while (us_item &&
 		       DATA_USERSTATS(us_item)->userid == userstats.userid &&
@@ -6024,6 +6028,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 			us_item = prev_in_ktree(ctx);
 		}
 		userstats_workername_root = free_ktree(userstats_workername_root, NULL);
+		K_RUNLOCK(userstats_list);
 	}
 
 	if (has_uhr) {
