@@ -19,10 +19,22 @@ BEGIN
 
 END $$;
 
-ALTER TABLE ONLY userstats
-  ADD COLUMN summarylevel char DEFAULT ' ' NOT NULL;
+DROP TABLE userstats;
 
-ALTER TABLE ONLY userstats
-  ALTER COLUMN summarylevel DROP DEFAULT;
+CREATE TABLE userstats (
+    userid bigint NOT NULL,
+    workername character varying(256) NOT NULL,
+    hashrate float NOT NULL,
+    hashrate5m float NOT NULL,
+    hashrate1hr float NOT NULL,
+    hashrate24hr float NOT NULL,
+    summarylevel char NOT NULL,
+    statsdate timestamp with time zone NOT NULL,
+    createdate timestamp with time zone NOT NULL,
+    createby character varying(64) DEFAULT ''::character varying NOT NULL,
+    createcode character varying(128) DEFAULT ''::character varying NOT NULL,
+    createinet character varying(128) DEFAULT ''::character varying NOT NULL,
+    PRIMARY KEY (userid, workername, summarylevel, statsdate)
+);
 
 END transaction;
