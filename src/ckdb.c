@@ -4267,7 +4267,7 @@ static bool poolstats_fill(PGconn *conn)
 	POOLSTATS *row;
 	char *field;
 	char *sel;
-	int fields = 7;
+	int fields = 8;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
@@ -4802,9 +4802,7 @@ static bool getdata()
 		goto matane;
 	if (!(ok = poolstats_fill(conn)))
 		goto matane;
-	if (!(ok = userstats_fill(conn)))
-		goto matane;
-	ok = poolstats_fill(conn);
+	ok = userstats_fill(conn);
 
 matane:
 
