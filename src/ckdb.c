@@ -936,7 +936,7 @@ typedef struct userstats {
 	double hashrate1hr;
 	double hashrate24hr;
 	bool idle; // Non-db field
-	char summarylevel[TXT_FLAG+1]; // Initially SUMMARY_NONE
+	char summarylevel[TXT_FLAG+1]; // Initially SUMMARY_NONE in RAM
 	tv_t statsdate;
 	SIMPLEDATECONTROLFIELDS;
 } USERSTATS;
@@ -988,6 +988,10 @@ static K_STORE *userstats_eos_store;
 
 #if (((24*60*60) % USERSTATS_DB_S) != 0)
 #error "USERSTATS_DB_S times an integer must = a day"
+#endif
+
+#if ((24*60*60) < USERSTATS_DB_S)
+#error "USERSTATS_DB_S must be at most 1 day"
 #endif
 
 /* We summarise and discard userstats that are older than the
@@ -1655,11 +1659,11 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 		item = find_create_workerstatus(userstats->userid, userstats->workername);
 		row = DATA_WORKERSTATUS(item);
 		if (userstats->idle) {
-			if (tv_newer(&(row->idle), &(userstats->createdate)))
-				memcpy(&(row->idle), &(userstats->createdate), sizeof(row->idle));
+			if (tv_newer(&(row->idle), &(userstats->statsdate)))
+				memcpy(&(row->idle), &(userstats->statsdate), sizeof(row->idle));
 		} else {
-			if (tv_newer(&(row->stats), &(userstats->createdate)))
-				memcpy(&(row->stats), &(userstats->createdate), sizeof(row->idle));
+			if (tv_newer(&(row->stats), &(userstats->statsdate)))
+				memcpy(&(row->stats), &(userstats->statsdate), sizeof(row->idle));
 		}
 	}
 }
@@ -4245,7 +4249,8 @@ static bool poolstats_fill(PGconn *conn)
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
-		"poolinstance,users,workers,hashrate,hashrate5m,hashrate1hr,hashrate24hr"
+		"poolinstance,elapsed,users,workers,hashrate,hashrate5m,"
+		"hashrate1hr,hashrate24hr"
 		SIMPLEDATECONTROL
 		" from poolstats";
 	res = PQexec(conn, sel);
@@ -4276,6 +4281,11 @@ static bool poolstats_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_STR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "elapsed", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("elapsed", field, row->elapsed);
 
 		PQ_GET_FLD(res, i, "users", field, ok);
 		if (!ok)
@@ -4362,15 +4372,15 @@ static void dsp_userstats(K_ITEM *item, FILE *stream)
 	}
 }
 
-/* order by userid asc,createdate asc,poolinstance asc,workername asc
+/* order by userid asc,statsdate asc,poolinstance asc,workername asc
    as per required for userstats homepage summarisation */
 static double cmp_userstats(K_ITEM *a, K_ITEM *b)
 {
 	double c = (double)(DATA_USERSTATS(a)->userid -
 			    DATA_USERSTATS(b)->userid);
 	if (c == 0) {
-		c = tvdiff(&(DATA_USERSTATS(a)->createdate),
-			   &(DATA_USERSTATS(b)->createdate));
+		c = tvdiff(&(DATA_USERSTATS(a)->statsdate),
+			   &(DATA_USERSTATS(b)->statsdate));
 		if (c == 0) {
 			c = (double)strcmp(DATA_USERSTATS(a)->poolinstance,
 					   DATA_USERSTATS(b)->poolinstance);
@@ -4429,6 +4439,7 @@ static bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	row->summarylevel[1] = '\0';
 	SIMPLEDATEINIT(row, now, by, code, inet);
 	SIMPLEDATETRANSFER(row);
+	memcpy(&(row->statsdate), &(row->createdate), sizeof(row->statsdate));
 
 	if (eos) {
 		// Save it for end processing
@@ -4503,13 +4514,13 @@ static bool userstats_fill(PGconn *conn)
 	USERSTATS *row;
 	char *field;
 	char *sel;
-	int fields = 8;
+	int fields = 9;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
-		"userid,workername,hashrate,hashrate5m,hashrate1hr,"
+		"userid,workername,elapsed,hashrate,hashrate5m,hashrate1hr,"
 		"hashrate24hr,summarylevel,statsdate"
 		SIMPLEDATECONTROL
 		" from userstats";
@@ -4537,6 +4548,9 @@ static bool userstats_fill(PGconn *conn)
 		item = k_unlink_head(userstats_list);
 		row = DATA_USERSTATS(item);
 
+		// From DB
+		row->poolinstance[0] = '\0';
+
 		PQ_GET_FLD(res, i, "userid", field, ok);
 		if (!ok)
 			break;
@@ -4546,6 +4560,11 @@ static bool userstats_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_STR("workername", field, row->workername);
+
+		PQ_GET_FLD(res, i, "elapsed", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("elapsed", field, row->elapsed);
 
 		PQ_GET_FLD(res, i, "hashrate", field, ok);
 		if (!ok)
@@ -4577,8 +4596,16 @@ static bool userstats_fill(PGconn *conn)
 			break;
 		TXT_TO_TV("statsdate", field, row->statsdate);
 
+		// From DB - 1hr means it must have been idle > 10m
+		if (row->hashrate5m == 0.0 && row->hashrate1hr == 0.0)
+			row->idle = true;
+		else
+			row->idle = false;
+
 		userstats_root = add_to_ktree(userstats_root, item, cmp_userstats);
 		k_add_head(userstats_store, item);
+
+		workerstatus_update(NULL, NULL, DATA_USERSTATS(item));
 	}
 	if (!ok)
 		k_add_head(userstats_list, item);
@@ -5340,8 +5367,8 @@ static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 
 				// find last stored userid record
 				userstats.userid = DATA_USERS(u_item)->userid;
-				userstats.createdate.tv_sec = date_eot.tv_sec;
-				userstats.createdate.tv_usec = date_eot.tv_usec;
+				userstats.statsdate.tv_sec = date_eot.tv_sec;
+				userstats.statsdate.tv_usec = date_eot.tv_usec;
 				// find/cmp doesn't get to here
 				userstats.poolinstance[0] = '\0';
 				userstats.workername[0] = '\0';
@@ -5349,7 +5376,7 @@ static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 				us_item = find_before_in_ktree(userstats_root, &uslook, cmp_userstats, us_ctx);
 				while (us_item && DATA_USERSTATS(us_item)->userid == userstats.userid) {
 					if (strcmp(DATA_USERSTATS(us_item)->workername, DATA_WORKERS(w_item)->workername) == 0) {
-						if (tvdiff(now, &(DATA_USERSTATS(us_item)->createdate)) < USERSTATS_PER_S) {
+						if (tvdiff(now, &(DATA_USERSTATS(us_item)->statsdate)) < USERSTATS_PER_S) {
 							// TODO: add together the latest per pool instance (this is the latest per worker)
 							if (!find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, usw_ctx)) {
 								w_hashrate5m += DATA_USERSTATS(us_item)->hashrate5m;
@@ -5417,7 +5444,7 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	// Find last records for each user/worker in ALLUSERS_LIMIT_S
 	// TODO: include pool_instance
 	us_item = last_in_ktree(userstats_root, us_ctx);
-	while (us_item && tvdiff(now, &(DATA_USERSTATS(us_item)->createdate)) < ALLUSERS_LIMIT_S) {
+	while (us_item && tvdiff(now, &(DATA_USERSTATS(us_item)->statsdate)) < ALLUSERS_LIMIT_S) {
 		usw_item = find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, usw_ctx);
 		if (!usw_item) {
 			K_WLOCK(userstats_list);
@@ -5970,8 +5997,8 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		u_elapsed = -1;
 		// find last stored userid record
 		userstats.userid = DATA_USERS(u_item)->userid;
-		userstats.createdate.tv_sec = date_eot.tv_sec;
-		userstats.createdate.tv_usec = date_eot.tv_usec;
+		userstats.statsdate.tv_sec = date_eot.tv_sec;
+		userstats.statsdate.tv_usec = date_eot.tv_usec;
 		// find/cmp doesn't get to here
 		STRNCPY(userstats.poolinstance, "");
 		STRNCPY(userstats.workername, "");
@@ -5979,9 +6006,11 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		us_item = find_before_in_ktree(userstats_root, &look, cmp_userstats, ctx);
 		while (us_item &&
 		       DATA_USERSTATS(us_item)->userid == userstats.userid &&
-		       tvdiff(now, &(DATA_USERSTATS(us_item)->createdate)) < USERSTATS_PER_S) {
+		       tvdiff(now, &(DATA_USERSTATS(us_item)->statsdate)) < USERSTATS_PER_S) {
 			// TODO: add the latest per pool instance (this is the latest per worker)
-			if (!find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, w_ctx)) {
+			// Ignore summarised data from the DB, it should be old so irrelevant
+			if (DATA_USERSTATS(us_item)->poolinstance[0] &&
+			    !find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, w_ctx)) {
 				u_hashrate5m += DATA_USERSTATS(us_item)->hashrate5m;
 				u_hashrate1hr += DATA_USERSTATS(us_item)->hashrate1hr;
 				if (u_elapsed == -1 ||

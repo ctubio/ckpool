@@ -24,6 +24,7 @@ DROP TABLE userstats;
 CREATE TABLE userstats (
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
+    elapsed bigint NOT NULL,
     hashrate float NOT NULL,
     hashrate5m float NOT NULL,
     hashrate1hr float NOT NULL,
