@@ -1647,7 +1647,8 @@ static K_ITEM *_find_create_workerstatus(int64_t userid, char *workername, bool 
 #define find_create_workerstatus(_u, _w)  _find_create_workerstatus(_u, _w, true)
 #define find_workerstatus(_u, _w)  _find_create_workerstatus(_u, _w, false)
 
-static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *userstats)
+static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *userstats,
+				SHARESUMMARY *sharesummary)
 {
 	WORKERSTATUS *row;
 	K_ITEM *item;
@@ -1678,6 +1679,13 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 			if (tv_newer(&(row->stats), &(userstats->statsdate)))
 				memcpy(&(row->stats), &(userstats->statsdate), sizeof(row->idle));
 		}
+	}
+
+	if (sharesummary) {
+		item = find_create_workerstatus(sharesummary->userid, sharesummary->workername);
+		row = DATA_WORKERSTATUS(item);
+		if (tv_newer(&(row->share), &(sharesummary->lastshare)))
+			memcpy(&(row->share), &(sharesummary->lastshare), sizeof(row->share));
 	}
 }
 
@@ -2964,7 +2972,7 @@ static bool shares_add(char *workinfoid, char *username, char *workername, char 
 	if (!w_item)
 		goto unitem;
 
-	workerstatus_update(NULL, shares, NULL);
+	workerstatus_update(NULL, shares, NULL, NULL);
 
 	sharesummary_update(NULL, shares, NULL, NULL, now, by, code, inet);
 
@@ -3584,6 +3592,8 @@ static bool sharesummary_fill(PGconn *conn)
 		sharesummary_root = add_to_ktree(sharesummary_root, item, cmp_sharesummary);
 		sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root, item, cmp_sharesummary_workinfoid);
 		k_add_head(sharesummary_store, item);
+
+		workerstatus_update(NULL, NULL, NULL, row);
 	}
 	if (!ok)
 		k_add_head(sharesummary_list, item);
@@ -3992,7 +4002,7 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	HISTORYDATETRANSFER(row);
 
 	// Update even if DB fails
-	workerstatus_update(row, NULL, NULL);
+	workerstatus_update(row, NULL, NULL, NULL);
 
 	row->authid = nextid(conn, "authid", (int64_t)1, now, by, code, inet);
 	if (row->authid == 0)
@@ -4123,6 +4133,7 @@ static bool auths_fill(PGconn *conn)
 
 		auths_root = add_to_ktree(auths_root, item, cmp_auths);
 		k_add_head(auths_store, item);
+		workerstatus_update(row, NULL, NULL, NULL);
 	}
 	if (!ok)
 		k_add_head(auths_list, item);
@@ -4506,7 +4517,7 @@ static bool userstats_add(char *poolinstance, char *elapsed, char *username,
 		createdate.tv_usec = row->createdate.tv_usec;
 	}
 
-	workerstatus_update(NULL, NULL, row);
+	workerstatus_update(NULL, NULL, row, NULL);
 
 	/* group at full key: userid,createdate,poolinstance,workername
 	   i.e. ignore instance and group together down at workername */
@@ -4664,7 +4675,7 @@ static bool userstats_fill(PGconn *conn)
 		userstats_root = add_to_ktree(userstats_root, item, cmp_userstats);
 		k_add_head(userstats_store, item);
 
-		workerstatus_update(NULL, NULL, DATA_USERSTATS(item));
+		workerstatus_update(NULL, NULL, row, NULL);
 	}
 	if (!ok)
 		k_add_head(userstats_list, item);
