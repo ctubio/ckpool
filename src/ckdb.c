@@ -5773,7 +5773,7 @@ static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by, char *code, char
 static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
 				__maybe_unused char *code, __maybe_unused char *inet)
 {
-	K_ITEM *i_username, *u_item, *p_item, *us_item, look;
+	K_ITEM *i_username, *u_item, *b_item, *p_item, *us_item, look;
 	double u_hashrate5m, u_hashrate1hr;
 	char reply[1024], tmp[1024], *buf;
 	USERSTATS userstats;
@@ -5797,19 +5797,18 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
-/*
-	// TODO: have a last_block - like last_bc - only updated when we find a block
-	b_item = last_in_tree(blocks_root, ctx);
+	// TODO: handle orphans
+	b_item = last_in_ktree(blocks_root, ctx);
 	if (b_item) {
 		tvs_to_buf(&(DATA_BLOCKS(b_item)->createdate), reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastblock=%s%cconfirmed=%s%c",
 					   reply, FLDSEP,
-					   &(DATA_BLOCKS(b_item)->confirmed), FLDSEP);
+					   DATA_BLOCKS(b_item)->confirmed, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
-	} else
-*/
-	snprintf(tmp, sizeof(tmp), "lastblock=?%cconfirmed=?%c", FLDSEP, FLDSEP);
-	APPEND_REALLOC(buf, off, len, tmp);
+	} else {
+		snprintf(tmp, sizeof(tmp), "lastblock=?%cconfirmed=?%c", FLDSEP, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	}
 
 	// TODO: assumes only one poolinstance (for now)
 	p_item = last_in_ktree(poolstats_root, ctx);
