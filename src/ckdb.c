@@ -67,6 +67,9 @@ static char *EMPTY = "";
 static char *db_user;
 static char *db_pass;
 
+// Currently hard coded at 4 characters
+static char *status_chars = "|/-\\";
+
 // size limit on the command string
 #define CMD_SIZ 31
 #define ID_SIZ 31
@@ -6559,6 +6562,7 @@ static void *listener(void *arg)
 	enum cmd_values cmdnum, last_cmd = 9001;
 	int sockd, which_cmds;
 	pthread_t summzer;
+	uint64_t counter = 0;
 	K_ITEM *item;
 	size_t siz;
 	tv_t now;
@@ -6680,6 +6684,11 @@ static void *listener(void *arg)
 			}
 		}
 		close(sockd);
+
+		char ch = status_chars[(counter++) & 0x3];
+		putchar(ch);
+		putchar('\r');
+		fflush(stdout);
 
 		if (cmdnum == CMD_SHUTDOWN)
 			break;
