@@ -448,7 +448,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", "127.0.0.1");
+			"createinet", ckp->serverurl);
 	ckdbq_add(ckp, ID_WORKINFO, val);
 }
 
@@ -467,7 +467,7 @@ static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", "127.0.0.1");
+			"createinet", ckp->serverurl);
 	ckdbq_add(ckp, ID_AGEWORKINFO, val);
 }
 
@@ -956,7 +956,7 @@ static void block_solve(ckpool_t *ckp)
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", "127.0.0.1");
+			"createinet", ckp->serverurl);
 	ck_runlock(&workbase_lock);
 
 	update_base(ckp);
@@ -1451,6 +1451,7 @@ static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uc
 	char hexcoinbase[512];
 	json_t *val = NULL;
 	char cdfield[64];
+	ckpool_t *ckp;
 	ts_t ts_now;
 
 	/* Submit anything over 95% of the diff in case of rounding errors */
@@ -1487,7 +1488,8 @@ static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uc
 	strcat(gbt_block, hexcoinbase);
 	if (wb->transactions)
 		realloc_strcat(&gbt_block, wb->txn_data);
-	send_proc(wb->ckp->generator, gbt_block);
+	ckp = wb->ckp;
+	send_proc(ckp->generator, gbt_block);
 	free(gbt_block);
 	val = json_pack("{si,ss,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
@@ -1504,8 +1506,8 @@ static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uc
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", "127.0.0.1");
-	ckdbq_add(client->ckp, ID_BLOCK, val);
+			"createinet", ckp->serverurl);
+	ckdbq_add(ckp, ID_BLOCK, val);
 }
 
 static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
@@ -1772,7 +1774,7 @@ out_unlock:
 	json_set_string(val, "createdate", cdfield);
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
-	json_set_string(val, "createinet", "127.0.0.1");
+	json_set_string(val, "createinet", ckp->serverurl);
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", client->user_instance->username);
 
@@ -1802,7 +1804,7 @@ out:
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", "127.0.0.1");
+				"createinet", ckp->serverurl);
 		ckdbq_add(ckp, ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
@@ -2200,7 +2202,7 @@ static void update_userstats(ckpool_t *ckp)
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", "127.0.0.1");
+				"createinet", ckp->serverurl);
 		client->notified_idle = client->idle;
 	}
 	/* Mark the last userstats sent on this pass of stats with an end of
@@ -2374,7 +2376,7 @@ static void *statsupdate(void *arg)
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", "127.0.0.1");
+				"createinet", ckp->serverurl);
 		ckdbq_add(ckp, ID_POOLSTATS, val);
 
 		/* Update stats 3 times per minute for smooth values, displaying
@@ -2437,6 +2439,8 @@ int stratifier(proc_instance_t *pi)
 	} while (!buf);
 	dealloc(buf);
 
+	if (!ckp->serverurl)
+		ckp->serverurl = "127.0.0.1";
 	cklock_init(&instance_lock);
 
 	ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
