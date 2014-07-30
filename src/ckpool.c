@@ -42,6 +42,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		struct tm *tm;
 		time_t now_t;
 		va_list ap;
+		char stamp[128];
 
 		va_start(ap, fmt);
 		VASPRINTF(&buf, fmt, ap);
@@ -49,18 +50,18 @@ void logmsg(int loglevel, const char *fmt, ...) {
 
 		now_t = time(NULL);
 		tm = localtime(&now_t);
-		if (logfd) {
-			FILE *LOGFP = global_ckp->logfp;
-
-			flock(logfd, LOCK_EX);
-			fprintf(LOGFP, "[%d-%02d-%02d %02d:%02d:%02d] %s",
+		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d]",
 				tm->tm_year + 1900,
 				tm->tm_mon + 1,
 				tm->tm_mday,
 				tm->tm_hour,
 				tm->tm_min,
-				tm->tm_sec,
-				buf);
+				tm->tm_sec);
+		if (logfd) {
+			FILE *LOGFP = global_ckp->logfp;
+
+			flock(logfd, LOCK_EX);
+			fprintf(LOGFP, "%s %s", stamp, buf);
 			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno));
 			fprintf(LOGFP, "\n");
@@ -68,9 +69,9 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		}
 		if (loglevel <= LOG_WARNING) {\
 			if (loglevel <= LOG_ERR && errno != 0)
-				fprintf(stderr, "%s with errno %d: %s\n", buf, errno, strerror(errno));
+				fprintf(stderr, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
 			else
-				fprintf(stderr, "%s\n", buf);
+				fprintf(stderr, "%s %s\n", stamp, buf);
 			fflush(stderr);
 		}
 		free(buf);
