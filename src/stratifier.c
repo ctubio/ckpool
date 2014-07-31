@@ -900,8 +900,10 @@ static void drop_client(int id)
 	if (client) {
 		stratum_instance_t *old_client = NULL;
 
-		if (client->authorised)
+		if (client->authorised) {
 			dec = true;
+			client->authorised = false;
+		}
 
 		ck_ulock(&instance_lock);
 		HASH_DEL(stratum_instances, client);
