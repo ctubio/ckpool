@@ -94,7 +94,7 @@ static char *restorefrom;
  *	non db records - will depend on TODO: pool stats reporting
  *	requirements
  *  DB+RAM userstats: for each pool/user/worker it would be the start
- *	of the next time band after the last DB createdate,
+ *	of the time band containing the DB statsdate,
  *	since all previous data was summarised and deleted -
  *	use the oldest of these for all pools/users/workers
  *	TODO: multiple pools is not yet handled by ckdb
@@ -1035,6 +1035,7 @@ typedef struct userstats {
 #define DATA_USERSTATS(_item) ((USERSTATS *)(_item->data))
 
 static K_TREE *userstats_root;
+static K_TREE *userstats_statsdate_root; // ordered by statsdate first
 static K_LIST *userstats_list;
 static K_STORE *userstats_store;
 // Awaiting EOS
@@ -1683,7 +1684,7 @@ static double cmp_workerstatus(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-static K_ITEM *find_workerstatus(int64_t userid, char *workername)
+static K_ITEM *get_workerstatus(int64_t userid, char *workername)
 {
 	WORKERSTATUS workerstatus;
 	K_TREE_CTX ctx[1];
@@ -1701,7 +1702,7 @@ static K_ITEM *_find_create_workerstatus(int64_t userid, char *workername, bool 
 	K_ITEM *item = NULL;
 	WORKERSTATUS *row;
 
-	item = find_workerstatus(userid, workername);
+	item = get_workerstatus(userid, workername);
 	if (!item && create) {
 		K_WLOCK(workerstatus_list);
 		item = k_unlink_head(workerstatus_list);
@@ -4531,6 +4532,27 @@ static double cmp_userstats_workername(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
+/* order by statsdate,userid asc,statsdate asc,workername asc,poolinstance asc
+   as per required for DB summarisation */
+static double cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b)
+{
+	double c = tvdiff(&(DATA_USERSTATS(a)->statsdate),
+			  &(DATA_USERSTATS(b)->statsdate));
+	if (c == 0) {
+		c = (double)(DATA_USERSTATS(a)->userid -
+			     DATA_USERSTATS(b)->userid);
+		if (c == 0) {
+			c = (double)strcmp(DATA_USERSTATS(a)->workername,
+					   DATA_USERSTATS(b)->workername);
+			if (c == 0) {
+				c = (double)strcmp(DATA_USERSTATS(a)->poolinstance,
+						   DATA_USERSTATS(b)->poolinstance);
+			}
+		}
+	}
+	return c;
+}
+
 static bool userstats_add_db(PGconn *conn, USERSTATS *row)
 {
 	ExecStatusType rescode;
@@ -4663,6 +4685,8 @@ static bool userstats_add(char *poolinstance, char *elapsed, char *username,
 				k_unlink_item(userstats_eos_store, us_match);
 				userstats_root = add_to_ktree(userstats_root, us_match,
 								cmp_userstats);
+				userstats_statsdate_root = add_to_ktree(userstats_statsdate_root, us_match,
+								cmp_userstats_statsdate);
 				k_add_head(userstats_store, us_match);
 			}
 		}
@@ -4685,13 +4709,15 @@ static void userstats_update_ccl(USERSTATS *row)
 	userstats.userid = row->userid;
 	STRNCPY(userstats.workername, row->workername);
 	memcpy(&(userstats.statsdate), &(row->statsdate), sizeof(row->statsdate));
-	// Start of the next timeband after this row
+	// Start of this timeband
 	switch (row->summarylevel[0]) {
 		case SUMMARY_DB:
-			userstats.statsdate.tv_sec += USERSTATS_DB_S;
+			userstats.statsdate.tv_sec -= userstats.statsdate.tv_sec % USERSTATS_DB_S;
+			userstats.statsdate.tv_usec = 0;
 			break;
 		case SUMMARY_FULL:
-			userstats.statsdate.tv_sec += USERSTATS_DB_DS;
+			userstats.statsdate.tv_sec -= userstats.statsdate.tv_sec % USERSTATS_DB_DS;
+			userstats.statsdate.tv_usec = 0;
 			break;
 		default:
 			tv_to_buf(&(row->statsdate), buf, sizeof(buf));
@@ -4822,6 +4848,8 @@ static bool userstats_fill(PGconn *conn)
 			row->idle = false;
 
 		userstats_root = add_to_ktree(userstats_root, item, cmp_userstats);
+		userstats_statsdate_root = add_to_ktree(userstats_statsdate_root, item,
+							cmp_userstats_statsdate);
 		k_add_head(userstats_store, item);
 
 		workerstatus_update(NULL, NULL, row, NULL);
@@ -4847,6 +4875,7 @@ void userstats_reload()
 
 	K_WLOCK(userstats_list);
 	userstats_root = free_ktree(userstats_root, NULL);
+	userstats_statsdate_root = free_ktree(userstats_statsdate_root, NULL);
 	k_list_transfer_to_head(userstats_store, userstats_list);
 	K_WUNLOCK(userstats_list);
 
@@ -5133,6 +5162,7 @@ static bool setup_data()
 	userstats_summ = k_new_store(userstats_list);
 	userstats_ccl = k_new_store(userstats_list);
 	userstats_root = new_ktree();
+	userstats_statsdate_root = new_ktree();
 	userstats_list->dsp_func = dsp_userstats;
 	userstats_ccl_root = new_ktree();
 
@@ -5155,6 +5185,7 @@ static bool setup_data()
 
 	bzero(&statsdate, sizeof(statsdate));
 	ccl = userstats_ccl->head;
+	// oldest in ccl
 	while (ccl) {
 		if (statsdate.tv_sec == 0 ||
 		    !tv_newer(&statsdate, &(DATA_USERSTATS(ccl)->statsdate)))
@@ -5709,7 +5740,7 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	// Find last records for each user/worker in ALLUSERS_LIMIT_S
 	// TODO: include pool_instance
 	K_WLOCK(userstats_list);
-	us_item = last_in_ktree(userstats_root, us_ctx);
+	us_item = last_in_ktree(userstats_statsdate_root, us_ctx);
 	while (us_item && tvdiff(now, &(DATA_USERSTATS(us_item)->statsdate)) < ALLUSERS_LIMIT_S) {
 		usw_item = find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, usw_ctx);
 		if (!usw_item) {
@@ -5721,7 +5752,7 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 
 			userstats_workername_root = add_to_ktree(userstats_workername_root, usw_item, cmp_userstats_workername);
 		}
-		us_item = us_item->prev;
+		us_item = prev_in_ktree(us_ctx);
 	}
 
 	APPEND_REALLOC_INIT(buf, off, len);
@@ -6587,7 +6618,7 @@ static void summarise_poolstats()
 static void summarise_userstats()
 {
 	K_TREE_CTX ctx[1], ctx2[1];
-	K_ITEM *tail, *new, *prev, *tmp;
+	K_ITEM *first, *new, *next, *tmp;
 	USERSTATS *userstats;
 	double statrange, factor;
 	bool locked, upgrade;
@@ -6601,20 +6632,20 @@ static void summarise_userstats()
 		upgrade = false;
 		locked = true;
 		K_ILOCK(userstats_list);
-		tail = last_in_ktree(userstats_root, ctx);
-		// Last non DB stat
-		while (tail && DATA_USERSTATS(tail)->poolinstance[0] == '\0')
-			tail = prev_in_ktree(ctx);
+		first = first_in_ktree(userstats_statsdate_root, ctx);
+		// Oldest non DB stat
+		while (first && DATA_USERSTATS(first)->summarylevel[0] != SUMMARY_NONE)
+			first = next_in_ktree(ctx);
 
-		if (!tail)
+		if (!first)
 			break;
 
-		statrange = tvdiff(&now, &(DATA_USERSTATS(tail)->statsdate));
+		statrange = tvdiff(&now, &(DATA_USERSTATS(first)->statsdate));
 		// Is there data ready for summarising?
 		if (statrange <= USERSTATS_AGE)
 			break;
 
-		memcpy(&when,  &(DATA_USERSTATS(tail)->statsdate), sizeof(when));
+		memcpy(&when,  &(DATA_USERSTATS(first)->statsdate), sizeof(when));
 		/* Convert when to the start of the timeframe after the one it is in
 		 * assume timeval ignores leapseconds ... */
 		when.tv_sec = when.tv_sec - (when.tv_sec % USERSTATS_DB_S) + USERSTATS_DB_S;
@@ -6625,41 +6656,43 @@ static void summarise_userstats()
 		if (statrange < USERSTATS_AGE)
 			break;
 
-		prev = prev_in_ktree(ctx);
+		next = next_in_ktree(ctx);
 
 		upgrade = true;
 		K_ULOCK(userstats_list);
 		new = k_unlink_head(userstats_list);
 		userstats = DATA_USERSTATS(new);
-		memcpy(userstats, DATA_USERSTATS(tail), sizeof(USERSTATS));
+		memcpy(userstats, DATA_USERSTATS(first), sizeof(USERSTATS));
 
-		remove_from_ktree(userstats_root, tail, cmp_userstats, ctx2);
-		k_unlink_item(userstats_store, tail);
-		k_add_head(userstats_summ, tail);
+		remove_from_ktree(userstats_root, first, cmp_userstats, ctx2);
+		remove_from_ktree(userstats_statsdate_root, first, cmp_userstats_statsdate, ctx2);
+		k_unlink_item(userstats_store, first);
+		k_add_head(userstats_summ, first);
 
 		count = 1;
-		while (prev) {
-			if (DATA_USERSTATS(prev)->userid != userstats->userid)
+		while (next) {
+			if (DATA_USERSTATS(next)->userid != userstats->userid)
 				break;
-			if (strcmp(DATA_USERSTATS(prev)->workername, userstats->workername))
+			if (strcmp(DATA_USERSTATS(next)->workername, userstats->workername))
 				break;
-			statrange = tvdiff(&when, &(DATA_USERSTATS(prev)->statsdate));
+			statrange = tvdiff(&when, &(DATA_USERSTATS(next)->statsdate));
 			if (statrange <= 0)
 				break;
 
 			count++;
-			userstats->hashrate += DATA_USERSTATS(prev)->hashrate;
-			userstats->hashrate5m += DATA_USERSTATS(prev)->hashrate5m;
-			userstats->hashrate1hr += DATA_USERSTATS(prev)->hashrate1hr;
-			userstats->hashrate24hr += DATA_USERSTATS(prev)->hashrate24hr;
-			if (userstats->elapsed > DATA_USERSTATS(prev)->elapsed)
-				userstats->elapsed = DATA_USERSTATS(prev)->elapsed;
+			userstats->hashrate += DATA_USERSTATS(next)->hashrate;
+			userstats->hashrate5m += DATA_USERSTATS(next)->hashrate5m;
+			userstats->hashrate1hr += DATA_USERSTATS(next)->hashrate1hr;
+			userstats->hashrate24hr += DATA_USERSTATS(next)->hashrate24hr;
+			if (userstats->elapsed > DATA_USERSTATS(next)->elapsed)
+				userstats->elapsed = DATA_USERSTATS(next)->elapsed;
 
-			tmp = prev_in_ktree(ctx);
-			remove_from_ktree(userstats_root, prev, cmp_userstats, ctx2);
-			k_unlink_item(userstats_store, prev);
-			k_add_head(userstats_summ, prev);
-			prev = tmp;
+			tmp = next_in_ktree(ctx);
+			remove_from_ktree(userstats_root, next, cmp_userstats, ctx2);
+			remove_from_ktree(userstats_statsdate_root, next, cmp_userstats_statsdate, ctx2);
+			k_unlink_item(userstats_store, next);
+			k_add_head(userstats_summ, next);
+			next = tmp;
 		}
 
 		if (userstats->hashrate5m > 0.0 || userstats->hashrate1hr > 0.0)
@@ -6693,6 +6726,7 @@ static void summarise_userstats()
 			tmp = userstats_summ->head;
 			while (tmp) {
 				add_to_ktree(userstats_root, tmp, cmp_userstats);
+				add_to_ktree(userstats_statsdate_root, tmp, cmp_userstats_statsdate);
 				tmp = tmp->next;
 			}
 			k_list_transfer_to_tail(userstats_summ, userstats_store);
@@ -6701,6 +6735,7 @@ static void summarise_userstats()
 
 		k_list_transfer_to_tail(userstats_summ, userstats_list);
 		add_to_ktree(userstats_root, new, cmp_userstats);
+		add_to_ktree(userstats_statsdate_root, new, cmp_userstats_statsdate);
 
 		if (upgrade)
 			K_WUNLOCK(userstats_list);
