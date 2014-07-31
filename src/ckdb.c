@@ -4559,7 +4559,7 @@ static bool userstats_add_db(PGconn *conn, USERSTATS *row)
 	PGresult *res;
 	char *ins;
 	bool ok = false;
-	char *params[9 + HISTORYDATECOUNT];
+	char *params[9 + SIMPLEDATECOUNT];
 	int par;
 	int n;
 
@@ -6671,27 +6671,27 @@ static void summarise_userstats()
 
 		count = 1;
 		while (next) {
-			if (DATA_USERSTATS(next)->userid != userstats->userid)
-				break;
-			if (strcmp(DATA_USERSTATS(next)->workername, userstats->workername))
-				break;
 			statrange = tvdiff(&when, &(DATA_USERSTATS(next)->statsdate));
 			if (statrange <= 0)
 				break;
 
-			count++;
-			userstats->hashrate += DATA_USERSTATS(next)->hashrate;
-			userstats->hashrate5m += DATA_USERSTATS(next)->hashrate5m;
-			userstats->hashrate1hr += DATA_USERSTATS(next)->hashrate1hr;
-			userstats->hashrate24hr += DATA_USERSTATS(next)->hashrate24hr;
-			if (userstats->elapsed > DATA_USERSTATS(next)->elapsed)
-				userstats->elapsed = DATA_USERSTATS(next)->elapsed;
-
 			tmp = next_in_ktree(ctx);
-			remove_from_ktree(userstats_root, next, cmp_userstats, ctx2);
-			remove_from_ktree(userstats_statsdate_root, next, cmp_userstats_statsdate, ctx2);
-			k_unlink_item(userstats_store, next);
-			k_add_head(userstats_summ, next);
+
+			if (DATA_USERSTATS(next)->userid == userstats->userid &&
+			    strcmp(DATA_USERSTATS(next)->workername, userstats->workername)) {
+				count++;
+				userstats->hashrate += DATA_USERSTATS(next)->hashrate;
+				userstats->hashrate5m += DATA_USERSTATS(next)->hashrate5m;
+				userstats->hashrate1hr += DATA_USERSTATS(next)->hashrate1hr;
+				userstats->hashrate24hr += DATA_USERSTATS(next)->hashrate24hr;
+				if (userstats->elapsed > DATA_USERSTATS(next)->elapsed)
+					userstats->elapsed = DATA_USERSTATS(next)->elapsed;
+
+				remove_from_ktree(userstats_root, next, cmp_userstats, ctx2);
+				remove_from_ktree(userstats_statsdate_root, next, cmp_userstats_statsdate, ctx2);
+				k_unlink_item(userstats_store, next);
+				k_add_head(userstats_summ, next);
+			}
 			next = tmp;
 		}
 
