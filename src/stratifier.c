@@ -2079,6 +2079,10 @@ static void sshare_process(ckpool_t __maybe_unused *ckp, json_params_t *jp)
 		LOGINFO("Share processor failed to find client id %d in hashtable!", client_id);
 		goto out;
 	}
+	if (unlikely(!client->authorised)) {
+		LOGDEBUG("Client %d no longer authorised to submit shares", client_id);
+		goto out;
+	}
 	json_msg = json_object();
 	result_val = parse_submit(client, json_msg, jp->params, &err_val);
 	json_object_set_new_nocheck(json_msg, "result", result_val);
