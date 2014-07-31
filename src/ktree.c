@@ -14,7 +14,7 @@ static const int dbg = 0;
 
 #define FAIL(fmt, ...) do \
 	{ \
-		quithere(1, fmt, ##__VA_ARGS__); \
+		quithere(1, fmt KTREE_FFL, ##__VA_ARGS__, KTREE_FFL_PASS); \
 	} while (0);
 
 #define RED_RED         true
@@ -25,12 +25,12 @@ static const int dbg = 0;
 
 static K_TREE nil[1] = { { Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 } };
 
-K_TREE *new_ktree()
+K_TREE *_new_ktree(KTREE_FFL_ARGS)
 {
 	K_TREE *ktree = (K_TREE *)malloc(sizeof(*ktree));
 
 	if (ktree == NULL)
-		FAIL("%s", "%K_TREE-F-OOM");
+		FAIL("%s", "OOM");
 
 	ktree->isNil = Yo;
 	ktree->red = RED_BLACK;
@@ -43,12 +43,12 @@ K_TREE *new_ktree()
 	return ktree;
 }
 
-static K_TREE *new_data(K_ITEM *data)
+static K_TREE *new_data(K_ITEM *data, KTREE_FFL_ARGS)
 {
 	K_TREE *ktree = (K_TREE *)malloc(sizeof(*ktree));
 
 	if (ktree == NULL)
-		FAIL("%s", "%K_TREE-F-OOM");
+		FAIL("%s", "OOM");
 
 	ktree->isNil = No;
 	ktree->red = RED_RED;
@@ -109,7 +109,7 @@ static void show_ktree(K_TREE *root, char *path, int pos, char *(*dsp_funct)(K_I
 	}
 }
 
-void dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *))
+void _dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *), KTREE_FFL_ARGS)
 {
 	char buf[42424];
 
@@ -124,7 +124,7 @@ void dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *))
 		printf(" Empty ktree\n");
 }
 
-void dsp_ktree(K_LIST *list, K_TREE *root, char *filename)
+void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *item;
@@ -167,76 +167,76 @@ void dsp_ktree(K_LIST *list, K_TREE *root, char *filename)
 	fclose(stream);
 }
 
-static int nilTest(K_TREE *node, char *msg, int depth, int count, K_TREE *nil2)
+static int nilTest(K_TREE *node, char *msg, int depth, int count, K_TREE *nil2, KTREE_FFL_ARGS)
 {
 	if (node->isNil == Yo || node == nil2)
 	{
 		if (node == nil2 && node->isNil == No)
-			FAIL("%%K_TREE-F-NIL2NOTNIL '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NIL2NOTNIL '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node != nil && node != nil2)
-			FAIL("%%K_TREE-F-NOTNILNIL2 '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NOTNILNIL2 '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node->red == RED_RED)
-			FAIL("%%K_TREE-F-NIRED '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NIRED '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node != nil2 && node->parent != NULL)
-			FAIL("%%K_TREE-F-NILPARENT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NILPARENT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node != nil2 && node->left != NULL)
-			FAIL("%%K_TREE-F-NILLEFT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NILLEFT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node == nil2 && node->left != nil)
-			FAIL("%%K_TREE-F-NIL2LEFT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NIL2LEFT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node != nil2 && node->right != NULL)
-			FAIL("%%K_TREE-F-NILRIGHT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NILRIGHT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node == nil2 && node->right != nil)
-			FAIL("%%K_TREE-F-NIL2RIGHT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NIL2RIGHT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node->data != NULL)
-			FAIL("%%K_TREE-F-NIDATA '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NIDATA '%s' depth=%d count=%d", msg, depth, count);
 	}
 	else
 	{
 		count++;
 
 		if (node->parent == NULL)
-			FAIL("%%K_TREE-F-NOPAR '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NOPAR '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node->left == NULL)
-			FAIL("%%K_TREE-F-NOLEFT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NOLEFT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node->right == NULL)
-			FAIL("%%K_TREE-F-NORIGHT '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NORIGHT '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node->data == NULL)
-			FAIL("%%K_TREE-F-NODATA '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NODATA '%s' depth=%d count=%d", msg, depth, count);
 
 		if (node->test != nilTestValue)
 			node->test = nilTestValue;
 		else
-			FAIL("%%K_TREE-F-NILTESTVALUE '%s' depth=%d count=%d", msg, depth, count);
+			FAIL("NILTESTVALUE '%s' depth=%d count=%d", msg, depth, count);
 
-		count = nilTest(node->left, msg, depth+1, count, nil2);
-		count = nilTest(node->right, msg, depth+1, count, nil2);
+		count = nilTest(node->left, msg, depth+1, count, nil2, KTREE_FFL_PASS);
+		count = nilTest(node->right, msg, depth+1, count, nil2, KTREE_FFL_PASS);
 	}
 
 	return(count);
 }
 
-static void bTest(K_TREE *root, K_TREE *cur, char *msg, int count)
+static void bTest(K_TREE *root, K_TREE *cur, char *msg, int count, KTREE_FFL_ARGS)
 {
 	if (cur->red != RED_RED)
 		count++;
 	else
 	{
 		if (cur->left->red == RED_RED)
-			FAIL("%%K_TREE-F-CURLR '%s' count=%d", msg, count);
+			FAIL("CURLR '%s' count=%d", msg, count);
 
 		if (cur->right->red == RED_RED)
-			FAIL("%%K_TREE-F-CURRR '%s' count=%d", msg, count);
+			FAIL("CURRR '%s' count=%d", msg, count);
 	}
 
 	if (cur->isNil == Yo)
@@ -245,52 +245,52 @@ static void bTest(K_TREE *root, K_TREE *cur, char *msg, int count)
 			bCount = count;
 
 		if (count != bCount)
-			FAIL("%%K_TREE-F-BCOUNT '%s' count=%d bCount=%d", msg, count, bCount);
+			FAIL("BCOUNT '%s' count=%d bCount=%d", msg, count, bCount);
 	}
 	else
 	{
 		if (cur->test != bTestValue)
 			cur->test = bTestValue;
 		else
-			FAIL("%%K_TREE-F-BTESTVALUE '%s' count=%d", msg, count);
+			FAIL("BTESTVALUE '%s' count=%d", msg, count);
 
-		bTest(root, cur->left, msg, count);
-		bTest(root, cur->right, msg, count);
+		bTest(root, cur->left, msg, count, KTREE_FFL_PASS);
+		bTest(root, cur->right, msg, count, KTREE_FFL_PASS);
 	}
 }
 
-static void bTestInit(K_TREE *root, char *msg)
+static void bTestInit(K_TREE *root, char *msg, KTREE_FFL_ARGS)
 {
 	bCount = 0;
 	bTestValue = getTestValue();
-	bTest(root, root, msg, 0);
+	bTest(root, root, msg, 0, KTREE_FFL_PASS);
 }
 
-static void lrpTest(K_TREE *top, char *msg)
+static void lrpTest(K_TREE *top, char *msg, KTREE_FFL_ARGS)
 {
 	if (top->test != lrpTestValue)
 		top->test = lrpTestValue;
 	else
-		FAIL("%%K_TREE-F-LRPTESTVALUE '%s'", msg);
+		FAIL("LRPTESTVALUE '%s'", msg);
 
 	if (top->left->isNil == No)
 	{
 		if (top->left->parent != top)
-			FAIL("%%K_TREE-F-LRPTESTL '%s'", msg);
+			FAIL("LRPTESTL '%s'", msg);
 
-		lrpTest(top->left, msg);
+		lrpTest(top->left, msg, KTREE_FFL_PASS);
 	}
 
 	if (top->right->isNil == No)
 	{
 		if (top->right->parent != top)
-			FAIL("%%K_TREE-F-LRPTESTR '%s'", msg);
+			FAIL("LRPTESTR '%s'", msg);
 
-		lrpTest(top->right, msg);
+		lrpTest(top->right, msg, KTREE_FFL_PASS);
 	}
 }
 
-static __maybe_unused void check_ktree(K_TREE *root, char *msg, K_TREE *nil2, int debugNil, int debugLRP, int debugColor)
+static __maybe_unused void check_ktree(K_TREE *root, char *msg, K_TREE *nil2, int debugNil, int debugLRP, int debugColor, KTREE_FFL_ARGS)
 {
 	if (root->isNil == Yo)
 		return;
@@ -298,20 +298,20 @@ static __maybe_unused void check_ktree(K_TREE *root, char *msg, K_TREE *nil2, in
 	if (debugNil)
 	{
 		nilTestValue = getTestValue();
-		nilTest(root, msg, 1, 0, nil2);
+		nilTest(root, msg, 1, 0, nil2, KTREE_FFL_PASS);
 	}
 
 	if (debugLRP && root->isNil == No)
 	{
 		lrpTestValue = getTestValue();
-		lrpTest(root, msg);
+		lrpTest(root, msg, KTREE_FFL_PASS);
 	}
 
 	if (debugColor && root->isNil == No)
-		bTestInit(root, msg);
+		bTestInit(root, msg, KTREE_FFL_PASS);
 }
 
-K_ITEM *first_in_ktree(K_TREE *root, K_TREE_CTX *ctx)
+K_ITEM *_first_in_ktree(K_TREE *root, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	if (root->isNil == No)
 	{
@@ -326,7 +326,7 @@ K_ITEM *first_in_ktree(K_TREE *root, K_TREE_CTX *ctx)
 	return(NULL);
 }
 
-K_ITEM *last_in_ktree(K_TREE *root, K_TREE_CTX *ctx)
+K_ITEM *_last_in_ktree(K_TREE *root, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	if (root->isNil == No)
 	{
@@ -341,7 +341,7 @@ K_ITEM *last_in_ktree(K_TREE *root, K_TREE_CTX *ctx)
 	return(NULL);
 }
 
-K_ITEM *next_in_ktree(K_TREE_CTX *ctx)
+K_ITEM *_next_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE *parent;
 	K_TREE *ktree = (K_TREE *)(*ctx);
@@ -370,7 +370,7 @@ K_ITEM *next_in_ktree(K_TREE_CTX *ctx)
 	return(NULL);
 }
 
-K_ITEM *prev_in_ktree(K_TREE_CTX *ctx)
+K_ITEM *_prev_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE *parent;
 	K_TREE *ktree = (K_TREE *)(*ctx);
@@ -453,7 +453,7 @@ static K_TREE *right_rotate(K_TREE *root, K_TREE *about)
 	return(root);
 }
 
-K_TREE *add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *))
+K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS)
 {
 	K_TREE *ktree;
 	K_TREE *x, *y;
@@ -461,14 +461,14 @@ K_TREE *add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K
 	double cmp;
 
 	if (root == NULL)
-		FAIL("%s", "%K_TREE-F-ADDNULL add ktree is NULL");
+		FAIL("%s", "ADDNULL add ktree is NULL");
 
-//check_ktree(root, ">add", NULL, 1, 1, 1);
+//check_ktree(root, ">add", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
 	if (root->parent != nil && root->parent != NULL)
-		FAIL("%s", "%K_TREE-F-ADDROOT add root isn't the root");
+		FAIL("%s", "ADDROOT add root isn't the root");
 
-	ktree = new_data(data);
+	ktree = new_data(data, KTREE_FFL_PASS);
 
 	if (root->isNil == Yo)
 	{
@@ -549,17 +549,17 @@ K_TREE *add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K
 	}
 	root->red = RED_BLACK;
 
-//check_ktree(root, "<add", NULL, 1, 1, 1);
+//check_ktree(root, "<add", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
 	return(root);
 }
 
-K_ITEM *find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx)
+K_ITEM *_find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	double cmp = -1.0;
 
 	if (ktree == NULL)
-		FAIL("%s", "%K_TREE-F-FINDNULL find ktree is NULL");
+		FAIL("%s", "FINDNULL find ktree is NULL");
 
 	while (ktree->isNil == No && cmp != 0.0)
 	{
@@ -584,13 +584,13 @@ K_ITEM *find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *,
 	}
 }
 
-K_ITEM *find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx)
+K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE *old = NULL;
 	double cmp = -1.0, oldcmp = -1;
 
 	if (ktree == NULL)
-		FAIL("%s", "%K_TREE-F-FINDNULL find_after ktree is NULL");
+		FAIL("%s", "FINDNULL find_after ktree is NULL");
 
 	while (ktree->isNil == No && cmp != 0.0)
 	{
@@ -629,13 +629,13 @@ K_ITEM *find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_I
 	}
 }
 
-K_ITEM *find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx)
+K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE *old = NULL;
 	double cmp = 1.0, oldcmp = 1;
 
 	if (ktree == NULL)
-		FAIL("%s", "%K_TREE-F-FINDNULL find_before ktree is NULL");
+		FAIL("%s", "FINDNULL find_before ktree is NULL");
 
 	while (ktree->isNil == No && cmp != 0.0)
 	{
@@ -755,7 +755,7 @@ static K_TREE *removeFixup(K_TREE *root, K_TREE *fix)
 
 // Does this work OK when you remove the last element in the ktree?
 // It should return the root as 'nil'
-K_TREE *remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx)
+K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX tmpctx[1];
 	K_TREE *found;
@@ -764,10 +764,10 @@ K_TREE *remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM
 	// double cmp;
 	int yred;
 
-//check_ktree(root, ">remove", NULL, 1, 1, 1);
+//check_ktree(root, ">remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
 	if (root == NULL)
-		FAIL("%s", "%K_TREE-F-REMNULL remove ktree is NULL");
+		FAIL("%s", "REMNULL remove ktree is NULL");
 
 	if (root->isNil == Yo)
 	{
@@ -776,7 +776,7 @@ K_TREE *remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM
 	}
 
 	if (root->parent->isNil == No)
-		FAIL("%s", "%K_TREE-F-REMROOT remove root isn't the root");
+		FAIL("%s", "REMROOT remove root isn't the root");
 
 	fdata = find_in_ktree(root, data, cmp_funct, ctx);
 
@@ -784,7 +784,7 @@ K_TREE *remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM
 		return(root);
 
 	if (cmp_funct(fdata, data) != 0.0)
-		FAIL("%s", "%K_TREE-F-BADFIND cmp(found, remove) != 0");
+		FAIL("%s", "BADFIND cmp(found, remove) != 0");
 
 	found = *ctx;
 
@@ -803,7 +803,7 @@ K_TREE *remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM
 	yred = y->red;
 
 	if (y->left->isNil == No && y->right->isNil == No)
-		FAIL("%s", "%K_TREE-F-REMBADY remove error");
+		FAIL("%s", "REMBADY remove error");
 
 	if (y->left->isNil == Yo)
 		x = y->right;
@@ -933,7 +933,7 @@ DBG("@remove after balance=%f :(\n", cmp);
 */
 
 
-//check_ktree(root, "<remove", NULL, 1, 1, 1);
+//check_ktree(root, "<remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
 	return root;
 }
@@ -952,13 +952,13 @@ static void free_ktree_sub(K_TREE *ktree, void (*free_funct)(void *))
 	}
 }
 
-K_TREE *free_ktree(K_TREE *ktree, void (*free_funct)(void *))
+K_TREE *_free_ktree(K_TREE *ktree, void (*free_funct)(void *), KTREE_FFL_ARGS)
 {
 	if (ktree == NULL)
-		FAIL("%s", "%K_TREE-F-FREENULL free NULL ktree");
+		FAIL("%s", "FREENULL free NULL ktree");
 
 	if (ktree->parent != NULL && ktree->parent != nil)
-		FAIL("%s", "%K_TREE-F-FREENOTROOT free ktree not root");
+		FAIL("%s", "FREENOTROOT free ktree not root");
 
 	free_ktree_sub(ktree, free_funct);
 
