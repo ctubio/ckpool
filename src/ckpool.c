@@ -112,16 +112,21 @@ static void *ckmsg_queue(void *arg)
 
 	while (42) {
 		ckmsg_t *msg;
+		tv_t now;
+		ts_t abs;
 
 		mutex_lock(&ckmsgq->lock);
+		tv_time(&now);
+		tv_to_ts(&abs, &now);
+		abs.tv_sec++;
 		if (!ckmsgq->msgs)
-			pthread_cond_wait(&ckmsgq->cond, &ckmsgq->lock);
+			pthread_cond_timedwait(&ckmsgq->cond, &ckmsgq->lock, &abs);
 		msg = ckmsgq->msgs;
-		if (likely(msg))
+		if (msg)
 			DL_DELETE(ckmsgq->msgs, msg);
 		mutex_unlock(&ckmsgq->lock);
 
-		if (unlikely(!msg))
+		if (!msg)
 			continue;
 		ckmsgq->func(ckp, msg->data);
 		free(msg);
