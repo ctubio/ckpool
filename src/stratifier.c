@@ -1088,7 +1088,7 @@ static void *blockupdate(void *arg)
 	while (42) {
 		dealloc(buf);
 		buf = send_recv_proc(ckp->generator, request);
-		if (safecmp(buf, hash) && !cmdmatch(buf, "failed")) {
+		if (buf && strcmp(buf, hash) && !cmdmatch(buf, "failed")) {
 			strcpy(hash, buf);
 			LOGNOTICE("Block hash changed to %s", hash);
 			send_proc(ckp->stratifier, "update");
