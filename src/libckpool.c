@@ -1081,6 +1081,22 @@ int safecmp(const char *a, const char *b)
 	return (strcmp(a, b));
 }
 
+/* Returns whether there is a case insensitive match of buf to cmd, safely
+ * handling NULL or zero length strings. */
+bool cmdmatch(const char *buf, const char *cmd)
+{
+	int cmdlen, buflen;
+
+	if (!buf)
+		return false;
+	buflen = strlen(buf);
+	if (!buflen)
+		return false;
+	cmdlen = strlen(cmd);
+	if (buflen < cmdlen)
+		return false;
+	return !strncasecmp(buf, cmd, cmdlen);
+}
 
 static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
