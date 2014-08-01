@@ -1735,14 +1735,14 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 		item = find_create_workerstatus(auths->userid, auths->workername);
 		row = DATA_WORKERSTATUS(item);
 		if (tv_newer(&(row->last_auth), &(auths->createdate)))
-			memcpy(&(row->last_auth), &(auths->createdate), sizeof(row->last_auth));
+			copy_tv(&(row->last_auth), &(auths->createdate));
 	}
 
 	if (shares) {
 		item = find_create_workerstatus(shares->userid, shares->workername);
 		row = DATA_WORKERSTATUS(item);
 		if (tv_newer(&(row->last_share), &(shares->createdate)))
-			memcpy(&(row->last_share), &(shares->createdate), sizeof(row->last_share));
+			copy_tv(&(row->last_share), &(shares->createdate));
 	}
 
 	if (userstats) {
@@ -1750,10 +1750,10 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 		row = DATA_WORKERSTATUS(item);
 		if (userstats->idle) {
 			if (tv_newer(&(row->last_idle), &(userstats->statsdate)))
-				memcpy(&(row->last_idle), &(userstats->statsdate), sizeof(row->last_idle));
+				copy_tv(&(row->last_idle), &(userstats->statsdate));
 		} else {
 			if (tv_newer(&(row->last_stats), &(userstats->statsdate)))
-				memcpy(&(row->last_stats), &(userstats->statsdate), sizeof(row->last_stats));
+				copy_tv(&(row->last_stats), &(userstats->statsdate));
 		}
 	}
 
@@ -1761,7 +1761,7 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 		item = find_create_workerstatus(sharesummary->userid, sharesummary->workername);
 		row = DATA_WORKERSTATUS(item);
 		if (tv_newer(&(row->last_share), &(sharesummary->lastshare)))
-			memcpy(&(row->last_share), &(sharesummary->lastshare), sizeof(row->last_share));
+			copy_tv(&(row->last_share), &(sharesummary->lastshare));
 	}
 }
 
@@ -2943,10 +2943,8 @@ static bool workinfo_fill(PGconn *conn)
 		workinfo_height_root = add_to_ktree(workinfo_height_root, item, cmp_workinfo_height);
 		k_add_head(workinfo_store, item);
 
-		if (tv_newer(&(dbstatus.newest_createdate_workinfo), &(row->createdate))) {
-			memcpy(&(dbstatus.newest_createdate_workinfo), &(row->createdate),
-				sizeof(row->createdate));
-		}
+		if (tv_newer(&(dbstatus.newest_createdate_workinfo), &(row->createdate)))
+			copy_tv(&(dbstatus.newest_createdate_workinfo), &(row->createdate));
 	}
 	if (!ok)
 		k_add_head(workinfo_list, item);
@@ -3679,8 +3677,7 @@ static bool sharesummary_fill(PGconn *conn)
 		if (tolower(row->complete[0]) == SUMMARY_NEW &&
 		    (dbstatus.oldest_sharesummary_firstshare_n.tv_sec == 0 ||
 		    !tv_newer(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare)))) {
-			memcpy(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare),
-				sizeof(row->createdate));
+			copy_tv(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare));
 		}
 	}
 	if (!ok)
@@ -4223,10 +4220,8 @@ static bool auths_fill(PGconn *conn)
 		k_add_head(auths_store, item);
 		workerstatus_update(row, NULL, NULL, NULL);
 
-		if (tv_newer(&(dbstatus.newest_createdate_auths), &(row->createdate))) {
-			memcpy(&(dbstatus.newest_createdate_auths), &(row->createdate),
-				sizeof(row->createdate));
-		}
+		if (tv_newer(&(dbstatus.newest_createdate_auths), &(row->createdate)))
+			copy_tv(&(dbstatus.newest_createdate_auths), &(row->createdate));
 	}
 	if (!ok)
 		k_add_head(auths_list, item);
@@ -4441,10 +4436,8 @@ static bool poolstats_fill(PGconn *conn)
 		poolstats_root = add_to_ktree(poolstats_root, item, cmp_poolstats);
 		k_add_head(poolstats_store, item);
 
-		if (tv_newer(&(dbstatus.newest_createdate_poolstats), &(row->createdate))) {
-			memcpy(&(dbstatus.newest_createdate_poolstats), &(row->createdate),
-				sizeof(row->createdate));
-		}
+		if (tv_newer(&(dbstatus.newest_createdate_poolstats), &(row->createdate)))
+			copy_tv(&(dbstatus.newest_createdate_poolstats), &(row->createdate));
 	}
 	if (!ok)
 		k_add_head(poolstats_list, item);
@@ -4581,7 +4574,7 @@ static bool userstats_add_db(PGconn *conn, USERSTATS *row)
 	ins = "insert into userstats "
 		"(userid,workername,elapsed,hashrate,hashrate5m,"
 		"hashrate1hr,hashrate24hr,summarylevel,statsdate"
-		HISTORYDATECONTROL ") values (" PQPARAM13 ")";
+		SIMPLEDATECONTROL ") values (" PQPARAM13 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
@@ -4632,7 +4625,7 @@ static bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	row->summarylevel[1] = '\0';
 	SIMPLEDATEINIT(row, now, by, code, inet);
 	SIMPLEDATETRANSFER(row);
-	memcpy(&(row->statsdate), &(row->createdate), sizeof(row->statsdate));
+	copy_tv(&(row->statsdate), &(row->createdate));
 
 	if (eos) {
 		// Save it for end processing
@@ -4708,7 +4701,7 @@ static void userstats_update_ccl(USERSTATS *row)
 
 	userstats.userid = row->userid;
 	STRNCPY(userstats.workername, row->workername);
-	memcpy(&(userstats.statsdate), &(row->statsdate), sizeof(row->statsdate));
+	copy_tv(&(userstats.statsdate), &(row->statsdate));
 	// Start of this timeband
 	switch (row->summarylevel[0]) {
 		case SUMMARY_DB:
@@ -4733,7 +4726,7 @@ static void userstats_update_ccl(USERSTATS *row)
 	if (item) {
 		tmp = DATA_USERSTATS(item);
 		if (tv_newer(&(tmp->statsdate), &(userstats.statsdate)))
-			memcpy(&(tmp->statsdate), &(userstats.statsdate), sizeof(tmp->statsdate));
+			copy_tv(&(tmp->statsdate), &(userstats.statsdate));
 	} else {
 		K_WLOCK(userstats_list);
 		item = k_unlink_head(userstats_list);
@@ -4741,7 +4734,7 @@ static void userstats_update_ccl(USERSTATS *row)
 		bzero(tmp, sizeof(*tmp));
 		tmp->userid = userstats.userid;
 		STRNCPY(tmp->workername, userstats.workername);
-		memcpy(&(tmp->statsdate), &(userstats.statsdate), sizeof(tmp->statsdate));
+		copy_tv(&(tmp->statsdate), &(userstats.statsdate));
 		userstats_ccl_root = add_to_ktree(userstats_ccl_root, item,
 						  cmp_userstats_workername);
 		k_add_head(userstats_ccl, item);
@@ -5189,7 +5182,7 @@ static bool setup_data()
 	while (ccl) {
 		if (statsdate.tv_sec == 0 ||
 		    !tv_newer(&statsdate, &(DATA_USERSTATS(ccl)->statsdate)))
-			memcpy(&statsdate, &(DATA_USERSTATS(ccl)->statsdate), sizeof(statsdate));
+			copy_tv(&statsdate, &(DATA_USERSTATS(ccl)->statsdate));
 		ccl = ccl->next;
 	}
 	tv_to_buf(&statsdate, buf, sizeof(buf));
@@ -6626,6 +6619,7 @@ static void summarise_userstats()
 	PGconn *conn = NULL;
 	int count;
 
+	upgrade = false;
 	locked = false;
 	while (1764) {
 		setnow(&now);
@@ -6634,6 +6628,7 @@ static void summarise_userstats()
 		K_ILOCK(userstats_list);
 		first = first_in_ktree(userstats_statsdate_root, ctx);
 		// Oldest non DB stat
+		// TODO: make the index start with summarylevel? so can find faster
 		while (first && DATA_USERSTATS(first)->summarylevel[0] != SUMMARY_NONE)
 			first = next_in_ktree(ctx);
 
@@ -6645,7 +6640,7 @@ static void summarise_userstats()
 		if (statrange <= USERSTATS_AGE)
 			break;
 
-		memcpy(&when,  &(DATA_USERSTATS(first)->statsdate), sizeof(when));
+		copy_tv(&when,  &(DATA_USERSTATS(first)->statsdate));
 		/* Convert when to the start of the timeframe after the one it is in
 		 * assume timeval ignores leapseconds ... */
 		when.tv_sec = when.tv_sec - (when.tv_sec % USERSTATS_DB_S) + USERSTATS_DB_S;
@@ -6678,7 +6673,7 @@ static void summarise_userstats()
 			tmp = next_in_ktree(ctx);
 
 			if (DATA_USERSTATS(next)->userid == userstats->userid &&
-			    strcmp(DATA_USERSTATS(next)->workername, userstats->workername)) {
+			    strcmp(DATA_USERSTATS(next)->workername, userstats->workername) == 0) {
 				count++;
 				userstats->hashrate += DATA_USERSTATS(next)->hashrate;
 				userstats->hashrate5m += DATA_USERSTATS(next)->hashrate5m;
@@ -6710,7 +6705,7 @@ static void summarise_userstats()
 		userstats->hashrate1hr *= factor;
 		userstats->hashrate24hr *= factor;
 
-		memcpy(&(userstats->statsdate), &when, sizeof(when));
+		copy_tv(&(userstats->statsdate), &when);
 		// Stats to the end of this timeframe
 		userstats->statsdate.tv_sec -= 1;
 		userstats->statsdate.tv_usec = 999999;
@@ -6741,6 +6736,7 @@ static void summarise_userstats()
 			K_WUNLOCK(userstats_list);
 		else
 			K_IUNLOCK(userstats_list);
+		upgrade = false;
 		locked = false;
 	}
 
