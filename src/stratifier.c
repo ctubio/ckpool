@@ -542,7 +542,7 @@ static void update_base(ckpool_t *ckp)
 		LOGWARNING("Failed to get base from generator in update_base");
 		return;
 	}
-	if (unlikely(!strncasecmp(buf, "failed", 6))) {
+	if (unlikely(cmdmatch(buf, "failed"))) {
 		LOGWARNING("Generator returned failure in update_base");
 		return;
 	}
@@ -1020,7 +1020,7 @@ retry:
 		LOGWARNING("Failed to get message in stratum_loop");
 		goto retry;
 	}
-	if (!strncasecmp(buf, "ping", 4)) {
+	if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Stratifier received ping request");
 		send_unix_msg(sockd, "pong");
 		close(sockd);
@@ -1029,21 +1029,21 @@ retry:
 
 	close(sockd);
 	LOGDEBUG("Stratifier received request: %s", buf);
-	if (!strncasecmp(buf, "shutdown", 8)) {
+	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
-	} else if (!strncasecmp(buf, "update", 6)) {
+	} else if (cmdmatch(buf, "update")) {
 		update_base(ckp);
-	} else if (!strncasecmp(buf, "subscribe", 9)) {
+	} else if (cmdmatch(buf, "subscribe")) {
 		/* Proxifier has a new subscription */
 		if (!update_subscribe(ckp))
 			goto out;
-	} else if (!strncasecmp(buf, "notify", 6)) {
+	} else if (cmdmatch(buf, "notify")) {
 		/* Proxifier has a new notify ready */
 		update_notify(ckp);
-	} else if (!strncasecmp(buf, "diff", 4)) {
+	} else if (cmdmatch(buf, "diff")) {
 		update_diff(ckp);
-	} else if (!strncasecmp(buf, "dropclient", 10)) {
+	} else if (cmdmatch(buf, "dropclient")) {
 		int client_id;
 
 		ret = sscanf(buf, "dropclient=%d", &client_id);
@@ -1051,9 +1051,9 @@ retry:
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
 			drop_client(client_id);
-	} else if (!strncasecmp(buf, "block", 5)) {
+	} else if (cmdmatch(buf, "block")) {
 		block_solve(ckp);
-	} else if (!strncasecmp(buf, "loglevel", 8)) {
+	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {
 		json_t *val = json_loads(buf, 0, NULL);
@@ -1079,7 +1079,7 @@ static void *blockupdate(void *arg)
 	pthread_detach(pthread_self());
 	rename_proc("blockupdate");
 	buf = send_recv_proc(ckp->generator, "getbest");
-	if (buf && strncasecmp(buf, "Failed", 6))
+	if (!cmdmatch(buf, "failed"))
 		sprintf(request, "getbest");
 	else
 		sprintf(request, "getlast");
@@ -1088,7 +1088,7 @@ static void *blockupdate(void *arg)
 	while (42) {
 		dealloc(buf);
 		buf = send_recv_proc(ckp->generator, request);
-		if (safecmp(buf, hash) && strncasecmp(buf, "Failed", 6)) {
+		if (safecmp(buf, hash) && !cmdmatch(buf, "failed")) {
 			strcpy(hash, buf);
 			LOGNOTICE("Block hash changed to %s", hash);
 			send_proc(ckp->stratifier, "update");
@@ -1899,7 +1899,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 	/* Random broken clients send something not an integer as the id so we copy
 	 * the json item for id_val as is for the response. */
 	method = json_string_value(method_val);
-	if (!strncasecmp(method, "mining.subscribe", 16)) {
+	if (cmdmatch(method, "mining.subscribe")) {
 		json_t *val, *result_val = parse_subscribe(client_id, params_val);
 
 		if (!result_val)
@@ -1922,7 +1922,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 		return;
 	}
 
-	if (!strncasecmp(method, "mining.auth", 11)) {
+	if (cmdmatch(method, "mining.auth")) {
 		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
 
 		ckmsgq_add(sauthq, jp);
@@ -1942,7 +1942,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 		return;
 	}
 
-	if (!strncasecmp(method, "mining.submit", 13)) {
+	if (cmdmatch(method, "mining.submit")) {
 		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
 
 		ckmsgq_add(sshareq, jp);

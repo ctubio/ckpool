@@ -1098,6 +1098,7 @@ bool cmdmatch(const char *buf, const char *cmd)
 	return !strncasecmp(buf, cmd, cmdlen);
 }
 
+
 static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /* Return a malloced string of *src encoded into mime base 64 */
