@@ -1088,7 +1088,7 @@ static void *blockupdate(void *arg)
 	while (42) {
 		dealloc(buf);
 		buf = send_recv_proc(ckp->generator, request);
-		if (buf && strcmp(buf, hash) && strncasecmp(buf, "Failed", 6)) {
+		if (safecmp(buf, hash) && strncasecmp(buf, "Failed", 6)) {
 			strcpy(hash, buf);
 			LOGNOTICE("Block hash changed to %s", hash);
 			send_proc(ckp->stratifier, "update");
@@ -1257,7 +1257,7 @@ static bool send_recv_auth(stratum_instance_t *client)
 		LOGINFO("User %s Worker %s got auth response: %s  suid: %s",
 			client->user_instance->username, client->workername,
 			response, secondaryuserid);
-		if (!strcmp(response, "ok") && secondaryuserid) {
+		if (!safecmp(response, "ok") && secondaryuserid) {
 			client->secondaryuserid = strdup(secondaryuserid);
 			ret = true;
 		}
@@ -1678,7 +1678,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = JSON_ERR(err);
 		goto out;
 	}
-	if (strcmp(user, client->workername)) {
+	if (safecmp(user, client->workername)) {
 		err = SE_WORKER_MISMATCH;
 		*err_val = JSON_ERR(err);
 		goto out;
