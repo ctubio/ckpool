@@ -1061,6 +1061,27 @@ void b58tobin(char *b58bin, const char *b58)
 	}
 }
 
+/* Does a safe string comparison tolerating zero length and NULL strings */
+int safecmp(const char *a, const char *b)
+{
+	int lena, lenb;
+
+	if (unlikely(!a || !b)) {
+		if (a != b)
+			return -1;
+		return 0;
+	}
+	lena = strlen(a);
+	lenb = strlen(b);
+	if (unlikely(!lena || !lenb)) {
+		if (lena != lenb)
+			return -1;
+		return 0;
+	}
+	return (strcmp(a, b));
+}
+
+
 static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /* Return a malloced string of *src encoded into mime base 64 */

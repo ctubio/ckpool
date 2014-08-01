@@ -414,6 +414,7 @@ bool _hex2bin(void *p, const void *vhexstr, size_t len, const char *file, const 
 #define hex2bin(p, vhexstr, len) _hex2bin(p, vhexstr, len, __FILE__, __func__, __LINE__)
 char *http_base64(const char *src);
 void b58tobin(char *b58bin, const char *b58);
+int safecmp(const char *a, const char *b);
 
 void address_to_pubkeytxn(char *pkh, const char *addr);
 int ser_number(uchar *s, int32_t val);
