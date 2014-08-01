@@ -34,6 +34,30 @@
 
 ckpool_t *global_ckp;
 
+static void proclog(ckpool_t *ckp, char *msg)
+{
+	FILE *LOGFP;
+	int logfd;
+
+	if (unlikely(!msg)) {
+		fprintf(stderr, "Proclog received null message");
+		return;
+	}
+	if (unlikely(!strlen(msg))) {
+		fprintf(stderr, "Proclog received zero length message");
+		free(msg);
+		return;
+	}
+	LOGFP = ckp->logfp;
+	logfd = ckp->logfd;
+
+	flock(logfd, LOCK_EX);
+	fprintf(LOGFP, "%s", msg);
+	flock(logfd, LOCK_UN);
+
+	free(msg);
+}
+
 /* Log everything to the logfile, but display warnings on the console as well */
 void logmsg(int loglevel, const char *fmt, ...) {
 	if (global_ckp->loglevel >= loglevel && fmt) {
@@ -58,14 +82,13 @@ void logmsg(int loglevel, const char *fmt, ...) {
 				tm->tm_min,
 				tm->tm_sec);
 		if (logfd) {
-			FILE *LOGFP = global_ckp->logfp;
+			char *msg;
 
-			flock(logfd, LOCK_EX);
-			fprintf(LOGFP, "%s %s", stamp, buf);
 			if (loglevel <= LOG_ERR && errno != 0)
-				fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno));
-			fprintf(LOGFP, "\n");
-			flock(logfd, LOCK_UN);
+				ASPRINTF(&msg, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
+			else
+				ASPRINTF(&msg, "%s %s\n", stamp, buf);
+			ckmsgq_add(global_ckp->logger, msg);
 		}
 		if (loglevel <= LOG_WARNING) {\
 			if (loglevel <= LOG_ERR && errno != 0)
@@ -677,6 +700,17 @@ static void childsighandler(int sig)
 	kill(ppid, sig);
 }
 
+static void launch_logger(proc_instance_t *pi)
+{
+	ckpool_t *ckp = pi->ckp;
+	char loggername[16];
+
+	/* Note that the logger is unique per process so it is the only value
+	 * in ckp that differs between processes */
+	snprintf(loggername, 15, "%clogger", pi->processname[0]);
+	ckp->logger = create_ckmsgq(ckp, loggername, &proclog);
+}
+
 static void launch_process(proc_instance_t *pi)
 {
 	pid_t pid;
@@ -688,6 +722,7 @@ static void launch_process(proc_instance_t *pi)
 		struct sigaction handler;
 		int ret;
 
+		launch_logger(pi);
 		handler.sa_handler = &childsighandler;
 		handler.sa_flags = 0;
 		sigemptyset(&handler.sa_mask);
@@ -1131,13 +1166,16 @@ int main(int argc, char **argv)
 	ckp.logfp = fopen(buf, "a");
 	if (!ckp.logfp)
 		quit(1, "Failed to make open log file %s", buf);
-	ckp.logfd = fileno(ckp.logfp);
+	/* Make logging line buffered */
+	setvbuf(ckp.logfp, NULL, _IOLBF, 0);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
 	ckp.main.sockname = strdup("listener");
 	write_namepid(&ckp.main);
 	create_process_unixsock(&ckp.main);
+	launch_logger(&ckp.main);
+	ckp.logfd = fileno(ckp.logfp);
 
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
