@@ -615,7 +615,7 @@ int wait_read_select(int sockd, int timeout)
 	FD_SET(sockd, &readfs);
 	do {
 		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
-	} while (unlikely(ret < 0 && interrupted()));
+	} while (unlikely(ret < 0));
 	return ret;
 }
 
@@ -692,7 +692,7 @@ int wait_write_select(int sockd, int timeout)
 	FD_SET(sockd, &writefds);
 	do {
 		ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
-	} while (unlikely(ret < 0 && interrupted()));
+	} while (unlikely(ret < 0));
 	return ret;
 }
 

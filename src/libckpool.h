@@ -362,13 +362,10 @@ static inline bool sock_blocks(void)
 {
 	return (errno == EAGAIN || errno == EWOULDBLOCK);
 }
+
 static inline bool sock_timeout(void)
 {
 	return (errno == ETIMEDOUT);
-}
-static inline bool interrupted(void)
-{
-	return (errno == EINTR);
 }
 
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);

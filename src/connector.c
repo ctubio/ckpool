@@ -284,10 +284,8 @@ retry:
 		cksleep_ms(100);
 		goto retry;
 	}
-	do {
-		ret = poll(fds, nfds, 1000);
-	} while (unlikely(ret < 0 && interrupted()));
-	if (ret < 0) {
+	ret = poll(fds, nfds, 1000);
+	if (unlikely(ret < 0)) {
 		LOGERR("Failed to poll in receiver");
 		goto out;
 	}
