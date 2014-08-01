@@ -94,9 +94,9 @@ static char *restorefrom;
  *	non db records - will depend on TODO: pool stats reporting
  *	requirements
  *  DB+RAM userstats: for each pool/user/worker it would be the start
- *	of the time band containing the DB statsdate,
- *	since all previous data was summarised and deleted -
- *	use the oldest of these for all pools/users/workers
+ *	of the time band containing the latest DB statsdate,
+ *	since all previous data was summarised to the DB and RAM and
+ *	deleted - use the oldest of these for all pools/users/workers
  *	TODO: multiple pools is not yet handled by ckdb
  *	TODO: handle a pool restart with a different instance name
  *		since this would always make the userstats reload point
