@@ -615,7 +615,7 @@ int wait_read_select(int sockd, int timeout)
 	FD_SET(sockd, &readfs);
 	do {
 		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
-	} while (unlikely(ret < 0 && interrupted()));
+	} while (unlikely(ret < 0));
 	return ret;
 }
 
@@ -692,7 +692,7 @@ int wait_write_select(int sockd, int timeout)
 	FD_SET(sockd, &writefds);
 	do {
 		ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
-	} while (unlikely(ret < 0 && interrupted()));
+	} while (unlikely(ret < 0));
 	return ret;
 }
 
@@ -1079,6 +1079,23 @@ int safecmp(const char *a, const char *b)
 		return 0;
 	}
 	return (strcmp(a, b));
+}
+
+/* Returns whether there is a case insensitive match of buf to cmd, safely
+ * handling NULL or zero length strings. */
+bool cmdmatch(const char *buf, const char *cmd)
+{
+	int cmdlen, buflen;
+
+	if (!buf)
+		return false;
+	buflen = strlen(buf);
+	if (!buflen)
+		return false;
+	cmdlen = strlen(cmd);
+	if (buflen < cmdlen)
+		return false;
+	return !strncasecmp(buf, cmd, cmdlen);
 }
 
 

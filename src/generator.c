@@ -233,11 +233,11 @@ retry:
 		goto retry;
 	}
 	LOGDEBUG("Generator received request: %s", buf);
-	if (!strncasecmp(buf, "shutdown", 8)) {
+	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
 	}
-	if (!strncasecmp(buf, "getbase", 7)) {
+	if (cmdmatch(buf, "getbase")) {
 		if (!gen_gbtbase(cs, gbt)) {
 			LOGWARNING("Failed to get block template from %s:%s",
 				   cs->url, cs->port);
@@ -250,14 +250,14 @@ retry:
 			free(s);
 			clear_gbtbase(gbt);
 		}
-	} else if (!strncasecmp(buf, "getbest", 7)) {
+	} else if (cmdmatch(buf, "getbest")) {
 		if (!get_bestblockhash(cs, hash)) {
 			LOGINFO("No best block hash support from %s:%s",
 				cs->url, cs->port);
 			send_unix_msg(sockd, "Failed");
 		} else
 			send_unix_msg(sockd, hash);
-	} else if (!strncasecmp(buf, "getlast", 7)) {
+	} else if (cmdmatch(buf, "getlast")) {
 		int height = get_blockcount(cs);
 
 		if (height == -1) {
@@ -273,13 +273,13 @@ retry:
 				LOGDEBUG("Hash: %s", hash);
 			}
 		}
-	} else if (!strncasecmp(buf, "submitblock:", 12)) {
+	} else if (cmdmatch(buf, "submitblock:")) {
 		LOGNOTICE("Submitting block data!");
 		if (submit_block(cs, buf + 12))
 			send_proc(ckp->stratifier, "block");
-	} else if (!strncasecmp(buf, "loglevel", 8)) {
+	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
-	} else if (!strncasecmp(buf, "ping", 4)) {
+	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Generator received ping request");
 		send_unix_msg(sockd, "pong");
 	}
@@ -383,7 +383,7 @@ static json_t *find_notify(json_t *val)
 		return NULL;
 	arr_size = json_array_size(val);
 	entry = json_string_value(json_array_get(val, 0));
-	if (entry && !strncasecmp(entry, "mining.notify", 13))
+	if (cmdmatch(entry, "mining.notify"))
 		return val;
 	for (i = 0; i < arr_size; i++) {
 		json_t *arr_val;
@@ -759,7 +759,7 @@ static bool parse_method(proxy_instance_t *proxi, const char *msg)
 		goto out;
 	}
 
-	if (!strncasecmp(buf, "mining.notify", 13)) {
+	if (cmdmatch(buf, "mining.notify")) {
 		if (parse_notify(proxi, params))
 			proxi->notified = ret = true;
 		else
@@ -767,22 +767,22 @@ static bool parse_method(proxy_instance_t *proxi, const char *msg)
 		goto out;
 	}
 
-	if (!strncasecmp(buf, "mining.set_difficulty", 21)) {
+	if (cmdmatch(buf, "mining.set_difficulty")) {
 		ret = parse_diff(proxi, params);
 		goto out;
 	}
 
-	if (!strncasecmp(buf, "client.reconnect", 16)) {
+	if (cmdmatch(buf, "client.reconnect")) {
 		ret = parse_reconnect(proxi, params);
 		goto out;
 	}
 
-	if (!strncasecmp(buf, "client.get_version", 18)) {
+	if (cmdmatch(buf, "client.get_version")) {
 		ret =  send_version(proxi, val);
 		goto out;
 	}
 
-	if (!strncasecmp(buf, "client.show_message", 19)) {
+	if (cmdmatch(buf, "client.show_message")) {
 		ret = show_message(params);
 		goto out;
 	}
@@ -1237,23 +1237,23 @@ retry:
 		goto retry;
 	}
 	LOGDEBUG("Proxy received request: %s", buf);
-	if (!strncasecmp(buf, "shutdown", 8)) {
+	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
-	} else if (!strncasecmp(buf, "getsubscribe", 12)) {
+	} else if (cmdmatch(buf, "getsubscribe")) {
 		send_subscribe(proxi, sockd);
-	} else if (!strncasecmp(buf, "getnotify", 9)) {
+	} else if (cmdmatch(buf, "getnotify")) {
 		send_notify(proxi, sockd);
-	} else if (!strncasecmp(buf, "getdiff", 7)) {
+	} else if (cmdmatch(buf, "getdiff")) {
 		send_diff(proxi, sockd);
-	} else if (!strncasecmp(buf, "reconnect", 9)) {
+	} else if (cmdmatch(buf, "reconnect")) {
 		kill_proxy(proxi);
 		pthread_cancel(proxi->pth_precv);
 		pthread_cancel(proxi->pth_psend);
 		goto reconnect;
-	} else if (!strncasecmp(buf, "loglevel", 8)) {
+	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
-	} else if (!strncasecmp(buf, "ping", 4)) {
+	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
 	} else {
