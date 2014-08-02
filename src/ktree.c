@@ -159,10 +159,10 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, KTREE_FFL_ARGS)
 			list->dsp_func(item, stream);
 			item = next_in_ktree(ctx);
 		}
-		fprintf(stream, "End\n");
+		fprintf(stream, "End\n\n");
 	}
 	else
-		fprintf(stream, "Empty ktree\n");
+		fprintf(stream, "Empty ktree\n\n");
 
 	fclose(stream);
 }
