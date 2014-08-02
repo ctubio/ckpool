@@ -124,7 +124,7 @@ void _dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *), KTREE_FFL_ARGS)
 		printf(" Empty ktree\n");
 }
 
-void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, KTREE_FFL_ARGS)
+void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *item;
@@ -146,10 +146,16 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, KTREE_FFL_ARGS)
 
 	stream = fopen(filename, "a");
 	if (!stream)
+	{
 		fprintf(stderr, "%s %s() failed to open '%s' (%d) %s",
 				stamp, __func__, filename, errno, strerror(errno));
+		return;
+	}
 
-	fprintf(stream, "%s Dump of ktree '%s':\n", stamp, list->name);
+	if (msg)
+		fprintf(stream, "%s %s\n", stamp, msg);
+	else
+		fprintf(stream, "%s Dump of ktree '%s':\n", stamp, list->name);
 
 	if (root->isNil == No)
 	{

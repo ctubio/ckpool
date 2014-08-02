@@ -40,8 +40,8 @@ extern K_TREE *_new_ktree(KTREE_FFL_ARGS);
 #define new_ktree() _new_ktree(KLIST_FFL_HERE)
 extern void _dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *), KTREE_FFL_ARGS);
 #define dump_ktree(_root, _dsp_funct) _dump_ktree(_root, _dsp_funct, KLIST_FFL_HERE)
-extern void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, KTREE_FFL_ARGS);
-#define dsp_ktree(_list, _root, _filename) _dsp_ktree(_list, _root, _filename, KLIST_FFL_HERE)
+extern void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL_ARGS);
+#define dsp_ktree(_list, _root, _filename, _msg) _dsp_ktree(_list, _root, _filename, _msg, KLIST_FFL_HERE)
 extern K_ITEM *_first_in_ktree(K_TREE *root, K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define first_in_ktree(_root, _ctx) _first_in_ktree(_root, _ctx, KLIST_FFL_HERE)
 extern K_ITEM *_last_in_ktree(K_TREE *root, K_TREE_CTX *ctx, KTREE_FFL_ARGS);
