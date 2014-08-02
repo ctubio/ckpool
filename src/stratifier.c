@@ -415,7 +415,8 @@ static void purge_share_hashtable(int64_t wb_id)
 
 static char *status_chars = "|/-\\";
 
-static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
+static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char *file,
+		      const char *func, const int line)
 {
 	static int counter = 0;
 	ckdb_msg_t *msg;
@@ -425,6 +426,11 @@ static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
 	fprintf(stdout, "%c\r", ch);
 	fflush(stdout);
 
+	if (!val) {
+		LOGWARNING("Invalid json sent to ckdbq_add from %s %s:%d", file, func, line);
+		return;
+	}
+
 	if (ckp->standalone)
 		return json_decref(val);
 
@@ -433,6 +439,8 @@ static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
 	msg->idtype = idtype;
 	ckmsgq_add(ckdbq, msg);
 }
+
+#define ckdbq_add(ckp, idtype, val) _ckdbq_add(ckp, idtype, val, __FILE__, __func__, __LINE__)
 
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
