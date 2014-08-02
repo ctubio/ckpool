@@ -2130,16 +2130,24 @@ out:
 
 static void ckdbq_process(ckpool_t *ckp, ckdb_msg_t *data)
 {
+	static bool failed = false;
 	bool logged = false;
 	char *buf = NULL;
 
 	while (!buf) {
 		buf = json_ckdb_call(ckp, ckdb_ids[data->idtype], data->val, logged);
 		if (unlikely(!buf)) {
-			LOGWARNING("Failed to talk to ckdb, queueing messages");
+			if (!failed) {
+				failed = true;
+				LOGWARNING("Failed to talk to ckdb, queueing messages");
+			}
 			sleep(5);
 		}
 		logged = true;
+	}
+	if (failed) {
+		failed = false;
+		LOGWARNING("Successfully resumed talking to ckdb");
 	}
 	LOGINFO("Got %s ckdb response: %s", ckdb_ids[data->idtype], buf);
 	free(buf);
