@@ -2434,6 +2434,8 @@ int stratifier(proc_instance_t *pi)
 	char *buf;
 	int ret;
 
+	LOGWARNING("%s stratifier starting", ckp->name);
+
 	/* Store this for use elsewhere */
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
@@ -2471,6 +2473,8 @@ int stratifier(proc_instance_t *pi)
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	cklock_init(&share_lock);
+
+	LOGWARNING("%s stratifier ready", ckp->name);
 
 	ret = stratum_loop(ckp, pi);
 out:

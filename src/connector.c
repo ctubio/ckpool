@@ -499,6 +499,9 @@ static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 			goto out;
 		}
 	} while (selret < 1);
+
+	LOGWARNING("%s connector ready", ckp->name);
+
 retry:
 	close(sockd);
 	sockd = accept(us->sockd, NULL, NULL);
@@ -594,6 +597,8 @@ int connector(proc_instance_t *pi)
 	conn_instance_t ci;
 	const int on = 1;
 	int tries = 0;
+
+	LOGWARNING("%s connector starting", ckp->name);
 
 	if (ckp->serverurl) {
 		if (!extract_sockaddr(ckp->serverurl, &url, &port)) {
