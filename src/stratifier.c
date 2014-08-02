@@ -712,6 +712,7 @@ static void update_notify(ckpool_t *ckp)
 		 workpadding);
 	LOGDEBUG("Header: %s", header);
 	hex2bin(wb->headerbin, header, 112);
+	wb->txn_hashes = ckzalloc(1);
 
 	ck_rlock(&workbase_lock);
 	strcpy(wb->enonce1const, proxy_base.enonce1);
