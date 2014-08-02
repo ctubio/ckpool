@@ -374,6 +374,7 @@ CREATE TABLE userstats (
     hashrate1hr float NOT NULL,
     hashrate24hr float NOT NULL,
     summarylevel char NOT NULL,
+    summarycount integer NOT NULL,
     statsdate timestamp with time zone NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
