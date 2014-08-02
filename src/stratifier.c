@@ -413,9 +413,17 @@ static void purge_share_hashtable(int64_t wb_id)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
 }
 
+static char *status_chars = "|/-\\";
+
 static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
 {
+	static int counter = 0;
 	ckdb_msg_t *msg;
+	char ch;
+
+	ch = status_chars[(counter++) & 0x3];
+	fprintf(stdout, "%c\r", ch);
+	fflush(stdout);
 
 	if (ckp->standalone)
 		return json_decref(val);
