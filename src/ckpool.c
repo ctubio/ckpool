@@ -195,14 +195,14 @@ retry:
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
 		send_unix_msg(sockd, "failed");
-	} else if (!strncasecmp(buf, "shutdown", 8)) {
+	} else if (cmdmatch(buf, "shutdown")) {
 		LOGWARNING("Listener received shutdown message, terminating ckpool");
 		send_unix_msg(sockd, "exiting");
 		goto out;
-	} else if (!strncasecmp(buf, "ping", 4)) {
+	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Listener received ping request");
 		send_unix_msg(sockd, "pong");
-	} else if (!strncasecmp(buf, "loglevel", 8)) {
+	} else if (cmdmatch(buf, "loglevel")) {
 		int loglevel;
 
 		if (sscanf(buf, "loglevel=%d", &loglevel) != 1) {
@@ -216,7 +216,7 @@ retry:
 			broadcast_proc(ckp, buf);
 			send_unix_msg(sockd, "success");
 		}
-	} else if (!strncasecmp(buf, "getfd", 5)) {
+	} else if (cmdmatch(buf, "getfd")) {
 		char *msg;
 
 		msg = send_recv_proc(ckp->connector, "getfd");

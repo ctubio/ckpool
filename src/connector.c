@@ -499,6 +499,9 @@ static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 			goto out;
 		}
 	} while (selret < 1);
+
+	LOGWARNING("%s connector ready", ckp->name);
+
 retry:
 	close(sockd);
 	sockd = accept(us->sockd, NULL, NULL);
@@ -514,30 +517,30 @@ retry:
 		LOGWARNING("Failed to get message in connector_loop");
 		goto retry;
 	}
-	if (!strncasecmp(buf, "ping", 4)) {
+	if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Connector received ping request");
 		send_unix_msg(sockd, "pong");
 		goto retry;
 	}
-	if (!strncasecmp(buf, "accept", 6)) {
+	if (cmdmatch(buf, "accept")) {
 		LOGDEBUG("Connector received accept signal");
 		ci->accept = true;
 		goto retry;
 	}
-	if (!strncasecmp(buf, "reject", 6)) {
+	if (cmdmatch(buf, "reject")) {
 		LOGDEBUG("Connector received reject signal");
 		ci->accept = false;
 		goto retry;
 	}
-	if (!strncasecmp(buf, "loglevel", 8)) {
+	if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 		goto retry;
 	}
 
 	LOGDEBUG("Connector received message: %s", buf);
-	if (!strncasecmp(buf, "shutdown", 8))
+	if (cmdmatch(buf, "shutdown"))
 		goto out;
-	if (!strncasecmp(buf, "dropclient", 10)) {
+	if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
 		int client_id;
 
@@ -556,7 +559,7 @@ retry:
 			LOGINFO("Connector dropped client id: %d", client_id);
 		goto retry;
 	}
-	if (!strncasecmp(buf, "getfd", 5)) {
+	if (cmdmatch(buf, "getfd")) {
 		send_fd(ci->serverfd, sockd);
 		goto retry;
 	}
@@ -594,6 +597,8 @@ int connector(proc_instance_t *pi)
 	conn_instance_t ci;
 	const int on = 1;
 	int tries = 0;
+
+	LOGWARNING("%s connector starting", ckp->name);
 
 	if (ckp->serverurl) {
 		if (!extract_sockaddr(ckp->serverurl, &url, &port)) {

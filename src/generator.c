@@ -193,6 +193,7 @@ static int gen_loop(proc_instance_t *pi)
 	server_instance_t *si = NULL;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
+	bool started = false;
 	char *buf = NULL;
 	connsock_t *cs;
 	gbtbase_t *gbt;
@@ -255,8 +256,13 @@ retry:
 			LOGINFO("No best block hash support from %s:%s",
 				cs->url, cs->port);
 			send_unix_msg(sockd, "Failed");
-		} else
+		} else {
+			if (unlikely(!started)) {
+				started = true;
+				LOGWARNING("%s generator ready", ckp->name);
+			}
 			send_unix_msg(sockd, hash);
+		}
 	} else if (cmdmatch(buf, "getlast")) {
 		int height = get_blockcount(cs);
 
@@ -269,6 +275,11 @@ retry:
 				send_unix_msg(sockd, "Failed");
 				goto reconnect;
 			} else {
+				if (unlikely(!started)) {
+					started = true;
+					LOGWARNING("%s generator ready", ckp->name);
+				}
+
 				send_unix_msg(sockd, hash);
 				LOGDEBUG("Hash: %s", hash);
 			}
@@ -1330,6 +1341,8 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		proxi->cs = &si->cs;
 	}
 
+	LOGWARNING("%s generator ready", ckp->name);
+
 	ret = proxy_loop(pi);
 
 	for (i = 0; i < ckp->proxies; i++) {
@@ -1357,6 +1370,8 @@ int generator(proc_instance_t *pi)
 {
 	ckpool_t *ckp = pi->ckp;
 	int ret;
+
+	LOGWARNING("%s generator starting", ckp->name);
 
 	if (ckp->proxy)
 		ret = proxy_mode(ckp, pi);

@@ -413,9 +413,23 @@ static void purge_share_hashtable(int64_t wb_id)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
 }
 
-static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
+static char *status_chars = "|/-\\";
+
+static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char *file,
+		      const char *func, const int line)
 {
+	static int counter = 0;
 	ckdb_msg_t *msg;
+	char ch;
+
+	ch = status_chars[(counter++) & 0x3];
+	fprintf(stdout, "%c\r", ch);
+	fflush(stdout);
+
+	if (!val) {
+		LOGWARNING("Invalid json sent to ckdbq_add from %s %s:%d", file, func, line);
+		return;
+	}
 
 	if (ckp->standalone)
 		return json_decref(val);
@@ -425,6 +439,8 @@ static void ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val)
 	msg->idtype = idtype;
 	ckmsgq_add(ckdbq, msg);
 }
+
+#define ckdbq_add(ckp, idtype, val) _ckdbq_add(ckp, idtype, val, __FILE__, __func__, __LINE__)
 
 static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 {
@@ -696,6 +712,7 @@ static void update_notify(ckpool_t *ckp)
 		 workpadding);
 	LOGDEBUG("Header: %s", header);
 	hex2bin(wb->headerbin, header, 112);
+	wb->txn_hashes = ckzalloc(1);
 
 	ck_rlock(&workbase_lock);
 	strcpy(wb->enonce1const, proxy_base.enonce1);
@@ -2130,16 +2147,24 @@ out:
 
 static void ckdbq_process(ckpool_t *ckp, ckdb_msg_t *data)
 {
+	static bool failed = false;
 	bool logged = false;
 	char *buf = NULL;
 
 	while (!buf) {
 		buf = json_ckdb_call(ckp, ckdb_ids[data->idtype], data->val, logged);
 		if (unlikely(!buf)) {
-			LOGWARNING("Failed to talk to ckdb, queueing messages");
+			if (!failed) {
+				failed = true;
+				LOGWARNING("Failed to talk to ckdb, queueing messages");
+			}
 			sleep(5);
 		}
 		logged = true;
+	}
+	if (failed) {
+		failed = false;
+		LOGWARNING("Successfully resumed talking to ckdb");
 	}
 	LOGINFO("Got %s ckdb response: %s", ckdb_ids[data->idtype], buf);
 	free(buf);
@@ -2426,6 +2451,8 @@ int stratifier(proc_instance_t *pi)
 	char *buf;
 	int ret;
 
+	LOGWARNING("%s stratifier starting", ckp->name);
+
 	/* Store this for use elsewhere */
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
@@ -2463,6 +2490,8 @@ int stratifier(proc_instance_t *pi)
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	cklock_init(&share_lock);
+
+	LOGWARNING("%s stratifier ready", ckp->name);
 
 	ret = stratum_loop(ckp, pi);
 out:
