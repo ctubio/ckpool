@@ -1142,7 +1142,7 @@ void logmsg(int loglevel, const char *fmt, ...)
 	time_t now_t;
 	va_list ap;
 	char stamp[128];
-	char *extra = "";
+	char *extra = EMPTY;
 
 	now_t = time(NULL);
 	tm = localtime(&now_t);
@@ -1291,7 +1291,7 @@ static K_ITEM *_require_name(char *name, int len, char *patt, char *reply,
 		dlen = 0;
 	if (!value || (int)dlen < len) {
 		LOGERR("%s(): failed, field '%s' short (%s%d<%d) from %s():%d",
-			__func__, name, value ? "" : "null",
+			__func__, name, value ? EMPTY : "null",
 			(int)dlen, len, func, line);
 		snprintf(reply, siz, "failed.short %s", name);
 		return NULL;
@@ -2728,6 +2728,10 @@ unparam:
 		free(row->merklehash);
 		k_add_head(workinfo_free, item);
 	} else {
+		// Not currently needed in RAM
+		free(row->transactiontree);
+		row->transactiontree = strdup(EMPTY);
+
 		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
 		k_add_head(workinfo_store, item);
 
@@ -2837,7 +2841,7 @@ static bool workinfo_fill(PGconn *conn)
 	int par;
 	char *field;
 	char *sel;
-	int fields = 11;
+	int fields = 10;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
@@ -2846,7 +2850,8 @@ static bool workinfo_fill(PGconn *conn)
 	//  however, the ageing rules for workinfo will decide that also
 	//  keep the last block + current?
 	sel = "select "
-		"workinfoid,poolinstance,transactiontree,merklehash,prevhash,"
+//		"workinfoid,poolinstance,transactiontree,merklehash,prevhash,"
+		"workinfoid,poolinstance,merklehash,prevhash,"
 		"coinbase1,coinbase2,version,bits,ntime,reward"
 		HISTORYDATECONTROL
 		" from workinfo where expirydate=$1";
@@ -2887,10 +2892,13 @@ static bool workinfo_fill(PGconn *conn)
 			break;
 		TXT_TO_STR("poolinstance", field, row->poolinstance);
 
+/* Not currently needed in RAM
 		PQ_GET_FLD(res, i, "transactiontree", field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BLOB("transactiontree", field, row->transactiontree);
+*/
+		row->transactiontree = strdup(EMPTY);
 
 		PQ_GET_FLD(res, i, "merklehash", field, ok);
 		if (!ok)
@@ -6286,8 +6294,8 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 		userstats.statsdate.tv_sec = date_eot.tv_sec;
 		userstats.statsdate.tv_usec = date_eot.tv_usec;
 		// find/cmp doesn't get to here
-		STRNCPY(userstats.poolinstance, "");
-		STRNCPY(userstats.workername, "");
+		STRNCPY(userstats.poolinstance, EMPTY);
+		STRNCPY(userstats.workername, EMPTY);
 		look.data = (void *)(&userstats);
 		K_RLOCK(userstats_free);
 		us_item = find_before_in_ktree(userstats_root, &look, cmp_userstats, ctx);
@@ -6645,7 +6653,7 @@ static enum cmd_values breakdown(char *buf, int *which_cmds, char *cmd, char *id
 
 			eq = strchr(data, '=');
 			if (!eq)
-				eq = "";
+				eq = EMPTY;
 			else
 				*(eq++) = '\0';
 
