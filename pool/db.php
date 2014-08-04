@@ -88,7 +88,8 @@ function homeInfo($user)
 	if ($ans['lastblock'] == '?')
 	{
 //		$ans['lastblock'] = 1401237522;
-		$ans['lastblock'] = 1403819191;
+//		$ans['lastblock'] = 1403819191;
+		$ans['lastblock'] = 1407113822;
 	}
  }
 
