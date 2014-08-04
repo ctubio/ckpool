@@ -831,40 +831,51 @@ json_t *json_object_dup(json_t *val, const char *entry)
 	return json_copy(json_object_get(val, entry));
 }
 
+char *rotating_filename(const char *path, time_t when)
+{
+	char *filename;
+	struct tm *tm;
+
+	tm = localtime(&when);
+	ASPRINTF(&filename, "%s%04d%02d%02d%02d.log", path, tm->tm_year + 1900, tm->tm_mon + 1,
+		 tm->tm_mday, tm->tm_hour);
+	return filename;
+}
+
 /* Creates a logfile entry which changes filename hourly with exclusive access */
 bool rotating_log(const char *path, const char *msg)
 {
 	mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 	char *filename;
-	struct tm *tm;
-	time_t now;
 	FILE *fp;
 	int fd;
+	bool ok = false;
 
-	now = time(NULL);
-	tm = localtime(&now);
-	ASPRINTF(&filename, "%s%04d%02d%02d%02d.log", path, tm->tm_year + 1900, tm->tm_mon + 1,
-		 tm->tm_mday, tm->tm_hour);
+	filename = rotating_filename(path, time(NULL));
 	fd = open(filename, O_CREAT|O_RDWR, mode);
 	if (unlikely(fd == -1)) {
 		LOGERR("Failed to open %s in rotating_log!", filename);
-		return false;
+		goto stageleft;
 	}
 	fp = fdopen(fd, "a");
 	if (unlikely(!fp)) {
 		close(fd);
 		LOGERR("Failed to fopen %s in rotating_log!", filename);
-		return false;
+		goto stageleft;
 	}
 	if (unlikely(flock(fd, LOCK_EX))) {
 		fclose(fp);
 		LOGERR("Failed to flock %s in rotating_log!", filename);
-		return false;
+		goto stageleft;
 	}
 	fprintf(fp, "%s\n", msg);
 	fclose(fp);
+	ok = true;
 
-	return true;
+stageleft:
+	free(filename);
+
+	return ok;
 }
 
 /* Align a size_t to 4 byte boundaries for fussy arches */

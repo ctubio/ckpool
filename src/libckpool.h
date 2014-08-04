@@ -396,6 +396,7 @@ const char *__json_array_string(json_t *val, unsigned int entry);
 char *json_array_string(json_t *val, unsigned int entry);
 json_t *json_object_dup(json_t *val, const char *entry);
 
+char *rotating_filename(const char *path, time_t when);
 bool rotating_log(const char *path, const char *msg);
 
 void align_len(size_t *len);
