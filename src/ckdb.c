@@ -6388,7 +6388,7 @@ static char *cmd_stats(char *cmd, char *id, __maybe_unused tv_t *now,
 	klist = _obj ## _free; \
 	ram = sizeof(K_LIST) + _stores * sizeof(K_STORE) + \
 		klist->allocate * klist->item_mem_count * klist->siz + \
-		sizeof(K_TREE) * klist->count * _trees; \
+		sizeof(K_TREE) * (klist->total - klist->count) * _trees; \
 	snprintf(tmp, sizeof(tmp), \
 		 "%cname%d=" #_obj "%callocated%d=%d%cstore%d=%d" \
 		 "%ctrees%d=%d%cram%d=%"PRIu64, \
