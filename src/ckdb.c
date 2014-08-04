@@ -6337,7 +6337,7 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	return buf;
 }
 
-static __maybe_unused char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *now,
+static char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *now,
 				    __maybe_unused char *by, __maybe_unused char *code,
 				    __maybe_unused char *inet)
 {
@@ -6366,6 +6366,62 @@ static __maybe_unused char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *no
 */
 }
 
+static char *cmd_stats(char *cmd, char *id, __maybe_unused tv_t *now,
+				    __maybe_unused char *by, __maybe_unused char *code,
+				    __maybe_unused char *inet)
+{
+	char tmp[1024], *buf;
+	size_t len, off;
+	uint64_t ram, tot = 0;
+	K_LIST *klist;
+	int i = 0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	APPEND_REALLOC(buf, off, len, cmd);
+
+// Doesn't include blob memory
+// - average transactiontree length of ~119k I have is ~28k (>3.3GB)
+#define USEINFO(_obj, _stores, _trees) \
+	klist = _obj ## _free; \
+	ram = sizeof(K_LIST) + _stores * sizeof(K_STORE) + \
+		klist->allocate * klist->item_mem_count * klist->siz + \
+		sizeof(K_TREE) * klist->count * _trees; \
+	snprintf(tmp, sizeof(tmp), \
+		 "%cname%d=" #_obj "%callocated%d=%d%cstore%d=%d" \
+		 "%ctrees%d=%d%cram%d=%"PRIu64, \
+		 i ? FLDSEP : '.', i, \
+		 FLDSEP, i, klist->total, \
+		 FLDSEP, i, klist->total - klist->count, \
+		 FLDSEP, i, _trees, \
+		 FLDSEP, i, ram); \
+	APPEND_REALLOC(buf, off, len, tmp); \
+	tot += ram; \
+	i++;
+
+	USEINFO(users, 1, 2);
+	USEINFO(workers, 1, 1);
+	USEINFO(payments, 1, 1);
+	USEINFO(idcontrol, 1, 0);
+	USEINFO(workinfo, 1, 1);
+	USEINFO(shares, 1, 1);
+	USEINFO(shareerrors, 1, 1);
+	USEINFO(sharesummary, 1, 2);
+	USEINFO(blocks, 1, 1);
+	USEINFO(auths, 1, 1);
+	USEINFO(poolstats, 1, 1);
+	USEINFO(userstats, 4, 2);
+	USEINFO(workerstatus, 1, 1);
+
+	snprintf(tmp, sizeof(tmp), "%ctotalram=%"PRIu64, FLDSEP, tot);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%s...", id, cmd);
+	return buf;
+}
+
 enum cmd_values {
 	CMD_UNSET,
 	CMD_REPLY, // Means something was wrong - send back reply
@@ -6384,6 +6440,7 @@ enum cmd_values {
 	CMD_ALLUSERS,
 	CMD_HOMEPAGE,
 	CMD_DSP,
+	CMD_STATS,
 	CMD_END
 };
 
@@ -6419,6 +6476,7 @@ static struct CMDS {
 	{ CMD_ALLUSERS,	"allusers",		false,	cmd_allusers,	ACCESS_WEB },
 	{ CMD_HOMEPAGE,	"homepage",		false,	cmd_homepage,	ACCESS_WEB },
 	{ CMD_DSP,	"dsp",			false,	cmd_dsp,	ACCESS_SYSTEM },
+	{ CMD_STATS,	"stats",		true,	cmd_stats,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,			false,	NULL,		NULL }
 };
 
