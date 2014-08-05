@@ -192,6 +192,8 @@ static K_STORE *userstats_db;
 ASSERT1(sizeof(long long) == 8);
 ASSERT2(sizeof(int64_t) == 8);
 
+#define MAXID 0x7fffffffffffffffLL
+
 #define PGOK(_res) ((_res) == PGRES_COMMAND_OK || \
 			(_res) == PGRES_TUPLES_OK || \
 			(_res) == PGRES_EMPTY_QUERY)
@@ -343,7 +345,7 @@ static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 
 // All data will be after: 2-Jan-2014 00:00:00+00
 #define DATE_BEGIN 1388620800L
-static const tv_t date_first = { DATE_BEGIN, 0L };
+static const tv_t date_begin = { DATE_BEGIN, 0L };
 
 #define HISTORYDATEINIT(_row, _cd, _by, _code, _inet) do { \
 		_row->createdate.tv_sec = (_cd)->tv_sec; \
@@ -1812,7 +1814,7 @@ static void workerstatus_ready()
 
 		sharesummary.userid = DATA_WORKERSTATUS(ws_item)->userid;
 		STRNCPY(sharesummary.workername, DATA_WORKERSTATUS(ws_item)->workername);
-		sharesummary.workinfoid = 0x7fffffffffffffffLL;
+		sharesummary.workinfoid = MAXID;
 		look.data = (void *)(&sharesummary);
 		ss_item = find_before_in_ktree(sharesummary_root, &look, cmp_sharesummary, ss_ctx);
 		if (ss_item) {
