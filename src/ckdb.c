@@ -342,8 +342,8 @@ static const tv_t default_expiry = { DEFAULT_EXPIRY, 0L };
 static const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 
 // All data will be after: 2-Jan-2014 00:00:00+00
-#define DATE_DEBUG 1388620800L
-static const tv_t date_first = { DATE_DEBUG, 0L };
+#define DATE_BEGIN 1388620800L
+static const tv_t date_first = { DATE_BEGIN, 0L };
 
 #define HISTORYDATEINIT(_row, _cd, _by, _code, _inet) do { \
 		_row->createdate.tv_sec = (_cd)->tv_sec; \
@@ -5314,8 +5314,8 @@ static bool reload()
 	if (!tv_newer(&start, &(dbstatus.userstats)))
 		copy_tv(&start, &(dbstatus.userstats));
 
-	if (start.tv_sec < DATE_DEBUG) {
-		start.tv_sec = DATE_DEBUG;
+	if (start.tv_sec < DATE_BEGIN) {
+		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
 	}
 	ok = reload_from(&start);
