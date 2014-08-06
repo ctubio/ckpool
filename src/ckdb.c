@@ -7412,7 +7412,6 @@ jilted:
 // 10Mb for now
 #define MAX_READ (10 * 1024 * 1024)
 
-// TODO: be able to specify a start time on the command line
 /* To handle a new database with no data:
  *	touch the filename reported in "Failed to open 'filename'"
  *	when ckdb aborts */
@@ -7483,6 +7482,11 @@ static bool reload_from(tv_t *start)
 				now.tv_sec += ROLL_S;
 				while (42) {
 					start->tv_sec += ROLL_S;
+					/* WARNING: if the system clock is wrong, any CCLs
+					 * missing or not created due to a ckpool outage of
+					 * an hour or more can stop the reload early and
+					 * cause DB problems! Though, the clock being wrong
+					 * can screw up ckpool and ckdb anyway ... */
 					if (!tv_newer(start, &now)) {
 						finished = true;
 						break;
