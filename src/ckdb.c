@@ -7370,7 +7370,7 @@ static bool reload_from(tv_t *start)
 	char *missing, *missing2;
 	int missing_count;
 	int processing;
-	bool ok = true;
+	bool ok = true, finished = false;
 	char *filename;
 	char data[MAX_READ];
 	uint64_t count, total;
@@ -7394,7 +7394,7 @@ static bool reload_from(tv_t *start)
 
 	total = 0;
 	processing = 0;
-	while (ok) {
+	while (ok && !finished) {
 		LOGWARNING("%s(): processing %s", __func__, filename);
 		processing++;
 		count = 0;
@@ -7431,7 +7431,7 @@ static bool reload_from(tv_t *start)
 				while (42) {
 					start->tv_sec += ROLL_S;
 					if (!tv_newer(start, &now)) {
-						ok = false;
+						finished = true;
 						break;
 					}
 					filename = rotating_filename(restorefrom, start->tv_sec);
