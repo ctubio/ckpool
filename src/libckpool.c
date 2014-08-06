@@ -270,7 +270,6 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 		LOGWARNING("Null length url string passed to extract_sockaddr");
 		return false;
 	}
-	*sockaddr_url = url;
 	url_begin = strstr(url, "//");
 	if (!url_begin)
 		url_begin = url;
