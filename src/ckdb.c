@@ -84,8 +84,9 @@ static char *restorefrom;
  *  Thus we can queue all messages:
  *	workinfo, shares, shareerror, ageworkinfo, poolstats, userstats
  *	and block
- *  to be processed after the reload completes and just process authorise
- *  messages immediately while the reload runs
+ *  with an ok.queued reply to ckpool, to be processed after the reload
+ *  completes and just process authorise messages immediately while the
+ *  reload runs
  *  This can't cause a duplicate process of an authorise message since a
  *  reload will ignore any messages before the last DB auths message,
  *  however, if ckdb and ckpool get out of sync due to ckpool starting
@@ -106,16 +107,18 @@ static char *restorefrom;
  *  1) the disk had not yet written it to the CCL when ckdb read EOF and
  *	ckpool was started at about the same time as the reload completed.
  *	This can be seen if the message displayed in the fatal error IS NOT
- *	in ckdb's message logfile. A ckdb restart will resolve this
+ *	in ckdb's message logfile.
+ *	A ckdb restart will resolve this
  *  2) ckpool was started at the time of the end of the reload, but the
- *	authorise message was written to disk and found in the CCL before
- *	it was processed in the message queue. This can be seen if the
- *	message displayed in the fatal error IS in ckdb's message logfile
- *	and means the messages after it in the logfile have already been
- *	processed. Again, a ckdb restart will resolve this
+ *	message was written to disk and found in the CCL before it was
+ *	processed in the message queue.
+ *	This can be seen if the message displayed in the fatal error IS in
+ *	ckdb's message logfile and means the messages after it in the
+ *	logfile have already been processed.
+ *	Again, a ckdb restart will resolve this
  *  In both the above (very rare) cases, if ckdb was to continue running,
  *  it would break the synchronisation and could cause DB problems, so
- *  ckdb aborting and needing a restart resolves this
+ *  ckdb aborting and needing a complete restart resolves it
  * The users table, required for the authorise messages, is always updated
  *  immediately and is not affected by ckpool messages until we
  *   TODO: allow bitcoin addresses - this will also need to be handled
