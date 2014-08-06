@@ -44,7 +44,7 @@
  * */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.5"
+#define DB_VERSION "0.6"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
