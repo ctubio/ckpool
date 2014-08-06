@@ -7386,10 +7386,11 @@ static bool reload_line(char *filename, uint64_t count, char *buf)
 		switch (cmdnum) {
 			// Ignore
 			case CMD_REPLY:
-			// Shouldn't be there, but ignore also
+				break;
+			// Shouldn't be there
 			case CMD_SHUTDOWN:
 			case CMD_PING:
-			// Non pool commands, shouldn't be there, ignore
+			// Non pool commands, shouldn't be there
 			case CMD_ADDUSER:
 			case CMD_CHKPASS:
 			case CMD_NEWID:
