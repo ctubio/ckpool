@@ -72,10 +72,63 @@ static char *status_chars = "|/-\\";
 
 static char *restorefrom;
 
-/* Restart data needed
- * -------------------
- * After the DB load, load "ckpool's ckdb logfile" (CCL), and all
- * later CCLs, that contains the oldest date of all of the following:
+/* Startup
+ * -------
+ * During startup we load the DB and track where it is up to with
+ *  dbstatus, we then reload "ckpool's ckdb logfiles" (CCLs) based
+ *  on dbstatus
+ *TODO:
+ * Once the DB is loaded, we can immediately start receiving ckpool
+ *  messages since ckpool already has logged all messages to the CLLs
+ *  and ckpool only verifies authorise responses
+ *  Thus we can queue all messages:
+ *	workinfo, shares, shareerror, ageworkinfo, poolstats, userstats
+ *	and block
+ *  to be processed after the reload completes and just process authorise
+ *  messages immediately while the reload runs
+ *  This can't cause a duplicate process of an authorise message since a
+ *  reload will ignore any messages before the last DB auths message,
+ *  however, if ckdb and ckpool get out of sync due to ckpool starting
+ *  during the reload (as mentioned below) it is possible for ckdb to
+ *  find an authorise message in the CCLs that was processed in the
+ *  message queue and thus is already in the DB.
+ *  This error would be very rare and also not an issue
+ * The first ckpool message also allows us to know where ckpool is up to
+ *  in the CCLs and thus where to stop processing the CCLs to stay in
+ *  sync with ckpool
+ * If ckpool isn't running, then the reload will complete at the end of
+ *  the last CCL file, however if a message arrives from ckpool while
+ *  processing the CCLs, that will mark the point where to stop processing
+ *  but can also produce a fatal error at the end of processing, reporting
+ *  the full ckpool message, if the message was not found in the CCL
+ *  processing after the message was received
+ *  This can be caused by two circumstances:
+ *  1) the disk had not yet written it to the CCL when ckdb read EOF and
+ *	ckpool was started at about the same time as the reload completed.
+ *	This can be seen if the message displayed in the fatal error IS NOT
+ *	in ckdb's message logfile. A ckdb restart will resolve this
+ *  2) ckpool was started at the time of the end of the reload, but the
+ *	authorise message was written to disk and found in the CCL before
+ *	it was processed in the message queue. This can be seen if the
+ *	message displayed in the fatal error IS in ckdb's message logfile
+ *	and means the messages after it in the logfile have already been
+ *	processed. Again, a ckdb restart will resolve this
+ *  In both the above (very rare) cases, if ckdb was to continue running,
+ *  it would break the synchronisation and could cause DB problems, so
+ *  ckdb aborting and needing a restart resolves this
+ * The users table, required for the authorise messages, is always updated
+ *  immediately and is not affected by ckpool messages until we
+ *   TODO: allow bitcoin addresses - this will also need to be handled
+ *    while filling the queue during reload, once we allow BTC addresses
+ * During the reload we can use the userstats createdate as 'now' for
+ *  the userstats summarisation process to allow the summarisation to
+ *  run during the reload
+ */
+
+/* Reload data needed
+ * ------------------
+ * After the DB load completes, load "ckpool's ckdb logfile" (CCL), and
+ * all later CCLs, that contains the oldest date of all of the following:
  *  RAM shares: oldest DB sharesummary firstshare where complete='n'
  *	All shares before this have been summarised to the DB with
  *	complete='a' (or 'y') and were deleted from RAM
@@ -108,7 +161,7 @@ static char *restorefrom;
  *	will be after the last DB workinfo
  *  DB+RAM accountbalance (TODO): resolved by shares/workinfo/blocks
  *  RAM workerstatus: last_auth, last_share, last_stats all handled by
- *	DB load up to whatever the CCL restart point is, and then
+ *	DB load up to whatever the CCL reload point is, and then
  *	corrected with the CCL reload
  *	last_idle will be the last idle userstats in the CCL load or 0
  *	Code currently doesn't use last_idle, so for now this is OK
@@ -161,7 +214,7 @@ typedef struct loadstatus {
 } LOADSTATUS;
 static LOADSTATUS dbstatus;
 
-/* Temporary while doing restart - it (of course) contains the fields
+/* Temporary while doing reload - it (of course) contains the fields
  * required to track the newest userstats per user/worker
  */
 static K_TREE *userstats_db_root;
@@ -2878,7 +2931,7 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 static double cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
 static double cmp_shares(K_ITEM *a, K_ITEM *b);
 
-/* N.B. a DB check can be done to find sharesummaries that were missed being
+/* N.B. a DB check can be done to find sharesummaries that have missed being
  *  aged (and a possible problem with the aging process):
  *  e.g. for a date D in the past of at least a few hours
  *	select count(*) from sharesummary where createdate<'D' and complete='n';
@@ -2886,7 +2939,7 @@ static double cmp_shares(K_ITEM *a, K_ITEM *b);
  *	update sharesummary set complete='a' where createdate<'D' and complete='n';
  * It's important to make sure the D value is far enough in the past such that
  *  all the matching sharesummary records in ckdb have certainly completed
- *  ckdb would need a restart to get the updated DB information though it would
+ *  ckdb would need to restart to get the updated DB information though it would
  *  not affect current ckdb code
  */
 static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
