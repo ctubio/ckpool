@@ -155,8 +155,8 @@ retry:
 		/* Test we can connect, authorise and get a block template */
 		gbt = si->data;
 		if (!gen_gbtbase(cs, gbt)) {
-			LOGINFO("Failed to get test block template from %s:%s auth %s !",
-				cs->url, cs->port, userpass);
+			LOGINFO("Failed to get test block template from %s:%s!",
+				cs->url, cs->port);
 			continue;
 		}
 		clear_gbtbase(gbt);
