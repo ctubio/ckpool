@@ -1572,7 +1572,6 @@ static void _txt_to_double(char *nam, char *fld, double *data, size_t siz, WHERE
 static char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
 	struct tm tm;
-	char *buf2;
 
 	if (!buf) {
 		switch (typ) {
@@ -1619,16 +1618,15 @@ static char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz,
 			snprintf(buf, siz, "%"PRId32, *((uint32_t *)data));
 			break;
 		case TYPE_TV:
-			buf2 = malloc(siz);
-			if (!buf2) {
-				quithere(1, "OOM (%d)" WHERE_FFL,
-						(int)siz, WHERE_FFL_PASS);
-			}
-			localtime_r(&(((struct timeval *)data)->tv_sec), &tm);
-			strftime(buf2, siz, "%Y-%m-%d %H:%M:%S", &tm);
-			snprintf(buf, siz, "%s.%06ld", buf2,
+			gmtime_r(&(((struct timeval *)data)->tv_sec), &tm);
+			snprintf(buf, siz, "%d-%02d-%02d %02d:%02d:%02d.%06ld+00",
+					   tm.tm_year + 1900,
+					   tm.tm_mon + 1,
+					   tm.tm_mday,
+					   tm.tm_hour,
+					   tm.tm_min,
+					   tm.tm_sec,
 					   (((struct timeval *)data)->tv_usec));
-			free(buf2);
 			break;
 		case TYPE_CTV:
 			snprintf(buf, siz, "%ld,%ld",
