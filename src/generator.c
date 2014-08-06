@@ -155,8 +155,8 @@ retry:
 		/* Test we can connect, authorise and get a block template */
 		gbt = si->data;
 		if (!gen_gbtbase(cs, gbt)) {
-			LOGINFO("Failed to get test block template from %s:%s auth %s !",
-				cs->url, cs->port, userpass);
+			LOGINFO("Failed to get test block template from %s:%s!",
+				cs->url, cs->port);
 			continue;
 		}
 		clear_gbtbase(gbt);
@@ -181,10 +181,18 @@ out:
 
 static void kill_server(server_instance_t *si)
 {
+	connsock_t *cs;
+
 	if (!si)
 		return;
-	close(si->cs.fd);
-	si->cs.fd = -1;
+	cs = &si->cs;
+	close(cs->fd);
+	cs->fd = -1;
+	dealloc(cs->url);
+	dealloc(cs->port);
+	dealloc(cs->auth);
+	dealloc(si->data);
+	dealloc(si);
 }
 
 static int gen_loop(proc_instance_t *pi)
@@ -1304,14 +1312,9 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 
 	ret = gen_loop(pi);
 
-	for (i = 0; i < ckp->btcds; si = ckp->servers[i], i++) {
-		connsock_t *cs = &si->cs;
-
-		dealloc(cs->url);
-		dealloc(cs->port);
-		dealloc(cs->auth);
-		dealloc(si->data);
-		dealloc(si);
+	for (i = 0; i < ckp->btcds; i++) {
+		si = ckp->servers[i];
+		kill_server(si);
 	}
 	dealloc(ckp->servers);
 	return ret;
