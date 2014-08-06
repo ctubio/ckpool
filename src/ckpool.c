@@ -63,7 +63,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 	if (global_ckp->loglevel >= loglevel && fmt) {
 		int logfd = global_ckp->logfd;
 		char *buf = NULL;
-		struct tm *tm;
+		struct tm tm;
 		time_t now_t;
 		va_list ap;
 		char stamp[128];
@@ -73,14 +73,14 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		va_end(ap);
 
 		now_t = time(NULL);
-		tm = localtime(&now_t);
+		localtime_r(&now_t, &tm);
 		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d]",
-				tm->tm_year + 1900,
-				tm->tm_mon + 1,
-				tm->tm_mday,
-				tm->tm_hour,
-				tm->tm_min,
-				tm->tm_sec);
+				tm.tm_year + 1900,
+				tm.tm_mon + 1,
+				tm.tm_mday,
+				tm.tm_hour,
+				tm.tm_min,
+				tm.tm_sec);
 		if (logfd) {
 			char *msg;
 

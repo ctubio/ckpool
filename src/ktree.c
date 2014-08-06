@@ -129,20 +129,20 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL
 	K_TREE_CTX ctx[1];
 	K_ITEM *item;
 	FILE *stream;
-	struct tm *tm;
+	struct tm tm;
 	time_t now_t;
 	char stamp[128];
 
 	now_t = time(NULL);
-	tm = localtime(&now_t);
+	localtime_r(&now_t, &tm);
 	snprintf(stamp, sizeof(stamp),
 			"[%d-%02d-%02d %02d:%02d:%02d]",
-			tm->tm_year + 1900,
-			tm->tm_mon + 1,
-			tm->tm_mday,
-			tm->tm_hour,
-			tm->tm_min,
-			tm->tm_sec);
+			tm.tm_year + 1900,
+			tm.tm_mon + 1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec);
 
 	stream = fopen(filename, "a");
 	if (!stream)

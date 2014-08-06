@@ -1222,22 +1222,22 @@ void logmsg(int loglevel, const char *fmt, ...)
 {
 	int logfd = 0;
 	char *buf = NULL;
-	struct tm *tm;
+	struct tm tm;
 	time_t now_t;
 	va_list ap;
 	char stamp[128];
 	char *extra = EMPTY;
 
 	now_t = time(NULL);
-	tm = localtime(&now_t);
+	localtime_r(&now_t, &tm);
 	snprintf(stamp, sizeof(stamp),
 			"[%d-%02d-%02d %02d:%02d:%02d]",
-			tm->tm_year + 1900,
-			tm->tm_mon + 1,
-			tm->tm_mday,
-			tm->tm_hour,
-			tm->tm_min,
-			tm->tm_sec);
+			tm.tm_year + 1900,
+			tm.tm_mon + 1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec);
 
 	if (!fmt) {
 		fprintf(stderr, "%s %s() called without fmt\n", stamp, __func__);
@@ -1440,16 +1440,17 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 						nam, (int)siz, (int)sizeof(tv_t), WHERE_FFL_PASS);
 			}
 			unsigned int yyyy, mm, dd, HH, MM, SS, uS = 0, tz;
+			char pm[2];
 			struct tm tm;
 			time_t tim;
 			int n;
-			n = sscanf(fld, "%u-%u-%u %u:%u:%u+%u",
-					&yyyy, &mm, &dd, &HH, &MM, &SS, &tz);
-			if (n != 7) {
+			n = sscanf(fld, "%u-%u-%u %u:%u:%u%1[+-]%u",
+					&yyyy, &mm, &dd, &HH, &MM, &SS, pm, &tz);
+			if (n != 8) {
 				// allow uS
-				n = sscanf(fld, "%u-%u-%u %u:%u:%u.%u+%u",
-						&yyyy, &mm, &dd, &HH, &MM, &SS, &uS, &tz);
-				if (n != 8) {
+				n = sscanf(fld, "%u-%u-%u %u:%u:%u.%u%1[+-]%u",
+						&yyyy, &mm, &dd, &HH, &MM, &SS, &uS, pm, &tz);
+				if (n != 9) {
 					quithere(1, "Field %s timeval unhandled date '%s' (%d)" WHERE_FFL,
 						 nam, fld, n, WHERE_FFL_PASS);
 				}
@@ -1461,12 +1462,19 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 			tm.tm_mon = (int)mm - 1;
 			tm.tm_year = (int)yyyy - 1900;
 			tm.tm_isdst = -1;
-			tim = mktime(&tm);
-			// Fix TZ offsets errors
+			tim = timegm(&tm);
 			if (tim > COMPARE_EXPIRY) {
 				((tv_t *)data)->tv_sec = default_expiry.tv_sec;
 				((tv_t *)data)->tv_usec = default_expiry.tv_usec;
 			} else {
+				// 2 digit tz (vs 4 digit)
+				if (tz < 25)
+					tz *= 60;
+				// time was converted ignoring tz - so correct it
+				if (pm[0] == '-')
+					tim += 60 * tz;
+				else
+					tim -= 60 * tz;
 				((tv_t *)data)->tv_sec = tim;
 				((tv_t *)data)->tv_usec = uS;
 			}

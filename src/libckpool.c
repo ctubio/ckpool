@@ -834,11 +834,11 @@ json_t *json_object_dup(json_t *val, const char *entry)
 char *rotating_filename(const char *path, time_t when)
 {
 	char *filename;
-	struct tm *tm;
+	struct tm tm;
 
-	tm = localtime(&when);
-	ASPRINTF(&filename, "%s%04d%02d%02d%02d.log", path, tm->tm_year + 1900, tm->tm_mon + 1,
-		 tm->tm_mday, tm->tm_hour);
+	gmtime_r(&when, &tm);
+	ASPRINTF(&filename, "%s%04d%02d%02d%02d.log", path, tm.tm_year + 1900, tm.tm_mon + 1,
+		 tm.tm_mday, tm.tm_hour);
 	return filename;
 }
 
