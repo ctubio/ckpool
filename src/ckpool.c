@@ -273,6 +273,12 @@ retry:
 			close(connfd);
 		} else
 			LOGWARNING("Failed to send_procmsg to connector");
+	} else if (cmdmatch(buf, "restart")) {
+		if (!fork()) {
+			ckp->initial_args[ckp->args++] = strdup("-H");
+			ckp->initial_args[ckp->args] = NULL;
+			execv(ckp->initial_args[0], (char *const *)ckp->initial_args);
+		}
 	} else {
 		LOGINFO("Listener received unhandled message: %s", buf);
 		send_unix_msg(sockd, "unknown");
@@ -1072,6 +1078,10 @@ int main(int argc, char **argv)
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
+	ckp.initial_args = ckalloc(sizeof(char *) * (argc + 2)); /* Leave room for extra -H */
+	for (ckp.args = 0; ckp.args < argc; ckp.args++)
+		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
+	ckp.initial_args[ckp.args] = NULL;
 
 	while ((c = getopt_long(argc, argv, "Ac:d:g:Hhkl:n:pS:s:", long_options, &i)) != -1) {
 		switch (c) {

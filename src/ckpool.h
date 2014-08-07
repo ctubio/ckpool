@@ -79,6 +79,10 @@ struct server_instance {
 typedef struct server_instance server_instance_t;
 
 struct ckpool_instance {
+	/* The initial command line arguments */
+	char **initial_args;
+	/* Number of arguments */
+	int args;
 	/* Filename of config file */
 	char *config;
 	/* Kill old instance with same name */
