@@ -7382,6 +7382,24 @@ static void *summariser(__maybe_unused void *arg)
 	return NULL;
 }
 
+static uint64_t ticks;
+static time_t last_tick;
+
+static void tick()
+{
+	time_t now;
+	char ch;
+
+	now = time(NULL);
+	if (now > last_tick) {
+		last_tick = now;
+		ch = status_chars[ticks++ & 0x3];
+		putchar(ch);
+		putchar('\r');
+		fflush(stdout);
+	}
+}
+
 static bool reload_line(char *filename, uint64_t count, char *buf)
 {
 	char cmd[CMD_SIZ+1], id[ID_SIZ+1];
@@ -7449,10 +7467,7 @@ static bool reload_line(char *filename, uint64_t count, char *buf)
 		}
 	}
 
-	char ch = status_chars[count & 0x3];
-	putchar(ch);
-	putchar('\r');
-	fflush(stdout);
+	tick();
 
 	K_WLOCK(transfer_free);
 	transfer_root = free_ktree(transfer_root, NULL);
@@ -7720,10 +7735,8 @@ static void *listener(void *arg)
 		}
 		close(sockd);
 
-		char ch = status_chars[(counter++) & 0x3];
-		putchar(ch);
-		putchar('\r');
-		fflush(stdout);
+		counter++;
+		tick();
 
 		if (cmdnum == CMD_SHUTDOWN)
 			break;
