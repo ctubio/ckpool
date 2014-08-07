@@ -173,6 +173,15 @@ static void broadcast_proc(ckpool_t *ckp, const char *buf)
 	}
 }
 
+/* Put a sanity check on kill calls to make sure we are not sending them to
+ * pid 0. */
+static int kill_pid(int pid, int sig)
+{
+	if (pid < 1)
+		return -1;
+	return kill(pid, sig);
+}
+
 static int send_procmsg(proc_instance_t *pi, const char *buf)
 {
 	char *path = pi->us.path;
@@ -187,7 +196,7 @@ static int send_procmsg(proc_instance_t *pi, const char *buf)
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
-	if (unlikely(kill(pi->pid, 0))) {
+	if (unlikely(kill_pid(pi->pid, 0))) {
 		LOGALERT("Attempting to send message %s to dead process %s", buf, pi->processname);
 		goto out;
 	}
@@ -380,8 +389,8 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
-	if (unlikely(kill(pi->pid, 0))) {
-		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
+	if (unlikely(kill_pid(pi->pid, 0))) {
+		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
 		goto out;
 	}
 	sockd = open_unix_client(path);
@@ -395,10 +404,8 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		ret = true;
 	close(sockd);
 out:
-	if (unlikely(!ret)) {
+	if (unlikely(!ret))
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
-		childsighandler(15);
-	}
 	return ret;
 }
 
@@ -417,7 +424,7 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
-	if (unlikely(kill(pi->pid, 0))) {
+	if (unlikely(kill_pid(pi->pid, 0))) {
 		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
 		goto out;
 	}
@@ -675,13 +682,13 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		}
 		ret = fscanf(fp, "%d", &oldpid);
 		fclose(fp);
-		if (ret == 1 && !(kill(oldpid, 0))) {
+		if (ret == 1 && !(kill_pid(oldpid, 0))) {
 			if (!ckp->killold) {
 				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
 					 path, oldpid);
 				return false;
 			}
-			if (kill(oldpid, 9)) {
+			if (kill_pid(oldpid, 9)) {
 				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
 				return false;
 			}
@@ -750,7 +757,7 @@ static void childsighandler(int sig)
 
 	LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
 		   sig, global_ckp->name);
-	kill(ppid, sig);
+	kill_pid(ppid, sig);
 }
 
 static void launch_logger(proc_instance_t *pi)
@@ -839,8 +846,8 @@ static void __shutdown_children(ckpool_t *ckp, int sig)
 
 	for (i = 0; i < ckp->proc_instances; i++) {
 		pid_t pid = ckp->children[i]->pid;
-		if (!kill(pid, 0))
-			kill(pid, sig);
+		if (!kill_pid(pid, 0))
+			kill_pid(pid, sig);
 	}
 }
 
