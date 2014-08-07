@@ -331,7 +331,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len += wb->enonce1varlen;
 	len += wb->enonce2varlen;
 
-	wb->coinb2bin = ckalloc(128);
+	wb->coinb2bin = ckzalloc(128);
 	memcpy(wb->coinb2bin, "\x0a\x63\x6b\x70\x6f\x6f\x6c", 7);
 	wb->coinb2len = 7;
 	if (ckp->btcsig) {
