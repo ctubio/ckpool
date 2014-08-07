@@ -1841,7 +1841,7 @@ static json_t *__stratum_notify(bool clean)
 			current_workbase->prevhash,
 			current_workbase->coinb1,
 			current_workbase->coinb2,
-			json_copy(current_workbase->merkle_array),
+			json_deep_copy(current_workbase->merkle_array),
 			current_workbase->bbversion,
 			current_workbase->nbit,
 			current_workbase->ntime,
