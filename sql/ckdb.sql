@@ -390,4 +390,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'0.4');
+insert into version (vlock,version) values (1,'0.6');
