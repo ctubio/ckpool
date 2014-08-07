@@ -7561,6 +7561,7 @@ static bool reload_from(tv_t *start)
 			filename = rotating_filename(restorefrom, start->tv_sec);
 			fp = fopen(filename, "r");
 			if (!fp) {
+				errno = 0;
 				missing = filename;
 				filename = NULL;
 				missing_count = 1;
@@ -7581,6 +7582,7 @@ static bool reload_from(tv_t *start)
 					fp = fopen(filename, "r");
 					if (fp)
 						break;
+					errno = 0;
 					if (missing_count++ > 1)
 						free(missing2);
 					missing2 = filename;
