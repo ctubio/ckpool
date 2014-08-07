@@ -7471,7 +7471,7 @@ jilted:
 // 10Mb for now
 #define MAX_READ (10 * 1024 * 1024)
 
-/* To handle a new database with no data:
+/* If the reload start file is missing and -r was specified correctly:
  *	touch the filename reported in "Failed to open 'filename'"
  *	when ckdb aborts at the beginning of the reload */
 static bool reload_from(tv_t *start)
