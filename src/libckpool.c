@@ -673,6 +673,7 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 		dealloc(buf);
 	}
 out:
+	shutdown(sockd, SHUT_RD);
 	if (unlikely(!buf))
 		LOGERR("Failure in recv_unix_msg from %s %s:%d", file, func, line);
 	return buf;
@@ -790,6 +791,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 	}
 	retval = true;
 out:
+	shutdown(sockd, SHUT_WR);
 	if (unlikely(!retval))
 		LOGERR("Failure in send_unix_msg from %s %s:%d", file, func, line);
 	return retval;
