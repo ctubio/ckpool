@@ -5335,16 +5335,15 @@ matane:
 	return ok;
 }
 
-static bool reload_from(tv_t *start);
+static void reload_from(tv_t *start);
 
-static bool reload()
+static void reload()
 {
 	char buf[DATE_BUFSIZ+1];
 	char *filename;
 	tv_t start;
 	char *reason;
 	FILE *fp;
-	bool ok = true;
 
 	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
 	LOGWARNING("%s(): %s oldest DB incomplete sharesummary", __func__, buf);
@@ -5402,14 +5401,12 @@ static bool reload()
 				int ern = errno;
 				quithere(1, "Couldn't create '%s' (%d) %s",
 					 filename, ern, strerror(ern));
-				close(fd);
 			}
+			close(fd);
 		}
 		free(filename);
 	}
-	ok = reload_from(&start);
-
-	return ok;
+	reload_from(&start);
 }
 
 /* TODO:
@@ -5592,8 +5589,7 @@ static bool setup_data()
 
 	db_load_complete = true;
 
-	if (!reload())
-		return false;
+	reload();
 
 	workerstatus_ready();
 
@@ -7408,7 +7404,7 @@ static void tick()
 	}
 }
 
-static bool reload_line(char *filename, uint64_t count, char *buf)
+static void reload_line(char *filename, uint64_t count, char *buf)
 {
 	char cmd[CMD_SIZ+1], id[ID_SIZ+1];
 	enum cmd_values cmdnum;
@@ -7416,7 +7412,6 @@ static bool reload_line(char *filename, uint64_t count, char *buf)
 	int which_cmds;
 	K_ITEM *item;
 	tv_t now, cd;
-	bool ok = false;
 
 	// Once we've read the message
 	setnow(&now);
@@ -7431,8 +7426,6 @@ static bool reload_line(char *filename, uint64_t count, char *buf)
 			LOGERR("%s() NULL message line %"PRIu64, __func__, count);
 		else
 			LOGERR("%s() Empty message line %"PRIu64, __func__, count);
-
-		goto jilted;
 	} else {
 		LOGFILE(buf);
 		cmdnum = breakdown(buf, &which_cmds, cmd, id, &cd);
@@ -7473,24 +7466,20 @@ static bool reload_line(char *filename, uint64_t count, char *buf)
 					 filename, count, cmd);
 				break;
 		}
+
+		K_WLOCK(transfer_free);
+		transfer_root = free_ktree(transfer_root, NULL);
+		item = transfer_store->head;
+		while (item) {
+			if (DATA_TRANSFER(item)->data != DATA_TRANSFER(item)->value)
+				free(DATA_TRANSFER(item)->data);
+			item = item->next;
+		}
+		k_list_transfer_to_head(transfer_store, transfer_free);
+		K_WUNLOCK(transfer_free);
 	}
 
 	tick();
-
-	K_WLOCK(transfer_free);
-	transfer_root = free_ktree(transfer_root, NULL);
-	item = transfer_store->head;
-	while (item) {
-		if (DATA_TRANSFER(item)->data != DATA_TRANSFER(item)->value)
-			free(DATA_TRANSFER(item)->data);
-		item = item->next;
-	}
-	k_list_transfer_to_head(transfer_store, transfer_free);
-	K_WUNLOCK(transfer_free);
-
-	ok = true;
-jilted:
-	return ok;
 }
 
 // Log files are every ...
@@ -7501,19 +7490,19 @@ jilted:
 /* If the reload start file is missing and -r was specified correctly:
  *	touch the filename reported in "Failed to open 'filename'"
  *	when ckdb aborts at the beginning of the reload */
-static bool reload_from(tv_t *start)
+static void reload_from(tv_t *start)
 {
 	char buf[DATE_BUFSIZ+1], run[DATE_BUFSIZ+1];
 	size_t rflen = strlen(restorefrom);
-	char *missing, *missing2;
+	char *missingfirst = NULL, *missinglast = NULL;
 	int missing_count;
 	int processing;
-	bool ok = true, finished = false;
-	char *filename;
+	bool finished = false;
+	char *filename = NULL;
 	char data[MAX_READ];
 	uint64_t count, total;
 	tv_t now;
-	FILE *fp;
+	FILE *fp = NULL;
 
 	reloading = true;
 
@@ -7532,82 +7521,81 @@ static bool reload_from(tv_t *start)
 
 	total = 0;
 	processing = 0;
-	while (ok && !finished) {
+	while (!finished) {
 		LOGWARNING("%s(): processing %s", __func__, filename);
 		processing++;
 		count = 0;
 
-		while (ok && fgets_unlocked(data, MAX_READ, fp))
-			ok = reload_line(filename, ++count, data);
+		while (fgets_unlocked(data, MAX_READ, fp))
+			reload_line(filename, ++count, data);
 
-		if (ok) {
-			if (ferror(fp)) {
-				int err = errno;
-				quithere(1, "Read failed on %s (%d) '%s'",
-					    filename, err, strerror(err));
-			}
-
-			LOGWARNING("%s(): read %"PRIu64" lines from %s",
-				   __func__, count, filename);
-
-			total += count;
+		if (ferror(fp)) {
+			int err = errno;
+			quithere(1, "Read failed on %s (%d) '%s'",
+				    filename, err, strerror(err));
 		}
 
+		LOGWARNING("%s(): read %"PRIu64" line%s from %s",
+			   __func__,
+			   count, count == 1 ? "" : "s",
+			   filename);
+		total += count;
 		fclose(fp);
-
-		if (ok) {
+		free(filename);
+		start->tv_sec += ROLL_S;
+		filename = rotating_filename(restorefrom, start->tv_sec);
+		fp = fopen(filename, "r");
+		if (!fp) {
+			missingfirst = strdup(filename);
 			free(filename);
-			start->tv_sec += ROLL_S;
-			filename = rotating_filename(restorefrom, start->tv_sec);
-			fp = fopen(filename, "r");
-			if (!fp) {
+			filename = NULL;
+			errno = 0;
+			missing_count = 1;
+			setnow(&now);
+			now.tv_sec += ROLL_S;
+			while (42) {
+				start->tv_sec += ROLL_S;
+				/* WARNING: if the system clock is wrong, any CCLs
+				 * missing or not created due to a ckpool outage of
+				 * an hour or more can stop the reload early and
+				 * cause DB problems! Though, the clock being wrong
+				 * can screw up ckpool and ckdb anyway ... */
+				if (!tv_newer(start, &now)) {
+					finished = true;
+					break;
+				}
+				filename = rotating_filename(restorefrom, start->tv_sec);
+				fp = fopen(filename, "r");
+				if (fp)
+					break;
 				errno = 0;
-				missing = filename;
+				if (missing_count++ > 1)
+					free(missinglast);
+				missinglast = strdup(filename);
+				free(filename);
 				filename = NULL;
-				missing_count = 1;
-				setnow(&now);
-				now.tv_sec += ROLL_S;
-				while (42) {
-					start->tv_sec += ROLL_S;
-					/* WARNING: if the system clock is wrong, any CCLs
-					 * missing or not created due to a ckpool outage of
-					 * an hour or more can stop the reload early and
-					 * cause DB problems! Though, the clock being wrong
-					 * can screw up ckpool and ckdb anyway ... */
-					if (!tv_newer(start, &now)) {
-						finished = true;
-						break;
-					}
-					filename = rotating_filename(restorefrom, start->tv_sec);
-					fp = fopen(filename, "r");
-					if (fp)
-						break;
-					errno = 0;
-					if (missing_count++ > 1)
-						free(missing2);
-					missing2 = filename;
-				}
-				if (missing_count == 1)
-					LOGWARNING("%s(): skipped %s", __func__, missing+rflen);
-				else {
-					LOGWARNING("%s(): skipped %d files from %s to %s",
-						   __func__, missing_count, missing+rflen, missing2+rflen);
-					free(missing2);
-				}
-				free(missing);
 			}
+			if (missing_count == 1)
+				LOGWARNING("%s(): skipped %s", __func__, missingfirst+rflen);
+			else {
+				LOGWARNING("%s(): skipped %d files from %s to %s",
+					   __func__, missing_count, missingfirst+rflen, missinglast+rflen);
+				free(missinglast);
+				missinglast = NULL;
+			}
+			free(missingfirst);
+			missingfirst = NULL;
 		}
 	}
-	if (filename)
-		free(filename);
 
 	snprintf(data, sizeof(data), "reload.%s.%"PRIu64, run, total);
 	LOGFILE(data);
-	LOGWARNING("%s(): %d files, total %"PRIu64" lines", __func__, processing, total);
+	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s",
+		   __func__,
+		   processing, processing == 1 ? "" : "s",
+		   total, total == 1 ? "" : "s");
 
 	reloading = false;
-
-	return ok;
 }
 
 // TODO: equivalent of api_allow
