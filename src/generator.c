@@ -153,7 +153,8 @@ retry:
 		keep_sockalive(cs->fd);
 
 		/* Test we can connect, authorise and get a block template */
-		gbt = si->data;
+		gbt = ckzalloc(sizeof(gbtbase_t));
+		si->data = gbt;
 		if (!gen_gbtbase(cs, gbt)) {
 			LOGINFO("Failed to get test block template from %s:%s!",
 				cs->url, cs->port);
@@ -1298,15 +1299,11 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 
 	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->btcds);
 	for (i = 0; i < ckp->btcds; i++) {
-		gbtbase_t *gbt;
-
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
 		si = ckp->servers[i];
 		si->url = ckp->btcdurl[i];
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
-		gbt = ckzalloc(sizeof(gbtbase_t));
-		si->data = gbt;
 	}
 
 	ret = gen_loop(pi);
