@@ -139,6 +139,8 @@ static char *restorefrom;
  *  RAM shares: oldest DB sharesummary firstshare where complete='n'
  *	All shares before this have been summarised to the DB with
  *	complete='a' (or 'y') and were deleted from RAM
+ *	If there are none with complete='n' but are others in the DB,
+ *	then the newest firstshare is used
  *  RAM shareerrors: as above
  *  DB+RAM sharesummary: created from shares, so as above
  *	Some shares after this may have been summarised to other
@@ -213,6 +215,8 @@ static char *restorefrom;
 
 typedef struct loadstatus {
 	tv_t oldest_sharesummary_firstshare_n;
+	tv_t newest_sharesummary_firstshare;
+	tv_t sharesummary_firstshare; // whichever of above 2 used
 	tv_t newest_createdate_workinfo;
 	tv_t newest_createdate_auths;
 	tv_t newest_createdate_poolstats;
@@ -3935,11 +3939,12 @@ static bool sharesummary_fill(PGconn *conn)
 
 		workerstatus_update(NULL, NULL, NULL, row);
 
-		if (tolower(row->complete[0]) == SUMMARY_NEW &&
-		    (dbstatus.oldest_sharesummary_firstshare_n.tv_sec == 0 ||
-		    !tv_newer(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare)))) {
-			copy_tv(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare));
-		}
+		if (tolower(row->complete[0]) == SUMMARY_NEW) {
+			if (dbstatus.oldest_sharesummary_firstshare_n.tv_sec == 0 ||
+			    !tv_newer(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare)))
+				copy_tv(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare));
+		} else if (tv_newer(&(dbstatus.newest_sharesummary_firstshare), &(row->firstshare)))
+				copy_tv(&(dbstatus.newest_sharesummary_firstshare), &(row->firstshare));
 	}
 	if (!ok)
 		k_add_head(sharesummary_free, item);
@@ -5336,6 +5341,8 @@ static bool reload()
 
 	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
 	LOGWARNING("%s(): %s oldest DB incomplete sharesummary", __func__, buf);
+	tv_to_buf(&(dbstatus.newest_sharesummary_firstshare), buf, sizeof(buf));
+	LOGWARNING("%s(): %s newest DB sharesummary", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_workinfo), buf, sizeof(buf));
 	LOGWARNING("%s(): %s newest DB workinfo", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_auths), buf, sizeof(buf));
@@ -5347,7 +5354,12 @@ static bool reload()
 	tv_to_buf(&(dbstatus.newest_createdate_blocks), buf, sizeof(buf));
 	LOGWARNING("%s(): %s newest DB blocks (ignored)", __func__, buf);
 
-	copy_tv(&start, &(dbstatus.oldest_sharesummary_firstshare_n));
+	if (dbstatus.oldest_sharesummary_firstshare_n.tv_sec)
+		copy_tv(&(dbstatus.sharesummary_firstshare), &(dbstatus.oldest_sharesummary_firstshare_n));
+	else
+		copy_tv(&(dbstatus.sharesummary_firstshare), &(dbstatus.newest_sharesummary_firstshare));
+
+	copy_tv(&start, &(dbstatus.sharesummary_firstshare));
 	reason = "sharesummary";
 	if (!tv_newer(&start, &(dbstatus.newest_createdate_workinfo))) {
 		copy_tv(&start, &(dbstatus.newest_createdate_workinfo));
@@ -6324,7 +6336,7 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 
 		// This just excludes the shares we certainly don't need
 		if (reloading) {
-			if (tv_newer(cd, &(dbstatus.oldest_sharesummary_firstshare_n)))
+			if (tv_newer(cd, &(dbstatus.sharesummary_firstshare)))
 				return NULL;
 		}
 
@@ -6394,7 +6406,7 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 
 		// This just excludes the shareerrors we certainly don't need
 		if (reloading) {
-			if (tv_newer(cd, &(dbstatus.oldest_sharesummary_firstshare_n)))
+			if (tv_newer(cd, &(dbstatus.sharesummary_firstshare)))
 				return NULL;
 		}
 
@@ -6446,7 +6458,7 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 		bool ok;
 
 		if (reloading) {
-			if (tv_newer(cd, &(dbstatus.oldest_sharesummary_firstshare_n)))
+			if (tv_newer(cd, &(dbstatus.sharesummary_firstshare)))
 				return NULL;
 		}
 
