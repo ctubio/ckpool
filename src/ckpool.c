@@ -173,6 +173,39 @@ static void broadcast_proc(ckpool_t *ckp, const char *buf)
 	}
 }
 
+static int send_procmsg(proc_instance_t *pi, const char *buf)
+{
+	char *path = pi->us.path;
+	int ret = -1;
+	int sockd;
+
+	if (unlikely(!path || !strlen(path))) {
+		LOGERR("Attempted to send message %s to null path in send_proc", buf ? buf : "");
+		goto out;
+	}
+	if (unlikely(!buf || !strlen(buf))) {
+		LOGERR("Attempted to send null message to socket %s in send_proc", path);
+		goto out;
+	}
+	if (unlikely(kill(pi->pid, 0))) {
+		LOGALERT("Attempting to send message %s to dead process %s", buf, pi->processname);
+		goto out;
+	}
+	sockd = open_unix_client(path);
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
+		goto out;
+	}
+	if (unlikely(!send_unix_msg(sockd, buf)))
+		LOGWARNING("Failed to send %s to socket %s", buf, path);
+	else
+		ret = sockd;
+out:
+	if (unlikely(ret == -1))
+		LOGERR("Failure in send_procmsg");
+	return ret;
+}
+
 /* Listen for incoming global requests. Always returns a response if possible */
 static void *listener(void *arg)
 {
@@ -217,15 +250,20 @@ retry:
 			send_unix_msg(sockd, "success");
 		}
 	} else if (cmdmatch(buf, "getfd")) {
-		char *msg;
+		int connfd = send_procmsg(ckp->connector, "getfd");
 
-		msg = send_recv_proc(ckp->connector, "getfd");
-		if (!msg)
-			LOGWARNING("Failed to receive fd data from connector");
-		else {
-			send_unix_data(sockd, msg, sizeof(struct msghdr));
-			free(msg);
-		}
+		if (connfd > 0) {
+			int newfd = get_fd(connfd);
+
+			if (newfd > 0) {
+				LOGDEBUG("Sending new fd %d", newfd);
+				send_fd(newfd, sockd);
+				close(newfd);
+			} else
+				LOGWARNING("Failed to get_fd");
+			close(connfd);
+		} else
+			LOGWARNING("Failed to send_procmsg to connector");
 	} else {
 		LOGINFO("Listener received unhandled message: %s", buf);
 		send_unix_msg(sockd, "unknown");

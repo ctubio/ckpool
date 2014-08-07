@@ -458,31 +458,6 @@ static client_instance_t *client_by_id(conn_instance_t *ci, int id)
 	return client;
 }
 
-static void send_fd(int fd, int sockd)
-{
-	struct cmsghdr cmptr;
-	struct iovec iov[1];
-	struct msghdr msg;
-	char buf[2];
-	int *cd;
-
-	memset(&cmptr, 0, sizeof(struct cmsghdr));
-	iov[0].iov_base = buf;
-	iov[0].iov_len = 2;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	cmptr.cmsg_level = SOL_SOCKET;
-	cmptr.cmsg_type = SCM_RIGHTS;
-	cmptr.cmsg_len = CMSG_LEN(sizeof(int));
-	cd = (int *)CMSG_DATA(&cmptr);
-	*cd = fd;
-	buf[1] = 0;
-	buf[0] = 0;
-	send_unix_data(sockd, &msg, sizeof(struct msghdr));
-}
-
 static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 {
 	int sockd = -1, client_id, ret = 0, selret;

@@ -714,45 +714,6 @@ int write_length(int sockd, const void *buf, int len)
 	return ofs;
 }
 
-bool _send_unix_data(int sockd, void *buf, uint32_t len, const char *file, const char *func, const int line)
-{
-	bool retval = false;
-	uint32_t msglen;
-	int ret;
-
-	if (unlikely(!buf)) {
-		LOGWARNING("Null message sent to send_unix_msg");
-		goto out;
-	}
-	msglen = htole32(len);
-	ret = wait_write_select(sockd, 5);
-	if (unlikely(ret < 1)) {
-		LOGERR("Select1 failed in send_unix_msg");
-		goto out;
-	}
-	ret = write_length(sockd, &msglen, 4);
-	if (unlikely(ret < 4)) {
-		LOGERR("Failed to write 4 byte length in send_unix_msg");
-		goto out;
-	}
-	ret = wait_write_select(sockd, 5);
-	if (unlikely(ret < 1)) {
-		LOGERR("Select2 failed in send_unix_msg");
-		goto out;
-	}
-	ret = write_length(sockd, buf, len);
-	if (unlikely(ret < 0)) {
-		LOGERR("Failed to write %d bytes in send_unix_msg", len);
-		goto out;
-	}
-	retval = true;
-out:
-	if (unlikely(!retval))
-		LOGERR("Failure in send_unix_msg from %s %s:%d", file, func, line);
-	return retval;
-}
-
-
 bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line)
 {
 	uint32_t msglen, len;
@@ -796,6 +757,119 @@ out:
 		LOGERR("Failure in send_unix_msg from %s %s:%d", file, func, line);
 	return retval;
 }
+
+bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, const char *func, const int line)
+{
+	bool retval = false;
+	int ret;
+
+	if (unlikely(!msg)) {
+		LOGWARNING("Null message sent to send_unix_data");
+		goto out;
+	}
+	ret = wait_write_select(sockd, 5);
+	if (unlikely(ret < 1)) {
+		LOGERR("Select1 failed in send_unix_data");
+		goto out;
+	}
+	ret = sendmsg(sockd, msg, 0);
+	if (unlikely(ret < 1)) {
+		LOGERR("Failed to send in send_unix_data");
+		goto out;
+	}
+	retval = true;
+out:
+	shutdown(sockd, SHUT_WR);
+	if (unlikely(!retval))
+		LOGERR("Failure in send_unix_data from %s %s:%d", file, func, line);
+	return retval;
+}
+
+bool _recv_unix_data(int sockd, struct msghdr *msg, const char *file, const char *func, const int line)
+{
+	bool retval = false;
+	int ret;
+
+	ret = wait_read_select(sockd, 5);
+	if (unlikely(ret < 1)) {
+		LOGERR("Select1 failed in recv_unix_data");
+		goto out;
+	}
+	ret = recvmsg(sockd, msg, MSG_WAITALL);
+	if (unlikely(ret < 0)) {
+		LOGERR("Failed to recv in recv_unix_data");
+		goto out;
+	}
+	retval = true;
+out:
+	shutdown(sockd, SHUT_RD);
+	if (unlikely(!retval))
+		LOGERR("Failure in recv_unix_data from %s %s:%d", file, func, line);
+	return retval;
+}
+
+#define CONTROLLLEN CMSG_LEN(sizeof(int))
+#define MAXLINE 4096
+
+/* Send a msghdr containing fd via the unix socket sockd */
+bool _send_fd(int fd, int sockd, const char *file, const char *func, const int line)
+{
+	struct cmsghdr *cmptr = ckzalloc(CONTROLLLEN);
+	struct iovec iov[1];
+	struct msghdr msg;
+	char buf[2];
+	bool ret;
+
+	memset(&msg, 0, sizeof(struct msghdr));
+	iov[0].iov_base = buf;
+	iov[0].iov_len = 2;
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_controllen = CONTROLLLEN;
+	msg.msg_control = cmptr;
+	cmptr->cmsg_level = SOL_SOCKET;
+	cmptr->cmsg_type = SCM_RIGHTS;
+	cmptr->cmsg_len = CONTROLLLEN;
+	*(int *)CMSG_DATA(cmptr) = fd;
+	buf[1] = 0;
+	buf[0] = 0;
+	ret = send_unix_data(sockd, &msg);
+	free(cmptr);
+	if (!ret)
+		LOGERR("Failed to send_unix_data in send_fd from %s %s:%d", file, func, line);
+	return ret;
+}
+
+/* Receive an fd by reading a msghdr from the unix socket sockd */
+int _get_fd(int sockd, const char *file, const char *func, const int line)
+{
+	int newfd = -1;
+	char buf[MAXLINE];
+	struct iovec iov[1];
+	struct msghdr msg;
+	struct cmsghdr *cmptr = ckzalloc(CONTROLLLEN);
+
+	memset(&msg, 0, sizeof(struct msghdr));
+	iov[0].iov_base = buf;
+	iov[0].iov_len = sizeof(buf);
+	msg.msg_iov = iov;
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_control = cmptr;
+	msg.msg_controllen = CONTROLLLEN;
+	if (!recv_unix_data(sockd, &msg)) {
+		LOGERR("Failed to recv_unix_data in get_fd from %s %s:%d", file, func, line);
+		goto out;
+	}
+out:
+	close(sockd);
+	newfd = *(int *)CMSG_DATA(cmptr);
+	free(cmptr);
+	return newfd;
+}
+
 
 /* Extracts a string value from a json array with error checking. To be used
  * when the value of the string returned is only examined and not to be stored.

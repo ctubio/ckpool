@@ -13,6 +13,8 @@
 #include "config.h"
 
 #include <sys/file.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include "libckpool.h"
 #include "uthash.h"
