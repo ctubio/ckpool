@@ -419,12 +419,19 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 		      const char *func, const int line)
 {
 	static int counter = 0;
+	static time_t time_counter;
 	ckdb_msg_t *msg;
+	time_t now_t;
 	char ch;
 
-	ch = status_chars[(counter++) & 0x3];
-	fprintf(stdout, "%c\r", ch);
-	fflush(stdout);
+	now_t = time(NULL);
+	if (now_t != time_counter) {
+		/* Rate limit to 1 update per second */
+		time_counter = now_t;
+		ch = status_chars[(counter++) & 0x3];
+		fprintf(stdout, "%c\r", ch);
+		fflush(stdout);
+	}
 
 	if (!val) {
 		LOGWARNING("Invalid json sent to ckdbq_add from %s %s:%d", file, func, line);
