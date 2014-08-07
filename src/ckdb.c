@@ -5757,7 +5757,7 @@ static char *cmd_poolstats_do(char *cmd, char *id, char *by, char *code,
 		while (ps && !DATA_POOLSTATS(ps)->stored &&
 		       strcmp(row.poolinstance, DATA_POOLSTATS(ps)->poolinstance) == 0 &&
 		       tvdiff(cd, &(DATA_POOLSTATS(ps)->createdate)) < STATS_PER) {
-				ps = next_in_ktree(ctx);
+				ps = prev_in_ktree(ctx);
 		}
 
 		if (!ps || !DATA_POOLSTATS(ps)->stored ||
