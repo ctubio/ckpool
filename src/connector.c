@@ -576,7 +576,6 @@ int connector(proc_instance_t *pi)
 	LOGWARNING("%s connector starting", ckp->name);
 
 	if (ckp->oldconnfd > 0) {
-		extract_sockaddr(ckp->serverurl, &url, &port);
 		sockd = ckp->oldconnfd;
 	} else if (ckp->serverurl) {
 		if (!extract_sockaddr(ckp->serverurl, &url, &port)) {
