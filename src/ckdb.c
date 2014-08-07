@@ -94,6 +94,10 @@ static char *restorefrom;
  *  find an authorise message in the CCLs that was processed in the
  *  message queue and thus is already in the DB.
  *  This error would be very rare and also not an issue
+ * TODO: However, we could start the ckpool message queue after loading
+ *  the users, auths, idcontrol and workers DB tables, before loading the
+ *  much larger sharesummary, workinfo, userstats and poolstats DB tables
+ *  so that ckdb is effectively ready for messages almost immediately
  * The first ckpool message also allows us to know where ckpool is up to
  *  in the CCLs and thus where to stop processing the CCLs to stay in
  *  sync with ckpool
@@ -7500,7 +7504,7 @@ static bool reload_from(tv_t *start)
 
 	setnow(&now);
 	tvs_to_buf(&now, run, sizeof(run));
-	snprintf(data, sizeof(data), "reload.%s.0", run);
+	snprintf(data, sizeof(data), "reload.%s.s0", run);
 	LOGFILE(data);
 
 	total = 0;
