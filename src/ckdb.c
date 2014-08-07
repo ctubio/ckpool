@@ -1080,6 +1080,7 @@ typedef struct poolstats {
 	double hashrate5m;
 	double hashrate1hr;
 	double hashrate24hr;
+	bool stored; // Non-db field
 	SIMPLEDATECONTROLFIELDS;
 } POOLSTATS;
 
@@ -4577,6 +4578,8 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 
 	row = DATA_POOLSTATS(p_item);
 
+	row->stored = false;
+
 	STRNCPY(row->poolinstance, poolinstance);
 	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
 	TXT_TO_INT("users", users, row->users);
@@ -4620,6 +4623,8 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 			PGLOGERR("Insert", rescode, conn);
 			goto unparam;
 		}
+
+		row->stored = true;
 	}
 
 	ok = true;
@@ -4685,6 +4690,8 @@ static bool poolstats_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(poolstats_free);
 		row = DATA_POOLSTATS(item);
+
+		row->stored = true;
 
 		PQ_GET_FLD(res, i, "poolinstance", field, ok);
 		if (!ok)
@@ -5746,7 +5753,16 @@ static char *cmd_poolstats_do(char *cmd, char *id, char *by, char *code,
 	if (!ps)
 		store = true;
 	else {
-		if (tvdiff(cd, &(DATA_POOLSTATS(ps)->createdate)) > STATS_PER)
+		// Find last stored matching the poolinstance and less than STATS_PER old
+		while (ps && !DATA_POOLSTATS(ps)->stored &&
+		       strcmp(row.poolinstance, DATA_POOLSTATS(ps)->poolinstance) == 0 &&
+		       tvdiff(cd, &(DATA_POOLSTATS(ps)->createdate)) < STATS_PER) {
+				ps = next_in_ktree(ctx);
+		}
+
+		if (!ps || !DATA_POOLSTATS(ps)->stored ||
+		    strcmp(row.poolinstance, DATA_POOLSTATS(ps)->poolinstance) != 0 ||
+		    tvdiff(cd, &(DATA_POOLSTATS(ps)->createdate)) >= STATS_PER)
 			store = true;
 		else
 			store = false;
