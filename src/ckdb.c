@@ -1438,7 +1438,7 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 			break;
 		case TYPE_TV:
 			if (siz != sizeof(tv_t)) {
-				quithere(1, "Field %s timeval incorrect structure size %d - should be %d"
+				quithere(1, "Field %s tv_t incorrect structure size %d - should be %d"
 						WHERE_FFL,
 						nam, (int)siz, (int)sizeof(tv_t), WHERE_FFL_PASS);
 			}
@@ -1454,7 +1454,7 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 				n = sscanf(fld, "%u-%u-%u %u:%u:%u.%u%1[+-]%u",
 						&yyyy, &mm, &dd, &HH, &MM, &SS, &uS, pm, &tz);
 				if (n != 9) {
-					quithere(1, "Field %s timeval unhandled date '%s' (%d)" WHERE_FFL,
+					quithere(1, "Field %s tv_t unhandled date '%s' (%d)" WHERE_FFL,
 						 nam, fld, n, WHERE_FFL_PASS);
 				}
 			}
@@ -1484,7 +1484,7 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 			break;
 		case TYPE_CTV:
 			if (siz != sizeof(tv_t)) {
-				quithere(1, "Field %s timeval incorrect structure size %d - should be %d"
+				quithere(1, "Field %s tv_t incorrect structure size %d - should be %d"
 						WHERE_FFL,
 						nam, (int)siz, (int)sizeof(tv_t), WHERE_FFL_PASS);
 			}
@@ -1621,7 +1621,7 @@ static char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz,
 			snprintf(buf, siz, "%"PRId32, *((uint32_t *)data));
 			break;
 		case TYPE_TV:
-			gmtime_r(&(((struct timeval *)data)->tv_sec), &tm);
+			gmtime_r(&(((tv_t *)data)->tv_sec), &tm);
 			snprintf(buf, siz, "%d-%02d-%02d %02d:%02d:%02d.%06ld+00",
 					   tm.tm_year + 1900,
 					   tm.tm_mon + 1,
@@ -1629,15 +1629,15 @@ static char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz,
 					   tm.tm_hour,
 					   tm.tm_min,
 					   tm.tm_sec,
-					   (((struct timeval *)data)->tv_usec));
+					   (((tv_t *)data)->tv_usec));
 			break;
 		case TYPE_CTV:
 			snprintf(buf, siz, "%ld,%ld",
-					   (((struct timeval *)data)->tv_sec),
-					   (((struct timeval *)data)->tv_usec));
+					   (((tv_t *)data)->tv_sec),
+					   (((tv_t *)data)->tv_usec));
 			break;
 		case TYPE_TVS:
-			snprintf(buf, siz, "%ld", (((struct timeval *)data)->tv_sec));
+			snprintf(buf, siz, "%ld", (((tv_t *)data)->tv_sec));
 			break;
 		case TYPE_DOUBLE:
 			snprintf(buf, siz, "%f", *((double *)data));
