@@ -94,6 +94,10 @@ static char *restorefrom;
  *  find an authorise message in the CCLs that was processed in the
  *  message queue and thus is already in the DB.
  *  This error would be very rare and also not an issue
+ * TODO: However, we could start the ckpool message queue after loading
+ *  the users, auths, idcontrol and workers DB tables, before loading the
+ *  much larger sharesummary, workinfo, userstats and poolstats DB tables
+ *  so that ckdb is effectively ready for messages almost immediately
  * The first ckpool message also allows us to know where ckpool is up to
  *  in the CCLs and thus where to stop processing the CCLs to stay in
  *  sync with ckpool
@@ -5343,8 +5347,10 @@ static bool reload_from(tv_t *start);
 static bool reload()
 {
 	char buf[DATE_BUFSIZ+1];
+	char *filename;
 	K_ITEM *ccl;
 	tv_t start;
+	FILE *fp;
 	bool ok;
 
 	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
@@ -5383,6 +5389,21 @@ static bool reload()
 	if (start.tv_sec < DATE_BEGIN) {
 		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
+		filename = rotating_filename(restorefrom, start.tv_sec);
+		fp = fopen(filename, "r");
+		if (fp)
+			fclose(fp);
+		else {
+			mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+			int fd = open(filename, O_CREAT|O_RDONLY, mode);
+			if (fd == -1) {
+				int ern = errno;
+				quithere(1, "Couldn't create '%s' (%d) %s",
+					 filename, ern, strerror(ern));
+				close(fd);
+			}
+		}
+		free(filename);
 	}
 	ok = reload_from(&start);
 
@@ -7454,7 +7475,7 @@ jilted:
 // 10Mb for now
 #define MAX_READ (10 * 1024 * 1024)
 
-/* To handle a new database with no data:
+/* If the reload start file is missing and -r was specified correctly:
  *	touch the filename reported in "Failed to open 'filename'"
  *	when ckdb aborts at the beginning of the reload */
 static bool reload_from(tv_t *start)
@@ -7483,7 +7504,7 @@ static bool reload_from(tv_t *start)
 
 	setnow(&now);
 	tvs_to_buf(&now, run, sizeof(run));
-	snprintf(data, sizeof(data), "reload.%s.0", run);
+	snprintf(data, sizeof(data), "reload.%s.s0", run);
 	LOGFILE(data);
 
 	total = 0;
