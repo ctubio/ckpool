@@ -575,7 +575,10 @@ int connector(proc_instance_t *pi)
 
 	LOGWARNING("%s connector starting", ckp->name);
 
-	if (ckp->serverurl) {
+	if (ckp->oldconnfd > 0) {
+		extract_sockaddr(ckp->serverurl, &url, &port);
+		sockd = ckp->oldconnfd;
+	} else if (ckp->serverurl) {
 		if (!extract_sockaddr(ckp->serverurl, &url, &port)) {
 			LOGWARNING("Failed to extract server address from %s", ckp->serverurl);
 			ret = 1;

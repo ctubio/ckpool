@@ -102,6 +102,10 @@ struct ckpool_instance {
 	/* Logfile */
 	FILE *logfp;
 	int logfd;
+	/* Connector fd if we inherited it from a running process */
+	int oldconnfd;
+	/* Should we inherit a running instance's socket and shut it down */
+	bool handover;
 
 	/* Logger message queue NOTE: Unique per process */
 	ckmsgq_t *logger;

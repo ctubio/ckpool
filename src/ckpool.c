@@ -699,19 +699,29 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 	return true;
 }
 
-static void create_process_unixsock(proc_instance_t *pi)
+static void name_process_sockname(unixsock_t *us, proc_instance_t *pi)
 {
-	unixsock_t *us = &pi->us;
-	ckpool_t *ckp = pi->ckp;
-
 	us->path = strdup(pi->ckp->socket_dir);
 	realloc_strcat(&us->path, pi->sockname);
+}
+
+static void open_process_sock(ckpool_t *ckp, proc_instance_t *pi, unixsock_t *us)
+{
 	LOGDEBUG("Opening %s", us->path);
 	us->sockd = open_unix_server(us->path);
 	if (unlikely(us->sockd < 0))
 		quit(1, "Failed to open %s socket", pi->sockname);
 	if (chown(us->path, -1, ckp->gr_gid))
 		quit(1, "Failed to set %s to group id %d", us->path, ckp->gr_gid);
+}
+
+static void create_process_unixsock(proc_instance_t *pi)
+{
+	unixsock_t *us = &pi->us;
+	ckpool_t *ckp = pi->ckp;
+
+	name_process_sockname(us, pi);
+	open_process_sock(ckp, pi, us);
 }
 
 static void write_namepid(proc_instance_t *pi)
@@ -1031,6 +1041,7 @@ static struct option long_options[] = {
 	{"config",	required_argument,	0,	'c'},
 	{"ckdb-name",	required_argument,	0,	'd'},
 	{"group",	required_argument,	0,	'g'},
+	{"handover",	no_argument,		0,	'H'},
 	{"help",	no_argument,		0,	'h'},
 	{"killold",	no_argument,		0,	'k'},
 	{"loglevel",	required_argument,	0,	'l'},
@@ -1055,7 +1066,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "Ac:d:g:hkl:n:pS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:d:g:Hhkl:n:pS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1068,6 +1079,10 @@ int main(int argc, char **argv)
 				break;
 			case 'g':
 				ckp.grpnam = optarg;
+				break;
+			case 'H':
+				ckp.handover = true;
+				ckp.killold = true;
 				break;
 			case 'h':
 				for (j = 0; long_options[j].val; j++) {
@@ -1215,8 +1230,24 @@ int main(int argc, char **argv)
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
 	ckp.main.sockname = strdup("listener");
+	name_process_sockname(&ckp.main.us, &ckp.main);
+	if (ckp.handover) {
+		int sockd = open_unix_client(ckp.main.us.path);
+
+		if (sockd > 0 && send_unix_msg(sockd, "getfd")) {
+			ckp.oldconnfd = get_fd(sockd);
+
+			close(sockd);
+			sockd = open_unix_client(ckp.main.us.path);
+			send_unix_msg(sockd, "shutdown");
+			if (ckp.oldconnfd > 0)
+				LOGWARNING("Inherited old socket with new file descriptor %d!", ckp.oldconnfd);
+			close(sockd);
+		}
+	}
+
 	write_namepid(&ckp.main);
-	create_process_unixsock(&ckp.main);
+	open_process_sock(&ckp, &ckp.main, &ckp.main.us);
 	launch_logger(&ckp.main);
 	ckp.logfd = fileno(ckp.logfp);
 
