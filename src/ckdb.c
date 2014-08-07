@@ -5343,8 +5343,10 @@ static bool reload_from(tv_t *start);
 static bool reload()
 {
 	char buf[DATE_BUFSIZ+1];
+	char *filename;
 	K_ITEM *ccl;
 	tv_t start;
+	FILE *fp;
 	bool ok;
 
 	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
@@ -5383,6 +5385,21 @@ static bool reload()
 	if (start.tv_sec < DATE_BEGIN) {
 		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
+		filename = rotating_filename(restorefrom, start.tv_sec);
+		fp = fopen(filename, "r");
+		if (fp)
+			fclose(fp);
+		else {
+			mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+			int fd = open(filename, O_CREAT|O_RDONLY, mode);
+			if (fd == -1) {
+				int ern = errno;
+				quithere(1, "Couldn't create '%s' (%d) %s",
+					 filename, ern, strerror(ern));
+				close(fd);
+			}
+		}
+		free(filename);
 	}
 	ok = reload_from(&start);
 
