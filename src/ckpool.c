@@ -785,9 +785,12 @@ static void childsighandler(int sig)
 {
 	pid_t ppid = getppid();
 
+	signal(sig, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
 	LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
 		   sig, global_ckp->name);
 	kill_pid(ppid, sig);
+	exit(0);
 }
 
 static void launch_logger(proc_instance_t *pi)
@@ -908,6 +911,8 @@ static void sighandler(int sig)
 {
 	ckpool_t *ckp = global_ckp;
 
+	signal(sig, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
 	LOGWARNING("Parent process %s received signal %d, shutting down",
 		   ckp->name, sig);
 	cancel_join_pthread(&ckp->pth_watchdog);
