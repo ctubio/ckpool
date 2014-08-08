@@ -4154,11 +4154,11 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			ins = "insert into blocks "
 				"(height,blockhash,workinfoid,userid,workername,"
 				"clientid,enonce1,nonce2,nonce,reward,confirmed"
-				HISTORYDATECONTROL ") values (select "
+				HISTORYDATECONTROL ") select "
 				"height,blockhash,workinfoid,userid,workername,"
 				"clientid,enonce1,nonce2,nonce,reward,confirmed,"
 				"$3,$4,$5,$6,$7 from blocks where"
-				"blockhash=$1 and expirydate=$2)";
+				"blockhash=$1 and expirydate=$2";
 
 			res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 			rescode = PQresultStatus(res);
