@@ -4033,11 +4033,11 @@ static K_ITEM *find_blocks(int32_t height, char *blockhash)
 */
 
 static bool blocks_add(PGconn *conn, char *height, char *blockhash,
-				char *workinfoid, char *username, char *workername,
-				char *clientid, char *enonce1, char *nonce2,
-				char *nonce, char *reward, char *confirmed,
-				char *by, char *code, char *inet, tv_t *cd,
-				bool igndup)
+			char *confirmed, char *workinfoid, char *username,
+			char *workername, char *clientid, char *enonce1,
+			char *nonce2, char *nonce, char *reward,
+			char *by, char *code, char *inet, tv_t *cd,
+			bool igndup, char *id)
 {
 	ExecStatusType rescode;
 	PGresult *res = NULL;
@@ -4171,6 +4171,10 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 
 			res = PQexec(conn, "Commit");
 			break;
+		default:
+			LOGERR("%s(): %s.failed.invalid confirm='%s'",
+			       __func__, id, confirmed);
+			goto flail;
 	}
 
 	ok = true;
@@ -4178,7 +4182,7 @@ unparam:
 	PQclear(res);
 	for (n = 0; n < par; n++)
 		free(params[n]);
-
+flail:
 	K_WLOCK(blocks_free);
 	if (!ok)
 		k_add_head(blocks_free, item);
@@ -6609,7 +6613,7 @@ static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet
 					      DATA_TRANSFER(i_nonce2)->data,
 					      DATA_TRANSFER(i_nonce)->data,
 					      DATA_TRANSFER(i_reward)->data,
-					      by, code, inet, cd, igndup);
+					      by, code, inet, cd, igndup, id);
 			break;
 		case BLOCKS_CONFIRM:
 			msg = "confirmed";
@@ -6619,11 +6623,11 @@ static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet
 					      DATA_TRANSFER(i_confirmed)->data,
 					      EMPTY, EMPTY, EMPTY, EMPTY,
 					      EMPTY, EMPTY, EMPTY, EMPTY,
-					      by, code, inet, cd, igndup);
+					      by, code, inet, cd, igndup, id);
 			break;
 		default:
-			LOGERR("%s.failed.invalid conf='%s'",
-			       id, DATA_TRANSFER(i_confirmed)->data);
+			LOGERR("%s(): %s.failed.invalid confirm='%s'",
+			       __func__, id, DATA_TRANSFER(i_confirmed)->data);
 			return strdup("failed.DATA");
 	}
 
