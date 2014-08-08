@@ -819,6 +819,7 @@ bool _send_fd(int fd, int sockd, const char *file, const char *func, const int l
 	struct msghdr msg;
 	char buf[2];
 	bool ret;
+	int *cm;
 
 	memset(&msg, 0, sizeof(struct msghdr));
 	iov[0].iov_base = buf;
@@ -832,7 +833,8 @@ bool _send_fd(int fd, int sockd, const char *file, const char *func, const int l
 	cmptr->cmsg_level = SOL_SOCKET;
 	cmptr->cmsg_type = SCM_RIGHTS;
 	cmptr->cmsg_len = CONTROLLLEN;
-	*(int *)CMSG_DATA(cmptr) = fd;
+	cm = (int *)CMSG_DATA(cmptr);
+	*cm = fd;
 	buf[1] = 0;
 	buf[0] = 0;
 	ret = send_unix_data(sockd, &msg);
@@ -850,6 +852,7 @@ int _get_fd(int sockd, const char *file, const char *func, const int line)
 	struct iovec iov[1];
 	struct msghdr msg;
 	struct cmsghdr *cmptr = ckzalloc(CONTROLLLEN);
+	int *cm;
 
 	memset(&msg, 0, sizeof(struct msghdr));
 	iov[0].iov_base = buf;
@@ -865,7 +868,8 @@ int _get_fd(int sockd, const char *file, const char *func, const int line)
 	}
 out:
 	close(sockd);
-	newfd = *(int *)CMSG_DATA(cmptr);
+	cm = (int *)CMSG_DATA(cmptr);
+	newfd = *cm;
 	free(cmptr);
 	return newfd;
 }
