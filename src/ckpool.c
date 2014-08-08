@@ -867,14 +867,28 @@ static void clean_up(ckpool_t *ckp)
 	dealloc(ckp->children);
 }
 
+static void cancel_join_pthread(pthread_t *pth)
+{
+	if (!*pth)
+		return;
+	pthread_cancel(*pth);
+	join_pthread(*pth);
+	pth = NULL;
+}
+
+static void cancel_pthread(pthread_t *pth)
+{
+	if (!*pth)
+		return;
+	pthread_cancel(*pth);
+	pth = NULL;
+}
+
 static void __shutdown_children(ckpool_t *ckp, int sig)
 {
 	int i;
 
-	if (ckp->pth_watchdog) {
-		pthread_cancel(ckp->pth_watchdog);
-		join_pthread(ckp->pth_watchdog);
-	}
+	cancel_join_pthread(&ckp->pth_watchdog);
 
 	for (i = 0; i < ckp->proc_instances; i++) {
 		pid_t pid = ckp->children[i]->pid;
@@ -885,10 +899,7 @@ static void __shutdown_children(ckpool_t *ckp, int sig)
 
 static void shutdown_children(ckpool_t *ckp, int sig)
 {
-	if (ckp->pth_watchdog) {
-		pthread_cancel(ckp->pth_watchdog);
-		join_pthread(ckp->pth_watchdog);
-	}
+	cancel_join_pthread(&ckp->pth_watchdog);
 
 	__shutdown_children(ckp, sig);
 }
@@ -899,17 +910,13 @@ static void sighandler(int sig)
 
 	LOGWARNING("Parent process %s received signal %d, shutting down",
 		   ckp->name, sig);
-	if (ckp->pth_watchdog) {
-		pthread_cancel(ckp->pth_watchdog);
-		join_pthread(ckp->pth_watchdog);
-	}
+	cancel_join_pthread(&ckp->pth_watchdog);
 
 	__shutdown_children(ckp, SIGTERM);
 	/* Wait a second, then send SIGKILL */
 	sleep(1);
 	__shutdown_children(ckp, SIGKILL);
-	if (ckp->pth_listener)
-		pthread_cancel(ckp->pth_listener);
+	cancel_pthread(&ckp->pth_listener);
 	exit(0);
 }
 
@@ -1051,6 +1058,7 @@ static void *watchdog(void *arg)
 	ckpool_t *ckp = (ckpool_t *)arg;
 
 	rename_proc("watchdog");
+	sleep(1);
 	while (42) {
 		proc_instance_t *pi;
 		time_t relaunch_t;
