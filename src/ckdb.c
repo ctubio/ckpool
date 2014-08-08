@@ -1006,6 +1006,8 @@ typedef struct blocks {
 #define BLOCKS_NEW 'n'
 #define BLOCKS_CONFIRM '1'
 
+#define KANO -27972
+
 static K_TREE *blocks_root;
 static K_LIST *blocks_free;
 static K_STORE *blocks_store;
@@ -3998,7 +4000,7 @@ void sharesummary_reload()
 	PQfinish(conn);
 }
 
-// order by height asc,blockhash asc,expirydate desc
+// order by height asc,blockhash asc,expirydate asc
 static double cmp_blocks(K_ITEM *a, K_ITEM *b)
 {
 	double c = DATA_BLOCKS(a)->height - DATA_BLOCKS(b)->height;
@@ -4066,7 +4068,9 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 		case BLOCKS_NEW:
 			u_item = find_users(username);
 			if (!u_item)
-				goto early;
+				row->userid = KANO;
+			else
+				row->userid = DATA_USERS(u_item)->userid;
 
 			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
 			STRNCPY(row->workername, workername);
@@ -4174,7 +4178,7 @@ unparam:
 	PQclear(res);
 	for (n = 0; n < par; n++)
 		free(params[n]);
-early:
+
 	K_WLOCK(blocks_free);
 	if (!ok)
 		k_add_head(blocks_free, item);
