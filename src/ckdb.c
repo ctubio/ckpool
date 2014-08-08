@@ -7886,7 +7886,7 @@ int main(int argc, char **argv)
 	/* Ignore sigpipe */
 	signal(SIGPIPE, SIG_IGN);
 
-	ret = mkdir(ckp.socket_dir, 0700);
+	ret = mkdir(ckp.socket_dir, 0770);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
 
