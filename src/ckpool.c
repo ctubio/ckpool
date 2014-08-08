@@ -871,8 +871,10 @@ static void __shutdown_children(ckpool_t *ckp, int sig)
 {
 	int i;
 
-	pthread_cancel(ckp->pth_watchdog);
-	join_pthread(ckp->pth_watchdog);
+	if (ckp->pth_watchdog) {
+		pthread_cancel(ckp->pth_watchdog);
+		join_pthread(ckp->pth_watchdog);
+	}
 
 	for (i = 0; i < ckp->proc_instances; i++) {
 		pid_t pid = ckp->children[i]->pid;
@@ -883,8 +885,10 @@ static void __shutdown_children(ckpool_t *ckp, int sig)
 
 static void shutdown_children(ckpool_t *ckp, int sig)
 {
-	pthread_cancel(ckp->pth_watchdog);
-	join_pthread(ckp->pth_watchdog);
+	if (ckp->pth_watchdog) {
+		pthread_cancel(ckp->pth_watchdog);
+		join_pthread(ckp->pth_watchdog);
+	}
 
 	__shutdown_children(ckp, sig);
 }
@@ -895,14 +899,17 @@ static void sighandler(int sig)
 
 	LOGWARNING("Parent process %s received signal %d, shutting down",
 		   ckp->name, sig);
-	pthread_cancel(ckp->pth_watchdog);
-	join_pthread(ckp->pth_watchdog);
+	if (ckp->pth_watchdog) {
+		pthread_cancel(ckp->pth_watchdog);
+		join_pthread(ckp->pth_watchdog);
+	}
 
 	__shutdown_children(ckp, SIGTERM);
 	/* Wait a second, then send SIGKILL */
 	sleep(1);
 	__shutdown_children(ckp, SIGKILL);
-	pthread_cancel(ckp->pth_listener);
+	if (ckp->pth_listener)
+		pthread_cancel(ckp->pth_listener);
 	exit(0);
 }
 
@@ -1310,7 +1317,8 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &handler, NULL);
 
 	/* Shutdown from here if the listener is sent a shutdown message */
-	join_pthread(ckp.pth_listener);
+	if (ckp.pth_listener)
+		join_pthread(ckp.pth_listener);
 
 	shutdown_children(&ckp, SIGTERM);
 	clean_up(&ckp);
