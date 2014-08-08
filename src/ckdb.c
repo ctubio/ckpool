@@ -7901,7 +7901,7 @@ int main(int argc, char **argv)
 		quit(1, "Failed to open log file %s", buf);
 	ckp.logfd = fileno(ckp.logfp);
 
-	snprintf(logname, sizeof(logname), "%s%s",
+	snprintf(logname, sizeof(logname), "%s%s-db-",
 				ckp.logdir, ckp.name);
 
 	ckp.main.ckp = &ckp;
