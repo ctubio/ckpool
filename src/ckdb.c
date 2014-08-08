@@ -4148,16 +4148,17 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			par = 0;
 			params[par++] = str_to_buf(row->blockhash, NULL, 0);
 			params[par++] = tv_to_buf(cd, NULL, 0);
+			params[par++] = str_to_buf(row->confirmed, NULL, 0);
 			HISTORYDATEPARAMS(params, par, row);
-			PARCHKVAL(par, 2 + HISTORYDATECOUNT, params); // 7 as per ins
+			PARCHKVAL(par, 3 + HISTORYDATECOUNT, params); // 8 as per ins
 
 			ins = "insert into blocks "
 				"(height,blockhash,workinfoid,userid,workername,"
 				"clientid,enonce1,nonce2,nonce,reward,confirmed"
 				HISTORYDATECONTROL ") select "
 				"height,blockhash,workinfoid,userid,workername,"
-				"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-				"$3,$4,$5,$6,$7 from blocks where "
+				"clientid,enonce1,nonce2,nonce,reward,"
+				"$3,$4,$5,$6,$7,$8 from blocks where "
 				"blockhash=$1 and expirydate=$2";
 
 			res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
