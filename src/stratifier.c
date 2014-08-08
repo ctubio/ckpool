@@ -1220,10 +1220,11 @@ static json_t *parse_subscribe(int client_id, json_t *params_val)
  * user or creates a new one. */
 static user_instance_t *authorise_user(const char *workername)
 {
-	char *fullname = strdupa(workername);
-	char *username = strsep(&fullname, ".");
+	char *username = strdupa(workername);
 	user_instance_t *instance;
 
+	username = strsep(&username, ".");
+	username = strsep(&username, "_");
 	if (strlen(username) > 127)
 		username[127] = '\0';
 
