@@ -783,13 +783,15 @@ static void rm_namepid(proc_instance_t *pi)
  * parent process to shut down cleanly. */
 static void childsighandler(int sig)
 {
-	pid_t ppid = getppid();
-
 	signal(sig, SIG_IGN);
 	signal(SIGTERM, SIG_IGN);
-	LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
-		   sig, global_ckp->name);
-	kill_pid(ppid, sig);
+	if (sig != SIGUSR1) {
+		pid_t ppid = getppid();
+
+		LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
+			sig, global_ckp->name);
+		kill_pid(ppid, sig);
+	}
 	exit(0);
 }
 
@@ -820,11 +822,9 @@ static void launch_process(proc_instance_t *pi)
 		handler.sa_flags = 0;
 		sigemptyset(&handler.sa_mask);
 		sigaction(SIGTERM, &handler, NULL);
-		sigaction(SIGINT, &handler, NULL);
+		signal(SIGINT, SIG_IGN);
+		signal(SIGQUIT, SIG_IGN);
 
-		/* Detach child processes leaving main only to communicate with
-		 * the terminal. */
-		ioctl(0, TIOCNOTTY, NULL);
 		rename_proc(pi->processname);
 		write_namepid(pi);
 		ret = pi->process(pi);
@@ -917,7 +917,7 @@ static void sighandler(int sig)
 		   ckp->name, sig);
 	cancel_join_pthread(&ckp->pth_watchdog);
 
-	__shutdown_children(ckp, SIGTERM);
+	__shutdown_children(ckp, SIGUSR1);
 	/* Wait a second, then send SIGKILL */
 	sleep(1);
 	__shutdown_children(ckp, SIGKILL);
