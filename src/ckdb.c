@@ -1922,8 +1922,6 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 	WORKERSTATUS *row;
 	K_ITEM *item;
 
-	LOGDEBUG("%s()", __func__);
-
 	if (auths) {
 		item = find_create_workerstatus(auths->userid, auths->workername);
 		row = DATA_WORKERSTATUS(item);
