@@ -7783,8 +7783,11 @@ static void check_restore_dir()
 {
 	struct stat statbuf;
 
-	if (!restorefrom)
-		quit(1, "ERR: '-r dir' required to specify the ckpool hourly ckdb log dir");
+	if (!restorefrom) {
+		restorefrom = strdup("logs");
+		if (!restorefrom)
+			quithere(1, "OOM");
+	}
 
 	if (!(*restorefrom))
 		quit(1, "ERR: '-r dir' can't be empty");
