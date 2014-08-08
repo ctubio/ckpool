@@ -7886,7 +7886,7 @@ int main(int argc, char **argv)
 //	parse_config(&ckp);
 
 	if (!ckp.logdir)
-		ckp.logdir = strdup("logs");
+		ckp.logdir = strdup("dblogs");
 
 	/* Create the log directory */
 	trail_slash(&ckp.logdir);
