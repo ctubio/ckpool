@@ -1469,14 +1469,16 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 }
 
 /* We should already be holding the workbase_lock */
-static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, double diff, const char *coinbase,
-			    int cblen, const char *nonce2, const char *nonce)
+static void
+test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, const uchar *hash,
+		double diff, const char *coinbase, int cblen, const char *nonce2, const char *nonce)
 {
 	int transactions = wb->transactions + 1;
+	char hexcoinbase[512], blockhash[68];
 	char *gbt_block, varint[12];
-	char hexcoinbase[512];
 	json_t *val = NULL;
 	char cdfield[64];
+	uchar swap[32];
 	ckpool_t *ckp;
 	ts_t ts_now;
 
@@ -1517,9 +1519,12 @@ static void test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uc
 	ckp = wb->ckp;
 	send_proc(ckp->generator, gbt_block);
 	free(gbt_block);
+
+	flip_32(swap, hash);
+	__bin2hex(blockhash, swap, 32);
 	val = json_pack("{si,ss,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
-			"blockhash", data,
+			"blockhash", blockhash,
 			"confirmed", "n",
 			"workinfoid", wb->id,
 			"username", client->user_instance->username,
@@ -1591,7 +1596,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	ret = diff_from_target(hash);
 
 	/* Test we haven't solved a block regardless of share status */
-	test_blocksolve(client, wb, swap, ret, coinbase, cblen, nonce2, nonce);
+	test_blocksolve(client, wb, swap, hash, ret, coinbase, cblen, nonce2, nonce);
 
 	return ret;
 }
