@@ -2266,6 +2266,7 @@ static void *statsupdate(void *arg)
 
 	tv_time(&stats.start_time);
 	cksleep_prepare_r(&stats.last_update);
+	sleep(1);
 
 	while (42) {
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
