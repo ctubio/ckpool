@@ -1013,6 +1013,10 @@ static void parse_config(ckpool_t *ckp)
 	}
 	json_get_string(&ckp->btcaddress, json_conf, "btcaddress");
 	json_get_string(&ckp->btcsig, json_conf, "btcsig");
+	if (ckp->btcsig && strlen(ckp->btcsig) > 38) {
+		LOGWARNING("Signature %s too long, truncating to 38 bytes", ckp->btcsig);
+		ckp->btcsig[38] = '\0';
+	}
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
 	json_get_string(&ckp->serverurl, json_conf, "serverurl");
