@@ -1725,7 +1725,10 @@ static PGconn *dbconnect()
 	char conninfo[128];
 	PGconn *conn;
 
-	snprintf(conninfo, sizeof(conninfo), "host=127.0.0.1 dbname=ckdb user=%s", db_user);
+	snprintf(conninfo, sizeof(conninfo),
+		 "host=127.0.0.1 dbname=ckdb user=%s%s%s",
+		 db_user, db_pass ? " password=" : "",
+		 db_pass ? db_pass : "");
 
 	conn = PQconnectdb(conninfo);
 	if (PQstatus(conn) != CONNECTION_OK)
@@ -7860,8 +7863,6 @@ int main(int argc, char **argv)
 
 	check_restore_dir();
 
-//	if (!db_pass)
-//		zzz
 	if (!db_user)
 		db_user = "postgres";
 	if (!ckp.name)
