@@ -1287,6 +1287,24 @@ static void setnow(tv_t *now)
 	now->tv_usec = spec.tv_nsec / 1000;
 }
 
+static uint64_t ticks;
+static time_t last_tick;
+
+static void tick()
+{
+	time_t now;
+	char ch;
+
+	now = time(NULL);
+	if (now != last_tick) {
+		last_tick = now;
+		ch = status_chars[ticks++ & 0x3];
+		putchar(ch);
+		putchar('\r');
+		fflush(stdout);
+	}
+}
+
 static void dsp_transfer(K_ITEM *item, FILE *stream)
 {
 	TRANSFER *t = NULL;
@@ -3170,6 +3188,8 @@ static bool workinfo_fill(PGconn *conn)
 
 		if (tv_newer(&(dbstatus.newest_createdate_workinfo), &(row->createdate)))
 			copy_tv(&(dbstatus.newest_createdate_workinfo), &(row->createdate));
+
+		tick();
 	}
 	if (!ok)
 		k_add_head(workinfo_free, item);
@@ -3946,6 +3966,8 @@ static bool sharesummary_fill(PGconn *conn)
 				copy_tv(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare));
 		} else if (tv_newer(&(dbstatus.newest_sharesummary_firstshare), &(row->firstshare)))
 				copy_tv(&(dbstatus.newest_sharesummary_firstshare), &(row->firstshare));
+
+		tick();
 	}
 	if (!ok)
 		k_add_head(sharesummary_free, item);
@@ -4511,6 +4533,8 @@ static bool auths_fill(PGconn *conn)
 
 		if (tv_newer(&(dbstatus.newest_createdate_auths), &(row->createdate)))
 			copy_tv(&(dbstatus.newest_createdate_auths), &(row->createdate));
+
+		tick();
 	}
 	if (!ok)
 		k_add_head(auths_free, item);
@@ -4742,6 +4766,8 @@ static bool poolstats_fill(PGconn *conn)
 
 		if (tv_newer(&(dbstatus.newest_createdate_poolstats), &(row->createdate)))
 			copy_tv(&(dbstatus.newest_createdate_poolstats), &(row->createdate));
+
+		tick();
 	}
 	if (!ok)
 		k_add_head(poolstats_free, item);
@@ -5196,6 +5222,8 @@ static bool userstats_fill(PGconn *conn)
 			if (tv_newer(&(dbstatus.newest_starttimeband_userstats), &statsdate))
 				copy_tv(&(dbstatus.newest_starttimeband_userstats), &statsdate);
 		}
+
+		tick();
 	}
 	if (!ok)
 		k_add_head(userstats_free, item);
@@ -7384,24 +7412,6 @@ static void *summariser(__maybe_unused void *arg)
 	}
 
 	return NULL;
-}
-
-static uint64_t ticks;
-static time_t last_tick;
-
-static void tick()
-{
-	time_t now;
-	char ch;
-
-	now = time(NULL);
-	if (now > last_tick) {
-		last_tick = now;
-		ch = status_chars[ticks++ & 0x3];
-		putchar(ch);
-		putchar('\r');
-		fflush(stdout);
-	}
 }
 
 static void reload_line(char *filename, uint64_t count, char *buf)
