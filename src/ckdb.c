@@ -5380,7 +5380,7 @@ static void reload()
 	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
 	LOGWARNING("%s(): %s oldest DB incomplete sharesummary", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_sharesummary_firstshare), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB sharesummary", __func__, buf);
+	LOGWARNING("%s(): %s newest DB complete sharesummary", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_workinfo), buf, sizeof(buf));
 	LOGWARNING("%s(): %s newest DB workinfo", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_auths), buf, sizeof(buf));
