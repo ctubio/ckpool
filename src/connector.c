@@ -343,7 +343,7 @@ void *sender(void *arg)
 			if (!polling)
 				timeout_ts.tv_sec += 1;
 			else {
-				ts_t wait_ts = {0, 1000000};
+				ts_t wait_ts = {0, 100000000};
 				timeraddspec(&timeout_ts, &wait_ts);
 			}
 			pthread_cond_timedwait(&sender_cond, &sender_lock, &timeout_ts);
