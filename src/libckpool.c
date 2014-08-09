@@ -610,17 +610,13 @@ int wait_read_select(int sockd, int timeout)
 {
 	tv_t tv_timeout;
 	fd_set readfs;
-	int ret;
 
 	tv_timeout.tv_sec = timeout;
 	tv_timeout.tv_usec = 0;
 
 	FD_ZERO(&readfs);
 	FD_SET(sockd, &readfs);
-	do {
-		ret = select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
-	} while (unlikely(ret < 0));
-	return ret;
+	return select(sockd + 1, &readfs, NULL, NULL, &tv_timeout);
 }
 
 int read_length(int sockd, void *buf, int len)
@@ -688,17 +684,13 @@ int wait_write_select(int sockd, int timeout)
 {
 	tv_t tv_timeout;
 	fd_set writefds;
-	int ret;
 
 	tv_timeout.tv_sec = timeout;
 	tv_timeout.tv_usec = 0;
 
 	FD_ZERO(&writefds);
 	FD_SET(sockd, &writefds);
-	do {
-		ret = select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
-	} while (unlikely(ret < 0));
-	return ret;
+	return select(sockd + 1, NULL, &writefds, NULL, &tv_timeout);
 }
 
 int write_length(int sockd, const void *buf, int len)
