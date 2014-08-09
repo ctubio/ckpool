@@ -374,6 +374,12 @@ void *sender(void *arg)
 		 * select on this one */
 		ret = wait_write_select(fd, 0);
 		if (ret < 1) {
+			if (ret < 0) {
+				LOGDEBUG("Discarding message sent to interrupted client");
+				free(sender_send->buf);
+				free(sender_send);
+				continue;
+			}
 			LOGDEBUG("Client %d not ready for writes", client->id);
 
 			/* Append it to the tail of the list */
