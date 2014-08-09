@@ -499,7 +499,7 @@ void close_unix_socket(const int sockd, const char *server_path)
 
 int _open_unix_server(const char *server_path, const char *file, const char *func, const int line)
 {
-	mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP; // Owner+Group R+W
+	mode_t mode = S_IRWXU | S_IRWXG; // Owner+Group RWX
 	struct sockaddr_un serveraddr;
 	int sockd = -1, len, ret;
 	struct stat buf;
