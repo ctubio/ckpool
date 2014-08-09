@@ -1265,6 +1265,7 @@ void logmsg(int loglevel, const char *fmt, ...)
 		fprintf(LOGFP, "%s %s", stamp, buf);
 		if (loglevel <= LOG_ERR && errno != 0)
 			fprintf(LOGFP, " with errno %d: %s", errno, strerror(errno));
+		errno = 0;
 		fprintf(LOGFP, "\n");
 		flock(logfd, LOCK_UN);
 	}
@@ -1272,6 +1273,7 @@ void logmsg(int loglevel, const char *fmt, ...)
 		if (loglevel <= LOG_ERR && errno != 0) {
 			fprintf(stderr, "%s %s with errno %d: %s%s\n",
 					stamp, buf, errno, strerror(errno), extra);
+			errno = 0;
 		} else
 			fprintf(stderr, "%s %s%s\n", stamp, buf, extra);
 		fflush(stderr);

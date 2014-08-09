@@ -499,6 +499,7 @@ void close_unix_socket(const int sockd, const char *server_path)
 
 int _open_unix_server(const char *server_path, const char *file, const char *func, const int line)
 {
+	mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP; // Owner+Group R+W
 	struct sockaddr_un serveraddr;
 	int sockd = -1, len, ret;
 	struct stat buf;
@@ -545,6 +546,10 @@ int _open_unix_server(const char *server_path, const char *file, const char *fun
 		sockd = -1;
 		goto out;
 	}
+
+	ret = chmod(server_path, mode);
+	if (unlikely(ret < 0))
+		LOGERR("Failed to set mode in open_unix_server - continuing");
 
 	ret = listen(sockd, 10);
 	if (unlikely(ret < 0)) {
