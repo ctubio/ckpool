@@ -336,7 +336,7 @@ void *sender(void *arg)
 		int ret, fd, ofs = 0;
 
 		mutex_lock(&sender_lock);
-		if (!sender_sends) {
+		if (!sender_sends || polling) {
 			ts_t timeout_ts;
 
 			ts_realtime(&timeout_ts);
