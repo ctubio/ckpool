@@ -23,6 +23,17 @@
 			__maybe_unused const char *func, \
 			__maybe_unused const int line
 
+#define cmp_t int32_t
+
+#define CMP_STR(a,b) strcmp((a),(b))
+#define CMP_INT(a,b) ((a)-(b))
+#define CMP_BIG_Z(a,b) (((a) < (b)) ? -1 : 1)
+#define CMP_BIG(a,b) (((a) == (b)) ? 0 : CMP_BIG_Z(a,b))
+#define CMP_TV(a,b) (((a).tv_sec == (b).tv_sec) ? CMP_BIG((a).tv_usec,(b).tv_usec) : \
+						  CMP_BIG_Z((a).tv_sec,(b).tv_sec))
+#define CMP_BIGINT CMP_BIG
+#define CMP_DOUBLE CMP_BIG
+
 typedef struct ktree
 {
 	bool	isNil;
@@ -50,15 +61,15 @@ extern K_ITEM *_next_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define next_in_ktree(_ctx) _next_in_ktree(_ctx, KLIST_FFL_HERE)
 extern K_ITEM *_prev_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define prev_in_ktree(_ctx) _prev_in_ktree(_ctx, KLIST_FFL_HERE)
-extern K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_func)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS);
+extern K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_func)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS);
 #define add_to_ktree(_root, _data, _cmp_func) _add_to_ktree(_root, _data, _cmp_func, KLIST_FFL_HERE)
-extern K_ITEM *_find_in_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
+extern K_ITEM *_find_in_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define find_in_ktree(_root, _data, _cmp_funct, _ctx) _find_in_ktree(_root, _data, _cmp_funct, _ctx, KLIST_FFL_HERE)
-extern K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
+extern K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define find_after_in_ktree(_ktree, _data, _cmp_funct, _ctx) _find_after_in_ktree(_ktree, _data, _cmp_funct, _ctx, KLIST_FFL_HERE)
-extern K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
+extern K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define find_before_in_ktree(_ktree, _data, _cmp_funct, _ctx) _find_before_in_ktree(_ktree, _data, _cmp_funct, _ctx, KLIST_FFL_HERE)
-extern K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
+extern K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS);
 #define remove_from_ktree(_root, _data, _cmp_funct, _ctx) _remove_from_ktree(_root, _data, _cmp_funct, _ctx, KLIST_FFL_HERE)
 extern K_TREE *_free_ktree(K_TREE *root, void (*free_funct)(void *), KTREE_FFL_ARGS);
 #define free_ktree(_root, _free_funct) _free_ktree(_root, _free_funct, KLIST_FFL_HERE)

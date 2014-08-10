@@ -1325,11 +1325,10 @@ static void dsp_transfer(K_ITEM *item, FILE *stream)
 }
 
 // order by name asc
-static double cmp_transfer(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)strcmp(DATA_TRANSFER(a)->name,
-				  DATA_TRANSFER(b)->name);
-	return c;
+	return CMP_STR(DATA_TRANSFER(a)->name,
+		       DATA_TRANSFER(b)->name);
 }
 
 static K_ITEM *find_transfer(char *name)
@@ -1816,13 +1815,13 @@ cleanup:
 }
 
 // order by userid asc,workername asc
-static double cmp_workerstatus(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_workerstatus(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_WORKERSTATUS(a)->userid -
-			    DATA_WORKERSTATUS(b)->userid);
-	if (c == 0.0) {
-		c = strcmp(DATA_WORKERSTATUS(a)->workername,
-			   DATA_WORKERSTATUS(b)->workername);
+	cmp_t c = CMP_BIGINT(DATA_WORKERSTATUS(a)->userid,
+			     DATA_WORKERSTATUS(b)->userid);
+	if (c == 0) {
+		c = CMP_STR(DATA_WORKERSTATUS(a)->workername,
+			    DATA_WORKERSTATUS(b)->workername);
 	}
 	return c;
 }
@@ -1866,8 +1865,8 @@ static K_ITEM *_find_create_workerstatus(int64_t userid, char *workername, bool 
 #define find_create_workerstatus(_u, _w)  _find_create_workerstatus(_u, _w, true)
 #define find_workerstatus(_u, _w)  _find_create_workerstatus(_u, _w, false)
 
-static double cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b);
-static double cmp_sharesummary(K_ITEM *a, K_ITEM *b);
+static cmp_t cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b);
+static cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b);
 
 /* All data is loaded, now update workerstatus last_share, last_idle, last_stats
  * Since shares are all part of a sharesummary, there's no need to search shares
@@ -1962,25 +1961,25 @@ static void workerstatus_update(AUTHS *auths, SHARES *shares, USERSTATS *usersta
 }
 
 // default tree order by username asc,expirydate desc
-static double cmp_users(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_users(K_ITEM *a, K_ITEM *b)
 {
-	double c = strcmp(DATA_USERS(a)->username,
+	cmp_t c = CMP_STR(DATA_USERS(a)->username,
 			  DATA_USERS(b)->username);
-	if (c == 0.0) {
-		c = tvdiff(&(DATA_USERS(b)->expirydate),
-			   &(DATA_USERS(a)->expirydate));
+	if (c == 0) {
+		c = CMP_TV(DATA_USERS(b)->expirydate,
+			   DATA_USERS(a)->expirydate);
 	}
 	return c;
 }
 
 // order by userid asc,expirydate desc
-static double cmp_userid(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_userid(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERS(a)->userid -
-			    DATA_USERS(b)->userid);
-	if (c == 0.0) {
-		c = tvdiff(&(DATA_USERS(b)->expirydate),
-			   &(DATA_USERS(a)->expirydate));
+	cmp_t c = CMP_BIGINT(DATA_USERS(a)->userid,
+			     DATA_USERS(b)->userid);
+	if (c == 0) {
+		c = CMP_TV(DATA_USERS(b)->expirydate,
+			   DATA_USERS(a)->expirydate);
 	}
 	return c;
 }
@@ -2210,16 +2209,16 @@ void users_reload()
 }
 
 // order by userid asc,workername asc,expirydate desc
-static double cmp_workers(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_workers(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_WORKERS(a)->userid -
-			    DATA_WORKERS(b)->userid);
-	if (c == 0.0) {
-		c = strcmp(DATA_WORKERS(a)->workername,
-			   DATA_WORKERS(b)->workername);
-		if (c == 0.0) {
-			c = tvdiff(&(DATA_WORKERS(b)->expirydate),
-				   &(DATA_WORKERS(a)->expirydate));
+	cmp_t c = CMP_BIGINT(DATA_WORKERS(a)->userid,
+			     DATA_WORKERS(b)->userid);
+	if (c == 0) {
+		c = CMP_STR(DATA_WORKERS(a)->workername,
+			    DATA_WORKERS(b)->workername);
+		if (c == 0) {
+			c = CMP_TV(DATA_WORKERS(b)->expirydate,
+				   DATA_WORKERS(a)->expirydate);
 		}
 	}
 	return c;
@@ -2635,19 +2634,19 @@ void workers_reload()
 }
 
 // order by userid asc,paydate asc,payaddress asc,expirydate desc
-static double cmp_payments(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_payments(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_PAYMENTS(a)->userid -
-			    DATA_PAYMENTS(b)->userid);
-	if (c == 0.0) {
-		c = tvdiff(&(DATA_PAYMENTS(a)->paydate),
-			   &(DATA_PAYMENTS(b)->paydate));
-		if (c == 0.0) {
-			c = strcmp(DATA_PAYMENTS(a)->payaddress,
-				   DATA_PAYMENTS(b)->payaddress);
-			if (c == 0.0) {
-				c = tvdiff(&(DATA_PAYMENTS(b)->expirydate),
-					   &(DATA_PAYMENTS(a)->expirydate));
+	cmp_t c = CMP_BIGINT(DATA_PAYMENTS(a)->userid,
+			     DATA_PAYMENTS(b)->userid);
+	if (c == 0) {
+		c = CMP_TV(DATA_PAYMENTS(a)->paydate,
+			   DATA_PAYMENTS(b)->paydate);
+		if (c == 0) {
+			c = CMP_STR(DATA_PAYMENTS(a)->payaddress,
+				    DATA_PAYMENTS(b)->payaddress);
+			if (c == 0) {
+				c = CMP_TV(DATA_PAYMENTS(b)->expirydate,
+					   DATA_PAYMENTS(a)->expirydate);
 			}
 		}
 	}
@@ -2778,13 +2777,13 @@ void payments_reload()
 }
 
 // order by workinfoid asc,expirydate asc
-static double cmp_workinfo(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_WORKINFO(a)->workinfoid -
-			    DATA_WORKINFO(b)->workinfoid);
+	cmp_t c = CMP_BIGINT(DATA_WORKINFO(a)->workinfoid,
+			     DATA_WORKINFO(b)->workinfoid);
 	if (c == 0) {
-		c = tvdiff(&(DATA_WORKINFO(a)->expirydate),
-			   &(DATA_WORKINFO(b)->expirydate));
+		c = CMP_TV(DATA_WORKINFO(a)->expirydate,
+			   DATA_WORKINFO(b)->expirydate);
 	}
 	return c;
 }
@@ -2815,21 +2814,20 @@ inline int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS)
 	return height;
 }
 
-static double _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS)
+static cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS)
 {
-	double c = (double)(_coinbase1height(coinbase1a, WHERE_FFL_PASS) -
-			    _coinbase1height(coinbase1b, WHERE_FFL_PASS));
-	return c;
+	return CMP_INT(_coinbase1height(coinbase1a, WHERE_FFL_PASS),
+		       _coinbase1height(coinbase1b, WHERE_FFL_PASS));
 }
 
 // order by height asc,createdate asc
-static double cmp_workinfo_height(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b)
 {
-	double c = cmp_height(DATA_WORKINFO(a)->coinbase1,
-			      DATA_WORKINFO(b)->coinbase1);
+	cmp_t c = cmp_height(DATA_WORKINFO(a)->coinbase1,
+			     DATA_WORKINFO(b)->coinbase1);
 	if (c == 0) {
-		c = tvdiff(&(DATA_WORKINFO(a)->createdate),
-			   &(DATA_WORKINFO(b)->createdate));
+		c = CMP_TV(DATA_WORKINFO(a)->createdate,
+			   DATA_WORKINFO(b)->createdate);
 	}
 	return c;
 }
@@ -2963,8 +2961,8 @@ unparam:
 
 static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 				char *by, char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS);
-static double cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
-static double cmp_shares(K_ITEM *a, K_ITEM *b);
+static cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
+static cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 
 /* N.B. a DB check can be done to find sharesummaries that have missed being
  *  aged (and a possible problem with the aging process):
@@ -3228,25 +3226,25 @@ void workinfo_reload()
 }
 
 // order by workinfoid asc,userid asc,workername asc,createdate asc,nonce asc,expirydate desc
-static double cmp_shares(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_shares(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHARES(a)->workinfoid -
-			    DATA_SHARES(b)->workinfoid);
+	cmp_t c = CMP_BIGINT(DATA_SHARES(a)->workinfoid,
+			     DATA_SHARES(b)->workinfoid);
 	if (c == 0) {
-		c = (double)(DATA_SHARES(a)->userid -
-			     DATA_SHARES(b)->userid);
+		c = CMP_BIGINT(DATA_SHARES(a)->userid,
+			       DATA_SHARES(b)->userid);
 		if (c == 0) {
-			c = strcmp(DATA_SHARES(a)->workername,
-				   DATA_SHARES(b)->workername);
+			c = CMP_STR(DATA_SHARES(a)->workername,
+				    DATA_SHARES(b)->workername);
 			if (c == 0) {
-				c = tvdiff(&(DATA_SHARES(a)->createdate),
-					   &(DATA_SHARES(b)->createdate));
+				c = CMP_TV(DATA_SHARES(a)->createdate,
+					   DATA_SHARES(b)->createdate);
 				if (c == 0) {
-					c = strcmp(DATA_SHARES(a)->nonce,
-						   DATA_SHARES(b)->nonce);
+					c = CMP_STR(DATA_SHARES(a)->nonce,
+						    DATA_SHARES(b)->nonce);
 					if (c == 0) {
-						c = tvdiff(&(DATA_SHARES(b)->expirydate),
-							   &(DATA_SHARES(a)->expirydate));
+						c = CMP_TV(DATA_SHARES(b)->expirydate,
+							   DATA_SHARES(a)->expirydate);
 					}
 				}
 			}
@@ -3362,19 +3360,19 @@ static bool shares_fill()
 }
 
 // order by workinfoid asc,userid asc,createdate asc,nonce asc,expirydate desc
-static double cmp_shareerrors(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHAREERRORS(a)->workinfoid -
-			    DATA_SHAREERRORS(b)->workinfoid);
+	cmp_t c = CMP_BIGINT(DATA_SHAREERRORS(a)->workinfoid,
+			     DATA_SHAREERRORS(b)->workinfoid);
 	if (c == 0) {
-		c = (double)(DATA_SHAREERRORS(a)->userid -
-			     DATA_SHAREERRORS(b)->userid);
+		c = CMP_BIGINT(DATA_SHAREERRORS(a)->userid,
+			       DATA_SHAREERRORS(b)->userid);
 		if (c == 0) {
-			c = tvdiff(&(DATA_SHAREERRORS(a)->createdate),
-				   &(DATA_SHAREERRORS(b)->createdate));
+			c = CMP_TV(DATA_SHAREERRORS(a)->createdate,
+				   DATA_SHAREERRORS(b)->createdate);
 			if (c == 0) {
-				c = tvdiff(&(DATA_SHAREERRORS(b)->expirydate),
-					   &(DATA_SHAREERRORS(a)->expirydate));
+				c = CMP_TV(DATA_SHAREERRORS(b)->expirydate,
+					   DATA_SHAREERRORS(a)->expirydate);
 			}
 		}
 	}
@@ -3486,32 +3484,32 @@ static void dsp_sharesummary(K_ITEM *item, FILE *stream)
 }
 
 // default tree order by userid asc,workername asc,workinfoid asc for reporting
-static double cmp_sharesummary(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHARESUMMARY(a)->userid -
-			    DATA_SHARESUMMARY(b)->userid);
-	if (c == 0.0) {
-		c = strcmp(DATA_SHARESUMMARY(a)->workername,
-			   DATA_SHARESUMMARY(b)->workername);
-		if (c == 0.0) {
-			c = (double)(DATA_SHARESUMMARY(a)->workinfoid -
-				     DATA_SHARESUMMARY(b)->workinfoid);
+	cmp_t c = CMP_BIGINT(DATA_SHARESUMMARY(a)->userid,
+			     DATA_SHARESUMMARY(b)->userid);
+	if (c == 0) {
+		c = CMP_STR(DATA_SHARESUMMARY(a)->workername,
+			    DATA_SHARESUMMARY(b)->workername);
+		if (c == 0) {
+			c = CMP_BIGINT(DATA_SHARESUMMARY(a)->workinfoid,
+				       DATA_SHARESUMMARY(b)->workinfoid);
 		}
 	}
 	return c;
 }
 
 // order by workinfoid asc,userid asc,workername asc for flagging complete
-static double cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_SHARESUMMARY(a)->workinfoid -
-			    DATA_SHARESUMMARY(b)->workinfoid);
-	if (c == 0.0) {
-		c = (double)(DATA_SHARESUMMARY(a)->userid -
-			     DATA_SHARESUMMARY(b)->userid);
-		if (c == 0.0) {
-			c = strcmp(DATA_SHARESUMMARY(a)->workername,
-				   DATA_SHARESUMMARY(b)->workername);
+	cmp_t c = CMP_BIGINT(DATA_SHARESUMMARY(a)->workinfoid,
+			     DATA_SHARESUMMARY(b)->workinfoid);
+	if (c == 0) {
+		c = CMP_BIGINT(DATA_SHARESUMMARY(a)->userid,
+			       DATA_SHARESUMMARY(b)->userid);
+		if (c == 0) {
+			c = CMP_STR(DATA_SHARESUMMARY(a)->workername,
+				    DATA_SHARESUMMARY(b)->workername);
 		}
 	}
 	return c;
@@ -4004,15 +4002,16 @@ void sharesummary_reload()
 }
 
 // order by height asc,blockhash asc,expirydate asc
-static double cmp_blocks(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b)
 {
-	double c = DATA_BLOCKS(a)->height - DATA_BLOCKS(b)->height;
+	cmp_t c = CMP_INT(DATA_BLOCKS(a)->height,
+			  DATA_BLOCKS(b)->height);
 	if (c == 0) {
-		c = strcmp(DATA_BLOCKS(a)->blockhash,
-			   DATA_BLOCKS(b)->blockhash);
+		c = CMP_STR(DATA_BLOCKS(a)->blockhash,
+			    DATA_BLOCKS(b)->blockhash);
 		if (c == 0) {
-			c = tvdiff(&(DATA_BLOCKS(a)->expirydate),
-				   &(DATA_BLOCKS(b)->expirydate));
+			c = CMP_TV(DATA_BLOCKS(a)->expirydate,
+				   DATA_BLOCKS(b)->expirydate);
 		}
 	}
 	return c;
@@ -4341,19 +4340,19 @@ void blocks_reload()
 }
 
 // order by userid asc,createdate asc,authid asc,expirydate desc
-static double cmp_auths(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_auths(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_AUTHS(a)->userid -
-			    DATA_AUTHS(b)->userid);
+	cmp_t c = CMP_BIGINT(DATA_AUTHS(a)->userid,
+			     DATA_AUTHS(b)->userid);
 	if (c == 0) {
-		c = tvdiff(&(DATA_AUTHS(a)->createdate),
-			   &(DATA_AUTHS(b)->createdate));
+		c = CMP_TV(DATA_AUTHS(a)->createdate,
+			   DATA_AUTHS(b)->createdate);
 		if (c == 0) {
-			c = (double)(DATA_AUTHS(a)->authid -
-				     DATA_AUTHS(b)->authid);
+			c = CMP_BIGINT(DATA_AUTHS(a)->authid,
+				       DATA_AUTHS(b)->authid);
 			if (c == 0) {
-				c = tvdiff(&(DATA_AUTHS(b)->expirydate),
-					   &(DATA_AUTHS(a)->expirydate));
+				c = CMP_TV(DATA_AUTHS(b)->expirydate,
+					   DATA_AUTHS(a)->expirydate);
 			}
 		}
 	}
@@ -4577,13 +4576,13 @@ void auths_reload()
 }
 
 // order by poolinstance asc,createdate asc
-static double cmp_poolstats(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)strcmp(DATA_POOLSTATS(a)->poolinstance,
-				  DATA_POOLSTATS(b)->poolinstance);
+	cmp_t c = CMP_STR(DATA_POOLSTATS(a)->poolinstance,
+			  DATA_POOLSTATS(b)->poolinstance);
 	if (c == 0) {
-		c = tvdiff(&(DATA_POOLSTATS(a)->createdate),
-			   &(DATA_POOLSTATS(b)->createdate));
+		c = CMP_TV(DATA_POOLSTATS(a)->createdate,
+			   DATA_POOLSTATS(b)->createdate);
 	}
 	return c;
 }
@@ -4832,19 +4831,19 @@ static void dsp_userstats(K_ITEM *item, FILE *stream)
 
 /* order by userid asc,statsdate asc,poolinstance asc,workername asc
    as per required for userstats homepage summarisation */
-static double cmp_userstats(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_userstats(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERSTATS(a)->userid -
-			    DATA_USERSTATS(b)->userid);
+	cmp_t c = CMP_BIGINT(DATA_USERSTATS(a)->userid,
+			     DATA_USERSTATS(b)->userid);
 	if (c == 0) {
-		c = tvdiff(&(DATA_USERSTATS(a)->statsdate),
-			   &(DATA_USERSTATS(b)->statsdate));
+		c = CMP_TV(DATA_USERSTATS(a)->statsdate,
+			   DATA_USERSTATS(b)->statsdate);
 		if (c == 0) {
-			c = (double)strcmp(DATA_USERSTATS(a)->poolinstance,
-					   DATA_USERSTATS(b)->poolinstance);
+			c = CMP_STR(DATA_USERSTATS(a)->poolinstance,
+				    DATA_USERSTATS(b)->poolinstance);
 			if (c == 0) {
-				c = (double)strcmp(DATA_USERSTATS(a)->workername,
-						   DATA_USERSTATS(b)->workername);
+				c = CMP_STR(DATA_USERSTATS(a)->workername,
+					    DATA_USERSTATS(b)->workername);
 			}
 		}
 	}
@@ -4853,32 +4852,32 @@ static double cmp_userstats(K_ITEM *a, K_ITEM *b)
 
 /* order by userid asc,workername asc
    temporary tree for summing userstats when sending user homepage info */
-static double cmp_userstats_workername(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_userstats_workername(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERSTATS(a)->userid -
-			    DATA_USERSTATS(b)->userid);
+	cmp_t c = CMP_BIGINT(DATA_USERSTATS(a)->userid,
+			     DATA_USERSTATS(b)->userid);
 	if (c == 0) {
-		c = (double)strcmp(DATA_USERSTATS(a)->workername,
-				   DATA_USERSTATS(b)->workername);
+		c = CMP_STR(DATA_USERSTATS(a)->workername,
+			    DATA_USERSTATS(b)->workername);
 	}
 	return c;
 }
 
 /* order by statsdate,userid asc,statsdate asc,workername asc,poolinstance asc
    as per required for DB summarisation */
-static double cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b)
 {
-	double c = tvdiff(&(DATA_USERSTATS(a)->statsdate),
-			  &(DATA_USERSTATS(b)->statsdate));
+	cmp_t c = CMP_TV(DATA_USERSTATS(a)->statsdate,
+			 DATA_USERSTATS(b)->statsdate);
 	if (c == 0) {
-		c = (double)(DATA_USERSTATS(a)->userid -
-			     DATA_USERSTATS(b)->userid);
+		c = CMP_BIGINT(DATA_USERSTATS(a)->userid,
+			       DATA_USERSTATS(b)->userid);
 		if (c == 0) {
-			c = (double)strcmp(DATA_USERSTATS(a)->workername,
-					   DATA_USERSTATS(b)->workername);
+			c = CMP_STR(DATA_USERSTATS(a)->workername,
+				    DATA_USERSTATS(b)->workername);
 			if (c == 0) {
-				c = (double)strcmp(DATA_USERSTATS(a)->poolinstance,
-						   DATA_USERSTATS(b)->poolinstance);
+				c = CMP_STR(DATA_USERSTATS(a)->poolinstance,
+					    DATA_USERSTATS(b)->poolinstance);
 			}
 		}
 	}
@@ -4888,19 +4887,19 @@ static double cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b)
 /* order by userid asc,workername asc,statsdate asc,poolinstance asc
    built during data load to update workerstatus at the end of the load
    and used during reload to discard stats already in the DB */
-static double cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b)
+static cmp_t cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b)
 {
-	double c = (double)(DATA_USERSTATS(a)->userid -
-			    DATA_USERSTATS(b)->userid);
+	cmp_t c = CMP_BIGINT(DATA_USERSTATS(a)->userid,
+			     DATA_USERSTATS(b)->userid);
 	if (c == 0) {
-		c = (double)strcmp(DATA_USERSTATS(a)->workername,
-				   DATA_USERSTATS(b)->workername);
+		c = CMP_STR(DATA_USERSTATS(a)->workername,
+			    DATA_USERSTATS(b)->workername);
 		if (c == 0) {
-			c = tvdiff(&(DATA_USERSTATS(a)->statsdate),
-				   &(DATA_USERSTATS(b)->statsdate));
+			c = CMP_TV(DATA_USERSTATS(a)->statsdate,
+				   DATA_USERSTATS(b)->statsdate);
 			if (c == 0) {
-				c = (double)strcmp(DATA_USERSTATS(a)->poolinstance,
-						   DATA_USERSTATS(b)->poolinstance);
+				c = CMP_STR(DATA_USERSTATS(a)->poolinstance,
+					    DATA_USERSTATS(b)->poolinstance);
 			}
 		}
 	}

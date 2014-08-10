@@ -459,12 +459,12 @@ static K_TREE *right_rotate(K_TREE *root, K_TREE *about)
 	return(root);
 }
 
-K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS)
+K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS)
 {
 	K_TREE *ktree;
 	K_TREE *x, *y;
 	K_TREE *pp;
-	double cmp;
+	cmp_t cmp;
 
 	if (root == NULL)
 		FAIL("%s", "ADDNULL add ktree is NULL");
@@ -490,13 +490,13 @@ K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, 
 		while (x->isNil == No)
 		{
 			y = x;
-			if ((cmp = (*cmp_funct)(ktree->data, x->data)) < 0.0)
+			if ((cmp = (*cmp_funct)(ktree->data, x->data)) < 0)
 				x = x->left;
 			else
 				x = x->right;
 		}
 		ktree->parent = y;
-		if (cmp < 0.0)
+		if (cmp < 0)
 			y->left = ktree;
 		else
 			y->right = ktree;
@@ -560,18 +560,18 @@ K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, 
 	return(root);
 }
 
-K_ITEM *_find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+K_ITEM *_find_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
-	double cmp = -1.0;
+	cmp_t cmp = -1;
 
 	if (ktree == NULL)
 		FAIL("%s", "FINDNULL find ktree is NULL");
 
-	while (ktree->isNil == No && cmp != 0.0)
+	while (ktree->isNil == No && cmp != 0)
 	{
 		if ((cmp = (*cmp_funct)(ktree->data, data)))
 		{
-			if (cmp > 0.0)
+			if (cmp > 0)
 				ktree = ktree->left;
 			else
 				ktree = ktree->right;
@@ -590,21 +590,21 @@ K_ITEM *_find_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *
 	}
 }
 
-K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE *old = NULL;
-	double cmp = -1.0, oldcmp = -1;
+	cmp_t cmp = -1, oldcmp = -1;
 
 	if (ktree == NULL)
 		FAIL("%s", "FINDNULL find_after ktree is NULL");
 
-	while (ktree->isNil == No && cmp != 0.0)
+	while (ktree->isNil == No && cmp != 0)
 	{
 		if ((cmp = (*cmp_funct)(ktree->data, data)))
 		{
 			old = ktree;
 			oldcmp = cmp;
-			if (cmp > 0.0)
+			if (cmp > 0)
 				ktree = ktree->left;
 			else
 				ktree = ktree->right;
@@ -620,7 +620,7 @@ K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_
 	{
 		if (old)
 		{
-			if (oldcmp > 0.0)
+			if (oldcmp > 0)
 			{
 				*ctx = old;
 				return(old->data);
@@ -635,21 +635,21 @@ K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_
 	}
 }
 
-K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE *old = NULL;
-	double cmp = 1.0, oldcmp = 1;
+	cmp_t cmp = 1, oldcmp = 1;
 
 	if (ktree == NULL)
 		FAIL("%s", "FINDNULL find_before ktree is NULL");
 
-	while (ktree->isNil == No && cmp != 0.0)
+	while (ktree->isNil == No && cmp != 0)
 	{
 		if ((cmp = (*cmp_funct)(ktree->data, data)))
 		{
 			old = ktree;
 			oldcmp = cmp;
-			if (cmp > 0.0)
+			if (cmp > 0)
 				ktree = ktree->left;
 			else
 				ktree = ktree->right;
@@ -665,7 +665,7 @@ K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, double (*cmp_funct)(K
 	{
 		if (old)
 		{
-			if (oldcmp < 0.0)
+			if (oldcmp < 0)
 			{
 				*ctx = old;
 				return(old->data);
@@ -761,13 +761,13 @@ static K_TREE *removeFixup(K_TREE *root, K_TREE *fix)
 
 // Does this work OK when you remove the last element in the ktree?
 // It should return the root as 'nil'
-K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX tmpctx[1];
 	K_TREE *found;
 	K_ITEM *fdata;
 	K_TREE *x, *y, *nil2;
-	// double cmp;
+	// cmp_t cmp;
 	int yred;
 
 //check_ktree(root, ">remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
@@ -789,7 +789,7 @@ K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, double (*cmp_funct)(K_ITE
 	if (fdata == NULL)
 		return(root);
 
-	if (cmp_funct(fdata, data) != 0.0)
+	if (cmp_funct(fdata, data) != 0)
 		FAIL("%s", "BADFIND cmp(found, remove) != 0");
 
 	found = *ctx;
@@ -889,7 +889,7 @@ DBG("@remove nil2->left wasn't nil!!!\n");
  {
 DBG("@remove nil2->right wasn't nil!!!\n");
  }
- cmp = 0.0;
+ cmp = 0;
  fdata = first_in_ktree(root, tmpctx);;
  while (fdata != NULL)
  {
@@ -920,7 +920,7 @@ DBG("@remove found nil2 in ktree(right) %f!!!\n", cmp);
 /*
 if (dbg != 0)
 {
- cmp = 0.0
+ cmp = 0;
  fdata = first_in_ktree(root, tmpctx);;
  while (fdata != NULL)
  {
@@ -931,7 +931,7 @@ if (dbg != 0)
 
 	fdata = next_in_ktree(tmpctx);;
  }
- if (cmp < -10.0 || cmp > 10.0)
+ if (cmp < -10 || cmp > 10)
  {
 DBG("@remove after balance=%f :(\n", cmp);
  }
