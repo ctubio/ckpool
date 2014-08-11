@@ -2024,6 +2024,7 @@ static bool users_add(PGconn *conn, char *username, char *emailaddress, char *pa
 			tv_t *now, char *by, char *code, char *inet)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	K_ITEM *item;
 	int n;
@@ -2080,6 +2081,11 @@ static bool users_add(PGconn *conn, char *username, char *emailaddress, char *pa
 		"secondaryuserid"
 		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
 
+	if (!conn) {
+		conn = dbconnect();
+		conned = true;
+	}
+
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
@@ -2090,6 +2096,8 @@ static bool users_add(PGconn *conn, char *username, char *emailaddress, char *pa
 	ok = true;
 unparam:
 	PQclear(res);
+	if (conned)
+		PQfinish(conn);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 unitem:
@@ -2253,6 +2261,7 @@ static K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 			   char *code, char *inet, tv_t *cd)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	K_ITEM *item, *ret = NULL;
 	int n;
@@ -2271,6 +2280,11 @@ static K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 
 	row = DATA_WORKERS(item);
 
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+	
 	row->workerid = nextid(conn, "workerid", (int64_t)1, cd, by, code, inet);
 	if (row->workerid == 0)
 		goto unitem;
@@ -2337,6 +2351,8 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 unitem:
+	if (conned)
+		PQfinish(conn);
 	K_WLOCK(workers_free);
 	if (!ret)
 		k_add_head(workers_free, item);
@@ -2354,6 +2370,7 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 			   char *by, char *code, char *inet, tv_t *cd)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	int n;
 	WORKERS *row;
@@ -2410,6 +2427,11 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 		params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 		PARCHKVAL(par, 3, params);
 
+		if (conn == NULL) {
+			conn = dbconnect();
+			conned = true;
+		}
+
 		res = PQexec(conn, "Begin");
 		rescode = PQresultStatus(res);
 		if (!PGOK(rescode)) {
@@ -2465,6 +2487,8 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	ok = true;
 unparam:
 	PQclear(res);
+	if (conned)
+		PQfinish(conn);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 early:
@@ -2941,7 +2965,6 @@ unparam:
 	PQclear(res);
 	if (conned)
 		PQfinish(conn);
-
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -4061,6 +4084,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			bool igndup, char *id)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res = NULL;
 	K_TREE_CTX ctx[1];
 	K_ITEM *item, *u_item;
@@ -4130,6 +4154,11 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				"clientid,enonce1,nonce2,nonce,reward,confirmed"
 				HISTORYDATECONTROL ") values (" PQPARAM16 ")";
 
+			if (conn == NULL) {
+				conn = dbconnect();
+				conned = true;
+			}
+
 			res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 			rescode = PQresultStatus(res);
 			if (!PGOK(rescode)) {
@@ -4145,6 +4174,11 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			params[par++] = str_to_buf(row->blockhash, NULL, 0);
 			params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 			PARCHKVAL(par, 3, params);
+
+			if (conn == NULL) {
+				conn = dbconnect();
+				conned = true;
+			}
 
 			res = PQexec(conn, "Begin");
 			rescode = PQresultStatus(res);
@@ -4205,6 +4239,9 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 flail:
+	if (conned)
+		PQfinish(conn);
+
 	K_WLOCK(blocks_free);
 	if (!ok)
 		k_add_head(blocks_free, item);
@@ -4944,6 +4981,7 @@ static cmp_t cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b)
 static bool userstats_add_db(PGconn *conn, USERSTATS *row)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	char *ins;
 	bool ok = false;
@@ -4972,6 +5010,11 @@ static bool userstats_add_db(PGconn *conn, USERSTATS *row)
 		"hashrate24hr,summarylevel,summarycount,statsdate"
 		SIMPLEDATECONTROL ") values (" PQPARAM14 ")";
 
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+	
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
@@ -4982,6 +5025,8 @@ static bool userstats_add_db(PGconn *conn, USERSTATS *row)
 	ok = true;
 unparam:
 	PQclear(res);
+	if (conned)
+		PQfinish(conn);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
