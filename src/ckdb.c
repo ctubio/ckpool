@@ -2853,6 +2853,7 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 				char *code, char *inet, tv_t *cd, bool igndup)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *item;
@@ -2914,6 +2915,11 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 		"prevhash,coinbase1,coinbase2,version,bits,ntime,reward"
 		HISTORYDATECONTROL ") values (" PQPARAM16 ")";
 
+	if (!conn) {
+		conn = dbconnect();
+		conned = true;
+	}
+
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
@@ -2925,6 +2931,9 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 
 unparam:
 	PQclear(res);
+	if (conned)
+		PQfinish(conn);
+
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -3271,9 +3280,10 @@ static void zero_sharesummary(SHARESUMMARY *row, tv_t *cd)
 static K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t workinfoid);
 
 // Memory (and log file) only
-static bool shares_add(char *workinfoid, char *username, char *workername, char *clientid,
-			char *enonce1, char *nonce2, char *nonce, char *diff, char *sdiff,
-			char *secondaryuserid, char *by, char *code, char *inet, tv_t *cd)
+static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername,
+			char *clientid, char *enonce1, char *nonce2, char *nonce,
+			char *diff, char *sdiff, char *secondaryuserid, char *by,
+			char *code, char *inet, tv_t *cd)
 {
 	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
 	SHARES *shares;
@@ -3311,7 +3321,7 @@ static bool shares_add(char *workinfoid, char *username, char *workername, char 
 	if (!wi_item)
 		goto unitem;
 
-	w_item = new_default_worker(NULL, false, shares->userid, shares->workername,
+	w_item = new_default_worker(conn, false, shares->userid, shares->workername,
 					by, code, inet, cd);
 	if (!w_item)
 		goto unitem;
@@ -3335,7 +3345,7 @@ static bool shares_add(char *workinfoid, char *username, char *workername, char 
 
 	workerstatus_update(NULL, shares, NULL, NULL);
 
-	sharesummary_update(NULL, shares, NULL, NULL, by, code, inet, cd);
+	sharesummary_update(conn, shares, NULL, NULL, by, code, inet, cd);
 
 	ok = true;
 unitem:
@@ -3381,9 +3391,10 @@ static cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b)
 
 // Memory (and log file) only
 // TODO: handle shareerrors that appear after a workinfoid is aged or doesn't exist?
-static bool shareerrors_add(char *workinfoid, char *username, char *workername,
-			char *clientid, char *errn, char *error, char *secondaryuserid,
-			char *by, char *code, char *inet, tv_t *cd)
+static bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
+				char *workername, char *clientid, char *errn,
+				char *error, char *secondaryuserid, char *by,
+				char *code, char *inet, tv_t *cd)
 {
 	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
 	SHAREERRORS *shareerrors;
@@ -3440,7 +3451,7 @@ static bool shareerrors_add(char *workinfoid, char *username, char *workername,
 		}
 	}
 
-	sharesummary_update(NULL, NULL, shareerrors, NULL, by, code, inet, cd);
+	sharesummary_update(conn, NULL, shareerrors, NULL, by, code, inet, cd);
 
 	ok = true;
 unitem:
@@ -4365,6 +4376,7 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 			tv_t *cd, bool igndup)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	K_TREE_CTX ctx[1];
 	K_ITEM *a_item, *u_item;
@@ -4411,6 +4423,11 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	// Update even if DB fails
 	workerstatus_update(row, NULL, NULL, NULL);
 
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+
 	row->authid = nextid(conn, "authid", (int64_t)1, cd, by, code, inet);
 	if (row->authid == 0)
 		goto unitem;
@@ -4444,6 +4461,8 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 unitem:
+	if (conned)
+		PQfinish(conn);
 	K_WLOCK(auths_free);
 	if (!secuserid)
 		k_add_head(auths_free, a_item);
@@ -5339,7 +5358,7 @@ static bool check_db_version(PGconn *conn)
 	return true;
 }
 
-static bool getdata()
+static bool getdata1()
 {
 	PGconn *conn = dbconnect();
 	bool ok = true;
@@ -5350,25 +5369,36 @@ static bool getdata()
 		goto matane;
 	if (!(ok = workers_fill(conn)))
 		goto matane;
-	if (!(ok = payments_fill(conn)))
-		goto matane;
-	if (!(ok = workinfo_fill(conn)))
-		goto matane;
-	if (!(ok = shares_fill()))
-		goto matane;
-	if (!(ok = shareerrors_fill()))
-		goto matane;
-	if (!(ok = sharesummary_fill(conn)))
-		goto matane;
-	if (!(ok = blocks_fill(conn)))
-		goto matane;
-	if (!(ok = auths_fill(conn)))
-		goto matane;
-	if (!(ok = poolstats_fill(conn)))
-		goto matane;
-	ok = userstats_fill(conn);
+	ok = auths_fill(conn);
 
 matane:
+
+	PQfinish(conn);
+	return ok;
+}
+
+static bool getdata2()
+{
+	PGconn *conn = dbconnect();
+	bool ok = true;
+
+	if (!(ok = blocks_fill(conn)))
+		goto sukamudai;
+	if (!(ok = payments_fill(conn)))
+		goto sukamudai;
+	if (!(ok = workinfo_fill(conn)))
+		goto sukamudai;
+	if (!(ok = shares_fill()))
+		goto sukamudai;
+	if (!(ok = shareerrors_fill()))
+		goto sukamudai;
+	if (!(ok = sharesummary_fill(conn)))
+		goto sukamudai;
+	if (!(ok = poolstats_fill(conn)))
+		goto sukamudai;
+	ok = userstats_fill(conn);
+
+sukamudai:
 
 	PQfinish(conn);
 	return ok;
@@ -5623,7 +5653,10 @@ static bool setup_data()
 	workerstatus_store = k_new_store(workerstatus_free);
 	workerstatus_root = new_ktree();
 
-	if (!getdata())
+	if (!getdata1())
+		return false;
+
+	if (!getdata2())
 		return false;
 
 	db_load_complete = true;
@@ -5651,14 +5684,13 @@ static bool setup_data()
 	return true;
 }
 
-static char *cmd_adduser(char *cmd, char *id, tv_t *now, char *by, char *code, char *inet,
-				__maybe_unused tv_t *notcd)
+static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
+				char *code, char *inet, __maybe_unused tv_t *notcd)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 
 	K_ITEM *i_username, *i_emailaddress, *i_passwordhash;
-	PGconn *conn;
 	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -5675,12 +5707,10 @@ static char *cmd_adduser(char *cmd, char *id, tv_t *now, char *by, char *code, c
 	if (!i_passwordhash)
 		return strdup(reply);
 
-	conn = dbconnect();
 	ok = users_add(conn, DATA_TRANSFER(i_username)->data,
-				DATA_TRANSFER(i_emailaddress)->data,
-				DATA_TRANSFER(i_passwordhash)->data,
-				now, by, code, inet);
-	PQfinish(conn);
+			     DATA_TRANSFER(i_emailaddress)->data,
+			     DATA_TRANSFER(i_passwordhash)->data,
+			     now, by, code, inet);
 
 	if (!ok) {
 		LOGERR("%s.failed.DBE", id);
@@ -5691,9 +5721,10 @@ static char *cmd_adduser(char *cmd, char *id, tv_t *now, char *by, char *code, c
 	return strdup(reply);
 }
 
-static char *cmd_chkpass(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
-				__maybe_unused char *code, __maybe_unused char *inet,
-				__maybe_unused tv_t *notcd)
+static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
+			 __maybe_unused tv_t *now, __maybe_unused char *by,
+			 __maybe_unused char *code, __maybe_unused char *inet,
+			 __maybe_unused tv_t *notcd)
 {
 	K_ITEM *i_username, *i_passwordhash, *u_item;
 	char reply[1024] = "";
@@ -5729,13 +5760,12 @@ static char *cmd_chkpass(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 	return strdup("ok.");
 }
 
-static char *cmd_poolstats_do(char *cmd, char *id, char *by, char *code,
-				char *inet, tv_t *cd, bool igndup)
+static char *cmd_poolstats_do(PGconn *conn, char *cmd, char *id, char *by,
+			      char *code, char *inet, tv_t *cd, bool igndup)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_TREE_CTX ctx[1];
-	PGconn *conn;
 	bool store;
 
 	// log to logfile
@@ -5803,7 +5833,6 @@ static char *cmd_poolstats_do(char *cmd, char *id, char *by, char *code,
 			store = false;
 	}
 
-	conn = dbconnect();
 	ok = poolstats_add(conn, store, DATA_TRANSFER(i_poolinstance)->data,
 					DATA_TRANSFER(i_elapsed)->data,
 					DATA_TRANSFER(i_users)->data,
@@ -5813,7 +5842,6 @@ static char *cmd_poolstats_do(char *cmd, char *id, char *by, char *code,
 					DATA_TRANSFER(i_hashrate1hr)->data,
 					DATA_TRANSFER(i_hashrate24hr)->data,
 					by, code, inet, cd, igndup);
-	PQfinish(conn);
 
 	if (!ok) {
 		LOGERR("%s.failed.DBE", id);
@@ -5824,8 +5852,9 @@ static char *cmd_poolstats_do(char *cmd, char *id, char *by, char *code,
 	return strdup(reply);
 }
 
-static char *cmd_poolstats(char *cmd, char *id, __maybe_unused tv_t *notnow,
-				char *by, char *code, char *inet, tv_t *cd)
+static char *cmd_poolstats(PGconn *conn, char *cmd, char *id,
+			   __maybe_unused tv_t *notnow, char *by,
+			   char *code, char *inet, tv_t *cd)
 {
 	bool igndup = false;
 
@@ -5836,11 +5865,12 @@ static char *cmd_poolstats(char *cmd, char *id, __maybe_unused tv_t *notnow,
 			return NULL;
 	}
 
-	return cmd_poolstats_do(cmd, id, by, code, inet, cd, igndup);
+	return cmd_poolstats_do(conn, cmd, id, by, code, inet, cd, igndup);
 }
 
-static char *cmd_userstats(char *cmd, char *id, __maybe_unused tv_t *notnow,
-				char *by, char *code, char *inet, tv_t *cd)
+static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
+			   __maybe_unused tv_t *notnow, char *by, char *code,
+			   char *inet, tv_t *cd)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -5917,8 +5947,8 @@ static char *cmd_userstats(char *cmd, char *id, __maybe_unused tv_t *notnow,
 	return strdup(reply);
 }
 
-static char *cmd_newid(char *cmd, char *id, tv_t *now, char *by, char *code, char *inet,
-			__maybe_unused tv_t *cd)
+static char *cmd_newid(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
+			char *code, char *inet, __maybe_unused tv_t *cd)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -5928,8 +5958,8 @@ static char *cmd_newid(char *cmd, char *id, tv_t *now, char *by, char *code, cha
 	int par;
 	bool ok = false;
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
-	PGconn *conn;
 	char *ins;
 	int n;
 
@@ -5962,7 +5992,10 @@ static char *cmd_newid(char *cmd, char *id, tv_t *now, char *by, char *code, cha
 	ins = "insert into idcontrol "
 		"(idname,lastid" MODIFYDATECONTROL ") values (" PQPARAM10 ")";
 
-	conn = dbconnect();
+	if (!conn) {
+		conn = dbconnect();
+		conned = true;
+	}
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 	rescode = PQresultStatus(res);
@@ -5974,7 +6007,8 @@ static char *cmd_newid(char *cmd, char *id, tv_t *now, char *by, char *code, cha
 	ok = true;
 foil:
 	PQclear(res);
-	PQfinish(conn);
+	if (conned)
+		PQfinish(conn);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -5992,9 +6026,10 @@ foil:
 	return strdup(reply);
 }
 
-static char *cmd_payments(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
-				__maybe_unused char *code, __maybe_unused char *inet,
-				__maybe_unused tv_t *notcd)
+static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd)
 {
 	K_ITEM *i_username, look, *u_item, *p_item;
 	K_TREE_CTX ctx[1];
@@ -6047,9 +6082,10 @@ static char *cmd_payments(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	return buf;
 }
 
-static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
-				__maybe_unused char *code, __maybe_unused char *inet,
-				__maybe_unused tv_t *notcd)
+static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
+			 __maybe_unused tv_t *now, __maybe_unused char *by,
+			 __maybe_unused char *code, __maybe_unused char *inet,
+			 __maybe_unused tv_t *notcd)
 {
 	K_ITEM *i_username, *i_stats, wlook, *u_item, *w_item, uslook, *us_item, *ws_item;
 	K_TREE_CTX w_ctx[1], us_ctx[1];
@@ -6184,9 +6220,10 @@ static char *cmd_workers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_
 	return buf;
 }
 
-static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
-				__maybe_unused char *code, __maybe_unused char *inet,
-				__maybe_unused tv_t *notcd)
+static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd)
 {
 	K_TREE *userstats_workername_root = new_ktree();
 	K_ITEM *us_item, *usw_item, *tmp_item, *u_item;
@@ -6289,12 +6326,12 @@ static char *cmd_allusers(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	return buf;
 }
 
-static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
-				char *by, char *code, char *inet, tv_t *cd)
+static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
+				__maybe_unused tv_t *notnow, char *by,
+				char *code, char *inet, tv_t *cd)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	PGconn *conn;
 
 	// log to logfile with processing success/failure code
 
@@ -6358,7 +6395,6 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 		if (!i_reward)
 			return strdup(reply);
 
-		conn = dbconnect();
 		workinfoid = workinfo_add(conn, DATA_TRANSFER(i_workinfoid)->data,
 						DATA_TRANSFER(i_poolinstance)->data,
 						DATA_TRANSFER(i_transactiontree)->data,
@@ -6371,7 +6407,6 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 						DATA_TRANSFER(i_ntime)->data,
 						DATA_TRANSFER(i_reward)->data,
 						by, code, inet, cd, igndup);
-		PQfinish(conn);
 
 		if (workinfoid == -1) {
 			LOGERR("%s.failed.DBE", id);
@@ -6431,17 +6466,17 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 		if (!i_secondaryuserid)
 			return strdup(reply);
 
-		ok = shares_add(DATA_TRANSFER(i_workinfoid)->data,
-				DATA_TRANSFER(i_username)->data,
-				DATA_TRANSFER(i_workername)->data,
-				DATA_TRANSFER(i_clientid)->data,
-				DATA_TRANSFER(i_enonce1)->data,
-				DATA_TRANSFER(i_nonce2)->data,
-				DATA_TRANSFER(i_nonce)->data,
-				DATA_TRANSFER(i_diff)->data,
-				DATA_TRANSFER(i_sdiff)->data,
-				DATA_TRANSFER(i_secondaryuserid)->data,
-				by, code, inet, cd);
+		ok = shares_add(conn, DATA_TRANSFER(i_workinfoid)->data,
+				      DATA_TRANSFER(i_username)->data,
+				      DATA_TRANSFER(i_workername)->data,
+				      DATA_TRANSFER(i_clientid)->data,
+				      DATA_TRANSFER(i_enonce1)->data,
+				      DATA_TRANSFER(i_nonce2)->data,
+				      DATA_TRANSFER(i_nonce)->data,
+				      DATA_TRANSFER(i_diff)->data,
+				      DATA_TRANSFER(i_sdiff)->data,
+				      DATA_TRANSFER(i_secondaryuserid)->data,
+				      by, code, inet, cd);
 
 		if (!ok) {
 			LOGERR("%s.failed.DATA", id);
@@ -6489,14 +6524,14 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 		if (!i_secondaryuserid)
 			return strdup(reply);
 
-		ok = shareerrors_add(DATA_TRANSFER(i_workinfoid)->data,
-					DATA_TRANSFER(i_username)->data,
-					DATA_TRANSFER(i_workername)->data,
-					DATA_TRANSFER(i_clientid)->data,
-					DATA_TRANSFER(i_errn)->data,
-					DATA_TRANSFER(i_error)->data,
-					DATA_TRANSFER(i_secondaryuserid)->data,
-					by, code, inet, cd);
+		ok = shareerrors_add(conn, DATA_TRANSFER(i_workinfoid)->data,
+					   DATA_TRANSFER(i_username)->data,
+					   DATA_TRANSFER(i_workername)->data,
+					   DATA_TRANSFER(i_clientid)->data,
+					   DATA_TRANSFER(i_errn)->data,
+					   DATA_TRANSFER(i_error)->data,
+					   DATA_TRANSFER(i_secondaryuserid)->data,
+					   by, code, inet, cd);
 		if (!ok) {
 			LOGERR("%s.failed.DATA", id);
 			return strdup("failed.DATA");
@@ -6521,7 +6556,7 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 		if (!i_poolinstance)
 			return strdup(reply);
 
-		ok = workinfo_age(NULL, DATA_TRANSFER(i_workinfoid)->data,
+		ok = workinfo_age(conn, DATA_TRANSFER(i_workinfoid)->data,
 					DATA_TRANSFER(i_poolinstance)->data,
 					by, code, inet, cd);
 
@@ -6543,12 +6578,11 @@ static char *cmd_sharelog(char *cmd, char *id, __maybe_unused tv_t *notnow,
 }
 
 // TODO: the confirm update: identify block changes from workinfo height?
-static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet,
-				tv_t *cd, bool igndup)
+static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
+			   char *code, char *inet, tv_t *cd, bool igndup)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	PGconn *conn;
 	K_ITEM *i_height, *i_blockhash, *i_confirmed, *i_workinfoid, *i_username;
 	K_ITEM *i_workername, *i_clientid, *i_enonce1, *i_nonce2, *i_nonce, *i_reward;
 	char *msg;
@@ -6604,7 +6638,6 @@ static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet
 				return strdup(reply);
 
 			msg = "added";
-			conn = dbconnect();
 			ok = blocks_add(conn, DATA_TRANSFER(i_height)->data,
 					      DATA_TRANSFER(i_blockhash)->data,
 					      DATA_TRANSFER(i_confirmed)->data,
@@ -6620,7 +6653,6 @@ static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet
 			break;
 		case BLOCKS_CONFIRM:
 			msg = "confirmed";
-			conn = dbconnect();
 			ok = blocks_add(conn, DATA_TRANSFER(i_height)->data,
 					      DATA_TRANSFER(i_blockhash)->data,
 					      DATA_TRANSFER(i_confirmed)->data,
@@ -6634,8 +6666,6 @@ static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet
 			return strdup("failed.DATA");
 	}
 
-	PQfinish(conn);
-
 	if (!ok) {
 		LOGERR("%s.failed.DBE", id);
 		return strdup("failed.DBE");
@@ -6646,8 +6676,9 @@ static char *cmd_blocks_do(char *cmd, char *id, char *by, char *code, char *inet
 	return strdup(reply);
 }
 
-static char *cmd_blocks(char *cmd, char *id, __maybe_unused tv_t *notnow,
-			char *by, char *code, char *inet, tv_t *cd)
+static char *cmd_blocks(PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *notnow, char *by,
+			char *code, char *inet, tv_t *cd)
 {
 	bool igndup = false;
 
@@ -6658,15 +6689,14 @@ static char *cmd_blocks(char *cmd, char *id, __maybe_unused tv_t *notnow,
 			return NULL;
 	}
 
-	return cmd_blocks_do(cmd, id, by, code, inet, cd, igndup);
+	return cmd_blocks_do(conn, cmd, id, by, code, inet, cd, igndup);
 }
 
-static char *cmd_auth_do(char *cmd, char *id, __maybe_unused tv_t *now, char *by,
+static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				char *code, char *inet, tv_t *cd, bool igndup)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	PGconn *conn;
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent;
 	char *secuserid;
@@ -6697,7 +6727,6 @@ static char *cmd_auth_do(char *cmd, char *id, __maybe_unused tv_t *now, char *by
 	if (!i_useragent)
 		return strdup(reply);
 
-	conn = dbconnect();
 	secuserid = auths_add(conn, DATA_TRANSFER(i_poolinstance)->data,
 				    DATA_TRANSFER(i_username)->data,
 				    DATA_TRANSFER(i_workername)->data,
@@ -6705,7 +6734,6 @@ static char *cmd_auth_do(char *cmd, char *id, __maybe_unused tv_t *now, char *by
 				    DATA_TRANSFER(i_enonce1)->data,
 				    DATA_TRANSFER(i_useragent)->data,
 				    by, code, inet, cd, igndup);
-	PQfinish(conn);
 
 	if (!secuserid) {
 		LOGDEBUG("%s.failed.DBE", id);
@@ -6717,8 +6745,9 @@ static char *cmd_auth_do(char *cmd, char *id, __maybe_unused tv_t *now, char *by
 	return strdup(reply);
 }
 
-static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by,
-				char *code, char *inet, tv_t *cd)
+static char *cmd_auth(PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, char *by,
+			char *code, char *inet, tv_t *cd)
 {
 	bool igndup = false;
 
@@ -6729,12 +6758,13 @@ static char *cmd_auth(char *cmd, char *id, tv_t *now, char *by,
 			return NULL;
 	}
 
-	return cmd_auth_do(cmd, id, now, by, code, inet, cd, igndup);
+	return cmd_auth_do(conn, cmd, id, by, code, inet, cd, igndup);
 }
 
-static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe_unused char *by,
-				__maybe_unused char *code, __maybe_unused char *inet,
-				__maybe_unused tv_t *notcd)
+static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd)
 {
 	K_ITEM *i_username, *u_item, *b_item, *p_item, *us_item, look;
 	double u_hashrate5m, u_hashrate1hr;
@@ -6868,9 +6898,10 @@ static char *cmd_homepage(char *cmd, char *id, __maybe_unused tv_t *now, __maybe
 	return buf;
 }
 
-static char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *now,
-				    __maybe_unused char *by, __maybe_unused char *code,
-				    __maybe_unused char *inet, __maybe_unused tv_t *notcd)
+static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
+		     char *id, __maybe_unused tv_t *now,
+		     __maybe_unused char *by, __maybe_unused char *code,
+		     __maybe_unused char *inet, __maybe_unused tv_t *notcd)
 {
 	__maybe_unused K_ITEM *i_file;
 	__maybe_unused char reply[1024] = "";
@@ -6897,9 +6928,10 @@ static char *cmd_dsp(char *cmd, char *id, __maybe_unused tv_t *now,
 */
 }
 
-static char *cmd_stats(char *cmd, char *id, __maybe_unused tv_t *now,
-				    __maybe_unused char *by, __maybe_unused char *code,
-				    __maybe_unused char *inet, __maybe_unused tv_t *notcd)
+static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *notcd)
 {
 	char tmp[1024], *buf;
 	size_t len, off;
@@ -6987,7 +7019,7 @@ static struct CMDS {
 	char *cmd_str;
 	bool noid; // doesn't require an id
 	bool createdate; // requires a createdate
-	char *(*func)(char *, char *, tv_t *, char *, char *, char *, tv_t *);
+	char *(*func)(PGconn *, char *, char *, tv_t *, char *, char *, char *, tv_t *);
 	char *access;
 } cmds[] = {
 	{ CMD_SHUTDOWN,	"shutdown",	true,	false,	NULL,		ACCESS_SYSTEM },
@@ -7425,7 +7457,7 @@ static void *summariser(__maybe_unused void *arg)
 	return NULL;
 }
 
-static void reload_line(char *filename, uint64_t count, char *buf)
+static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 {
 	char cmd[CMD_SIZ+1], id[ID_SIZ+1];
 	enum cmd_values cmdnum;
@@ -7475,7 +7507,8 @@ static void reload_line(char *filename, uint64_t count, char *buf)
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
 			case CMD_BLOCK:
-				ans = cmds[which_cmds].func(cmd, id, &now, (char *)"code",
+				ans = cmds[which_cmds].func(conn, cmd, id, &now,
+							    (char *)"code",
 							    (char *)__func__,
 							    (char *)"127.0.0.1", &cd);
 				if (ans)
@@ -7513,6 +7546,7 @@ static void reload_line(char *filename, uint64_t count, char *buf)
  *	when ckdb aborts at the beginning of the reload */
 static void reload_from(tv_t *start)
 {
+	PGconn *conn = NULL;
 	char buf[DATE_BUFSIZ+1], run[DATE_BUFSIZ+1];
 	size_t rflen = strlen(restorefrom);
 	char *missingfirst = NULL, *missinglast = NULL;
@@ -7540,6 +7574,8 @@ static void reload_from(tv_t *start)
 	snprintf(data, sizeof(data), "reload.%s.s0", run);
 	LOGFILE(data);
 
+	conn = dbconnect();
+
 	total = 0;
 	processing = 0;
 	while (!finished) {
@@ -7548,7 +7584,7 @@ static void reload_from(tv_t *start)
 		count = 0;
 
 		while (fgets_unlocked(data, MAX_READ, fp))
-			reload_line(filename, ++count, data);
+			reload_line(conn, filename, ++count, data);
 
 		if (ferror(fp)) {
 			int err = errno;
@@ -7608,6 +7644,8 @@ static void reload_from(tv_t *start)
 			missingfirst = NULL;
 		}
 	}
+
+	PQfinish(conn);
 
 	snprintf(data, sizeof(data), "reload.%s.%"PRIu64, run, total);
 	LOGFILE(data);
@@ -7734,7 +7772,8 @@ static void *listener(void *arg)
 					if (dup)
 						send_unix_msg(sockd, last_reply);
 					else {
-						ans = cmds[which_cmds].func(cmd, id, &now, (char *)"code",
+						ans = cmds[which_cmds].func(NULL, cmd, id, &now,
+									    (char *)"code",
 									    (char *)__func__,
 									    (char *)"127.0.0.1", &cd);
 						siz = strlen(ans) + strlen(id) + 32;
