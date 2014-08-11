@@ -4614,6 +4614,7 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 				bool igndup)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	K_TREE_CTX ctx[1];
 	K_ITEM *p_item;
@@ -4671,6 +4672,11 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 			"hashrate5m,hashrate1hr,hashrate24hr"
 			SIMPLEDATECONTROL ") values (" PQPARAM12 ")";
 
+		if (!conn) {
+			conn = dbconnect();
+			conned = true;
+		}
+
 		res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0);
 		rescode = PQresultStatus(res);
 		if (!PGOK(rescode)) {
@@ -4685,6 +4691,8 @@ static bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 unparam:
 	if (store) {
 		PQclear(res);
+		if (conned)
+			PQfinish(conn);
 		for (n = 0; n < par; n++)
 			free(params[n]);
 	}
