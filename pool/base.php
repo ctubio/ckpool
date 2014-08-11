@@ -229,7 +229,7 @@ function validate()
  $whoid = '';
 
  if (!isset($_SESSION['ckpkey']))
-	return false;
+	return array(false, NULL);
 
  $key = $_SESSION['ckpkey'];
  if (!isset($_SESSION[$key]))
