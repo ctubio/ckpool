@@ -127,6 +127,9 @@ struct ckpool_instance {
 	pthread_t pth_listener;
 	pthread_t pth_watchdog;
 
+	/* Are we running in passthrough mode */
+	bool passthrough;
+
 	/* Are we running as a proxy */
 	bool proxy;
 

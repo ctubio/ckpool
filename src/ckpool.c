@@ -1107,6 +1107,7 @@ static struct option long_options[] = {
 	{"killold",	no_argument,		0,	'k'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
 	{"ckdb-sockdir",required_argument,	0,	'S'},
 	{"sockdir",	required_argument,	0,	's'},
@@ -1179,7 +1180,14 @@ int main(int argc, char **argv)
 			case 'n':
 				ckp.name = optarg;
 				break;
+			case 'P':
+				if (ckp.proxy)
+					quit(1, "Cannot set both proxy and passthrough mode");
+				ckp.passthrough = true;
+				break;
 			case 'p':
+				if (ckp.passthrough)
+					quit(1, "Cannot set both passthrough and proxy mode");
 				ckp.proxy = true;
 				break;
 			case 'S':
