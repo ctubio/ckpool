@@ -1742,6 +1742,7 @@ static int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 			tv_t *cd, char *by, char *code, char *inet)
 {
 	ExecStatusType rescode;
+	bool conned = false;
 	PGresult *res;
 	char qry[1024];
 	char *params[5];
@@ -1757,6 +1758,11 @@ static int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 				   "where idname='%s' for update",
 				   idname);
 
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+	
 	res = PQexec(conn, qry);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
@@ -1811,6 +1817,8 @@ static int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 		free(params[n]);
 cleanup:
 	PQclear(res);
+	if (conned)
+		PQfinish(conn);
 	return lastid;
 }
 
