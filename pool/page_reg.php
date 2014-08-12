@@ -96,7 +96,7 @@ function show_reg($menu, $name, $u)
 	if ($pass === NULL || safepass($pass) !== true)
 	{
 		$ok = false;
-		$data['error'] = "Password is unsafe";
+		$data['error'] = "Password is unsafe - requires 6 or more chars, including upper+lower+digits";
 	} elseif ($pass2 === NULL || $pass2 != $pass)
 	{
 		$ok = false;

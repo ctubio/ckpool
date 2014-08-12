@@ -82,10 +82,15 @@ function doworker($data, $user)
 		else
 		{
 			$uhr /= 10000000;
-			if ($uhr < 100000)
-				$uhr = (round($uhr)/100).'GHs';
+			if ($uhr < 0.01)
+				$uhr = '0GHs';
 			else
-				$uhr = (round($uhr/1000)/100).'THs';
+			{
+				if ($uhr < 100000)
+					$uhr = number_format(round($uhr)/100,2).'GHs';
+				else
+					$uhr = number_format(round($uhr/1000)/100,2).'THs';
+			}
 		}
 		$pg .= "<td class=dr>$uhr</td>";
 		$pg .= "</tr>\n";
