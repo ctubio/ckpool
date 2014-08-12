@@ -275,8 +275,10 @@ retry:
 			LOGWARNING("Failed to send_procmsg to connector");
 	} else if (cmdmatch(buf, "restart")) {
 		if (!fork()) {
-			ckp->initial_args[ckp->args++] = strdup("-H");
-			ckp->initial_args[ckp->args] = NULL;
+			if (!ckp->handover) {
+				ckp->initial_args[ckp->args++] = strdup("-H");
+				ckp->initial_args[ckp->args] = NULL;
+			}
 			execv(ckp->initial_args[0], (char *const *)ckp->initial_args);
 		}
 	} else {
