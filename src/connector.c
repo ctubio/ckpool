@@ -71,14 +71,13 @@ struct sender_send {
 	client_instance_t *client;
 	char *buf;
 	int len;
-	bool polling;
-	ts_t polltime;
 };
 
 typedef struct sender_send sender_send_t;
 
 /* For the linked list of pending sends */
 static sender_send_t *sender_sends;
+static sender_send_t *delayed_sends;
 
 /* For protecting the pending sends list */
 static pthread_mutex_t sender_lock;
@@ -335,34 +334,30 @@ void *sender(void *arg)
 		sender_send_t *sender_send;
 		client_instance_t *client;
 		int ret, fd, ofs = 0;
-		bool polling = false;
 
 		mutex_lock(&sender_lock);
-		if (sender_sends && sender_sends->polling)
-			polling = true;
-		if (!sender_sends || polling) {
+		/* Poll every 100ms if there are no new sends */
+		if (!sender_sends) {
+			const ts_t polltime = {0, 100000000};
 			ts_t timeout_ts;
 
-			if (!polling) {
-				/* Wait 1 second in pure event driven mode */
-				ts_realtime(&timeout_ts);
-				timeout_ts.tv_sec += 1;
-			} else {
-				/* Poll every 100ms if the head of the list is
-				 * a delayed writer. */
-				timeout_ts.tv_sec = 0;
-				timeout_ts.tv_nsec = 100000000;
-				timeraddspec(&timeout_ts, &sender_sends->polltime);
-			}
+			ts_realtime(&timeout_ts);
+			timeraddspec(&timeout_ts, &polltime);
 			pthread_cond_timedwait(&sender_cond, &sender_lock, &timeout_ts);
 		}
 		sender_send = sender_sends;
-		if (likely(sender_send))
+		if (sender_send)
 			DL_DELETE(sender_sends, sender_send);
 		mutex_unlock(&sender_lock);
 
-		if (!sender_send)
-			continue;
+		/* Service delayed sends only if we have timed out on the
+		 * conditional with no new sends appearing. */
+		if (!sender_send) {
+			if (!delayed_sends)
+				continue;
+			sender_send = delayed_sends;
+			DL_DELETE(delayed_sends, sender_send);
+		}
 
 		client = sender_send->client;
 
@@ -390,13 +385,10 @@ void *sender(void *arg)
 			}
 			LOGDEBUG("Client %d not ready for writes", client->id);
 
-			/* Append it to the tail of the list */
-			mutex_lock(&sender_lock);
-			DL_APPEND(sender_sends, sender_send);
-			mutex_unlock(&sender_lock);
-
-			sender_send->polling = true;
-			ts_realtime(&sender_send->polltime);
+			/* Append it to the tail of the delayed sends list.
+			 * This is the only function that alters it so no
+			 * locking is required. */
+			DL_APPEND(delayed_sends, sender_send);
 			continue;
 		}
 		while (sender_send->len) {
