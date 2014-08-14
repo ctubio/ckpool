@@ -170,13 +170,6 @@ struct json_params {
 
 typedef struct json_params json_params_t;
 
-struct ckdb_msg {
-	json_t *val;
-	int idtype;
-};
-
-typedef struct ckdb_msg ckdb_msg_t;
-
 /* Stratum json messages with their associated client id */
 struct smsg {
 	json_t *json_msg;
@@ -415,12 +408,32 @@ static void purge_share_hashtable(int64_t wb_id)
 
 static char *status_chars = "|/-\\";
 
+/* Absorbs the json and generates a ckdb json message, logs it to the ckdb
+ * log and returns the malloced message. */
+static char *ckdb_msg(ckpool_t *ckp, json_t *val, const int idtype)
+{
+	char *json_msg = json_dumps(val, JSON_COMPACT);
+	char logname[512];
+	char *ret = NULL;
+
+	if (unlikely(!json_msg))
+		goto out;
+	ASPRINTF(&ret, "%s.id.json=%s", ckdb_ids[idtype], json_msg);
+	free(json_msg);
+out:
+	json_decref(val);
+	snprintf(logname, 511, "%s%s", ckp->logdir, ckp->ckdb_name);
+	rotating_log(logname, ret);
+	return ret;
+}
+
 static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char *file,
 		      const char *func, const int line)
 {
-	static int counter = 0;
 	static time_t time_counter;
-	ckdb_msg_t *msg;
+	static int counter = 0;
+
+	char *json_msg;
 	time_t now_t;
 	char ch;
 
@@ -441,10 +454,13 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 	if (ckp->standalone)
 		return json_decref(val);
 
-	msg = ckalloc(sizeof(ckdb_msg_t));
-	msg->val = val;
-	msg->idtype = idtype;
-	ckmsgq_add(ckdbq, msg);
+	json_msg = ckdb_msg(ckp, val, idtype);
+	if (unlikely(!json_msg)) {
+		LOGWARNING("Failed to dump json from %s %s:%d", file, func, line);
+		return;
+	}
+
+	ckmsgq_add(ckdbq, json_msg);
 }
 
 #define ckdbq_add(ckp, idtype, val) _ckdbq_add(ckp, idtype, val, __FILE__, __func__, __LINE__)
@@ -1252,10 +1268,10 @@ static user_instance_t *authorise_user(const char *workername)
 static bool send_recv_auth(stratum_instance_t *client)
 {
 	ckpool_t *ckp = client->ckp;
+	char *buf, *json_msg;
 	char cdfield[64];
 	bool ret = false;
 	json_t *val;
-	char *buf;
 	ts_t now;
 
 	ts_realtime(&now);
@@ -1272,7 +1288,13 @@ static bool send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", client->address);
-	buf = json_ckdb_call(ckp, ckdb_ids[ID_AUTH], val, false);
+	json_msg = ckdb_msg(ckp, val, ID_AUTH);
+	if (unlikely(!json_msg)) {
+		LOGWARNING("Failed to dump json in send_recv_auth");
+		return ret;
+	}
+	buf = ckdb_msg_call(ckp, json_msg);
+	free(json_msg);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
 
@@ -1286,10 +1308,8 @@ static bool send_recv_auth(stratum_instance_t *client)
 			client->secondaryuserid = strdup(secondaryuserid);
 			ret = true;
 		}
-	} else {
+	} else
 		LOGWARNING("Got no auth response from ckdb :(");
-		json_decref(val);
-	}
 
 	return ret;
 }
@@ -2158,14 +2178,13 @@ out:
 
 }
 
-static void ckdbq_process(ckpool_t *ckp, ckdb_msg_t *data)
+static void ckdbq_process(ckpool_t *ckp, char *msg)
 {
 	static bool failed = false;
-	bool logged = false;
 	char *buf = NULL;
 
 	while (!buf) {
-		buf = json_ckdb_call(ckp, ckdb_ids[data->idtype], data->val, logged);
+		buf = ckdb_msg_call(ckp, msg);
 		if (unlikely(!buf)) {
 			if (!failed) {
 				failed = true;
@@ -2173,13 +2192,13 @@ static void ckdbq_process(ckpool_t *ckp, ckdb_msg_t *data)
 			}
 			sleep(5);
 		}
-		logged = true;
 	}
+	free(msg);
 	if (failed) {
 		failed = false;
 		LOGWARNING("Successfully resumed talking to ckdb");
 	}
-	LOGINFO("Got %s ckdb response: %s", ckdb_ids[data->idtype], buf);
+	LOGINFO("Got ckdb response: %s", buf);
 	free(buf);
 }
 
