@@ -1265,12 +1265,12 @@ static user_instance_t *authorise_user(const char *workername)
  * and get SUID parameters back. We don't add these requests to the ckdbqueue
  * since we have to wait for the response but this is done from the authoriser
  * thread so it won't hold anything up but other authorisations. */
-static bool send_recv_auth(stratum_instance_t *client)
+static int send_recv_auth(stratum_instance_t *client)
 {
 	ckpool_t *ckp = client->ckp;
 	char *buf, *json_msg;
 	char cdfield[64];
-	bool ret = false;
+	int ret = 1;
 	json_t *val;
 	ts_t now;
 
@@ -1306,15 +1306,18 @@ static bool send_recv_auth(stratum_instance_t *client)
 			response, secondaryuserid);
 		if (!safecmp(response, "ok") && secondaryuserid) {
 			client->secondaryuserid = strdup(secondaryuserid);
-			ret = true;
+			ret = 0;
 		}
-	} else
+	} else {
+		ret = -1;
 		LOGWARNING("Got no auth response from ckdb :(");
+	}
 
 	return ret;
 }
 
-static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val, const char *address)
+static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val,
+			       const char *address, int *errnum)
 {
 	bool ret = false;
 	const char *buf;
@@ -1354,8 +1357,11 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	client->workername = strdup(buf);
 	if (client->ckp->standalone)
 		ret = true;
-	else
-		ret = send_recv_auth(client);
+	else {
+		*errnum = send_recv_auth(client);
+		if (!*errnum)
+			ret = true;
+	}
 	client->authorised = ret;
 	if (client->authorised)
 		inc_worker(client->user_instance);
@@ -2147,7 +2153,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
 	stratum_instance_t *client;
-	int client_id;
+	int client_id, errnum = 0;
 
 	client_id = jp->client_id;
 
@@ -2159,15 +2165,19 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 		LOGINFO("Authoriser failed to find client id %d in hashtable!", client_id);
 		goto out;
 	}
-	result_val = parse_authorise(client, jp->params, &err_val, jp->address);
+	result_val = parse_authorise(client, jp->params, &err_val, jp->address, &errnum);
 	if (json_is_true(result_val)) {
 		char *buf;
 
 		ASPRINTF(&buf, "Authorised, welcome to %s %s!", ckp->name,
 			 client->user_instance->username);
 		stratum_send_message(client, buf);
-	} else
-		stratum_send_message(client, "Failed authorisation :(");
+	} else {
+		if (errnum < 0)
+			stratum_send_message(client, "Authorisations temporarily offline :(");
+		else
+			stratum_send_message(client, "Failed authorisation :(");
+	}
 	json_msg = json_object();
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
