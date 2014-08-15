@@ -643,7 +643,7 @@ static char *first_pool_message;
 static sem_t socketer_sem;
 
 static const char *userpatt = "^[!-~]*$"; // no spaces
-static const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.]*[A-Za-z0-9]$";
+static const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.-]*[A-Za-z0-9]$";
 static const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 static const char *intpatt = "^[0-9][0-9]*$";
 static const char *hashpatt = "^[A-Fa-f0-9]*$";
