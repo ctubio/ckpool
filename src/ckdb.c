@@ -7754,6 +7754,7 @@ static void *socketer(__maybe_unused void *arg)
 						LOGWARNING("Listener received shutdown message, terminating ckdb");
 						snprintf(reply, sizeof(reply), "%s.%ld.ok.exiting", id, now.tv_sec);
 						send_unix_msg(sockd, reply);
+						everyone_die = true;
 						break;
 					case CMD_PING:
 						LOGDEBUG("Listener received ping request");
@@ -7908,9 +7909,6 @@ static void *socketer(__maybe_unused void *arg)
 		close(sockd);
 
 		tick();
-
-		if (cmdnum == CMD_SHUTDOWN)
-			break;
 
 		if (trf_root)
 			trf_root = free_ktree(trf_root, NULL);
