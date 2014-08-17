@@ -176,6 +176,8 @@ static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instanc
 	fd = drop_client(ci, client);
 	if (fd == -1)
 		return;
+	if (ckp->passthrough)
+		return;
 	sprintf(buf, "dropclient=%d", client->id);
 	send_proc(ckp->stratifier, buf);
 }
@@ -236,8 +238,7 @@ reparse:
 	msg[buflen] = 0;
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
-	val = json_loads(msg, 0, NULL);
-	if (!val) {
+	if (!(val = json_loads(msg, 0, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
 		LOGINFO("Client id %d sent invalid json message %s", client->id, msg);
@@ -250,7 +251,10 @@ reparse:
 		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 		json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		s = json_dumps(val, 0);
-		send_proc(ckp->stratifier, s);
+		if (ckp->passthrough)
+			send_proc(ckp->generator, s);
+		else
+			send_proc(ckp->stratifier, s);
 		free(s);
 		json_decref(val);
 	}
