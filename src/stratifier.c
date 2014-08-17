@@ -234,6 +234,7 @@ struct stratum_instance {
 	int user_id;
 
 	ckpool_t *ckp;
+	bool passthrough;
 };
 
 typedef struct stratum_instance stratum_instance_t;
@@ -1951,6 +1952,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 {
 	stratum_instance_t *client;
 	const char *method;
+	char buf[256];
 
 	/* Random broken clients send something not an integer as the id so we copy
 	 * the json item for id_val as is for the response. */
@@ -1978,6 +1980,23 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 		return;
 	}
 
+	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
+		/* We need to inform the connector process that this client
+		 * is a passthrough and to manage its messages accordingly */
+		client->passthrough = true;
+		LOGINFO("Adding passthrough client %d", client->id);
+		snprintf(buf, 255, "passthrough=%d", client->id);
+		send_proc(client->ckp->connector, buf);
+		return;
+
+	}
+
+	/* No passthrough messages should get through from here on */
+	if (unlikely(client->passthrough)) {
+		LOGWARNING("Passthrough client messages falling through to stratifier");
+		return;
+	}
+
 	if (cmdmatch(method, "mining.auth")) {
 		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
 
@@ -1987,8 +2006,6 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 
 	/* We should only accept authorised requests from here on */
 	if (!client->authorised) {
-		char buf[256];
-
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */

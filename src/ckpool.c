@@ -1042,7 +1042,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:d:g:Hhkl:n:pS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:d:g:Hhkl:n:PpS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1093,7 +1093,7 @@ int main(int argc, char **argv)
 			case 'P':
 				if (ckp.proxy)
 					quit(1, "Cannot set both proxy and passthrough mode");
-				ckp.passthrough = true;
+				ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
 				if (ckp.passthrough)

@@ -68,6 +68,7 @@ struct proxy_instance {
 	ckpool_t *ckp;
 	connsock_t *cs;
 	server_instance_t *si;
+	bool passthrough;
 
 	const char *auth;
 	const char *pass;
@@ -562,6 +563,44 @@ retry:
 	goto retry;
 
 out:
+	return ret;
+}
+
+static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
+{
+	json_t *req, *val = NULL, *res_val;
+	bool ret = false;
+
+	req = json_pack("{s:s,s:[s]}",
+			"method", "mining.passthrough",
+			"params", PACKAGE"/"VERSION);
+	ret = send_json_msg(cs, req);
+	json_decref(req);
+	if (!ret) {
+		LOGWARNING("Failed to send message in passthrough_stratum");
+		goto out;
+	}
+	if (read_socket_line(cs, 5) < 1) {
+		LOGWARNING("Failed to receive line in passthrough_stratum");
+		goto out;
+	}
+	val = json_msg_result(cs->buf, &res_val);
+	if (!val) {
+		LOGWARNING("Failed to get a json result in passthrough_stratum, got: %s",
+			   cs->buf);
+		goto out;
+	}
+	ret = json_is_true(res_val);
+	if (!ret) {
+		LOGWARNING("Denied passthrough for stratum");
+		goto out;
+	}
+	proxi->passthrough = true;
+out:
+	if (val)
+		json_decref(val);
+	if (!ret)
+		close(cs->fd);
 	return ret;
 }
 
@@ -1158,6 +1197,15 @@ retry:
 				cs->url, cs->port);
 			continue;
 		}
+		if (ckp->passthrough) {
+			if (!passthrough_stratum(cs, proxi)) {
+				LOGWARNING("Failed initial passthrough to %s:%s !",
+					   cs->url, cs->port);
+				continue;
+			}
+			alive = proxi;
+			break;
+		}
 		/* Test we can connect, authorise and get stratum information */
 		if (!subscribe_stratum(cs, proxi)) {
 			LOGINFO("Failed initial subscribe to %s:%s !",
@@ -1181,7 +1229,8 @@ retry:
 	}
 	ckp->chosen_server = 0;
 	cs = alive->cs;
-	LOGNOTICE("Connected to upstream server %s:%s as proxy", cs->url, cs->port);
+	LOGNOTICE("Connected to upstream server %s:%s as proxy%s", cs->url, cs->port,
+		  ckp->passthrough ? " in passthrough mode" : "");
 	mutex_init(&alive->notify_lock);
 	create_pthread(&alive->pth_precv, proxy_recv, alive);
 	mutex_init(&alive->psend_lock);
@@ -1229,9 +1278,11 @@ reconnect:
 
 	/* We've just subscribed and authorised so tell the stratifier to
 	 * retrieve the first subscription. */
-	send_proc(ckp->stratifier, "subscribe");
-	send_proc(ckp->stratifier, "notify");
-	proxi->notified = false;
+	if (!ckp->passthrough) {
+		send_proc(ckp->stratifier, "subscribe");
+		send_proc(ckp->stratifier, "notify");
+		proxi->notified = false;
+	}
 
 	do {
 		selret = wait_read_select(us->sockd, 5);

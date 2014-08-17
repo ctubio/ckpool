@@ -51,6 +51,9 @@ struct client_instance {
 
 	char buf[PAGESIZE];
 	int bufofs;
+
+	bool passthrough;
+	int passthrough_id;
 };
 
 typedef struct client_instance client_instance_t;
@@ -464,6 +467,16 @@ static client_instance_t *client_by_id(conn_instance_t *ci, int id)
 	return client;
 }
 
+static void passthrough_client(conn_instance_t *ci, client_instance_t *client)
+{
+	char *buf;
+
+	LOGINFO("Connector adding passthrough client %d", client->id);
+	client->passthrough = true;
+	ASPRINTF(&buf, "{\"result\": true}\n");
+	send_client(ci, client->id, buf);
+}
+
 static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 {
 	int sockd = -1, client_id, ret = 0, selret;
@@ -538,6 +551,23 @@ retry:
 		ret = drop_client(ci, client);
 		if (ret >= 0)
 			LOGINFO("Connector dropped client id: %d", client_id);
+		goto retry;
+	}
+	if (cmdmatch(buf, "passthrough")) {
+		client_instance_t *client;
+		int client_id;
+
+		ret = sscanf(buf, "passthrough=%d", &client_id);
+		if (ret < 0) {
+			LOGDEBUG("Connector failed to parse passthrough command: %s", buf);
+			goto retry;
+		}
+		client = client_by_id(ci, client_id);
+		if (unlikely(!client)) {
+			LOGINFO("Connector failed to find client id %d to pass through", client_id);
+			goto retry;
+		}
+		passthrough_client(ci, client);
 		goto retry;
 	}
 	if (cmdmatch(buf, "getfd")) {
