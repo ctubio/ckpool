@@ -64,7 +64,7 @@ static client_instance_t *fdclients;
 /* Linked list of dead clients no longer in use but may still have references */
 static client_instance_t *dead_clients;
 
-static int64_t client_id;
+static int64_t client_id = 1;
 
 struct sender_send {
 	struct sender_send *next;
@@ -135,7 +135,7 @@ retry:
 	client->fd = fd;
 
 	ck_wlock(&ci->lock);
-	client->id = ++client_id;
+	client->id = client_id++;
 	HASH_ADD_INT(clients, id, client);
 	HASH_REPLACE(fdhh, fdclients, fd, SOI, client, old_client);
 	ci->nfds++;
