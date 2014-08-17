@@ -30,7 +30,9 @@ config.h
 mkinstalldirs
 
 *.swp
-ckpool
+src/ckpool
+src/ckpmsg
+src/ckdb
 ltmain.sh
 
 *.m4
