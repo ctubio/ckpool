@@ -42,7 +42,6 @@ AC_CHECK_HEADERS(libpq-fe.h postgresql/libpq-fe.h grp.h)
 PTHREAD_LIBS="-lpthread"
 MATH_LIBS="-lm"
 RT_LIBS="-lrt"
-PQ_LIBS="-lpq"
 
 AC_CONFIG_SUBDIRS([src/jansson-2.6])
 JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
@@ -50,8 +49,22 @@ JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
 AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(MATH_LIBS)
 AC_SUBST(RT_LIBS)
-AC_SUBST(PQ_LIBS)
 AC_SUBST(JANSSON_LIBS)
+
+AC_ARG_WITH([ckdb],
+	[AC_HELP_STRING([--without-ckdb],[Compile ckpool without postgresql database support (default enabled)])],
+	[ckdb=$withval]
+	)
+
+if test "x$ckdb" != "xno"; then
+	AC_CHECK_LIB([pq], [main],[PQ=-lpq],echo "Error: Required library libpq-dev
+		not found. Install it or disable postgresql support with --without-ckdb" && exit 1)
+	PQ_LIBS="-lpq"
+else
+	PQ_LIBS=""
+fi
+AM_CONDITIONAL([WANT_CKDB], [test "x$ckdb" != "xno"])
+AC_SUBST(PQ_LIBS)
 
 AC_OUTPUT([Makefile] [src/Makefile])
 
