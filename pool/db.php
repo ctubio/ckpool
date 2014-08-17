@@ -50,7 +50,8 @@ function msgEncode($cmd, $id, $fields)
 {
  global $send_sep, $fld_sep, $val_sep;
 
- $msg = $cmd . $send_sep . $id;
+ $t = time() % 10000;
+ $msg = $cmd . $send_sep . $id.$t;
  $first = true;
  foreach ($fields as $name => $value)
  {

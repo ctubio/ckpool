@@ -75,32 +75,46 @@ function safepass($pass)
 function show_reg($menu, $name, $u)
 {
  $user = getparam('user', false);
- $mail = getparam('mail', false);
+ $mail = trim(getparam('mail', false));
  $pass = getparam('pass', false);
  $pass2 = getparam('pass2', false);
 
  $data = array();
+
+ if (nuem($user))
+	$data['user'] = '';
+ else
+	$data['user'] = $user;
+
+ if (nuem($mail))
+	$data['mail'] = '';
+ else
+	$data['mail'] = $mail;
+
  $ok = true;
- if ($user === NULL && $mail === NULL && $pass === NULL && $pass2 === NULL)
-	 $ok = false;
+ if (nuem($user) || nuem($mail) || nuem($pass) || nuem($pass2))
+	$ok = false;
  else
  {
-	if ($user !== NULL)
-		$data['user'] = $user;
-	else
-		$ok = false;
-	if ($mail !== NULL)
-		$data['mail'] = $mail;
-	else
-		$ok = false;
-	if ($pass === NULL || safepass($pass) !== true)
+	if (safepass($pass) !== true)
 	{
 		$ok = false;
-		$data['error'] = "Password is unsafe";
-	} elseif ($pass2 === NULL || $pass2 != $pass)
+		$data['error'] = "Password is unsafe - requires 6 or more characters, including<br>" .
+				 "at least one of each uppercase, lowercase and digits";
+	}
+	elseif ($pass2 != $pass)
 	{
 		$ok = false;
 		$data['error'] = "Passwords don't match";
+	}
+
+	$orig = $user;
+	$user = preg_replace('/[_\\.]/', '', $orig);
+	if ($user != $orig)
+	{
+		$ok = false;
+		$data['error'] = "Username cannot include '.' or '_'";
+		$data['user'] = $user;
 	}
  }
 

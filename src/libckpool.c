@@ -258,6 +258,67 @@ void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int l
 	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
+void _cksem_init(sem_t *sem, const char *file, const char *func, const int line)
+{
+	int ret;
+	if ((ret = sem_init(sem, 0, 0)))
+		quitfrom(1, file, func, line, "Failed to sem_init ret=%d errno=%d", ret, errno);
+}
+
+void _cksem_post(sem_t *sem, const char *file, const char *func, const int line)
+{
+	if (unlikely(sem_post(sem)))
+		quitfrom(1, file, func, line, "Failed to sem_post errno=%d sem=0x%p", errno, sem);
+}
+
+void _cksem_wait(sem_t *sem, const char *file, const char *func, const int line)
+{
+retry:
+	if (unlikely(sem_wait(sem))) {
+		if (errno == EINTR)
+			goto retry;
+		quitfrom(1, file, func, line, "Failed to sem_wait errno=%d sem=0x%p", errno, sem);
+	}
+}
+
+int _cksem_mswait(sem_t *sem, int ms, const char *file, const char *func, const int line)
+{
+	ts_t abs_timeout, ts_now;
+	tv_t tv_now;
+	int ret;
+
+	tv_time(&tv_now);
+	tv_to_ts(&ts_now, &tv_now);
+	ms_to_ts(&abs_timeout, ms);
+retry:
+	timeraddspec(&abs_timeout, &ts_now);
+	ret = sem_timedwait(sem, &abs_timeout);
+
+	if (ret) {
+		if (likely(errno == ETIMEDOUT))
+			return ETIMEDOUT;
+		if (errno == EINTR)
+			goto retry;
+		quitfrom(1, file, func, line, "Failed to sem_timedwait errno=%d sem=0x%p", errno, sem);
+	}
+	return 0;
+}
+
+void cksem_reset(sem_t *sem)
+{
+	int ret;
+
+	do {
+		ret = sem_trywait(sem);
+		if (unlikely(ret < 0 && (errno == EINTR)))
+			ret = 0;
+	} while (!ret);
+}
+
+void cksem_destroy(sem_t *sem)
+{
+	sem_destroy(sem);
+}
 
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 {

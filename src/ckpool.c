@@ -275,8 +275,10 @@ retry:
 			LOGWARNING("Failed to send_procmsg to connector");
 	} else if (cmdmatch(buf, "restart")) {
 		if (!fork()) {
-			ckp->initial_args[ckp->args++] = strdup("-H");
-			ckp->initial_args[ckp->args] = NULL;
+			if (!ckp->handover) {
+				ckp->initial_args[ckp->args++] = strdup("-H");
+				ckp->initial_args[ckp->args] = NULL;
+			}
 			execv(ckp->initial_args[0], (char *const *)ckp->initial_args);
 		}
 	} else {
@@ -505,109 +507,17 @@ out:
 	return buf;
 }
 
-static const char *invalid_unknown = " (unknown reason)";
-static const char *invalid_toodeep = " >9 levels, recursion?";
-
-#define first_invalid(_json_data) _first_invalid(_json_data, 0)
-
-static char *_first_invalid(json_t *json_data, int level)
+/* Send a json msg to ckdb and return the response */
+char *_ckdb_msg_call(const ckpool_t *ckp, char *msg,  const char *file, const char *func,
+		     const int line)
 {
-	const char *json_key, *json_str;
-	json_t *json_value;
-	void *json_iter;
-	int json_typ;
-	char buf[512], *inside;
-	bool found;
+	char *buf = NULL;
 
-	if (level > 9)
-		return strdup(invalid_toodeep);
-
-	buf[0] = '\0';
-	found = false;
-	json_iter = json_object_iter(json_data);	
-	while (!found && json_iter) {
-		json_key = json_object_iter_key(json_iter);
-		json_value = json_object_iter_value(json_iter);
-		json_typ = json_typeof(json_value);
-		switch(json_typ) {
-			case JSON_STRING:
-				json_str = json_string_value(json_value);
-				if (json_str == NULL) {
-					snprintf(buf, sizeof(buf),
-						 " %s is NULL", json_key);
-					found = true;
-				}
-				break;
-			case JSON_REAL:
-			case JSON_INTEGER:
-			case JSON_TRUE:
-			case JSON_FALSE:
-				break;
-			case JSON_ARRAY:
-				inside = _first_invalid(json_value, level+1);
-				if (inside != invalid_unknown) {
-					snprintf(buf, sizeof(buf),
-						 " %s : [%s ]", json_key, inside);
-					free(inside);
-					found = true;
-				}
-				break;
-			case JSON_NULL:
-				snprintf(buf, sizeof(buf),
-					 " %s is NULL", json_key);
-				found = true;
-				break;
-			default:
-				snprintf(buf, sizeof(buf),
-					 " unknown type %d for %s",
-					 json_typ, json_key);
-				found = true;
-				break;
-		}
-		if (!found)
-			json_iter = json_object_iter_next(json_data, json_iter);
-	}
-
-	if (!*buf) {
-		if (level > 0)
-			return (char *)invalid_unknown;
-		else
-			return strdup(invalid_unknown);
-	} else
-		return strdup(buf);
-}
-
-/* Send a json msg to ckdb with its idmsg and return the response, consuming
- * the json on success */
-char *_json_ckdb_call(const ckpool_t *ckp, const char *idmsg, json_t *val, bool logged,
-		      const char *file, const char *func, const int line)
-{
-	char *msg = NULL, *dump, *buf = NULL;
-
-	dump = json_dumps(val, JSON_COMPACT);
-	if (unlikely(!dump)) {
-		char *invalid = first_invalid(val);
-		LOGWARNING("Json dump failed in json_ckdb_call from %s %s:%d%s", file, func, line, invalid);
-		free(invalid);
-		return buf;
-	}
-	ASPRINTF(&msg, "%s.id.json=%s", idmsg, dump);
-	if (!logged) {
-		char logname[512];
-
-		snprintf(logname, 511, "%s%s", ckp->logdir, ckp->ckdb_name);
-		rotating_log(logname, msg);
-	}
-	free(dump);
 	LOGDEBUG("Sending ckdb: %s", msg);
 	buf = _send_recv_ckdb(ckp, msg, file, func, line);
 	LOGDEBUG("Received from ckdb: %s", buf);
-	free(msg);
-	if (likely(buf))
-		json_decref(val);
 	return buf;
 }
-
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
