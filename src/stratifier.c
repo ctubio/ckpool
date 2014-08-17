@@ -164,7 +164,7 @@ static char lasthash[68];
 struct json_params {
 	json_t *params;
 	json_t *id_val;
-	int client_id;
+	int64_t client_id;
 	char address[INET6_ADDRSTRLEN];
 };
 
@@ -173,7 +173,7 @@ typedef struct json_params json_params_t;
 /* Stratum json messages with their associated client id */
 struct smsg {
 	json_t *json_msg;
-	int client_id;
+	int64_t client_id;
 	char address[INET6_ADDRSTRLEN];
 };
 
@@ -185,12 +185,12 @@ static ckmsgq_t *ckdbq;		// ckdb
 static ckmsgq_t *sshareq;	// Stratum share sends
 static ckmsgq_t *sauthq;	// Stratum authorisations
 
-static int user_instance_id;
+static int64_t user_instance_id;
 
 struct user_instance {
 	UT_hash_handle hh;
 	char username[128];
-	int id;
+	int64_t id;
 
 	int workers;
 };
@@ -202,7 +202,7 @@ static user_instance_t *user_instances;
 /* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
-	int id;
+	int64_t id;
 
 	char enonce1[32];
 	uchar enonce1bin[16];
@@ -231,10 +231,9 @@ struct stratum_instance {
 	char *useragent;
 	char *workername;
 	char *secondaryuserid;
-	int user_id;
+	int64_t user_id;
 
 	ckpool_t *ckp;
-	bool passthrough;
 };
 
 typedef struct stratum_instance stratum_instance_t;
@@ -429,7 +428,7 @@ out:
 }
 
 static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char *file,
-		      const char *func, const int line)
+		       const char *func, const int line)
 {
 	static time_t time_counter;
 	static int counter = 0;
@@ -639,7 +638,7 @@ static void drop_allclients(ckpool_t *ckp)
 	ck_wlock(&instance_lock);
 	HASH_ITER(hh, stratum_instances, client, tmp) {
 		HASH_DEL(stratum_instances, client);
-		sprintf(buf, "dropclient=%d", client->id);
+		sprintf(buf, "dropclient=%ld", client->id);
 		send_proc(ckp->connector, buf);
 	}
 	HASH_ITER(hh, disconnected_instances, client, tmp)
@@ -794,7 +793,7 @@ static void update_diff(ckpool_t *ckp)
 }
 
 /* Enter with instance_lock held */
-static stratum_instance_t *__instance_by_id(int id)
+static stratum_instance_t *__instance_by_id(int64_t id)
 {
 	stratum_instance_t *instance;
 
@@ -803,7 +802,7 @@ static stratum_instance_t *__instance_by_id(int id)
 }
 
 /* Enter with write instance_lock held */
-static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int id)
+static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 
@@ -816,7 +815,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int id)
 	return instance;
 }
 
-static bool disconnected_sessionid_exists(const char *sessionid, int id)
+static bool disconnected_sessionid_exists(const char *sessionid, int64_t id)
 {
 	bool connected_exists = false, ret = false;
 	stratum_instance_t *instance, *tmp;
@@ -903,7 +902,7 @@ static void stratum_broadcast(json_t *val)
 	mutex_unlock(&ssends->lock);
 }
 
-static void stratum_add_send(json_t *val, int client_id)
+static void stratum_add_send(json_t *val, int64_t client_id)
 {
 	smsg_t *msg;
 
@@ -931,7 +930,7 @@ static void dec_worker(user_instance_t *instance)
 	mutex_unlock(&stats_lock);
 }
 
-static void drop_client(int id)
+static void drop_client(int64_t id)
 {
 	stratum_instance_t *client = NULL;
 	bool dec = false;
@@ -1085,9 +1084,9 @@ retry:
 	} else if (cmdmatch(buf, "diff")) {
 		update_diff(ckp);
 	} else if (cmdmatch(buf, "dropclient")) {
-		int client_id;
+		int64_t client_id;
 
-		ret = sscanf(buf, "dropclient=%d", &client_id);
+		ret = sscanf(buf, "dropclient=%ld", &client_id);
 		if (ret < 0)
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
@@ -1166,7 +1165,7 @@ static void new_enonce1(stratum_instance_t *client)
 }
 
 /* Extranonce1 must be set here */
-static json_t *parse_subscribe(int client_id, json_t *params_val)
+static json_t *parse_subscribe(int64_t client_id, json_t *params_val)
 {
 	stratum_instance_t *client = NULL;
 	bool old_match = false;
@@ -1278,7 +1277,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,si,ss,ss,ss,ss,ss}",
+	val = json_pack("{ss,ss,ss,ss,sI,ss,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
@@ -1550,7 +1549,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 
 	flip_32(swap, hash);
 	__bin2hex(blockhash, swap, 32);
-	val = json_pack("{si,ss,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
+	val = json_pack("{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
 			"blockhash", blockhash,
 			"confirmed", "n",
@@ -1661,7 +1660,7 @@ static void submit_share(stratum_instance_t *client, int64_t jobid, const char *
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	json_msg = json_pack("{sisssssssisi}", "jobid", jobid, "nonce2", enonce2,
+	json_msg = json_pack("{sisssssssIsi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
 			     "msg_id", msg_id);
 	msg = json_dumps(json_msg, 0);
@@ -1851,7 +1850,7 @@ out_unlock:
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
 	if (!share) {
-		val = json_pack("{si,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
+		val = json_pack("{sI,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"clientid", client->id,
 				"secondaryuserid", client->secondaryuserid,
 				"enonce1", client->enonce1,
@@ -1903,7 +1902,7 @@ static void stratum_broadcast_update(bool clean)
 }
 
 /* For sending a single stratum template update */
-static void stratum_send_update(int client_id, bool clean)
+static void stratum_send_update(int64_t client_id, bool clean)
 {
 	json_t *json_msg;
 
@@ -1914,7 +1913,7 @@ static void stratum_send_update(int client_id, bool clean)
 	stratum_add_send(json_msg, client_id);
 }
 
-static void send_json_err(int client_id, json_t *id_val, const char *err_msg)
+static void send_json_err(int64_t client_id, json_t *id_val, const char *err_msg)
 {
 	json_t *val;
 
@@ -1922,7 +1921,7 @@ static void send_json_err(int client_id, json_t *id_val, const char *err_msg)
 	stratum_add_send(val, client_id);
 }
 
-static void update_client(const int client_id)
+static void update_client(const int64_t client_id)
 {
 	stratum_instance_t *client;
 
@@ -1936,7 +1935,7 @@ static void update_client(const int client_id)
 		stratum_send_diff(client);
 }
 
-static json_params_t *create_json_params(const int client_id, const json_t *params, const json_t *id_val, const char *address)
+static json_params_t *create_json_params(const int64_t client_id, const json_t *params, const json_t *id_val, const char *address)
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
 
@@ -1947,7 +1946,7 @@ static json_params_t *create_json_params(const int client_id, const json_t *para
 	return jp;
 }
 
-static void parse_method(const int client_id, json_t *id_val, json_t *method_val,
+static void parse_method(const int64_t client_id, json_t *id_val, json_t *method_val,
 			 json_t *params_val, char *address)
 {
 	stratum_instance_t *client;
@@ -1982,18 +1981,17 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
 		/* We need to inform the connector process that this client
-		 * is a passthrough and to manage its messages accordingly */
-		client->passthrough = true;
+		 * is a passthrough and to manage its messages accordingly.
+		 * Remove this instance since the client id may well be
+		 * reused */
+		ck_wlock(&instance_lock);
+		HASH_DEL(stratum_instances, client);
+		ck_wunlock(&instance_lock);
+
 		LOGINFO("Adding passthrough client %d", client->id);
-		snprintf(buf, 255, "passthrough=%d", client->id);
+		snprintf(buf, 255, "passthrough=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
-		return;
-
-	}
-
-	/* No passthrough messages should get through from here on */
-	if (unlikely(client->passthrough)) {
-		LOGWARNING("Passthrough client messages falling through to stratifier");
+		free(client);
 		return;
 	}
 
@@ -2010,7 +2008,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
 		LOGINFO("Dropping unauthorised client %d", client->id);
-		snprintf(buf, 255, "dropclient=%d", client->id);
+		snprintf(buf, 255, "dropclient=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
 		return;
 	}
@@ -2028,7 +2026,7 @@ static void parse_method(const int client_id, json_t *id_val, json_t *method_val
 static void parse_instance_msg(smsg_t *msg)
 {
 	json_t *val = msg->json_msg, *id_val, *method, *params;
-	int client_id = msg->client_id;
+	int64_t client_id = msg->client_id;
 
 	/* Return back the same id_val even if it's null or not existent. */
 	id_val = json_object_get(val, "id");
@@ -2140,7 +2138,7 @@ static void sshare_process(ckpool_t __maybe_unused *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
 	stratum_instance_t *client;
-	int client_id;
+	int64_t client_id;
 
 	client_id = jp->client_id;
 
@@ -2170,7 +2168,8 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
 	stratum_instance_t *client;
-	int client_id, errnum = 0;
+	int64_t client_id;
+	int errnum = 0;
 
 	client_id = jp->client_id;
 
@@ -2179,7 +2178,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	ck_runlock(&instance_lock);
 
 	if (unlikely(!client)) {
-		LOGINFO("Authoriser failed to find client id %d in hashtable!", client_id);
+		LOGINFO("Authoriser failed to find client id %ld in hashtable!", client_id);
 		goto out;
 	}
 	result_val = parse_authorise(client, jp->params, &err_val, jp->address, &errnum);
@@ -2278,7 +2277,7 @@ static void update_userstats(ckpool_t *ckp)
 		ghs5 = client->dsps5 * nonces;
 		ghs60 = client->dsps60 * nonces;
 		ghs1440 = client->dsps1440 * nonces;
-		val = json_pack("{ss,si,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
+		val = json_pack("{ss,sI,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
 				"instanceid", client->id,
 				"elapsed", elapsed,

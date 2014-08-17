@@ -1216,6 +1216,7 @@ static void passthrough_send(ckpool_t __maybe_unused *ckp, pass_msg_t *pm)
 	len = strlen(pm->msg);
 	sent = write_socket(pm->cs->fd, pm->msg, len);
 	if (sent != len) {
+		/* FIXME: Do something about this? */
 		LOGWARNING("Failed to passthrough %d bytes of message %s", len, pm->msg);
 	}
 	free(pm->msg);
@@ -1227,7 +1228,7 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 	pass_msg_t *pm = ckzalloc(sizeof(pass_msg_t));
 
 	pm->cs = proxi->cs;
-	pm->msg = strdup(msg);
+	ASPRINTF(&pm->msg, "%s\n", msg);
 	ckmsgq_add(proxi->passsends, pm);
 }
 

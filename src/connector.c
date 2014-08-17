@@ -37,7 +37,7 @@ typedef struct connector_instance conn_instance_t;
 struct client_instance {
 	/* For clients hashtable */
 	UT_hash_handle hh;
-	int id;
+	int64_t id;
 
 	/* For fdclients hashtable */
 	UT_hash_handle fdhh;
@@ -53,7 +53,6 @@ struct client_instance {
 	int bufofs;
 
 	bool passthrough;
-	int passthrough_id;
 };
 
 typedef struct client_instance client_instance_t;
@@ -65,7 +64,7 @@ static client_instance_t *fdclients;
 /* Linked list of dead clients no longer in use but may still have references */
 static client_instance_t *dead_clients;
 
-static int client_id;
+static int64_t client_id;
 
 struct sender_send {
 	struct sender_send *next;
@@ -136,7 +135,7 @@ retry:
 	client->fd = fd;
 
 	ck_wlock(&ci->lock);
-	client->id = client_id++;
+	client->id = ++client_id;
 	HASH_ADD_INT(clients, id, client);
 	HASH_REPLACE(fdhh, fdclients, fd, SOI, client, old_client);
 	ci->nfds++;
@@ -178,11 +177,11 @@ static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instanc
 		return;
 	if (ckp->passthrough)
 		return;
-	sprintf(buf, "dropclient=%d", client->id);
+	sprintf(buf, "dropclient=%ld", client->id);
 	send_proc(ckp->stratifier, buf);
 }
 
-static void send_client(conn_instance_t *ci, int id, char *buf);
+static void send_client(conn_instance_t *ci, int64_t id, char *buf);
 
 static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
@@ -246,9 +245,16 @@ reparse:
 		invalidate_client(ckp, ci, client);
 		return;
 	} else {
+		int64_t passthrough_id;
 		char *s;
 
-		json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
+		if (client->passthrough) {
+			passthrough_id = json_integer_value(json_object_get(val, "client_id"));
+			json_object_del(val, "client_id");
+			passthrough_id = (client->id << 32) | passthrough_id;
+			json_object_set_new_nocheck(val, "client_id", json_integer(passthrough_id));
+		} else
+			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 		json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		s = json_dumps(val, 0);
 		if (ckp->passthrough)
@@ -417,7 +423,7 @@ void *sender(void *arg)
 
 /* Send a client by id a heap allocated buffer, allowing this function to
  * free the ram. */
-static void send_client(conn_instance_t *ci, int id, char *buf)
+static void send_client(conn_instance_t *ci, int64_t id, char *buf)
 {
 	sender_send_t *sender_send;
 	client_instance_t *client;
@@ -460,7 +466,7 @@ static void send_client(conn_instance_t *ci, int id, char *buf)
 	mutex_unlock(&sender_lock);
 }
 
-static client_instance_t *client_by_id(conn_instance_t *ci, int id)
+static client_instance_t *client_by_id(conn_instance_t *ci, int64_t id)
 {
 	client_instance_t *client;
 
@@ -483,7 +489,8 @@ static void passthrough_client(conn_instance_t *ci, client_instance_t *client)
 
 static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 {
-	int sockd = -1, client_id, ret = 0, selret;
+	int sockd = -1,  ret = 0, selret;
+	int64_t client_id64, client_id;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
 	char *buf = NULL;
@@ -540,35 +547,34 @@ retry:
 		goto out;
 	if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
-		int client_id;
 
-		ret = sscanf(buf, "dropclient=%d", &client_id);
+		ret = sscanf(buf, "dropclient=%ld", &client_id64);
 		if (ret < 0) {
 			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
 			goto retry;
 		}
+		client_id = client_id64 & 0xffffffffll;
 		client = client_by_id(ci, client_id);
 		if (unlikely(!client)) {
-			LOGINFO("Connector failed to find client id %d to drop", client_id);
+			LOGINFO("Connector failed to find client id %ld to drop", client_id);
 			goto retry;
 		}
 		ret = drop_client(ci, client);
 		if (ret >= 0)
-			LOGINFO("Connector dropped client id: %d", client_id);
+			LOGINFO("Connector dropped client id: %ld", client_id);
 		goto retry;
 	}
 	if (cmdmatch(buf, "passthrough")) {
 		client_instance_t *client;
-		int client_id;
 
-		ret = sscanf(buf, "passthrough=%d", &client_id);
+		ret = sscanf(buf, "passthrough=%ld", &client_id);
 		if (ret < 0) {
 			LOGDEBUG("Connector failed to parse passthrough command: %s", buf);
 			goto retry;
 		}
 		client = client_by_id(ci, client_id);
 		if (unlikely(!client)) {
-			LOGINFO("Connector failed to find client id %d to pass through", client_id);
+			LOGINFO("Connector failed to find client id %ld to pass through", client_id);
 			goto retry;
 		}
 		passthrough_client(ci, client);
@@ -587,8 +593,16 @@ retry:
 	}
 
 	/* Extract the client id from the json message and remove its entry */
-	client_id = json_integer_value(json_object_get(json_msg, "client_id"));
+	client_id64 = json_integer_value(json_object_get(json_msg, "client_id"));
 	json_object_del(json_msg, "client_id");
+	if (client_id64 > 0xffffffffll) {
+		int64_t passthrough_id;
+
+		passthrough_id = client_id64 & 0xffffffffll;
+		client_id = client_id64 >> 32;
+		json_object_set_new_nocheck(json_msg, "client_id", json_integer(passthrough_id));
+	} else
+		client_id = client_id64;
 	dealloc(buf);
 	buf = json_dumps(json_msg, 0);
 	realloc_strcat(&buf, "\n");
