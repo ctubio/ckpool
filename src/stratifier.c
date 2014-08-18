@@ -550,7 +550,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 			break;
 		}
 	}
-	HASH_ADD_INT(workbases, id, wb);
+	HASH_ADD_I64(workbases, id, wb);
 	current_workbase = wb;
 	ck_wunlock(&workbase_lock);
 
@@ -798,7 +798,7 @@ static stratum_instance_t *__instance_by_id(int64_t id)
 {
 	stratum_instance_t *instance;
 
-	HASH_FIND_INT(stratum_instances, &id, instance);
+	HASH_FIND_I64(stratum_instances, &id, instance);
 	return instance;
 }
 
@@ -812,7 +812,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id)
 	instance->ckp = ckp;
 	tv_time(&instance->ldc);
 	LOGINFO("Added instance %d", id);
-	HASH_ADD_INT(stratum_instances, id, instance);
+	HASH_ADD_I64(stratum_instances, id, instance);
 	return instance;
 }
 
@@ -1214,10 +1214,10 @@ static json_t *parse_subscribe(int64_t client_id, json_t *params_val)
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		new_enonce1(client);
-		LOGINFO("Set new subscription %d to new enonce1 %s", client->id,
+		LOGINFO("Set new subscription %ld to new enonce1 %s", client->id,
 			client->enonce1);
 	} else {
-		LOGINFO("Set new subscription %d to old matched enonce1 %s", client->id,
+		LOGINFO("Set new subscription %ld to old matched enonce1 %s", client->id,
 			 client->enonce1);
 	}
 
@@ -1353,7 +1353,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
 
-	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
+	LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
 		  client->user_instance->username);
 	client->workername = strdup(buf);
 	if (client->ckp->standalone)
@@ -1746,7 +1746,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	share = true;
 
 	ck_rlock(&workbase_lock);
-	HASH_FIND_INT(workbases, &id, wb);
+	HASH_FIND_I64(workbases, &id, wb);
 	if (unlikely(!wb)) {
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));

@@ -136,7 +136,7 @@ retry:
 
 	ck_wlock(&ci->lock);
 	client->id = client_id++;
-	HASH_ADD_INT(clients, id, client);
+	HASH_ADD_I64(clients, id, client);
 	HASH_REPLACE(fdhh, fdclients, fd, SOI, client, old_client);
 	ci->nfds++;
 	ck_wunlock(&ci->lock);
@@ -441,16 +441,16 @@ static void send_client(conn_instance_t *ci, int64_t id, char *buf)
 	}
 
 	ck_rlock(&ci->lock);
-	HASH_FIND_INT(clients, &id, client);
+	HASH_FIND_I64(clients, &id, client);
 	if (likely(client))
 		fd = client->fd;
 	ck_runlock(&ci->lock);
 
 	if (unlikely(fd == -1)) {
 		if (client)
-			LOGINFO("Client id %d disconnected", id);
+			LOGINFO("Client id %ld disconnected", id);
 		else
-			LOGINFO("Connector failed to find client id %d to send to", id);
+			LOGINFO("Connector failed to find client id %ld to send to", id);
 		free(buf);
 		return;
 	}
@@ -471,7 +471,7 @@ static client_instance_t *client_by_id(conn_instance_t *ci, int64_t id)
 	client_instance_t *client;
 
 	ck_rlock(&ci->lock);
-	HASH_FIND_INT(clients, &id, client);
+	HASH_FIND_I64(clients, &id, client);
 	ck_runlock(&ci->lock);
 
 	return client;
