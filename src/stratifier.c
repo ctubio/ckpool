@@ -530,14 +530,15 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		memcpy(lasthash, wb->prevhash, 65);
 		blockchange_id = wb->id;
 	}
-	if (*new_block) {
+	if (*new_block && ckp->logshares) {
 		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
 		ret = mkdir(wb->logdir, 0750);
 		if (unlikely(ret && errno != EEXIST))
 			LOGERR("Failed to create log directory %s", wb->logdir);
 	}
 	sprintf(wb->idstring, "%016lx", wb->id);
-	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
+	if (ckp->logshares)
+		sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		if (HASH_COUNT(workbases) < 3)
@@ -1680,9 +1681,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
+	char *fname = NULL, *s;
 	char idstring[20];
 	uint32_t ntime32;
-	char *fname, *s;
 	workbase_t *wb;
 	uchar hash[32];
 	int64_t id;
@@ -1836,17 +1837,19 @@ out_unlock:
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", client->user_instance->username);
 
-	fp = fopen(fname, "a");
-	if (likely(fp)) {
-		s = json_dumps(val, 0);
-		len = strlen(s);
-		len = fprintf(fp, "%s\n", s);
-		free(s);
-		fclose(fp);
-		if (unlikely(len < 0))
-			LOGERR("Failed to fwrite to %s", fname);
-	} else
-		LOGERR("Failed to fopen %s", fname);
+	if (ckp->logshares) {
+		fp = fopen(fname, "a");
+		if (likely(fp)) {
+			s = json_dumps(val, 0);
+			len = strlen(s);
+			len = fprintf(fp, "%s\n", s);
+			free(s);
+			fclose(fp);
+			if (unlikely(len < 0))
+				LOGERR("Failed to fwrite to %s", fname);
+		} else
+			LOGERR("Failed to fopen %s", fname);
+	}
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
 	if (!share) {
@@ -1866,6 +1869,7 @@ out:
 		ckdbq_add(ckp, ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
+	free(fname);
 	return json_boolean(result);
 }
 

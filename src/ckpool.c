@@ -1015,6 +1015,7 @@ static struct option long_options[] = {
 	{"handover",	no_argument,		0,	'H'},
 	{"help",	no_argument,		0,	'h'},
 	{"killold",	no_argument,		0,	'k'},
+	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
 	{"passthrough",	no_argument,		0,	'P'},
@@ -1042,7 +1043,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:d:g:Hhkl:n:PpS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:d:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1079,6 +1080,9 @@ int main(int argc, char **argv)
 				exit(0);
 			case 'k':
 				ckp.killold = true;
+				break;
+			case 'L':
+				ckp.logshares = true;
 				break;
 			case 'l':
 				ckp.loglevel = atoi(optarg);
