@@ -530,14 +530,15 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		memcpy(lasthash, wb->prevhash, 65);
 		blockchange_id = wb->id;
 	}
-	if (*new_block) {
+	if (*new_block && ckp->logshares) {
 		sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
 		ret = mkdir(wb->logdir, 0750);
 		if (unlikely(ret && errno != EEXIST))
 			LOGERR("Failed to create log directory %s", wb->logdir);
 	}
 	sprintf(wb->idstring, "%016lx", wb->id);
-	sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
+	if (ckp->logshares)
+		sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
 	HASH_ITER(hh, workbases, tmp, tmpa) {
 		if (HASH_COUNT(workbases) < 3)
@@ -549,7 +550,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 			break;
 		}
 	}
-	HASH_ADD_INT(workbases, id, wb);
+	HASH_ADD_I64(workbases, id, wb);
 	current_workbase = wb;
 	ck_wunlock(&workbase_lock);
 
@@ -797,7 +798,7 @@ static stratum_instance_t *__instance_by_id(int64_t id)
 {
 	stratum_instance_t *instance;
 
-	HASH_FIND_INT(stratum_instances, &id, instance);
+	HASH_FIND_I64(stratum_instances, &id, instance);
 	return instance;
 }
 
@@ -811,7 +812,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id)
 	instance->ckp = ckp;
 	tv_time(&instance->ldc);
 	LOGINFO("Added instance %d", id);
-	HASH_ADD_INT(stratum_instances, id, instance);
+	HASH_ADD_I64(stratum_instances, id, instance);
 	return instance;
 }
 
@@ -1213,10 +1214,10 @@ static json_t *parse_subscribe(int64_t client_id, json_t *params_val)
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		new_enonce1(client);
-		LOGINFO("Set new subscription %d to new enonce1 %s", client->id,
+		LOGINFO("Set new subscription %ld to new enonce1 %s", client->id,
 			client->enonce1);
 	} else {
-		LOGINFO("Set new subscription %d to old matched enonce1 %s", client->id,
+		LOGINFO("Set new subscription %ld to old matched enonce1 %s", client->id,
 			 client->enonce1);
 	}
 
@@ -1352,7 +1353,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
 
-	LOGNOTICE("Authorised client %d worker %s as user %s", client->id, buf,
+	LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
 		  client->user_instance->username);
 	client->workername = strdup(buf);
 	if (client->ckp->standalone)
@@ -1680,9 +1681,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
+	char *fname = NULL, *s;
 	char idstring[20];
 	uint32_t ntime32;
-	char *fname, *s;
 	workbase_t *wb;
 	uchar hash[32];
 	int64_t id;
@@ -1745,7 +1746,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	share = true;
 
 	ck_rlock(&workbase_lock);
-	HASH_FIND_INT(workbases, &id, wb);
+	HASH_FIND_I64(workbases, &id, wb);
 	if (unlikely(!wb)) {
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
@@ -1836,17 +1837,19 @@ out_unlock:
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", client->user_instance->username);
 
-	fp = fopen(fname, "a");
-	if (likely(fp)) {
-		s = json_dumps(val, 0);
-		len = strlen(s);
-		len = fprintf(fp, "%s\n", s);
-		free(s);
-		fclose(fp);
-		if (unlikely(len < 0))
-			LOGERR("Failed to fwrite to %s", fname);
-	} else
-		LOGERR("Failed to fopen %s", fname);
+	if (ckp->logshares) {
+		fp = fopen(fname, "a");
+		if (likely(fp)) {
+			s = json_dumps(val, 0);
+			len = strlen(s);
+			len = fprintf(fp, "%s\n", s);
+			free(s);
+			fclose(fp);
+			if (unlikely(len < 0))
+				LOGERR("Failed to fwrite to %s", fname);
+		} else
+			LOGERR("Failed to fopen %s", fname);
+	}
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
 	if (!share) {
@@ -1866,6 +1869,7 @@ out:
 		ckdbq_add(ckp, ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
 	}
+	free(fname);
 	return json_boolean(result);
 }
 

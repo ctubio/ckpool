@@ -1,0 +1,216 @@
+CKPOOL + CKDB + libckpool by Con Kolivas and Andrew Smith.
+
+Ultra low overhead massively scaleable multi-process, multi-threaded modular
+bitcoin mining pool, proxy, passthrough, library and database interface in c
+for Linux.
+
+
+---
+LICENSE:
+
+GNU Public license V3. See included COPYING for details.
+
+
+---
+DESIGN:
+
+Architecture:
+- Low level hand coded architecture relying on minimal outside libraries beyond
+basic glibc functions for maximum flexibility and minimal overhead that can be
+built and deployed on any Linux installation.
+- Multiprocess+multithreaded design to scale to massive deployments and
+capitalise on modern multicore/multithread CPU designs.
+- Minimal memory overhead.
+- Utilises ultra reliable unix sockets for communication with dependent
+processes.
+- Modular code design to streamline further development.
+- Standalone library code that can be utilised independently of ckpool.
+- Same code can be deployed in many different modes designed to talk to each
+other on the same machine, local lan or remote internet locations.
+
+Modes of deployment:
+- Comprehensive pooled mining solution with a postgresql database interface.
+- Passthrough node(s) that combine connections to a single socket which can
+be used to scale to millions of clients and allow the main pool to be isolated
+from direct communication with clients.
+- Proxy nodes with a database that act as a single client to the upstream pool
+while storing full client data of their own.
+- Simple proxy without the limitations of hashrate inherent in other proxy
+solutions when talking to ckpool.
+- Simple pool without a database.
+- Library for use by other software.
+
+Features:
+- Bitcoind communication to unmodified bitcoind with multiple failover to local
+or remote locations.
+- Local pool instance worker limited only by operating system resources and
+can be made virtually limitless through use of multiple downstream passthrough
+nodes.
+- Proxy and passthrough modes can set up multiple failover upstream pools.
+- Optional share logging.
+- Virtually seamless restarts for upgrades through socket handover from exiting
+instances to new starting instance.
+- Configurable custom coinbase signature.
+- Configurable instant starting and minimum difficulty.
+- Rapid vardiff adjustment with stable unlimited maximum difficulty handling.
+- New work generation on block changes incorporate full bitcoind transaction
+set without delay or requiring to send transactionless work to miners thereby
+providing the best bitcoin network support and rewarding miners with the most
+transaction fees.
+- Event driven communication based on communication readiness preventing
+slow communicating clients from delaying low latency ones.
+- Stratum messaging system to running clients.
+- Accurate pool and per client statistics.
+- Multiple named instances can be run concurrently on the same machine.
+
+
+---
+BUILDING:
+
+Building ckpool standalone without ckdb has no dependencies outside of the
+basic build tools on any linux installation.
+
+sudo apt-get install build-essential
+./configure --without-ckdb
+make
+
+
+Building with ckdb requires installation of the postgresql development library.
+
+sudo apt-get install build-essential libpq-dev
+./configure
+make
+
+
+Building from git also requires autoconf and automake
+
+sudo apt-get install build-essential libpq-dev autoconf automake
+./autogen.sh
+./configure
+make
+
+
+Binaries will be built in the src/ subdirectory.
+
+
+Installation is NOT required and ckpool can be run directly from the directory
+it's built in but it can be installed with:
+sudo make install
+
+
+It is anticipated that pool operators wishing to set up a full database based
+installation of ckpool+ckdb will be familiar with setting up postgresql and
+associated permissions to the directories where the various processes will
+communicate with each other and a web server so these will not be documented.
+
+
+---
+RUNNING:
+
+ckpool supports the following options:
+
+-A | --standalone
+-c CONFIG | --config CONFIG
+-d CKDB-NAME | --ckdb-name CKDB-NAME
+-g GROUP | --group GROUP
+-H | --handover
+-h | --help
+-k | --killold
+-L | --log-shares
+-l LOGLEVEL | --loglevel LOGLEVEL
+-n NAME | --name NAME
+-P | --passthrough
+-p | --proxy
+-S CKDB-SOCKDIR | --ckdb-sockdir CKDB-SOCKDIR
+-s SOCKDIR | --sockdir SOCKDIR
+
+
+-A Standalone mode tells ckpool not to try to communicate with ckdb or log any
+ckdb requests in the rotating ckdb logs it would otherwise store. All users
+are automatically accepted without any attempt to authorise users in any way.
+
+-c <CONFIG> tells ckpool to override its default configuration filename and
+load the specified one. If -c is not specified, ckpool looks for ckpool.conf
+whereas in proxy or passthrough modes it will look for ckproxy.conf
+
+-d <CKDB-NAME> tells ckpool what the name of the ckdb process is that it should
+speak to, otherwise it will look for ckdb.
+
+-g <GROUP> will start ckpool as the group ID specified.
+
+-H will make ckpool attempt to receive a handover from a running incidence of
+ckpool with the same name, taking its client listening socket and shutting it
+down.
+
+-h displays the above help
+
+-k will make ckpool shut down an existing instance of ckpool with the same name,
+killing it if need be. Otherwise ckpool will refuse to start if an instance of
+the same name is already running.
+
+-L will log per share information in the logs directory divided by block height
+and then workbase.
+
+-l <LOGLEVEL will change the log level to that specified. Default is 5 and
+maximum debug is level 7.
+
+-n <NAME> will change the ckpool process name to that specified, allowing
+multiple different named instances to be running.
+
+-P will start ckpool in passthrough proxy mode where it collates all incoming
+connections and streams all information on a single connection to an upstream
+pool specified in ckproxy.conf . Downstream users all retain their individual
+presence on the master pool. Standalone mode is implied.
+
+-p will start ckpool in proxy mode where it appears to be a local pool handling
+clients as separate entities while presenting shares as a single user to the
+upstream pool specified. Note that the upstream pool needs to be a ckpool for
+it to scale to large hashrates. Standalone mode is Optional.
+
+-S <CKDB-SOCKDIR> tells ckpool which directory to look for the ckdb socket to
+talk to.
+
+-s <SOCKDIR> tells ckpool which directory to place its own communication
+sockets (/tmp by default)
+
+
+---
+CONFIGURATION
+
+At least one bitcoind is mandatory in ckpool mode with the minimum requirements
+of server, rpcuser and rpcpassword set.
+
+Ckpool takes a json encoded configuration file in ckpool.conf by default or
+ckproxy.conf in proxy or passthrough mode unless specified with -c. Sample
+configurations for ckpool and ckproxy are included with the source. Entries
+after the valid json are ignored and the space there can be used for comments.
+The options recognised are as follows:
+
+
+"btcd" : This is an array of bitcoind(s) with the options url, auth  and pass
+which match the configured bitcoind. This is mandatory in pool mode.
+
+"proxy" : This is an array in the same format as btcd above but is used in
+proxy and passthrough mode to set the upstream pool and is mandatory.
+
+"btcaddress" : This is the bitcoin address to try to generate blocks to.
+
+"btcsig" : This is an optional signature to put into the coinbase of mined
+blocks.
+
+"blockpoll" : This is the frequency in milliseconds for how often to check for
+new network blocks and is 500 by default.
+
+"update_interval" : This is the frequency that stratum updates are sent out to
+miners and is set to 30 seconds by default to help perpetuate transactions for
+the health of the bitcoin network.
+
+"serverurl" : This is the IP to try to bind ckpool uniquely to, otherwise it
+will attempt to bind to all interfaces in port 3333 by default in pool mode
+and 3334 in proxy mode.
+
+"mindiff" : Minimum diff that vardiff will allow miners to drop to. Default 1
+
+"startdiff" : Starting diff that new clients are given. Default 42
+
+"logdir" : Which directory to store pool and client logs. Default "logs"

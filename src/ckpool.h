@@ -87,6 +87,8 @@ struct ckpool_instance {
 	char *config;
 	/* Kill old instance with same name */
 	bool killold;
+	/* Whether to log shares or not */
+	bool logshares;
 	/* Logging level */
 	int loglevel;
 	/* Main process name */

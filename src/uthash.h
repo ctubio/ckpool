@@ -261,6 +261,10 @@ do {                                                                            
     HASH_ADD(hh,head,intfield,sizeof(int),add)
 #define HASH_REPLACE_INT(head,intfield,add,replaced)                             \
     HASH_REPLACE(hh,head,intfield,sizeof(int),add,replaced)
+#define HASH_FIND_I64(head,findint,out)                                          \
+    HASH_FIND(hh,head,findint,sizeof(int64_t),out)
+#define HASH_ADD_I64(head,intfield,add)                                          \
+    HASH_ADD(hh,head,intfield,sizeof(int64_t),add)
 #define HASH_FIND_PTR(head,findptr,out)                                          \
     HASH_FIND(hh,head,findptr,sizeof(void *),out)
 #define HASH_ADD_PTR(head,ptrfield,add)                                          \
