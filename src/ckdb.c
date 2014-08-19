@@ -79,7 +79,6 @@ static char *restorefrom;
  * During startup we load the DB and track where it is up to with
  *  dbstatus, we then reload "ckpool's ckdb logfiles" (CCLs) based
  *  on dbstatus
- *TODO:
  * Once the DB is loaded, we can immediately start receiving ckpool
  *  messages since ckpool already has logged all messages to the CLLs
  *  and ckpool only verifies authorise responses
@@ -96,7 +95,7 @@ static char *restorefrom;
  *  find an authorise message in the CCLs that was processed in the
  *  message queue and thus is already in the DB.
  *  This error would be very rare and also not an issue
- * TODO: However, we could start the ckpool message queue after loading
+ * To avoid this, we start the ckpool message queue after loading
  *  the users, auths, idcontrol and workers DB tables, before loading the
  *  much larger sharesummary, workinfo, userstats and poolstats DB tables
  *  so that ckdb is effectively ready for messages almost immediately
@@ -176,9 +175,6 @@ static char *restorefrom;
  *	corrected with the CCL reload
  *	last_idle will be the last idle userstats in the CCL load or 0
  *	Code currently doesn't use last_idle, so for now this is OK
- *
- *  TODO: handle the ckpool messages/CCL overlap in the start of the
- *	ckpool messages that will arrive after the CCL load finishes
  *
  *  idcontrol: only userid reuse is critical and the user is added
  *	immeditately to the DB before replying to the add message
