@@ -172,3 +172,45 @@ talk to.
 
 -s <SOCKDIR> tells ckpool which directory to place its own communication
 sockets (/tmp by default)
+
+
+---
+CONFIGURATION
+
+At least one bitcoind is mandatory in ckpool mode with the minimum requirements
+of server, rpcuser and rpcpassword set.
+
+Ckpool takes a json encoded configuration file in ckpool.conf by default or
+ckproxy.conf in proxy or passthrough mode unless specified with -c. Sample
+configurations for ckpool and ckproxy are included with the source. Entries
+after the valid json are ignored and the space there can be used for comments.
+The options recognised are as follows:
+
+
+"btcd" : This is an array of bitcoind(s) with the options url, auth  and pass
+which match the configured bitcoind. This is mandatory in pool mode.
+
+"proxy" : This is an array in the same format as btcd above but is used in
+proxy and passthrough mode to set the upstream pool and is mandatory.
+
+"btcaddress" : This is the bitcoin address to try to generate blocks to.
+
+"btcsig" : This is an optional signature to put into the coinbase of mined
+blocks.
+
+"blockpoll" : This is the frequency in milliseconds for how often to check for
+new network blocks and is 500 by default.
+
+"update_interval" : This is the frequency that stratum updates are sent out to
+miners and is set to 30 seconds by default to help perpetuate transactions for
+the health of the bitcoin network.
+
+"serverurl" : This is the IP to try to bind ckpool uniquely to, otherwise it
+will attempt to bind to all interfaces in port 3333 by default in pool mode
+and 3334 in proxy mode.
+
+"mindiff" : Minimum diff that vardiff will allow miners to drop to. Default 1
+
+"startdiff" : Starting diff that new clients are given. Default 42
+
+"logdir" : Which directory to store pool and client logs. Default "logs"
