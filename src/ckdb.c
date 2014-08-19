@@ -223,6 +223,18 @@ typedef struct loadstatus {
 } LOADSTATUS;
 static LOADSTATUS dbstatus;
 
+// Share stats since last block
+typedef struct poolstatus {
+	int64_t workinfoid; // Last block
+	double diffacc;
+	double differr;
+	double best_sdiff; // TODO
+} POOLSTATUS;
+static POOLSTATUS pool;
+/* TODO: when we know about orphans, the count reset to zero
+ * will need to be undone - i.e. recalculate this data from
+ * the memory tables */
+
 // size limit on the command string
 #define CMD_SIZ 31
 #define ID_SIZ 31
@@ -3576,6 +3588,11 @@ static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *wor
 			}
 
 			if (!DATA_SHARESUMMARY(ss_item)->reset) {
+				if (DATA_SHARESUMMARY(ss_item)->workinfoid >= pool.workinfoid) {
+					// Negate coz the shares will re-add
+					pool.diffacc -= DATA_SHARESUMMARY(ss_item)->sharecount;
+					pool.differr -= DATA_SHARESUMMARY(ss_item)->errorcount;
+				}
 				zero_sharesummary(DATA_SHARESUMMARY(ss_item), cd, shares->diff);
 				DATA_SHARESUMMARY(ss_item)->reset = true;
 			}
@@ -3686,6 +3703,11 @@ static bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 			}
 
 			if (!DATA_SHARESUMMARY(ss_item)->reset) {
+				if (DATA_SHARESUMMARY(ss_item)->workinfoid >= pool.workinfoid) {
+					// Negate coz the shares will re-add
+					pool.diffacc -= DATA_SHARESUMMARY(ss_item)->sharecount;
+					pool.differr -= DATA_SHARESUMMARY(ss_item)->errorcount;
+				}
 				zero_sharesummary(DATA_SHARESUMMARY(ss_item), cd, 0.0);
 				DATA_SHARESUMMARY(ss_item)->reset = true;
 			}
@@ -3862,22 +3884,32 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 				case SE_NONE:
 					row->diffacc += s_row->diff;
 					row->shareacc++;
+					if (row->workinfoid >= pool.workinfoid)
+						pool.diffacc += s_row->diff;
 					break;
 				case SE_STALE:
 					row->diffsta += s_row->diff;
 					row->sharesta++;
+					if (row->workinfoid >= pool.workinfoid)
+						pool.differr += s_row->diff;
 					break;
 				case SE_DUPE:
 					row->diffdup += s_row->diff;
 					row->sharedup++;
+					if (row->workinfoid >= pool.workinfoid)
+						pool.differr += s_row->diff;
 					break;
 				case SE_HIGH_DIFF:
 					row->diffhi += s_row->diff;
 					row->sharehi++;
+					if (row->workinfoid >= pool.workinfoid)
+						pool.differr += s_row->diff;
 					break;
 				default:
 					row->diffrej += s_row->diff;
 					row->sharerej++;
+					if (row->workinfoid >= pool.workinfoid)
+						pool.differr += s_row->diff;
 					break;
 			}
 		}
@@ -4236,6 +4268,12 @@ static bool sharesummary_fill(PGconn *conn)
 		} else if (tv_newer(&(dbstatus.newest_sharesummary_firstshare), &(row->firstshare)))
 				copy_tv(&(dbstatus.newest_sharesummary_firstshare), &(row->firstshare));
 
+		if (row->workinfoid >= pool.workinfoid) {
+			pool.diffacc += row->diffacc;
+			pool.differr += row->diffsta + row->diffdup +
+					row->diffhi + row->diffrej;
+		}
+
 		tick();
 	}
 	if (!ok)
@@ -4563,9 +4601,14 @@ flail:
 			tmp[0] = '\0';
 		else {
 			snprintf(tmp, sizeof(tmp),
-				 " Reward: %f, User: %s, Worker: %s",
+				 " Reward: %f, User: %s, Worker: %s, ShareEst: %.1f",
 				 BTC_TO_D(DATA_BLOCKS(b_item)->reward),
-				 username, workername);
+				 username, workername, pool.diffacc);
+			if (pool.workinfoid < DATA_BLOCKS(b_item)->workinfoid) {
+				pool.workinfoid = DATA_BLOCKS(b_item)->workinfoid;
+				pool.diffacc = pool.differr =
+				pool.best_sdiff = 0.0;
+			}
 		}
 
 		LOGWARNING("%s(): BLOCK! Status: %s, Block: %s/...%s%s",
@@ -4684,6 +4727,9 @@ static bool blocks_fill(PGconn *conn)
 
 		if (tv_newer(&(dbstatus.newest_createdate_blocks), &(row->createdate)))
 			copy_tv(&(dbstatus.newest_createdate_blocks), &(row->createdate));
+
+		if (pool.workinfoid < row->workinfoid)
+			pool.workinfoid = row->workinfoid;
 	}
 	if (!ok)
 		k_add_head(blocks_free, item);
@@ -7281,6 +7327,15 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		snprintf(tmp, sizeof(tmp), "lastblock=?%cconfirmed=?%c", FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
+
+
+	snprintf(tmp, sizeof(tmp), "blockacc=%.1f%c",
+				   pool.diffacc, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "blockerr=%.1f%c",
+				   pool.differr, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 
 	// TODO: assumes only one poolinstance (for now)
 	p_item = last_in_ktree(poolstats_root, ctx);

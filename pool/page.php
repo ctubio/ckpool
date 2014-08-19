@@ -126,6 +126,8 @@ function pgtop($dotop, $user, $douser)
  $phr = '?THs';
  $plb = '?';
  $nlb = '?';
+ $pac = '0';
+ $per = '0';
  $uhr = '?GHs';
  $u1hr = '';
  if ($info !== false)
@@ -168,10 +170,11 @@ function pgtop($dotop, $user, $douser)
 				}
 				else
 				{
-					$min = round(($sec % 3600) / 60);
-					$hr = round($sec / 3600);
+					$min = round($sec / 60);
+					$hr = round($min / 60);
+					$min -= ($hr * 60);
 					$plb = $hr.'h';
-					if ($min != 0)
+					if ($min > 0)
 						$plb .= ' '.$min.'m';
 				}
 			}
@@ -183,14 +186,20 @@ function pgtop($dotop, $user, $douser)
 		$nlb = $info['lastbc'];
 		if ($nlb != '?')
 		{
-			$sec = $now - $info['lastbc'];
+			$sec = $now - $nlb;
 			$min = round($sec / 60);
 			$nlb = $min.'m';
-			$s = $sec % 60;
+			$s = $sec - $min * 60;
 			if ($s > 0)
 				$nlb .= " ${s}s";
 		}
 	}
+
+	if (isset($info['blockacc']))
+		$pac = $info['blockacc'];
+
+	if (isset($info['blockerr']))
+		$per = $info['blockerr'];
 
 	if (isset($info['u_hashrate5m']))
 	{
@@ -235,12 +244,19 @@ function pgtop($dotop, $user, $douser)
  $top .= '<div class=topd>';
  if ($dotop === true)
  {
+	$top .= '<table width=100%><tr><td>';
 	$top .= '<span class=topdes>CKPool:</span>';
 	$top .= "<span class=topdat>$phr</span>";
+	$top .= '<br>';
+	$top .= '<span class=topdes>Block Shares:</span>';
+	$top .= "<span class=topdat>$pac</span>";
+	$top .= '</td><td>';
 	$top .= '<span class=topdes>Pool, Last Block:</span>';
 	$top .= "<span class=topdat>$plb</span>";
+	$top .= '<br>';
 	$top .= '<span class=topdes>Network, Last Block:</span>';
 	$top .= "<span class=topdat>$nlb</span>";
+	$top .= '</td><td>';
 
 	if ($douser === true)
 	{
@@ -273,7 +289,7 @@ Pass: <input type=password name=Pass size=10 value=''>
  else
 	$top .= '&nbsp;';
 
- $top .= '</div>';
+ $top .= '</td></tr></table></div>';
  return $top;
 }
 #
