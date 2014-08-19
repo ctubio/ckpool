@@ -5,11 +5,13 @@ bitcoin mining pool, proxy, passthrough, library and database interface in c
 for Linux.
 
 
+---
 LICENSE:
 
 GNU Public license V3. See included COPYING for details.
 
 
+---
 DESIGN:
 
 Architecture:
@@ -60,3 +62,47 @@ slow communicating clients from delaying low latency ones.
 - Stratum messaging system to running clients.
 - Accurate pool and per client statistics.
 - Multiple named instances can be run concurrently on the same machine.
+
+
+---
+BUILDING:
+
+Building ckpool standalone without ckdb has no dependencies outside of the
+basic build tools on any linux installation.
+
+sudo apt-get install build-essential
+./configure --without-ckdb
+make
+
+
+Building with ckdb requires installation of the postgresql development library.
+
+sudo apt-get install build-essential libpq-dev
+./configure
+make
+
+
+Building from git also requires autoconf and automake
+
+sudo apt-get install build-essential libpq-dev autoconf automake
+./autogen.sh
+./configure
+make
+
+
+Binaries will be built in the src/ subdirectory.
+
+
+Installation is NOT required and ckpool can be run directly from the directory
+it's built in but it can be installed with:
+sudo make install
+
+
+It is anticipated that pool operators wishing to set up a full database based
+installation of ckpool+ckdb will be familiar with setting up postgresql and
+associated permissions to the directories where the various processes will
+communicate with each other and a web server so these will not be documented.
+
+
+---
+RUNNING:
