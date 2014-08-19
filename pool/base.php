@@ -30,6 +30,7 @@ function siprefmt($amt)
 {
  global $sipre;
 
+ $dot = 2;
  $pref = floor(log10($amt)/3);
  if ($pref < 0)
 	$pref = 0;
@@ -43,7 +44,9 @@ function siprefmt($amt)
   $pref++;
  }
 
- return number_format($amt, 2).$sipre[$pref];
+ if ($pref == 0)
+  $dot = 0;
+ return number_format($amt, $dot).$sipre[$pref];
 }
 #
 function difffmt($amt)

@@ -196,10 +196,10 @@ function pgtop($dotop, $user, $douser)
 	}
 
 	if (isset($info['blockacc']))
-		$pac = $info['blockacc'];
+		$pac = number_format($info['blockacc'], 0);
 
 	if (isset($info['blockerr']))
-		$per = $info['blockerr'];
+		$per = number_format($info['blockerr'], 0);
 
 	if (isset($info['u_hashrate5m']))
 	{
