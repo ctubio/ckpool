@@ -24,6 +24,33 @@ function btcfmt($amt)
  return number_format($amt, 8);
 }
 #
+global $sipre;
+$sipre = array('', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y');
+function siprefmt($amt)
+{
+ global $sipre;
+
+ $pref = floor(log10($amt)/3);
+ if ($pref < 0)
+	$pref = 0;
+ if ($pref >= count($sipre))
+	$pref = count($sipre)-1;
+
+ $amt = round(100.0 * $amt / pow(10, $pref * 3)) / 100;
+ if ($amt > 999.99 && $pref < (count($sipre)-1))
+ {
+  $amt /= 1000;
+  $pref++;
+ }
+
+ return number_format($amt, 2).$sipre[$pref];
+}
+#
+function difffmt($amt)
+{
+ return siprefmt($amt);
+}
+#
 function emailStr($str)
 {
  $all = '/[^A-Za-z0-9_+\.@-]/'; // no space = trim

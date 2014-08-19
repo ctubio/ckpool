@@ -216,6 +216,7 @@ CREATE TABLE sharesummary ( -- per workinfo for each user+worker
     errorcount bigint NOT NULL,
     firstshare timestamp with time zone NOT NULL,
     lastshare timestamp with time zone NOT NULL,
+    lastdiffacc float NOT NULL,
     complete char NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) NOT NULL,
@@ -390,4 +391,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'0.6');
+insert into version (vlock,version) values (1,'0.7');

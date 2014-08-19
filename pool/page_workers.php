@@ -10,9 +10,10 @@ function doworker($data, $user)
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
  $pg .= "<td class=dl>Worker Name</td>";
- $pg .= "<td class=dr>Difficulty</td>";
- $pg .= "<td class=dc>Idle Notifications</td>";
- $pg .= "<td class=dr>Idle Notification Time</td>";
+// $pg .= "<td class=dr>Difficulty</td>";
+// $pg .= "<td class=dc>Idle Notifications</td>";
+// $pg .= "<td class=dr>Idle Notification Time</td>";
+ $pg .= "<td class=dr>Work Diff</td>";
  $pg .= "<td class=dr>Last Share</td>";
  $pg .= "<td class=dr>Hash Rate</td>";
  $pg .= "</tr>\n";
@@ -28,6 +29,7 @@ function doworker($data, $user)
 
 		$pg .= "<tr class=$row>";
 		$pg .= '<td class=dl>'.$ans['workername'.$i].'</td>';
+/*
 		$pg .= '<td class=dr>'.$ans['difficultydefault'.$i].'</td>';
 		$nots = $ans['idlenotificationenabled'.$i];
 		switch ($nots)
@@ -41,6 +43,12 @@ function doworker($data, $user)
 		}
 		$pg .= '<td class=dc>'.$nots.'</td>';
 		$pg .= '<td class=dr>'.$ans['idlenotificationtime'.$i].'</td>';
+*/
+		if ($ans['w_lastdiff'.$i] > 0)
+			$ld = difffmt($ans['w_lastdiff'.$i]);
+		else
+			$ld = '&nbsp;';
+		$pg .= "<td class=dr>$ld</td>";
 		$lst = $ans['STAMP'] - $ans['w_lastshare'.$i];
 		if ($lst < 60)
 			$lstdes = $lst.'s';
