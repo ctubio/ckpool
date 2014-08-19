@@ -1097,7 +1097,7 @@ int main(int argc, char **argv)
 			case 'P':
 				if (ckp.proxy)
 					quit(1, "Cannot set both proxy and passthrough mode");
-				ckp.proxy = ckp.passthrough = true;
+				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
 				if (ckp.passthrough)
