@@ -39,8 +39,17 @@ function doreg($data, $u)
 #
 function doreg2($data)
 {
+ if (isset($data['user']))
+	$user = htmlspecialchars($data['user']);
+ else
+	$user = '';
+
  $pg = '<h1>Registered</h1>';
- $pg .= '<br>You will receive an email shortly to verify your account';
+// $pg .= '<br>You will receive an email shortly to verify your account';
+ $pg .= '<br>Your account is registered and ready to mine.';
+ $pg .= '<br>Choose your own worker names in cgminer.';
+ $pg .= '<br>Worker names must start with your username like';
+ $pg .= ": <span class=hil>${user}_</span> or <span class=hil>${user}.</span>";
  return $pg;
 }
 #

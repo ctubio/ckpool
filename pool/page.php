@@ -90,6 +90,7 @@ span.topdes {color:blue;}
 span.topwho {color:black; font-weight: bold; margin-right: 8px;}
 span.topdat {margin-left: 8px; margin-right: 24px; color:green; font-weight: bold;}
 span.login {float: right; margin-left: 8px; margin-right: 24px;}
+span.hil {color:blue;}
 #n42 {margin:0; position: relative; color:#fff; background:#07e;}
 #n42 a {color:#fff; text-decoration:none; margin: 4px;}
 #n42 td {min-width: 100px; float: left; vertical-align: top; padding: 2px;}
