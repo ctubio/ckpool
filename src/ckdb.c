@@ -7532,6 +7532,31 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 #define ACCESS_PROXY	"x"
 #define ACCESS_CKDB	"c"
 
+/* The socket command format is as follows:
+ *  Basic structure:
+ *    cmd.id.fld1=value1 FLD_SEP fld2=value2 FLD_SEP fld3=...
+ *   cmd is the cmd_str from the table below
+ *   id is a string of anything but '.' - preferably just digits and/or letters
+ *   FLD_SEP is a single character macro - defined in the code near the top
+ *    no spaces around FLD_SEP - they are added above for readability
+ *     i.e. it's really: cmd.id.fld1=value1FLD_SEPfld2...
+ *   fldN names cannot contain '=' or FLD_SEP
+ *   valueN values cannot contain FLD_SEP except for the json field (see below)
+ *
+ *  The reply will be id.timestamp.status.information...
+ *  Status 'ok' means it succeeded
+ *  Some cmds you can optionally send as just 'cmd' if 'noid' below is true
+ *   then the reply will be .timestamp.status.information
+ *   i.e. a zero length 'id' at the start of the reply
+ *
+ *  Data from ckpool starts with a fld1: json={...} of field data
+ *  This is assumed to be the only field data sent and any other fields after
+ *   it will cause a json error
+ *  Any fields before it will circumvent the json interpretation of {...} and
+ *   the full json in {...} will be stored as text in TRANSFER under the name
+ *   'json' - which will (usually) mean the command will fail if it requires
+ *   actual field data
+ */
 static struct CMDS {
 	enum cmd_values cmd_val;
 	char *cmd_str;
