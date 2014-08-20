@@ -8043,6 +8043,8 @@ static void *summariser(__maybe_unused void *arg)
 {
 	pthread_detach(pthread_self());
 
+	rename_proc("db_summariser");
+
 	while (!everyone_die && !db_load_complete)
 		cksleep_ms(42);
 
@@ -8066,6 +8068,8 @@ static void *logger(__maybe_unused void *arg)
 	tv_t now;
 
 	pthread_detach(pthread_self());
+
+	rename_proc("db_logger");
 
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstart.%ld,%ld",
@@ -8130,6 +8134,8 @@ static void *socketer(__maybe_unused void *arg)
 	bool dup, want_first;
 
 	pthread_detach(pthread_self());
+
+	rename_proc("db_socketer");
 
 	while (!everyone_die && !db_auths_complete)
 		cksem_mswait(&socketer_sem, 420);
@@ -8706,7 +8712,6 @@ static void process_queued(K_ITEM *wq_item)
 // TODO: equivalent of api_allow
 static void *listener(void *arg)
 {
-	proc_instance_t *pi = (proc_instance_t *)arg;
 	pthread_t log_pt;
 	pthread_t sock_pt;
 	pthread_t summ_pt;
@@ -8723,7 +8728,7 @@ static void *listener(void *arg)
 
 	create_pthread(&summ_pt, summariser, NULL);
 
-	rename_proc(pi->sockname);
+	rename_proc("db_listener");
 
 	if (!setup_data()) {
 		if (!everyone_die) {
