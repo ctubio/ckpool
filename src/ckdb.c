@@ -1336,11 +1336,7 @@ static void log_queue_message(char *msg)
 
 	K_WLOCK(logqueue_free);
 	lq_item = k_unlink_head(logqueue_free);
-	K_WUNLOCK(logqueue_free);
-
 	DATA_LOGQUEUE(lq_item)->msg = strdup(msg);
-
-	K_WLOCK(logqueue_free);
 	k_add_tail(logqueue_store, lq_item);
 	K_WUNLOCK(logqueue_free);
 }
