@@ -7605,6 +7605,26 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
  *   the full json in {...} will be stored as text in TRANSFER under the name
  *   'json' - which will (usually) mean the command will fail if it requires
  *   actual field data
+ *
+ *  Examples of the commands not from ckpool with an example reply
+ *  STAMP is the unix timestamp in seconds
+ *   With no id:
+ *	ping
+ *	.STAMP.ok.pong
+ *
+ *	shutdown
+ *	.STAMP.ok.exiting
+ *
+ *   With an id
+ *   In each case the id in these examples, also returned, is 'ID' which can
+ *   of course be most any string, as stated above
+ *   For commands with multiple fld=value the space between them must be typed
+ *   as a TAB
+ *	ping.ID
+ *	ID.STAMP.ok.pong
+ *
+ *	newid.ID.idname=fooid idvalue=1234
+ *	ID.STAMP.ok.added fooid 1234
  */
 static struct CMDS {
 	enum cmd_values cmd_val;
