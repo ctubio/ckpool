@@ -4,7 +4,7 @@ function doindex($data, $user)
 {
  $pg = '
 <h1>CKPool</h1>
-Welcome to CKPool the bestest mostest gnarliest poolest in the ...... south.
+Welcome to CKPool
 ';
  return $pg;
 }
