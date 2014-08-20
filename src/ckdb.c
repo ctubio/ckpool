@@ -1304,6 +1304,9 @@ void logmsg(int loglevel, const char *fmt, ...)
 	char stamp[128];
 	char *extra = EMPTY;
 
+	if (loglevel > global_ckp->loglevel)
+		return;
+
 	now_t = time(NULL);
 	localtime_r(&now_t, &tm);
 	snprintf(stamp, sizeof(stamp),
