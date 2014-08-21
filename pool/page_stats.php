@@ -18,7 +18,7 @@ function dostats($data, $user)
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
  $pg .= "<td class=dl>Username</td>";
- $pg .= "<td class=dr>Hash Rate</td>";
+ $pg .= "<td class=dr>Hash Rate 1hr</td>";
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
