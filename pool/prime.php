@@ -20,7 +20,7 @@ function process($p, $user)
 	'gap' => NULL,
 	'Help' => array(
 		'Help' => 'help',
-		'Payout' => 'payout'
+		'Payouts' => 'payout'
 	)
  );
  $page = '';
