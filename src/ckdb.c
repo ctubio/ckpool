@@ -253,6 +253,7 @@ static POOLSTATUS pool;
 
 // TAB
 #define FLDSEP 0x09
+#define FLDSEPSTR "\011"
 
 // Ensure long long and int64_t are both 8 bytes (and thus also the same)
 #define ASSERT1(condition) __maybe_unused static char sizeof_longlong_must_be_8[(condition)?1:-1]
@@ -652,7 +653,7 @@ static cklock_t fpm_lock;
 static char *first_pool_message;
 static sem_t socketer_sem;
 
-static const char *userpatt = "^[^/\\._ ]*$"; // disallow: '/' '.' '_'
+static const char *userpatt = "^[^/\\._"FLDSEPSTR"]*$"; // disallow: '/' '.' '_' and FLDSEP
 static const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.-]*[A-Za-z0-9]$";
 static const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 static const char *intpatt = "^[0-9][0-9]*$";
@@ -7583,14 +7584,14 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 /* The socket command format is as follows:
  *  Basic structure:
- *    cmd.id.fld1=value1 FLD_SEP fld2=value2 FLD_SEP fld3=...
+ *    cmd.id.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
  *   cmd is the cmd_str from the table below
  *   id is a string of anything but '.' - preferably just digits and/or letters
- *   FLD_SEP is a single character macro - defined in the code near the top
- *    no spaces around FLD_SEP - they are added above for readability
- *     i.e. it's really: cmd.id.fld1=value1FLD_SEPfld2...
- *   fldN names cannot contain '=' or FLD_SEP
- *   valueN values cannot contain FLD_SEP except for the json field (see below)
+ *   FLDSEP is a single character macro - defined in the code near the top
+ *    no spaces around FLDSEP - they are added above for readability
+ *     i.e. it's really: cmd.id.fld1=value1FLDSEPfld2...
+ *   fldN names cannot contain '=' or FLDSEP
+ *   valueN values cannot contain FLDSEP except for the json field (see below)
  *
  *  The reply will be id.timestamp.status.information...
  *  Status 'ok' means it succeeded
