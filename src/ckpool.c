@@ -854,6 +854,21 @@ static void json_get_string(char **store, json_t *val, const char *res)
 	*store = strdup(buf);
 }
 
+static void json_get_int64(int64_t *store, json_t *val, const char *res)
+{
+	json_t *entry = json_object_get(val, res);
+
+	if (!entry) {
+		LOGDEBUG("Json did not find entry %s", res);
+		return;
+	}
+	if (!json_is_integer(entry)) {
+		LOGWARNING("Json entry %s is not an integer", res);
+		return;
+	}
+	*store = json_integer_value(entry);
+}
+
 static void json_get_int(int *store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
@@ -930,8 +945,8 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
 	json_get_string(&ckp->serverurl, json_conf, "serverurl");
-	json_get_int(&ckp->mindiff, json_conf, "mindiff");
-	json_get_int(&ckp->startdiff, json_conf, "startdiff");
+	json_get_int64(&ckp->mindiff, json_conf, "mindiff");
+	json_get_int64(&ckp->startdiff, json_conf, "startdiff");
 	json_get_string(&ckp->logdir, json_conf, "logdir");
 	arr_val = json_object_get(json_conf, "proxy");
 	if (arr_val && json_is_array(arr_val)) {

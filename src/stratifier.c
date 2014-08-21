@@ -1408,7 +1408,7 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 	return tdiff;
 }
 
-static void add_submit(stratum_instance_t *client, int diff, bool valid)
+static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	int64_t next_blockid, optimal;
@@ -1467,23 +1467,18 @@ static void add_submit(stratum_instance_t *client, int diff, bool valid)
 		return;
 
 	optimal = round(dsps * 3.33);
-	if (optimal <= client->ckp->mindiff) {
-		if (client->diff == client->ckp->mindiff)
-			return;
-		optimal = client->ckp->mindiff;
-	}
-
-	if (optimal > network_diff) {
-		/* Intentionally round down here */
-		optimal = network_diff;
-		if (client->diff == optimal)
-			return;
-	}
-
 	/* Don't drop diff to rapidly in case the client simply switched away
 	 * and has just returned */
 	if (optimal < client->diff / 2)
 		optimal = client->diff / 2;
+	/* Clamp to mindiff ~ network_diff */
+	if (optimal < ckp->mindiff)
+		optimal = ckp->mindiff;
+	if (optimal > network_diff)
+		optimal = network_diff;
+	if (client->diff == optimal)
+		return;
+
 	client->ssdc = 0;
 
 	LOGINFO("Client %d biased dsps %.2f dsps %.2f drr %.2f adjust diff from %ld to: %ld ",
@@ -1812,7 +1807,7 @@ out_unlock:
 		}
 	}  else
 		LOGINFO("Rejected client %d invalid share", client->id);
-	add_submit(client, diff, result);
+	add_submit(ckp, client, diff, result);
 
 	/* Now write to the pool's sharelog. */
 	val = json_object();
