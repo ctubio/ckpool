@@ -2,7 +2,7 @@
 #
 function allusersort($a, $b)
 {
- $cmp = $a['u_hashrate5m'] != $b['u_hashrate5m'];
+ $cmp = $b['u_hashrate5m'] - $a['u_hashrate5m'];
  if ($cmp != 0)
 	return $cmp;
  return $a['userid'] - $b['userid'];
@@ -44,16 +44,20 @@ function dostats($data, $user)
 		$pg .= '<td class=dl>'.$all[$i]['username'].'</td>';
 		$uhr = $all[$i]['u_hashrate5m'];
 		if ($uhr == '?')
-			$uhr = '?GHs';
+			$dsp = '?GHs';
 		else
 		{
 			$uhr /= 10000000;
 			if ($uhr < 100000)
-				$uhr = (round($uhr)/100).'GHs';
+				$rate = 'G';
 			else
-				$uhr = (round($uhr/1000)/100).'THs';
+			{
+				$rate = 'T';
+				$uhr /= 1000;
+			}
+			$dsp = number_format($urh/100, 2);
 		}
-		$pg .= "<td class=dr>$uhr</td>";
+		$pg .= "<td class=dr>$dsp</td>";
 		$pg .= "</tr>\n";
 	}
  }
