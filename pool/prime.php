@@ -19,7 +19,8 @@ function process($p, $user)
 	),
 	'gap' => NULL,
 	'Help' => array(
-		'Help' => 'help'
+		'Help' => 'help',
+		'Payout' => 'payout'
 	)
  );
  $page = '';
