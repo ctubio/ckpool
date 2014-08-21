@@ -6797,6 +6797,7 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t len, off;
 	int rows;
 	int64_t userid = -1;
+	double u_hashrate5m = 0.0;
 	double u_hashrate1hr = 0.0;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -6812,6 +6813,7 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 			DATA_USERSTATS(usw_item)->userid = DATA_USERSTATS(us_item)->userid;
 			strcpy(DATA_USERSTATS(usw_item)->workername, DATA_USERSTATS(us_item)->workername);
+			DATA_USERSTATS(usw_item)->hashrate5m = DATA_USERSTATS(us_item)->hashrate5m;
 			DATA_USERSTATS(usw_item)->hashrate1hr = DATA_USERSTATS(us_item)->hashrate1hr;
 
 			userstats_workername_root = add_to_ktree(userstats_workername_root, usw_item, cmp_userstats_workername);
@@ -6842,6 +6844,10 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					snprintf(tmp, sizeof(tmp), "userid%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
+					double_to_buf(u_hashrate5m, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "u_hashrate5m%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
 					double_to_buf(u_hashrate1hr, reply, sizeof(reply));
 					snprintf(tmp, sizeof(tmp), "u_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
@@ -6850,8 +6856,10 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				}
 			}
 			userid = DATA_USERSTATS(usw_item)->userid;
+			u_hashrate5m = 0;
 			u_hashrate1hr = 0;
 		}
+		u_hashrate5m += DATA_USERSTATS(usw_item)->hashrate5m;
 		u_hashrate1hr += DATA_USERSTATS(usw_item)->hashrate1hr;
 
 		tmp_item = usw_item;
@@ -6873,6 +6881,10 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 			bigint_to_buf(userid, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "userid%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			double_to_buf(u_hashrate5m, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "u_hashrate5m%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			double_to_buf(u_hashrate1hr, reply, sizeof(reply));
