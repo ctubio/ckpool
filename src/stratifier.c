@@ -1417,7 +1417,10 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 
 	ck_rlock(&workbase_lock);
 	next_blockid = workbase_id + 1;
-	network_diff = current_workbase->network_diff;
+	if (ckp->proxy)
+		network_diff = current_workbase->diff;
+	else
+		network_diff = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
 	tdiff = sane_tdiff(&now_t, &client->last_share);
@@ -1770,7 +1773,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		goto out_unlock;
 	}
 	invalid = false;
-	if (wb->proxy && sdiff > wdiff)
+	if (wb->proxy && sdiff >= wdiff)
 		submit = true;
 out_unlock:
 	ck_runlock(&workbase_lock);
