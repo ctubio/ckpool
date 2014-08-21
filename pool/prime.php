@@ -23,6 +23,8 @@ function process($p, $user)
 		'Payouts' => 'payout'
 	)
  );
+ if ($user == 'Kano' || $user == 'ckolivas')
+	$menu['Help']['ckp'] = 'ckp';
  $page = '';
  $n = '';
  foreach ($menu as $item => $options)
