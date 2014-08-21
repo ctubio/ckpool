@@ -1450,12 +1450,10 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	if (client->ssdc < 72 && tdiff < 240)
 		return;
 
-	if (diff != client->diff)
+	if (diff != client->diff) {
+		client->ssdc = 0;
 		return;
-
-	/* We have the effect of a change pending */
-	if (client->diff_change_job_id >= next_blockid)
-		return;
+	}
 
 	/* Diff rate ratio */
 	dsps = client->dsps5 / bias;
