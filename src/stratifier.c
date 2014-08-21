@@ -1510,8 +1510,8 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 	ckpool_t *ckp;
 	ts_t ts_now;
 
-	/* Submit anything over 95% of the diff in case of rounding errors */
-	if (diff < current_workbase->network_diff * 0.95)
+	/* Submit anything over 99% of the diff in case of rounding errors */
+	if (diff < current_workbase->network_diff * 0.99)
 		return;
 
 	LOGWARNING("Possible block solve diff %f !", diff);
