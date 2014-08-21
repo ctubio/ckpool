@@ -55,7 +55,7 @@ function dostats($data, $user)
 				$rate = 'T';
 				$uhr /= 1000;
 			}
-			$dsp = number_format($urh/100, 2).$rate.'Hs';
+			$dsp = number_format($uhr/100, 2).$rate.'Hs';
 		}
 		$pg .= "<td class=dr>$dsp</td>";
 		$pg .= "</tr>\n";
