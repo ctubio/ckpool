@@ -25,7 +25,10 @@ function btcfmt($amt)
 }
 #
 global $sipre;
+# max of uint64 is ~1.845x10^19, 'Z' is above that (10^21)
+# max of uint256 is ~1.158x10^77, which is well above 'Y' (10^24)
 $sipre = array('', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y');
+#
 function siprefmt($amt)
 {
  global $sipre;
