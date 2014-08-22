@@ -2,7 +2,7 @@
 #
 function allusersort($a, $b)
 {
- $cmp = $a['u_hashrate1hr'] != $b['u_hashrate1hr'];
+ $cmp = $b['u_hashrate5m'] - $a['u_hashrate5m'];
  if ($cmp != 0)
 	return $cmp;
  return $a['userid'] - $b['userid'];
@@ -18,7 +18,7 @@ function dostats($data, $user)
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
  $pg .= "<td class=dl>Username</td>";
- $pg .= "<td class=dr>Hash Rate</td>";
+ $pg .= "<td class=dr>Hash Rate 5m</td>";
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
@@ -28,7 +28,7 @@ function dostats($data, $user)
 	{
 		$all[] = array('username' => $ans['username'.$i],
 				'userid' => $ans['userid'.$i],
-				'u_hashrate1hr' => $ans['u_hashrate1hr'.$i]);
+				'u_hashrate5m' => $ans['u_hashrate5m'.$i]);
 	}
 
 	usort($all, 'allusersort');
@@ -42,18 +42,22 @@ function dostats($data, $user)
 
 		$pg .= "<tr class=$row>";
 		$pg .= '<td class=dl>'.$all[$i]['username'].'</td>';
-		$uhr = $all[$i]['u_hashrate1hr'];
+		$uhr = $all[$i]['u_hashrate5m'];
 		if ($uhr == '?')
-			$uhr = '?GHs';
+			$dsp = '?GHs';
 		else
 		{
 			$uhr /= 10000000;
 			if ($uhr < 100000)
-				$uhr = (round($uhr)/100).'GHs';
+				$rate = 'G';
 			else
-				$uhr = (round($uhr/1000)/100).'THs';
+			{
+				$rate = 'T';
+				$uhr /= 1000;
+			}
+			$dsp = number_format($uhr/100, 2).$rate.'Hs';
 		}
-		$pg .= "<td class=dr>$uhr</td>";
+		$pg .= "<td class=dr>$dsp</td>";
 		$pg .= "</tr>\n";
 	}
  }

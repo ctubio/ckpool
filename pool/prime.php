@@ -19,9 +19,12 @@ function process($p, $user)
 	),
 	'gap' => NULL,
 	'Help' => array(
-		'Help' => 'help'
+		'Help' => 'help',
+		'Payouts' => 'payout'
 	)
  );
+ if ($user == 'Kano' || $user == 'ckolivas')
+	$menu['Help']['ckp'] = 'ckp';
  $page = '';
  $n = '';
  foreach ($menu as $item => $options)
