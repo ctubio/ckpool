@@ -65,7 +65,7 @@ static int dump_indent(size_t flags, int depth, int space, json_dump_callback_t 
     return 0;
 }
 
-static const char *noutf8_iterate(const char *buffer, int32_t *codepoint)
+static inline const char *noutf8_iterate(const char *buffer, int32_t *codepoint)
 {
     int32_t value;
 
