@@ -3973,7 +3973,7 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 	char *ins, *upd;
 	bool ok = false, new;
 	char *params[19 + MODIFYDATECOUNT];
-	int n, par;
+	int n, par = 0;
 	int64_t userid, workinfoid;
 	char *workername;
 	tv_t *sharecreatedate;
@@ -7169,6 +7169,10 @@ wiconf:
 				return NULL;
 		}
 
+		i_nonce = require_name(trf_root, "nonce", 1, NULL, reply, siz);
+		if (!i_nonce)
+			return strdup(reply);
+
 		i_workinfoid = require_name(trf_root, "workinfoid", 1, NULL, reply, siz);
 		if (!i_workinfoid)
 			return strdup(reply);
@@ -7199,10 +7203,6 @@ wiconf:
 
 		i_nonce2 = require_name(trf_root, "nonce2", 1, NULL, reply, siz);
 		if (!i_nonce2)
-			return strdup(reply);
-
-		i_nonce = require_name(trf_root, "nonce", 1, NULL, reply, siz);
-		if (!i_nonce)
 			return strdup(reply);
 
 		i_diff = require_name(trf_root, "diff", 1, NULL, reply, siz);
@@ -7248,6 +7248,10 @@ sconf:
 				return NULL;
 		}
 
+		i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
+		if (!i_username)
+			return strdup(reply);
+
 		i_workinfoid = require_name(trf_root, "workinfoid", 1, NULL, reply, siz);
 		if (!i_workinfoid)
 			return strdup(reply);
@@ -7259,10 +7263,6 @@ sconf:
 			    workinfoid > confirm_last_workinfoid)
 				goto seconf;
 		}
-
-		i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
-		if (!i_username)
-			return strdup(reply);
 
 		i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
 		if (!i_workername)
