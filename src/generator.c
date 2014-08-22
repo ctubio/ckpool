@@ -263,7 +263,7 @@ retry:
 			send_unix_msg(sockd, "Failed");
 			goto reconnect;
 		} else {
-			char *s = json_dumps(gbt->json, 0);
+			char *s = json_dumps(gbt->json, JSON_NO_UTF8);
 
 			send_unix_msg(sockd, s);
 			free(s);
@@ -915,7 +915,7 @@ static void send_subscribe(proxy_instance_t *proxi, int sockd)
 
 	json_msg = json_pack("{sssi}", "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len);
-	msg = json_dumps(json_msg, 0);
+	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
 	send_unix_msg(sockd, msg);
 	free(msg);
@@ -944,7 +944,7 @@ static void send_notify(proxy_instance_t *proxi, int sockd)
 			     "clean", ni->clean);
 	mutex_unlock(&proxi->notify_lock);
 
-	msg = json_dumps(json_msg, 0);
+	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
 	send_unix_msg(sockd, msg);
 	free(msg);
@@ -957,7 +957,7 @@ static void send_diff(proxy_instance_t *proxi, int sockd)
 	char *msg;
 
 	json_msg = json_pack("{sf}", "diff", proxi->diff);
-	msg = json_dumps(json_msg, 0);
+	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
 	send_unix_msg(sockd, msg);
 	free(msg);

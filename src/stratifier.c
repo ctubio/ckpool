@@ -2368,7 +2368,7 @@ static void *statsupdate(void *arg)
 				"runtime", diff.tv_sec,
 				"Users", stats.users,
 				"Workers", stats.workers);
-		s = json_dumps(val, 0);
+		s = json_dumps(val, JSON_NO_UTF8);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
 		fprintf(fp, "%s\n", s);
@@ -2381,7 +2381,7 @@ static void *statsupdate(void *arg)
 				"hashrate1hr", suffix60,
 				"hashrate6hr", suffix360,
 				"hashrate1d", suffix1440);
-		s = json_dumps(val, 0);
+		s = json_dumps(val, JSON_NO_UTF8);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
 		fprintf(fp, "%s\n", s);
@@ -2392,7 +2392,7 @@ static void *statsupdate(void *arg)
 				"SPS5m", sps5,
 				"SPS15m", sps15,
 				"SPS1h", sps60);
-		s = json_dumps(val, 0);
+		s = json_dumps(val, JSON_NO_UTF8);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
 		fprintf(fp, "%s\n", s);
@@ -2439,7 +2439,7 @@ static void *statsupdate(void *arg)
 				LOGERR("Failed to fopen %s", fname);
 				continue;
 			}
-			s = json_dumps(val, 0);
+			s = json_dumps(val, JSON_NO_UTF8);
 			fprintf(fp, "%s\n", s);
 			/* Only display the status of connected users to the
 			 * console log. */
