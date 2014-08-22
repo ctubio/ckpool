@@ -3967,7 +3967,7 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 				char *by, char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS)
 {
 	ExecStatusType rescode;
-	PGresult *res;
+	PGresult *res = NULL;
 	SHARESUMMARY *row;
 	K_ITEM *item;
 	char *ins, *upd;
