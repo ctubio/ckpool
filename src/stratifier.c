@@ -191,6 +191,7 @@ struct user_instance {
 	UT_hash_handle hh;
 	char username[128];
 	int64_t id;
+	bool new_user;
 
 	int workers;
 };
@@ -1250,6 +1251,7 @@ static user_instance_t *authorise_user(const char *workername)
 		/* New user instance */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
+		instance->new_user = true;
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
@@ -1316,9 +1318,37 @@ static int send_recv_auth(stratum_instance_t *client)
 	return ret;
 }
 
+/* For sending auths to ckdb after we've already decided we can authorise
+ * these clients while ckdb is offline, based on an existing client of the
+ * same username already having been authorised. */
+static void queue_delayed_auth(stratum_instance_t *client)
+{
+	ckpool_t *ckp = client->ckp;
+	char cdfield[64];
+	json_t *val;
+	ts_t now;
+
+	ts_realtime(&now);
+	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
+
+	val = json_pack("{ss,ss,ss,ss,sI,ss,ss,ss,ss,ss}",
+			"username", client->user_instance->username,
+			"workername", client->workername,
+			"poolinstance", ckp->name,
+			"useragent", client->useragent,
+			"clientid", client->id,
+			"enonce1", client->enonce1,
+			"createdate", cdfield,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", client->address);
+	ckdbq_add(ckp, ID_AUTH, val);
+}
+
 static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val,
 			       const char *address, int *errnum)
 {
+	user_instance_t *user_instance;
 	bool ret = false;
 	const char *buf;
 	int arr_size;
@@ -1346,14 +1376,14 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty username parameter");
 		goto out;
 	}
-	client->user_instance = authorise_user(buf);
-	client->user_id = client->user_instance->id;
+	user_instance = client->user_instance = authorise_user(buf);
+	client->user_id = user_instance->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
 
 	LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
-		  client->user_instance->username);
+		  user_instance->username);
 	client->workername = strdup(buf);
 	if (client->ckp->standalone)
 		ret = true;
@@ -1361,10 +1391,19 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*errnum = send_recv_auth(client);
 		if (!*errnum)
 			ret = true;
+		else if (*errnum < 0 && !user_instance->new_user) {
+			/* This user has already been authorised but ckdb is
+			 * offline so we assume they already exist but add the
+			 * auth request to the queued messages. */
+			queue_delayed_auth(client);
+			ret = true;
+		}
 	}
 	client->authorised = ret;
-	if (client->authorised)
-		inc_worker(client->user_instance);
+	if (client->authorised) {
+		inc_worker(user_instance);
+		user_instance->new_user = false;
+	}
 out:
 	return json_boolean(ret);
 }
