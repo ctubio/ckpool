@@ -164,6 +164,7 @@ struct ckpool_instance {
 	char **proxyurl;
 	char **proxyauth;
 	char **proxypass;
+	server_instance_t *btcdbackup;
 };
 
 ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
