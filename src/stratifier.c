@@ -1279,13 +1279,14 @@ static int send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,sI,ss,ss,ss,ss,ss}",
+	val = json_pack("{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
 			"useragent", client->useragent,
 			"clientid", client->id,
 			"enonce1", client->enonce1,
+			"preauth", false,
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
@@ -1331,13 +1332,14 @@ static void queue_delayed_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,sI,ss,ss,ss,ss,ss}",
+	val = json_pack("{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
 			"useragent", client->useragent,
 			"clientid", client->id,
 			"enonce1", client->enonce1,
+			"preauth", true,
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
