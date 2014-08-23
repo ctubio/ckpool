@@ -1549,6 +1549,9 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 		return;
 
 	LOGWARNING("Possible block solve diff %f !", diff);
+	/* Can't submit a block in proxy mode without the transactions */
+	if (wb->proxy && wb->merkles)
+		return;
 
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);

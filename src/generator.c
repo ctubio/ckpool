@@ -1519,7 +1519,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		if (alive_btcd(si))
 			LOGNOTICE("Backup btcd %s:%s alive", si->cs.url, si->cs.port);
 		else {
-			LOGWARNING("Backup btcd %s:%s failed!", si->cs.url, si->cs.port);
+			LOGNOTICE("Backup btcd %s:%s failed!", si->cs.url, si->cs.port);
 			ckp->btcdbackup = NULL;
 			free(si);
 		}
