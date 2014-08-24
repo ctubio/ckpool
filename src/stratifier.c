@@ -191,7 +191,7 @@ struct user_instance {
 	UT_hash_handle hh;
 	char username[128];
 	int64_t id;
-	bool new_user;
+	char *secondaryuserid;
 
 	int workers;
 };
@@ -231,7 +231,6 @@ struct stratum_instance {
 	user_instance_t *user_instance;
 	char *useragent;
 	char *workername;
-	char *secondaryuserid;
 	int64_t user_id;
 
 	ckpool_t *ckp;
@@ -1247,10 +1246,9 @@ static user_instance_t *authorise_user(const char *workername)
 	ck_ilock(&instance_lock);
 	HASH_FIND_STR(user_instances, username, instance);
 	if (!instance) {
-		/* New user instance */
+		/* New user instance. Secondary user id will be NULL */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
-		instance->new_user = true;
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
@@ -1268,6 +1266,7 @@ static user_instance_t *authorise_user(const char *workername)
  * thread so it won't hold anything up but other authorisations. */
 static int send_recv_auth(stratum_instance_t *client)
 {
+	user_instance_t *user_instance = client->user_instance;
 	ckpool_t *ckp = client->ckp;
 	char *buf, *json_msg;
 	char cdfield[64];
@@ -1279,7 +1278,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
 	JSON_CPACK(val, "{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
-			"username", client->user_instance->username,
+			"username", user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
 			"useragent", client->useragent,
@@ -1304,10 +1303,11 @@ static int send_recv_auth(stratum_instance_t *client)
 		secondaryuserid = response;
 		strsep(&secondaryuserid, ".");
 		LOGINFO("User %s Worker %s got auth response: %s  suid: %s",
-			client->user_instance->username, client->workername,
+			user_instance->username, client->workername,
 			response, secondaryuserid);
 		if (!safecmp(response, "ok") && secondaryuserid) {
-			client->secondaryuserid = strdup(secondaryuserid);
+			if (!user_instance->secondaryuserid)
+				user_instance->secondaryuserid = strdup(secondaryuserid);
 			ret = 0;
 		}
 	} else {
@@ -1392,7 +1392,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*errnum = send_recv_auth(client);
 		if (!*errnum)
 			ret = true;
-		else if (*errnum < 0 && !user_instance->new_user) {
+		else if (*errnum < 0 && user_instance->secondaryuserid) {
 			/* This user has already been authorised but ckdb is
 			 * offline so we assume they already exist but add the
 			 * auth request to the queued messages. */
@@ -1401,10 +1401,8 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		}
 	}
 	client->authorised = ret;
-	if (client->authorised) {
+	if (client->authorised)
 		inc_worker(user_instance);
-		user_instance->new_user = false;
-	}
 out:
 	return json_boolean(ret);
 }
@@ -1712,6 +1710,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	bool share = false, result = false, invalid = true, submit = false;
+	user_instance_t *user_instance = client->user_instance;
 	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	double diff = client->diff, wdiff = 0, sdiff = -1;
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
@@ -1855,7 +1854,7 @@ out_unlock:
 	json_set_int(val, "workinfoid", id);
 	json_set_int(val, "clientid", client->id);
 	json_set_string(val, "enonce1", client->enonce1);
-	json_set_string(val, "secondaryuserid", client->secondaryuserid);
+	json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
 	json_set_string(val, "ntime", ntime);
@@ -1871,7 +1870,7 @@ out_unlock:
 	json_set_string(val, "createcode", __func__);
 	json_set_string(val, "createinet", ckp->serverurl);
 	json_set_string(val, "workername", client->workername);
-	json_set_string(val, "username", client->user_instance->username);
+	json_set_string(val, "username", user_instance->username);
 
 	if (ckp->logshares) {
 		fp = fopen(fname, "a");
@@ -1891,11 +1890,11 @@ out:
 	if (!share) {
 		JSON_CPACK(val, "{sI,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"clientid", client->id,
-				"secondaryuserid", client->secondaryuserid,
+				"secondaryuserid", user_instance->secondaryuserid,
 				"enonce1", client->enonce1,
 				"workinfoid", current_workbase->id,
 				"workername", client->workername,
-				"username", client->user_instance->username,
+				"username", user_instance->username,
 				"error", json_copy(*err_val),
 				"errn", err,
 				"createdate", cdfield,
