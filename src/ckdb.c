@@ -723,6 +723,8 @@ typedef struct logqueue {
 
 static K_LIST *logqueue_free;
 static K_STORE *logqueue_store;
+static pthread_mutex_t wq_waitlock;
+static pthread_cond_t wq_waitcond;
 
 // WORKQUEUE
 typedef struct workqueue {
@@ -6300,6 +6302,8 @@ static bool setup_data()
 
 	cklock_init(&fpm_lock);
 	cksem_init(&socketer_sem);
+	mutex_init(&wq_waitlock);
+	cond_init(&wq_waitcond);
 
 	alloc_storage();
 
@@ -8606,6 +8610,9 @@ static void *socketer(__maybe_unused void *arg)
 						K_WLOCK(workqueue_free);
 						k_add_tail(workqueue_store, item);
 						K_WUNLOCK(workqueue_free);
+						mutex_lock(&wq_waitlock);
+						pthread_cond_signal(&wq_waitcond);
+						mutex_unlock(&wq_waitlock);
 						break;
 					// Code error
 					default:
@@ -8984,8 +8991,19 @@ static void *listener(void *arg)
 		if (wq_item) {
 			process_queued(conn, wq_item);
 			tick();
-		} else
-			cksleep_ms(4);
+		} else {
+			const ts_t tsdiff = {0, 420000000};
+			tv_t now;
+			ts_t abs;
+
+			tv_time(&now);
+			tv_to_ts(&abs, &now);
+			timeraddspec(&abs, &tsdiff);
+
+			mutex_lock(&wq_waitlock);
+			pthread_cond_timedwait(&wq_waitcond, &wq_waitlock, &abs);
+			mutex_unlock(&wq_waitlock);
+		}
 	}
 
 	PQfinish(conn);
