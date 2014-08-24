@@ -266,6 +266,17 @@ typedef struct unixsock unixsock_t;
 
 typedef struct proc_instance proc_instance_t;
 
+
+void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line);
+#define json_check(val, err) _json_check(val, err,  __FILE__, __func__, __LINE__)
+
+/* Check and pack json */
+#define JSON_CPACK(val, ...) do { \
+	json_error_t err; \
+	val = json_pack_ex(&err, 0, ##__VA_ARGS__); \
+	json_check(val, &err); \
+} while (0)
+
 /* No error checking with these, make sure we know they're valid already! */
 static inline void json_strcpy(char *buf, json_t *val, const char *key)
 {

@@ -237,6 +237,11 @@ retry:
 		}
 	} while (selret < 1);
 
+	if (unlikely(cs->fd < 0)) {
+		LOGWARNING("Bitcoind socket invalidated, will atempt failover");
+		goto reconnect;
+	}
+
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		LOGEMERG("Failed to accept on generator socket");
@@ -523,19 +528,19 @@ static bool subscribe_stratum(connsock_t *cs, proxy_instance_t *proxi)
 retry:
 	/* Attempt to reconnect if the pool supports resuming */
 	if (proxi->sessionid) {
-		req = json_pack("{s:i,s:s,s:[s,s]}",
+		JSON_CPACK(req, "{s:i,s:s,s:[s,s]}",
 				"id", proxi->id++,
 				"method", "mining.subscribe",
 				"params", PACKAGE"/"VERSION, proxi->sessionid);
 	/* Then attempt to connect with just the client description */
 	} else if (!proxi->no_params) {
-		req = json_pack("{s:i,s:s,s:[s]}",
+		JSON_CPACK(req, "{s:i,s:s,s:[s]}",
 				"id", proxi->id++,
 				"method", "mining.subscribe",
 				"params", PACKAGE"/"VERSION);
 	/* Then try without any parameters */
 	} else {
-		req = json_pack("{s:i,s:s,s:[]}",
+		JSON_CPACK(req, "{s:i,s:s,s:[]}",
 				"id", proxi->id++,
 				"method", "mining.subscribe",
 				"params");
@@ -580,7 +585,7 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	json_t *req, *val = NULL, *res_val;
 	bool ret = false;
 
-	req = json_pack("{s:s,s:[s]}",
+	JSON_CPACK(req, "{s:s,s:[s]}",
 			"method", "mining.passthrough",
 			"params", PACKAGE"/"VERSION);
 	ret = send_json_msg(cs, req);
@@ -701,7 +706,7 @@ static bool send_version(proxy_instance_t *proxi, json_t *val)
 	connsock_t *cs = proxi->cs;
 	bool ret;
 
-	json_msg = json_pack("{sossso}", "id", id_val, "result", PACKAGE"/"VERSION,
+	JSON_CPACK(json_msg, "{sossso}", "id", id_val, "result", PACKAGE"/"VERSION,
 			     "error", json_null());
 	ret = send_json_msg(cs, json_msg);
 	json_decref(json_msg);
@@ -864,7 +869,7 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	json_t *val = NULL, *res_val, *req;
 	bool ret;
 
-	req = json_pack("{s:i,s:s,s:[s,s]}",
+	JSON_CPACK(req, "{s:i,s:s,s:[s,s]}",
 			"id", proxi->id++,
 			"method", "mining.authorize",
 			"params", proxi->auth, proxi->pass);
@@ -913,7 +918,7 @@ static void send_subscribe(proxy_instance_t *proxi, int sockd)
 	json_t *json_msg;
 	char *msg;
 
-	json_msg = json_pack("{sssi}", "enonce1", proxi->enonce1,
+	JSON_CPACK(json_msg, "{sssi}", "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
@@ -936,7 +941,7 @@ static void send_notify(proxy_instance_t *proxi, int sockd)
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
-	json_msg = json_pack("{sisssssssosssssssb}",
+	JSON_CPACK(json_msg, "{sisssssssosssssssb}",
 			     "jobid", ni->id, "prevhash", ni->prevhash,
 			     "coinbase1", ni->coinbase1, "coinbase2", ni->coinbase2,
 			     "merklehash", merkle_arr, "bbversion", ni->bbversion,
@@ -956,7 +961,7 @@ static void send_diff(proxy_instance_t *proxi, int sockd)
 	json_t *json_msg;
 	char *msg;
 
-	json_msg = json_pack("{sf}", "diff", proxi->diff);
+	JSON_CPACK(json_msg, "{sf}", "diff", proxi->diff);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
 	send_unix_msg(sockd, msg);
@@ -1156,7 +1161,7 @@ static void *proxy_send(void *arg)
 		mutex_unlock(&proxi->notify_lock);
 
 		if (jobid) {
-			val = json_pack("{s[ssooo]soss}", "params", proxi->auth, jobid,
+			JSON_CPACK(val, "{s[ssooo]soss}", "params", proxi->auth, jobid,
 					json_object_dup(msg->json_msg, "nonce2"),
 					json_object_dup(msg->json_msg, "ntime"),
 					json_object_dup(msg->json_msg, "nonce"),
