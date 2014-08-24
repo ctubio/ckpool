@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.46"
+#define CKDB_VERSION DB_VERSION"-0.47"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -704,11 +704,10 @@ static int64_t confirm_range_finish;
 // The workinfoid range we are processing
 static int64_t confirm_first_workinfoid;
 static int64_t confirm_last_workinfoid;
-/* TODO: Stop the reload once we fully complete confirm_last_workinfoid
- *   and report a message saying so
- *  This isn't mandatory - but it's simply a waste of processing to continue
- *   reloading data since it will all be ignored anyway */
-static bool confirm_finished;
+/* Stop the reload 11min after the 'last' workinfoid+1 appears
+ * ckpool uses 10min - but add 1min to be sure */
+#define WORKINFO_AGE 660
+static tv_t confirm_finish;
 
 // DB users,workers,auth load is complete
 static bool db_auths_complete = false;
@@ -8881,7 +8880,7 @@ static bool reload_from(tv_t *start)
 		processing++;
 		count = 0;
 
-		while (!matched && !confirm_finished && fgets_unlocked(reload_buf, MAX_READ, fp))
+		while (!matched && fgets_unlocked(reload_buf, MAX_READ, fp))
 			matched = reload_line(conn, filename, ++count, reload_buf);
 
 		if (ferror(fp)) {
@@ -8897,9 +8896,11 @@ static bool reload_from(tv_t *start)
 		total += count;
 		fclose(fp);
 		free(filename);
-		if (matched || confirm_finished)
+		if (matched)
 			break;
 		start->tv_sec += ROLL_S;
+		if (confirm_sharesummary && tv_newer(&confirm_finish, start))
+			break;
 		filename = rotating_filename(restorefrom, start->tv_sec);
 		fp = fopen(filename, "re");
 		if (!fp) {
@@ -8957,7 +8958,7 @@ static bool reload_from(tv_t *start)
 	if (everyone_die)
 		return true;
 
-	if (!matched && !confirm_finished) {
+	if (!matched) {
 		ck_wlock(&fpm_lock);
 		if (first_pool_message) {
 			LOGERR("%s() reload completed without finding ckpool queue match '%.32s'...",
@@ -9343,21 +9344,53 @@ static void confirm_reload()
 		}
 	}
 
-	workinfo.workinfoid = confirm_first_workinfoid + 1;
-	workinfo.expirydate.tv_sec = default_expiry.tv_sec;
-	workinfo.expirydate.tv_usec = default_expiry.tv_usec;
+	/* These two below find the closest valid workinfo to the ones chosen
+	 * however we still use the original ones chosen to select/ignore data */
 
+	/* Find the workinfo before confirm_first_workinfoid+1
+	 * i.e. the one we want or the previous before it */
+	workinfo.workinfoid = confirm_first_workinfoid + 1;
+	workinfo.expirydate.tv_sec = date_begin.tv_sec;
+	workinfo.expirydate.tv_usec = date_begin.tv_usec;
 	look.data = (void *)(&workinfo);
 	wi_item = find_before_in_ktree(workinfo_root, &look, cmp_workinfo, ctx);
 	if (wi_item) {
 		copy_tv(&start, &(DATA_WORKINFO(wi_item)->createdate));
 		if (DATA_WORKINFO(wi_item)->workinfoid != confirm_first_workinfoid) {
-			LOGWARNING("%s() start workinfo not found ... using %"PRId64,
+			LOGWARNING("%s() start workinfo not found ... using time of %"PRId64,
 				   __func__, DATA_WORKINFO(wi_item)->workinfoid);
 		}
 	} else {
-		start.tv_sec = 0;
-		LOGWARNING("%s() no start workinfo found ... using 0", __func__);
+		start.tv_sec = start.tv_usec = 0;
+		LOGWARNING("%s() no start workinfo found ... using time 0", __func__);
+	}
+
+	/* Find the workinfo after confirm_last_workinfoid-1
+	 * i.e. the one we want or the next after it */
+	workinfo.workinfoid = confirm_last_workinfoid - 1;
+	workinfo.expirydate.tv_sec = date_eot.tv_sec;
+	workinfo.expirydate.tv_usec = date_eot.tv_usec;
+	look.data = (void *)(&workinfo);
+	wi_item = find_after_in_ktree(workinfo_root, &look, cmp_workinfo, ctx);
+	if (wi_item) {
+		/* Now find the one after the one we found to determine the
+		 * confirm_finish timestamp */
+		workinfo.workinfoid = DATA_WORKINFO(wi_item)->workinfoid;
+		workinfo.expirydate.tv_sec = date_eot.tv_sec;
+		workinfo.expirydate.tv_usec = date_eot.tv_usec;
+		look.data = (void *)(&workinfo);
+		wi_item = find_after_in_ktree(workinfo_root, &look, cmp_workinfo, ctx);
+		if (wi_item) {
+			copy_tv(&confirm_finish, &(DATA_WORKINFO(wi_item)->createdate));
+			confirm_finish.tv_sec += WORKINFO_AGE;
+		} else {
+			confirm_finish.tv_sec = date_eot.tv_sec;
+			confirm_finish.tv_usec = date_eot.tv_usec;
+		}
+	} else {
+		confirm_finish.tv_sec = date_eot.tv_sec;
+		confirm_finish.tv_usec = date_eot.tv_usec;
+		LOGWARNING("%s() no finish workinfo found ... using EOT", __func__);
 	}
 
 	LOGWARNING("%s() workinfo range: %"PRId64" to %"PRId64" ('%s' to '%s')",
