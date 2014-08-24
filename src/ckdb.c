@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.47"
+#define CKDB_VERSION DB_VERSION"-0.48"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -8374,16 +8374,19 @@ static void *logger(__maybe_unused void *arg)
 		K_WLOCK(logqueue_free);
 		lq_item = k_unlink_head(logqueue_store);
 		K_WUNLOCK(logqueue_free);
-		if (lq_item) {
+		while (lq_item) {
 			LOGFILE(DATA_LOGQUEUE(lq_item)->msg);
 			free(DATA_LOGQUEUE(lq_item)->msg);
 
 			K_WLOCK(logqueue_free);
 			k_add_head(logqueue_free, lq_item);
+			if (!everyone_die)
+				lq_item = k_unlink_head(logqueue_store);
+			else
+				lq_item = NULL;
 			K_WUNLOCK(logqueue_free);
-		} else
-			cksleep_ms(42);
-
+		}
+		cksleep_ms(42);
 	}
 
 	K_WLOCK(logqueue_free);
