@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.45"
+#define CKDB_VERSION DB_VERSION"-0.46"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -9279,9 +9279,9 @@ static void confirm_reload()
 	if (confirm_range && *confirm_range) {
 		switch(tolower(confirm_range[0])) {
 			case 'b':
-				// First DB record of the block after 'confirm_block-1'
-				blocks.height = confirm_block - 1;
-				STRNCPY(blocks.blockhash, "~");
+				// First DB record of the block = or after confirm_block
+				blocks.height = confirm_block;
+				blocks.blockhash[0] = '\0';
 				look.data = (void *)(&blocks);
 				b_end_item = find_after_in_ktree(blocks_root, &look, cmp_blocks, ctx);
 				if (!b_end_item) {
@@ -9293,22 +9293,22 @@ static void confirm_reload()
 
 				// Now find the last DB record of the previous block
 				blocks.height = DATA_BLOCKS(b_end_item)->height;
-				STRNCPY(blocks.blockhash, " ");
+				blocks.blockhash[0] = '\0';
 				look.data = (void *)(&blocks);
 				b_begin_item = find_before_in_ktree(blocks_root, &look, cmp_blocks, ctx);
 				if (!b_begin_item)
 					confirm_first_workinfoid = 0;
 				else {
-					// First DB record of the block after 'begin-1'
-					blocks.height = DATA_BLOCKS(b_begin_item)->height - 1;
-					STRNCPY(blocks.blockhash, "~");
+					// First DB record of the block 'begin'
+					blocks.height = DATA_BLOCKS(b_begin_item)->height;
+					blocks.blockhash[0] = '\0';
 					look.data = (void *)(&blocks);
 					b_begin_item = find_after_in_ktree(blocks_root, &look, cmp_blocks, ctx);
 					// Not possible
 					if (!b_begin_item)
 						confirm_first_workinfoid = 0;
 					else
-						confirm_last_workinfoid = DATA_BLOCKS(b_begin_item)->workinfoid;
+						confirm_first_workinfoid = DATA_BLOCKS(b_begin_item)->workinfoid;
 				}
 				snprintf(first_buf, sizeof(first_buf),
 					 "block %d",
