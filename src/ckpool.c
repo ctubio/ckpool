@@ -388,7 +388,7 @@ static int get_proc_pid(proc_instance_t *pi)
 	FILE *fp;
 
 	sprintf(path, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
-	fp = fopen(path, "r");
+	fp = fopen(path, "re");
 	if (!fp)
 		goto out;
 	ret = fscanf(fp, "%d", &pid);
@@ -615,7 +615,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		int oldpid;
 
 		LOGNOTICE("File %s exists", path);
-		fp = fopen(path, "r");
+		fp = fopen(path, "re");
 		if (!fp) {
 			LOGEMERG("Failed to open file %s", path);
 			return false;
@@ -635,7 +635,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
 		}
 	}
-	fp = fopen(path, "w");
+	fp = fopen(path, "we");
 	if (!fp) {
 		LOGERR("Failed to open file %s", path);
 		return false;
@@ -1223,7 +1223,7 @@ int main(int argc, char **argv)
 
 	/* Create the logfile */
 	sprintf(buf, "%s%s.log", ckp.logdir, ckp.name);
-	ckp.logfp = fopen(buf, "a");
+	ckp.logfp = fopen(buf, "ae");
 	if (!ckp.logfp)
 		quit(1, "Failed to make open log file %s", buf);
 	/* Make logging line buffered */

@@ -144,7 +144,7 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL
 			tm.tm_min,
 			tm.tm_sec);
 
-	stream = fopen(filename, "a");
+	stream = fopen(filename, "ae");
 	if (!stream)
 	{
 		fprintf(stderr, "%s %s() failed to open '%s' (%d) %s",

@@ -1873,7 +1873,7 @@ out_unlock:
 	json_set_string(val, "username", user_instance->username);
 
 	if (ckp->logshares) {
-		fp = fopen(fname, "a");
+		fp = fopen(fname, "ae");
 		if (likely(fp)) {
 			s = json_dumps(val, 0);
 			len = strlen(s);
@@ -2400,7 +2400,7 @@ static void *statsupdate(void *arg)
 		suffix_string(ghs1440, suffix1440, 16, 0);
 
 		snprintf(fname, 511, "%s/pool.status", ckp->logdir);
-		fp = fopen(fname, "w");
+		fp = fopen(fname, "we");
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
 
@@ -2474,7 +2474,7 @@ static void *statsupdate(void *arg)
 					"hashrate1d", suffix1440);
 
 			snprintf(fname, 511, "%s/%s", ckp->logdir, client->workername);
-			fp = fopen(fname, "w");
+			fp = fopen(fname, "we");
 			if (unlikely(!fp)) {
 				LOGERR("Failed to fopen %s", fname);
 				continue;
