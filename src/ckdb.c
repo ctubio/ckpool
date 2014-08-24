@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.43"
+#define CKDB_VERSION DB_VERSION"-0.45"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -694,6 +694,7 @@ static bool confirm_sharesummary;
  *		up to the workinfoid of the 1st db block height equal or after NNN
  *	wNNN - confirm all workinfoid's from NNN up to the last aged sharesummary
  *	rNNN-MMM - confirm all workinfoid's from NNN to MMM inclusive
+ *	i - just show the dbload information then exit
  */
 static char *confirm_range;
 static int confirm_block;
@@ -9161,6 +9162,7 @@ static void confirm_reload()
 	__maybe_unused K_TREE *workinfo_save;
 	K_ITEM look, *wi_item, *wif_item, *wil_item;
 	K_ITEM *b_begin_item, *b_end_item;
+	K_ITEM *ss_begin_item, *ss_end_item;
 	WORKINFO workinfo;
 	BLOCKS blocks;
 	K_TREE_CTX ctx[1];
@@ -9179,7 +9181,7 @@ static void confirm_reload()
 	wil_item = last_in_ktree(workinfo_root, ctx);
 
 	if (!wif_item || !wil_item) {
-		LOGWARNING("%s(): DB contains no workinfo data", __func__);
+		LOGWARNING("%s(): DB contains no workinfo records", __func__);
 		return;
 	}
 
@@ -9199,19 +9201,41 @@ static void confirm_reload()
 	if (!b_begin_item || !b_end_item)
 		LOGWARNING("%s(): DB contains no blocks :(", __func__);
 	else {
-		tv_to_buf(&(DATA_WORKINFO(b_begin_item)->createdate),
+		tv_to_buf(&(DATA_BLOCKS(b_begin_item)->createdate),
 			  cd_buf, sizeof(cd_buf));
 		LOGWARNING("%s(): DB first block %d/%"PRId64" %s",
 			   __func__,
 			   DATA_BLOCKS(b_begin_item)->height,
 			   DATA_BLOCKS(b_begin_item)->workinfoid,
 			   cd_buf);
-		tv_to_buf(&(DATA_WORKINFO(b_end_item)->createdate),
+		tv_to_buf(&(DATA_BLOCKS(b_end_item)->createdate),
 			  cd_buf, sizeof(cd_buf));
 		LOGWARNING("%s(): DB last block %d/%"PRId64" %s",
 			   __func__,
 			   DATA_BLOCKS(b_end_item)->height,
 			   DATA_BLOCKS(b_end_item)->workinfoid,
+			   cd_buf);
+	}
+
+	ss_begin_item = first_in_ktree(sharesummary_workinfoid_root, ctx);
+	ss_end_item = last_in_ktree(sharesummary_workinfoid_root, ctx);
+
+	if (!ss_begin_item || !ss_end_item)
+		LOGWARNING("%s(): DB contains no sharesummary records", __func__);
+	else {
+		tv_to_buf(&(DATA_SHARESUMMARY(ss_begin_item)->createdate),
+			  cd_buf, sizeof(cd_buf));
+		LOGWARNING("%s(): DB first sharesummary %"PRId64"/%s %s",
+			   __func__,
+			   DATA_SHARESUMMARY(ss_begin_item)->workinfoid,
+			   DATA_SHARESUMMARY(ss_begin_item)->workername,
+			   cd_buf);
+		tv_to_buf(&(DATA_SHARESUMMARY(ss_end_item)->createdate),
+			  cd_buf, sizeof(cd_buf));
+		LOGWARNING("%s(): DB last sharesummary %"PRId64"/%s %s",
+			   __func__,
+			   DATA_SHARESUMMARY(ss_end_item)->workinfoid,
+			   DATA_SHARESUMMARY(ss_end_item)->workername,
 			   cd_buf);
 	}
 
@@ -9311,6 +9335,9 @@ static void confirm_reload()
 				first_reason = "start range";
 				last_reason = "end range";
 				break;
+			case 'i':
+				LOGWARNING("%s(): info displayed - exiting", __func__);
+				exit(0);
 			default:
 				quithere(1, "Code fail");
 		}
@@ -9391,7 +9418,7 @@ static void confirm_summaries()
 
 	// Simple value check to abort early
 	if (confirm_range && *confirm_range) {
-		if (strlen(confirm_range) < 2) {
+		if (confirm_range[0] != 'i' && strlen(confirm_range) < 2) {
 			LOGEMERG("%s() invalid confirm range length '%s'", __func__, confirm_range);
 			return;
 		}
@@ -9438,6 +9465,8 @@ static void confirm_summaries()
 					return;
 				}
 				free(range);
+				break;
+			case 'i':
 				break;
 			default:
 				LOGEMERG("%s() invalid confirm range '%s'",
