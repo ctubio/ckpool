@@ -1391,7 +1391,7 @@ static bool rotating_log_nolock(char *msg)
 	bool ok = false;
 
 	filename = rotating_filename(logname, time(NULL));
-	fp = fopen(filename, "a+");
+	fp = fopen(filename, "a+e");
 	if (unlikely(!fp)) {
 		LOGERR("Failed to fopen %s in rotating_log!", filename);
 		goto stageleft;
@@ -6154,7 +6154,7 @@ static bool reload()
 		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
 		filename = rotating_filename(restorefrom, start.tv_sec);
-		fp = fopen(filename, "r");
+		fp = fopen(filename, "re");
 		if (fp)
 			fclose(fp);
 		else {
@@ -6193,7 +6193,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		int oldpid;
 
 		LOGWARNING("File %s exists", path);
-		fp = fopen(path, "r");
+		fp = fopen(path, "re");
 		if (!fp) {
 			LOGEMERG("Failed to open file %s", path);
 			return false;
@@ -6213,7 +6213,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
 		}
 	}
-	fp = fopen(path, "w");
+	fp = fopen(path, "we");
 	if (!fp) {
 		LOGERR("Failed to open file %s", path);
 		return false;
@@ -8861,7 +8861,7 @@ static bool reload_from(tv_t *start)
 	LOGWARNING("%s(): from %s", __func__, buf);
 
 	filename = rotating_filename(restorefrom, start->tv_sec);
-	fp = fopen(filename, "r");
+	fp = fopen(filename, "re");
 	if (!fp)
 		quithere(1, "Failed to open '%s'", filename);
 
@@ -8899,7 +8899,7 @@ static bool reload_from(tv_t *start)
 			break;
 		start->tv_sec += ROLL_S;
 		filename = rotating_filename(restorefrom, start->tv_sec);
-		fp = fopen(filename, "r");
+		fp = fopen(filename, "re");
 		if (!fp) {
 			missingfirst = strdup(filename);
 			free(filename);
@@ -8920,7 +8920,7 @@ static bool reload_from(tv_t *start)
 					break;
 				}
 				filename = rotating_filename(restorefrom, start->tv_sec);
-				fp = fopen(filename, "r");
+				fp = fopen(filename, "re");
 				if (fp)
 					break;
 				errno = 0;
@@ -9354,7 +9354,7 @@ static void confirm_reload()
 		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
 		filename = rotating_filename(restorefrom, start.tv_sec);
-		fp = fopen(filename, "r");
+		fp = fopen(filename, "re");
 		if (fp)
 			fclose(fp);
 		else {
@@ -9651,7 +9651,7 @@ int main(int argc, char **argv)
 
 	/* Create the logfile */
 	sprintf(buf, "%s%s%s.log", ckp.logdir, ckp.name, dbcode);
-	ckp.logfp = fopen(buf, "a");
+	ckp.logfp = fopen(buf, "ae");
 	if (!ckp.logfp)
 		quit(1, "Failed to open log file %s", buf);
 	ckp.logfd = fileno(ckp.logfp);

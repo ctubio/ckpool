@@ -999,15 +999,15 @@ bool rotating_log(const char *path, const char *msg)
 	bool ok = false;
 
 	filename = rotating_filename(path, time(NULL));
-	fd = open(filename, O_CREAT|O_RDWR, mode);
+	fd = open(filename, O_CREAT | O_RDWR | O_CLOEXEC , mode);
 	if (unlikely(fd == -1)) {
 		LOGERR("Failed to open %s in rotating_log!", filename);
 		goto stageleft;
 	}
-	fp = fdopen(fd, "a");
+	fp = fdopen(fd, "ae");
 	if (unlikely(!fp)) {
 		close(fd);
-		LOGERR("Failed to fopen %s in rotating_log!", filename);
+		LOGERR("Failed to fdopen %s in rotating_log!", filename);
 		goto stageleft;
 	}
 	if (unlikely(flock(fd, LOCK_EX))) {
