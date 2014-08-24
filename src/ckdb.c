@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.51"
+#define CKDB_VERSION DB_VERSION"-0.52"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -9182,13 +9182,13 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 			}
 		} else if (DATA_SHARESUMMARY(rss)->diffacc != DATA_SHARESUMMARY(lss)->diffacc) {
 			diff++;
-			if (diff_first == 0) {
-				diff_first = DATA_SHARESUMMARY(lss)->workinfoid;
-				copy_tv(&diff_first_cd, &(DATA_SHARESUMMARY(lss)->createdate));
-			}
-			diff_last = DATA_SHARESUMMARY(lss)->workinfoid;
-			copy_tv(&diff_last_cd, &(DATA_SHARESUMMARY(lss)->createdate));
 			if (show_diff) {
+				if (diff_first == 0) {
+					diff_first = DATA_SHARESUMMARY(lss)->workinfoid;
+					copy_tv(&diff_first_cd, &(DATA_SHARESUMMARY(lss)->createdate));
+				}
+				diff_last = DATA_SHARESUMMARY(lss)->workinfoid;
+				copy_tv(&diff_last_cd, &(DATA_SHARESUMMARY(lss)->createdate));
 				LOGERR("ERROR: %"PRId64"/%s/%ld,%ld %.19s - diffacc: %s: %.0f %s: %.0f",
 					DATA_SHARESUMMARY(lss)->workinfoid,
 					DATA_SHARESUMMARY(lss)->workername,
@@ -9217,7 +9217,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 			" (%s .. %s)",
 			miss_first, miss_last, cd_buf1, cd_buf2);
 	}
-	if (diff_first) {
+	if (show_diff && diff_first) {
 		tv_to_buf(&diff_first_cd, cd_buf1, sizeof(cd_buf1));
 		tv_to_buf(&diff_last_cd, cd_buf2, sizeof(cd_buf2));
 		LOGERR(" workinfoid range for differences: %"PRId64"-%"PRId64
