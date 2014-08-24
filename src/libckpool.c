@@ -933,6 +933,16 @@ out:
 }
 
 
+void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line)
+{
+	if (likely(val))
+		return;
+
+	LOGERR("Invalid json line:%d col:%d pos:%d text: %s from %s %s:%d",
+	       err->line, err->column, err->position, err->text,
+	       file, func, line);
+}
+
 /* Extracts a string value from a json array with error checking. To be used
  * when the value of the string returned is only examined and not to be stored.
  * See json_array_string below */
