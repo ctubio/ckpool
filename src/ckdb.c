@@ -274,6 +274,37 @@ ASSERT2(sizeof(int64_t) == 8);
 			(_res) == PGRES_TUPLES_OK || \
 			(_res) == PGRES_EMPTY_QUERY)
 
+// Clear text printable version of txt up to first '\0'
+static char *safe_text(char *txt)
+{
+	unsigned char *ptr = (unsigned char *)txt;
+	size_t len;
+	char *ret, *buf;
+
+	if (!txt) {
+		buf = strdup("(null)");
+		if (!buf)
+			quithere(1, "malloc OOM");
+		return buf;
+	}
+
+	// Allocate the maximum needed
+	len = (strlen(txt)+1)*4+1;
+	ret = buf = malloc(len);
+	if (!buf)
+		quithere(1, "malloc (%d) OOM", (int)len);
+	while (*ptr) {
+		if (*ptr >= ' ' && *ptr <= '~')
+			*(buf++) = *(ptr++);
+		else {
+			snprintf(buf, 5, "0x%02x", *(ptr++));
+			buf += 4;
+		}
+	}
+	strcpy(buf, "0x00");
+	return ret;
+}
+
 static char *pqerrmsg(PGconn *conn)
 {
 	char *ptr, *buf = strdup(PQerrorMessage(conn));
@@ -7933,7 +7964,16 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 		next += JSON_TRANSFER_LEN;
 		json_data = json_loads(next, JSON_DISABLE_EOF_CHECK, &err_val);
 		if (!json_data) {
-			LOGERR("Json decode error from command: '%s'", cmd);
+			/* This REALLY shouldn't ever get an error since the input
+			 * is a json generated string
+			 * If that happens then dump lots of information */
+			char *text = safe_text(next);
+			LOGERR("Json decode error from command: '%s' "
+				"json_err=(%d:%d:%d)%s:%s input='%s'",
+				cmd, err_val.line, err_val.column,
+				err_val.position, err_val.source,
+				err_val.text, text);
+			free(text);
 			free(cmdptr);
 			return CMD_REPLY;
 		}
