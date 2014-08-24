@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fenv.h>
+#include <getopt.h>
 #include <jansson.h>
 #include <signal.h>
 #include <stdio.h>
@@ -38,14 +39,15 @@
 #include "ktree.h"
 
 /* TODO: any tree/list accessed in new threads needs
- * to ensure all code using those trees/lists use locks
+ *  to ensure all code using those trees/lists use locks
  * This code's lock implementation is equivalent to table level locking
  * Consider adding row level locking (a per kitem usage count) if needed
- * TODO: verify all tables with multuthread access are locked
+ * TODO: verify all tables with multithread access are locked
  */
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
+#define CKDB_VERSION DB_VERSION"-0.42"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -9278,14 +9280,32 @@ static void check_restore_dir()
 	strcat(restorefrom, RELOADFILES);
 }
 
+static struct option long_options[] = {
+	{"config",		required_argument,	0,	'c'},
+	{"dbname",		required_argument,	0,	'd'},
+	{"help",		no_argument,		0,	'h'},
+	{"killold",		no_argument,		0,	'k'},
+	{"loglevel",		required_argument,	0,	'l'},
+	{"name",		required_argument,	0,	'n'},
+	{"dbpass",		required_argument,	0,	'p'},
+	{"ckpool-logdir",	required_argument,	0,	'r'},
+	{"sockdir",		required_argument,	0,	's'},
+	{"dbuser",		required_argument,	0,	'u'},
+	{"version",		no_argument,		0,	'v'},
+	{"confirm",		no_argument,		0,	'y'},
+	{0, 0, 0, 0}
+};
+
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
 	char buf[512];
 	ckpool_t ckp;
-	int c, ret;
+	int c, ret, i = 0, j;
 	char *kill;
 	tv_t now;
+
+	printf("CKDB Master V%s (C) Kano (see source code)\n", CKDB_VERSION);
 
 	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
 
@@ -9293,7 +9313,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:d:kl:n:p:r:s:u:y")) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:r:s:u:vy", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
@@ -9304,6 +9324,23 @@ int main(int argc, char **argv)
 				while (*kill)
 					*(kill++) = ' ';
 				break;
+			case 'h':
+				for (j = 0; long_options[j].val; j++) {
+					struct option *jopt = &long_options[j];
+
+					if (jopt->has_arg) {
+						char *upper = alloca(strlen(jopt->name) + 1);
+						int offset = 0;
+
+						do {
+							upper[offset] = toupper(jopt->name[offset]);
+						} while (upper[offset++] != '\0');
+						printf("-%c %s | --%s %s\n", jopt->val,
+						       upper, jopt->name, upper);
+					} else
+						printf("-%c | --%s\n", jopt->val, jopt->name);
+				}
+				exit(0);
 			case 'k':
 				ckp.killold = true;
 				break;
@@ -9329,6 +9366,8 @@ int main(int argc, char **argv)
 				while (*kill)
 					*(kill++) = ' ';
 				break;
+			case 'v':
+				exit(0);
 			case 'p':
 				db_pass = strdup(optarg);
 				kill = optarg;
