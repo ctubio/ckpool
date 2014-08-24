@@ -747,6 +747,7 @@ enum cmd_values {
 	CMD_REPLY, // Means something was wrong - send back reply
 	CMD_SHUTDOWN,
 	CMD_PING,
+	CMD_VERSION,
 	CMD_SHARELOG,
 	CMD_AUTH,
 	CMD_ADDUSER,
@@ -7899,6 +7900,7 @@ static struct CMDS {
 } cmds[] = {
 	{ CMD_SHUTDOWN,	"shutdown",	true,	false,	NULL,		ACCESS_SYSTEM },
 	{ CMD_PING,	"ping",		true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
+	{ CMD_VERSION,	"version",	true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
 	{ CMD_SHARELOG,	STR_WORKINFO,	false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_SHARES,	false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_SHAREERRORS, false,	true,	cmd_sharelog,	ACCESS_POOL },
@@ -8532,6 +8534,13 @@ static void *socketer(__maybe_unused void *arg)
 						snprintf(reply, sizeof(reply), "%s.%ld.ok.pong", id, now.tv_sec);
 						send_unix_msg(sockd, reply);
 						break;
+					case CMD_VERSION:
+						LOGDEBUG("Listener received version request");
+						snprintf(reply, sizeof(reply),
+							 "%s.%ld.ok.CKDB V%s",
+							 id, now.tv_sec, CKDB_VERSION);
+						send_unix_msg(sockd, reply);
+						break;
 					// Always process immediately:
 					case CMD_AUTH:
 					case CMD_CHKPASS:
@@ -8761,6 +8770,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			// Shouldn't be there
 			case CMD_SHUTDOWN:
 			case CMD_PING:
+			case CMD_VERSION:
 			// Non pool commands, shouldn't be there
 			case CMD_ADDUSER:
 			case CMD_NEWPASS:
