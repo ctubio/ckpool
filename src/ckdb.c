@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.48"
+#define CKDB_VERSION DB_VERSION"-0.50"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -831,6 +831,16 @@ static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.value };
 static K_ITEM userstats_idle = { "tmp", NULL, NULL, (void *)(&userstats_3) };
 static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.value };
 static K_ITEM userstats_eos = { "tmp", NULL, NULL, (void *)(&userstats_4) };
+
+static TRANSFER shares_1 = { "secondaryuserid", TRUE_STR, shares_1.value };
+static K_ITEM shares_secondaryuserid = { "", NULL, NULL, (void *)(&shares_1) };
+static TRANSFER shareerrors_1 = { "secondaryuserid", TRUE_STR, shareerrors_1.value };
+static K_ITEM shareerrors_secondaryuserid = { "", NULL, NULL, (void *)(&shareerrors_1) };
+// Time limit that this problem occurred
+// 24-Aug-2014 05:20+00 (1st one shortly after this)
+static tv_t missing_secuser_min = { 1408857600L, 0L };
+// 24-Aug-2014 06:00+00
+static tv_t missing_secuser_max = { 1408860000L, 0L };
 
 // USERS
 typedef struct users {
@@ -3764,6 +3774,19 @@ static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *wor
 	TXT_TO_DOUBLE("sdiff", sdiff, shares->sdiff);
 	STRNCPY(shares->secondaryuserid, secondaryuserid);
 
+	if (!(*secondaryuserid)) {
+		STRNCPY(shares->secondaryuserid,
+			DATA_USERS(u_item)->secondaryuserid);
+		if (!tv_newer(&missing_secuser_min, cd) ||
+		    !tv_newer(cd, &missing_secuser_max)) {
+			tv_to_buf(cd, cd_buf, sizeof(cd_buf));
+			LOGERR("%s() %s/%ld,%ld %.19s missing secondaryuserid! "
+				"Share corrected",
+				__func__, username,
+				cd->tv_sec, cd->tv_usec, cd_buf);
+		}
+	}
+
 	HISTORYDATEINIT(shares, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, shares);
 
@@ -3890,6 +3913,19 @@ static bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	TXT_TO_INT("errn", errn, shareerrors->errn);
 	STRNCPY(shareerrors->error, error);
 	STRNCPY(shareerrors->secondaryuserid, secondaryuserid);
+
+	if (!(*secondaryuserid)) {
+		STRNCPY(shareerrors->secondaryuserid,
+			DATA_USERS(u_item)->secondaryuserid);
+		if (!tv_newer(&missing_secuser_min, cd) ||
+		    !tv_newer(cd, &missing_secuser_max)) {
+			tv_to_buf(cd, cd_buf, sizeof(cd_buf));
+			LOGERR("%s() %s/%ld,%ld %.19s missing secondaryuserid! "
+				"Sharerror corrected",
+				__func__, username,
+				cd->tv_sec, cd->tv_usec, cd_buf);
+		}
+	}
 
 	HISTORYDATEINIT(shareerrors, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, shareerrors);
@@ -7271,9 +7307,9 @@ wiconf:
 		if (!i_sdiff)
 			return strdup(reply);
 
-		i_secondaryuserid = require_name(trf_root, "secondaryuserid", 1, NULL, reply, siz);
+		i_secondaryuserid = optional_name(trf_root, "secondaryuserid", 1, NULL);
 		if (!i_secondaryuserid)
-			return strdup(reply);
+			i_secondaryuserid = &shares_secondaryuserid;
 
 		ok = shares_add(conn, DATA_TRANSFER(i_workinfoid)->data,
 				      DATA_TRANSFER(i_username)->data,
@@ -7338,9 +7374,9 @@ sconf:
 		if (!i_error)
 			return strdup(reply);
 
-		i_secondaryuserid = require_name(trf_root, "secondaryuserid", 1, NULL, reply, siz);
+		i_secondaryuserid = optional_name(trf_root, "secondaryuserid", 1, NULL);
 		if (!i_secondaryuserid)
-			return strdup(reply);
+			i_secondaryuserid = &shareerrors_secondaryuserid;
 
 		ok = shareerrors_add(conn, DATA_TRANSFER(i_workinfoid)->data,
 					   DATA_TRANSFER(i_username)->data,
