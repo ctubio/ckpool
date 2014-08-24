@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fenv.h>
+#include <getopt.h>
 #include <jansson.h>
 #include <signal.h>
 #include <stdio.h>
@@ -38,14 +39,15 @@
 #include "ktree.h"
 
 /* TODO: any tree/list accessed in new threads needs
- * to ensure all code using those trees/lists use locks
+ *  to ensure all code using those trees/lists use locks
  * This code's lock implementation is equivalent to table level locking
  * Consider adding row level locking (a per kitem usage count) if needed
- * TODO: verify all tables with multuthread access are locked
+ * TODO: verify all tables with multithread access are locked
  */
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
+#define CKDB_VERSION DB_VERSION"-0.42"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -273,6 +275,37 @@ ASSERT2(sizeof(int64_t) == 8);
 #define PGOK(_res) ((_res) == PGRES_COMMAND_OK || \
 			(_res) == PGRES_TUPLES_OK || \
 			(_res) == PGRES_EMPTY_QUERY)
+
+// Clear text printable version of txt up to first '\0'
+static char *safe_text(char *txt)
+{
+	unsigned char *ptr = (unsigned char *)txt;
+	size_t len;
+	char *ret, *buf;
+
+	if (!txt) {
+		buf = strdup("(null)");
+		if (!buf)
+			quithere(1, "malloc OOM");
+		return buf;
+	}
+
+	// Allocate the maximum needed
+	len = (strlen(txt)+1)*4+1;
+	ret = buf = malloc(len);
+	if (!buf)
+		quithere(1, "malloc (%d) OOM", (int)len);
+	while (*ptr) {
+		if (*ptr >= ' ' && *ptr <= '~')
+			*(buf++) = *(ptr++);
+		else {
+			snprintf(buf, 5, "0x%02x", *(ptr++));
+			buf += 4;
+		}
+	}
+	strcpy(buf, "0x00");
+	return ret;
+}
 
 static char *pqerrmsg(PGconn *conn)
 {
@@ -647,6 +680,26 @@ static const tv_t date_begin = { DATE_BEGIN, 0L };
 
 // argv -y - don't run in ckdb mode, just confirm sharesummaries
 static bool confirm_sharesummary;
+
+/* Optional workinfoid range -Y to supply when confirming sharesummaries
+ * N.B. if you specify -Y it will enable -y, so -y isn't also required
+ *
+ * Default (NULL) is to confirm all aged sharesummaries
+ * Default should normally be used every time
+ *  The below options are mainly for debugging or
+ *   a quicker confirm if required due to not running confirms regularly
+ *  TODO: ... once the code includes flagging confirmed sharesummaries
+ * Valid options are:
+ *	bNNN - confirm all workinfoid's from the previous db block before NNN (or 0)
+ *		up to the workinfoid of the 1st db block height equal or after NNN
+ *	wNNN - confirm all workinfoid's from NNN up to the last aged sharesummary
+ *	rNNN-MMM - confirm all workinfoid's from NNN to MMM inclusive
+ */
+static char *confirm_range;
+static int confirm_block;
+static int64_t confirm_range_start;
+static int64_t confirm_range_finish;
+
 // The workinfoid range we are processing
 static int64_t confirm_first_workinfoid;
 static int64_t confirm_last_workinfoid;
@@ -7937,7 +7990,16 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 		next += JSON_TRANSFER_LEN;
 		json_data = json_loads(next, JSON_DISABLE_EOF_CHECK, &err_val);
 		if (!json_data) {
-			LOGERR("Json decode error from command: '%s'", cmd);
+			/* This REALLY shouldn't ever get an error since the input
+			 * is a json generated string
+			 * If that happens then dump lots of information */
+			char *text = safe_text(next);
+			LOGERR("Json decode error from command: '%s' "
+				"json_err=(%d:%d:%d)%s:%s input='%s'",
+				cmd, err_val.line, err_val.column,
+				err_val.position, err_val.source,
+				err_val.text, text);
+			free(text);
 			free(cmdptr);
 			return CMD_REPLY;
 		}
@@ -9086,17 +9148,61 @@ static void confirm_reload()
 	K_TREE *sharesummary_workinfoid_save;
 	__maybe_unused K_TREE *sharesummary_save;
 	__maybe_unused K_TREE *workinfo_save;
-	K_ITEM look, *wi_item;
+	K_ITEM look, *wi_item, *wif_item, *wil_item;
+	K_ITEM *b_begin_item, *b_end_item;
 	WORKINFO workinfo;
+	BLOCKS blocks;
 	K_TREE_CTX ctx[1];
 	char buf[DATE_BUFSIZ+1];
 	char *first_reason;
 	char *last_reason;
+	char cd_buf[DATE_BUFSIZ];
+	char first_buf[64], last_buf[64];
 	char *filename;
 	tv_t start;
 	FILE *fp;
 
 // TODO: // abort reload when we get an age after the end of a workinfo after the Xs after the last workinfo before the end
+
+	wif_item = first_in_ktree(workinfo_root, ctx);
+	wil_item = last_in_ktree(workinfo_root, ctx);
+
+	if (!wif_item || !wil_item) {
+		LOGWARNING("%s(): DB contains no workinfo data", __func__);
+		return;
+	}
+
+	tv_to_buf(&(DATA_WORKINFO(wif_item)->createdate),
+		  cd_buf, sizeof(cd_buf));
+	LOGWARNING("%s(): DB first workinfoid %"PRId64" %s",
+		   __func__, DATA_WORKINFO(wif_item)->workinfoid, cd_buf);
+
+	tv_to_buf(&(DATA_WORKINFO(wil_item)->createdate),
+		  cd_buf, sizeof(cd_buf));
+	LOGWARNING("%s(): DB last workinfoid %"PRId64" %s",
+		   __func__, DATA_WORKINFO(wil_item)->workinfoid, cd_buf);
+
+	b_begin_item = first_in_ktree(blocks_root, ctx);
+	b_end_item = last_in_ktree(blocks_root, ctx);
+
+	if (!b_begin_item || !b_end_item)
+		LOGWARNING("%s(): DB contains no blocks :(", __func__);
+	else {
+		tv_to_buf(&(DATA_WORKINFO(b_begin_item)->createdate),
+			  cd_buf, sizeof(cd_buf));
+		LOGWARNING("%s(): DB first block %d/%"PRId64" %s",
+			   __func__,
+			   DATA_BLOCKS(b_begin_item)->height,
+			   DATA_BLOCKS(b_begin_item)->workinfoid,
+			   cd_buf);
+		tv_to_buf(&(DATA_WORKINFO(b_end_item)->createdate),
+			  cd_buf, sizeof(cd_buf));
+		LOGWARNING("%s(): DB last block %d/%"PRId64" %s",
+			   __func__,
+			   DATA_BLOCKS(b_end_item)->height,
+			   DATA_BLOCKS(b_end_item)->workinfoid,
+			   cd_buf);
+	}
 
 	/* The first workinfo we should process
 	 * With no y records we should start from the beginning (0)
@@ -9132,6 +9238,71 @@ static void confirm_reload()
 		LOGWARNING("%s(): there are no unconfirmed sharesummary records in the DB",
 			   __func__, buf);
 		return;
+	}
+
+	// Do this after above code for checking and so we can use the results
+	if (confirm_range && *confirm_range) {
+		switch(tolower(confirm_range[0])) {
+			case 'b':
+				// First DB record of the block after 'confirm_block-1'
+				blocks.height = confirm_block - 1;
+				STRNCPY(blocks.blockhash, "~");
+				look.data = (void *)(&blocks);
+				b_end_item = find_after_in_ktree(blocks_root, &look, cmp_blocks, ctx);
+				if (!b_end_item) {
+					LOGWARNING("%s(): no DB block height found matching or after %d",
+						   __func__, confirm_block);
+					return;
+				}
+				confirm_last_workinfoid = DATA_BLOCKS(b_end_item)->workinfoid;
+
+				// Now find the last DB record of the previous block
+				blocks.height = DATA_BLOCKS(b_end_item)->height;
+				STRNCPY(blocks.blockhash, " ");
+				look.data = (void *)(&blocks);
+				b_begin_item = find_before_in_ktree(blocks_root, &look, cmp_blocks, ctx);
+				if (!b_begin_item)
+					confirm_first_workinfoid = 0;
+				else {
+					// First DB record of the block after 'begin-1'
+					blocks.height = DATA_BLOCKS(b_begin_item)->height - 1;
+					STRNCPY(blocks.blockhash, "~");
+					look.data = (void *)(&blocks);
+					b_begin_item = find_after_in_ktree(blocks_root, &look, cmp_blocks, ctx);
+					// Not possible
+					if (!b_begin_item)
+						confirm_first_workinfoid = 0;
+					else
+						confirm_last_workinfoid = DATA_BLOCKS(b_begin_item)->workinfoid;
+				}
+				snprintf(first_buf, sizeof(first_buf),
+					 "block %d",
+					 b_begin_item ? DATA_BLOCKS(b_begin_item)->height : 0);
+				first_reason = first_buf;
+				snprintf(last_buf, sizeof(last_buf),
+					 "block %d",
+					 DATA_BLOCKS(b_end_item)->height);
+				last_reason = last_buf;
+				break;
+			case 'w':
+				confirm_first_workinfoid = confirm_range_start;
+				// last from default
+				if (confirm_last_workinfoid < confirm_first_workinfoid) {
+					LOGWARNING("%s(): no unconfirmed sharesummary records before start",
+						   __func__, buf);
+					return;
+				}
+				first_reason = "start range";
+				break;
+			case 'r':
+				confirm_first_workinfoid = confirm_range_start;
+				confirm_last_workinfoid = confirm_range_finish;
+				first_reason = "start range";
+				last_reason = "end range";
+				break;
+			default:
+				quithere(1, "Code fail");
+		}
 	}
 
 	workinfo.workinfoid = confirm_first_workinfoid + 1;
@@ -9205,6 +9376,64 @@ static void confirm_reload()
 static void confirm_summaries()
 {
 	pthread_t log_pt;
+	char *range, *minus;
+
+	// Simple value check to abort early
+	if (confirm_range && *confirm_range) {
+		if (strlen(confirm_range) < 2) {
+			LOGEMERG("%s() invalid confirm range length '%s'", __func__, confirm_range);
+			return;
+		}
+		switch(tolower(confirm_range[0])) {
+			case 'b':
+				confirm_block = atoi(confirm_range+1);
+				if (confirm_block <= 0) {
+					LOGEMERG("%s() invalid confirm block '%s' - must be >0",
+						 __func__, confirm_range);
+					return;
+				}
+				break;
+			case 'w':
+				confirm_range_start = atoll(confirm_range+1);
+				if (confirm_range_start <= 0) {
+					LOGEMERG("%s() invalid confirm start '%s' - must be >0",
+						 __func__, confirm_range);
+					return;
+				}
+			case 'r':
+				range = strdup(confirm_range);
+				minus = strchr(range+1, '-');
+				if (!minus || minus == range+1) {
+					LOGEMERG("%s() invalid confirm range '%s' - must be rNNN-MMM",
+						 __func__, confirm_range);
+					return;
+				}
+				*(minus++) = '\0';
+				confirm_range_start = atoll(range+1);
+				if (confirm_range_start <= 0) {
+					LOGEMERG("%s() invalid confirm start in '%s' - must be >0",
+						 __func__, confirm_range);
+					return;
+				}
+				confirm_range_finish = atoll(minus);
+				if (confirm_range_finish <= 0) {
+					LOGEMERG("%s() invalid confirm finish in '%s' - must be >0",
+						 __func__, confirm_range);
+					return;
+				}
+				if (confirm_range_finish < confirm_range_start) {
+					LOGEMERG("%s() invalid confirm range in '%s' - finish < start",
+						 __func__, confirm_range);
+					return;
+				}
+				free(range);
+				break;
+			default:
+				LOGEMERG("%s() invalid confirm range '%s'",
+					 __func__, confirm_range);
+				return;
+		}
+	}
 
 	logqueue_free = k_new_list("LogQueue", sizeof(LOGQUEUE),
 					ALLOC_LOGQUEUE, LIMIT_LOGQUEUE, true);
@@ -9256,14 +9485,33 @@ static void check_restore_dir()
 	strcat(restorefrom, RELOADFILES);
 }
 
+static struct option long_options[] = {
+	{ "config",		required_argument,	0,	'c' },
+	{ "dbname",		required_argument,	0,	'd' },
+	{ "help",		no_argument,		0,	'h' },
+	{ "killold",		no_argument,		0,	'k' },
+	{ "loglevel",		required_argument,	0,	'l' },
+	{ "name",		required_argument,	0,	'n' },
+	{ "dbpass",		required_argument,	0,	'p' },
+	{ "ckpool-logdir",	required_argument,	0,	'r' },
+	{ "sockdir",		required_argument,	0,	's' },
+	{ "dbuser",		required_argument,	0,	'u' },
+	{ "version",		no_argument,		0,	'v' },
+	{ "confirm",		no_argument,		0,	'y' },
+	{ "confirmrange",	required_argument,	0,	'Y' },
+	{ 0, 0, 0, 0 }
+};
+
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
 	char buf[512];
 	ckpool_t ckp;
-	int c, ret;
+	int c, ret, i = 0, j;
 	char *kill;
 	tv_t now;
+
+	printf("CKDB Master V%s (C) Kano (see source code)\n", CKDB_VERSION);
 
 	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
 
@@ -9271,7 +9519,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt(argc, argv, "c:d:kl:n:p:r:s:u:y")) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:r:s:u:vyY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
@@ -9282,6 +9530,23 @@ int main(int argc, char **argv)
 				while (*kill)
 					*(kill++) = ' ';
 				break;
+			case 'h':
+				for (j = 0; long_options[j].val; j++) {
+					struct option *jopt = &long_options[j];
+
+					if (jopt->has_arg) {
+						char *upper = alloca(strlen(jopt->name) + 1);
+						int offset = 0;
+
+						do {
+							upper[offset] = toupper(jopt->name[offset]);
+						} while (upper[offset++] != '\0');
+						printf("-%c %s | --%s %s\n", jopt->val,
+						       upper, jopt->name, upper);
+					} else
+						printf("-%c | --%s\n", jopt->val, jopt->name);
+				}
+				exit(0);
 			case 'k':
 				ckp.killold = true;
 				break;
@@ -9307,6 +9572,8 @@ int main(int argc, char **argv)
 				while (*kill)
 					*(kill++) = ' ';
 				break;
+			case 'v':
+				exit(0);
 			case 'p':
 				db_pass = strdup(optarg);
 				kill = optarg;
@@ -9316,7 +9583,11 @@ int main(int argc, char **argv)
 					*(kill++) = '\0';
 				break;
 			case 'y':
-				// TODO: allow a range e.g. block or workinfo range or ...
+				confirm_sharesummary = true;
+				break;
+			case 'Y':
+				confirm_range = strdup(optarg);
+				// Auto enable it also
 				confirm_sharesummary = true;
 				break;
 		}
