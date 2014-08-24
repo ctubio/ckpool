@@ -433,10 +433,14 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 {
 	static time_t time_counter;
 	static int counter = 0;
-
 	char *json_msg;
 	time_t now_t;
 	char ch;
+
+	if (unlikely(!val)) {
+		LOGWARNING("Invalid json sent to ckdbq_add from %s %s:%d", file, func, line);
+		return;
+	}
 
 	now_t = time(NULL);
 	if (now_t != time_counter) {
@@ -445,11 +449,6 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 		ch = status_chars[(counter++) & 0x3];
 		fprintf(stdout, "%c\r", ch);
 		fflush(stdout);
-	}
-
-	if (!val) {
-		LOGWARNING("Invalid json sent to ckdbq_add from %s %s:%d", file, func, line);
-		return;
 	}
 
 	if (ckp->standalone)
@@ -473,7 +472,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 
 	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
 
-	val = json_pack("{sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
 			"workinfoid", wb->id,
 			"poolinstance", ckp->name,
 			"transactiontree", wb->txn_hashes,
@@ -501,7 +500,7 @@ static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
-	val = json_pack("{sI,ss,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{sI,ss,ss,ss,ss,ss}",
 			"workinfoid", id,
 			"poolinstance", ckp->name,
 			"createdate", cdfield,
@@ -966,7 +965,7 @@ static void stratum_broadcast_message(const char *msg)
 {
 	json_t *json_msg;
 
-	json_msg = json_pack("{sosss[s]}", "id", json_null(), "method", "client.show_message",
+	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
 	stratum_broadcast(json_msg);
 }
@@ -985,7 +984,7 @@ static void block_solve(ckpool_t *ckp)
 	ASPRINTF(&msg, "Block %d solved by %s!", current_workbase->height, ckp->name);
 	/* We send blank settings to ckdb with only the matching data from what we submitted
 	 * to say the block has been confirmed. */
-	val = json_pack("{si,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{si,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", current_workbase->height,
 			"confirmed", "1",
 			"workinfoid", current_workbase->id,
@@ -1226,7 +1225,7 @@ static json_t *parse_subscribe(int64_t client_id, json_t *params_val)
 		n2len = workbases->enonce2varlen;
 	else
 		n2len = 8;
-	ret = json_pack("[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
+	JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
 			n2len);
 	ck_runlock(&workbase_lock);
 
@@ -1279,7 +1278,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
@@ -1332,7 +1331,7 @@ static void queue_delayed_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	val = json_pack("{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
 			"username", client->user_instance->username,
 			"workername", client->workername,
 			"poolinstance", ckp->name,
@@ -1414,7 +1413,7 @@ static void stratum_send_diff(stratum_instance_t *client)
 {
 	json_t *json_msg;
 
-	json_msg = json_pack("{s[I]soss}", "params", client->diff, "id", json_null(),
+	JSON_CPACK(json_msg, "{s[I]soss}", "params", client->diff, "id", json_null(),
 			     "method", "mining.set_difficulty");
 	stratum_add_send(json_msg, client->id);
 }
@@ -1423,7 +1422,7 @@ static void stratum_send_message(stratum_instance_t *client, const char *msg)
 {
 	json_t *json_msg;
 
-	json_msg = json_pack("{sosss[s]}", "id", json_null(), "method", "client.show_message",
+	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
 	stratum_add_send(json_msg, client->id);
 }
@@ -1587,7 +1586,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 
 	flip_32(swap, hash);
 	__bin2hex(blockhash, swap, 32);
-	val = json_pack("{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
 			"blockhash", blockhash,
 			"confirmed", "n",
@@ -1698,7 +1697,7 @@ static void submit_share(stratum_instance_t *client, int64_t jobid, const char *
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	json_msg = json_pack("{sisssssssIsi}", "jobid", jobid, "nonce2", enonce2,
+	JSON_CPACK(json_msg, "{sisssssssIsi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
 			     "msg_id", msg_id);
 	msg = json_dumps(json_msg, 0);
@@ -1890,7 +1889,7 @@ out_unlock:
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
 	if (!share) {
-		val = json_pack("{sI,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
+		JSON_CPACK(val, "{sI,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"clientid", client->id,
 				"secondaryuserid", client->secondaryuserid,
 				"enonce1", client->enonce1,
@@ -1915,7 +1914,7 @@ static json_t *__stratum_notify(bool clean)
 {
 	json_t *val;
 
-	val = json_pack("{s:[ssssosssb],s:o,s:s}",
+	JSON_CPACK(val, "{s:[ssssosssb],s:o,s:s}",
 			"params",
 			current_workbase->idstring,
 			current_workbase->prevhash,
@@ -1958,7 +1957,7 @@ static void send_json_err(int64_t client_id, json_t *id_val, const char *err_msg
 {
 	json_t *val;
 
-	val = json_pack("{soss}", "id", json_copy(id_val), "error", err_msg);
+	JSON_CPACK(val, "{soss}", "id", json_copy(id_val), "error", err_msg);
 	stratum_add_send(val, client_id);
 }
 
@@ -2318,7 +2317,7 @@ static void update_userstats(ckpool_t *ckp)
 		ghs5 = client->dsps5 * nonces;
 		ghs60 = client->dsps60 * nonces;
 		ghs1440 = client->dsps1440 * nonces;
-		val = json_pack("{ss,sI,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
+		JSON_CPACK(val, "{ss,sI,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
 				"instanceid", client->id,
 				"elapsed", elapsed,
@@ -2406,7 +2405,7 @@ static void *statsupdate(void *arg)
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
 
-		val = json_pack("{si,si,si}",
+		JSON_CPACK(val, "{si,si,si}",
 				"runtime", diff.tv_sec,
 				"Users", stats.users,
 				"Workers", stats.workers);
@@ -2416,7 +2415,7 @@ static void *statsupdate(void *arg)
 		fprintf(fp, "%s\n", s);
 		dealloc(s);
 
-		val = json_pack("{ss,ss,ss,ss,ss,ss}",
+		JSON_CPACK(val, "{ss,ss,ss,ss,ss,ss}",
 				"hashrate1m", suffix1,
 				"hashrate5m", suffix5,
 				"hashrate15m", suffix15,
@@ -2429,7 +2428,7 @@ static void *statsupdate(void *arg)
 		fprintf(fp, "%s\n", s);
 		dealloc(s);
 
-		val = json_pack("{sf,sf,sf,sf}",
+		JSON_CPACK(val, "{sf,sf,sf,sf}",
 				"SPS1m", sps1,
 				"SPS5m", sps5,
 				"SPS15m", sps15,
@@ -2469,7 +2468,7 @@ static void *statsupdate(void *arg)
 			ghs = client->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
 
-			val = json_pack("{ss,ss,ss,ss}",
+			JSON_CPACK(val, "{ss,ss,ss,ss}",
 					"hashrate1m", suffix1,
 					"hashrate5m", suffix5,
 					"hashrate1hr", suffix60,
@@ -2495,7 +2494,7 @@ static void *statsupdate(void *arg)
 
 		ts_realtime(&ts_now);
 		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
-		val = json_pack("{ss,si,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
+		JSON_CPACK(val, "{ss,si,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
 				"poolinstance", ckp->name,
 				"elapsed", diff.tv_sec,
 				"users", stats.users,
