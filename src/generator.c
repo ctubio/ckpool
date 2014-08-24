@@ -237,6 +237,11 @@ retry:
 		}
 	} while (selret < 1);
 
+	if (unlikely(cs->fd < 0)) {
+		LOGWARNING("Bitcoind socket invalidated, will atempt failover");
+		goto reconnect;
+	}
+
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		LOGEMERG("Failed to accept on generator socket");
