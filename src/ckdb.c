@@ -7929,7 +7929,8 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 	char reply[1024] = "";
 	K_TREE_CTX ctx[1];
 	K_ITEM *item;
-	char *cmdptr, *idptr, *data, *next, *eq;
+	char *cmdptr, *idptr, *next, *eq;
+	char *data = NULL;
 	bool noid = false;
 
 	*trf_root = NULL;
