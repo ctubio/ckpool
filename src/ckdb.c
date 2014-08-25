@@ -9538,6 +9538,8 @@ static void confirm_reload()
 
 	tv_to_buf(&start, buf, sizeof(buf));
 	LOGWARNING("%s() load start timestamp %s", __func__, buf);
+	tv_to_buf(&confirm_finish, buf, sizeof(buf));
+	LOGWARNING("%s() load finish timestamp %s", __func__, buf);
 
 	/* Save the DB info for comparing to the reload
 	 * i.e. the reload will generate from scratch all the
