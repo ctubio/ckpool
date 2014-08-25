@@ -1090,6 +1090,8 @@ retry:
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
 			drop_client(client_id);
+	} else if (cmdmatch(buf, "dropall")) {
+		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
 		block_solve(ckp);
 	} else if (cmdmatch(buf, "loglevel")) {
