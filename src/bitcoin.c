@@ -68,7 +68,7 @@ bool validate_address(connsock_t *cs, const char *address)
 		goto out;
 	}
 	if (!json_is_true(valid_val))
-		LOGWARNING("Bitcoin address %s is NOT valid", address);
+		LOGDEBUG("Bitcoin address %s is NOT valid", address);
 	else {
 		LOGDEBUG("Bitcoin address %s IS valid", address);
 		ret = true;
