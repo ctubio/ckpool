@@ -1289,6 +1289,8 @@ retry:
 		break;
 	}
 	if (!alive) {
+		send_proc(ckp->stratifier, "dropall");
+		send_proc(ckp->connector, "reject");
 		if (!ckp->chosen_server) {
 			LOGWARNING("Failed to connect to any servers as proxy, retrying in 5s!");
 			sleep(5);
