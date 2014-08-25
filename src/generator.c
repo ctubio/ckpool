@@ -311,6 +311,11 @@ retry:
 		LOGNOTICE("Submitting block data!");
 		if (submit_block(cs, buf + 12))
 			send_proc(ckp->stratifier, "block");
+	} else if (cmdmatch(buf, "checkaddr:")) {
+		if (validate_address(cs, buf + 10))
+			send_unix_msg(sockd, "true");
+		else
+			send_unix_msg(sockd, "false");
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ping")) {

@@ -2548,10 +2548,32 @@ int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_statsupdate;
 	ckpool_t *ckp = pi->ckp;
-	char *buf;
-	int ret;
+	char *buf, *msg;
+	int ret = 1;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
+
+	/* Wait for the generator to have something for us */
+	do {
+		if (!ping_main(ckp)) {
+			ret = 1;
+			goto out;
+		}
+		buf = send_recv_proc(ckp->generator, "ping");
+	} while (!buf);
+
+	ASPRINTF(&msg, "checkaddr:%s", ckp->btcaddress);
+	buf = send_recv_proc(ckp->generator, msg);
+	dealloc(msg);
+	if (!buf) {
+		LOGEMERG("Fatal: No response to checkaddr from generator");
+		goto out;
+	}
+	if (cmdmatch(buf, "false")) {
+		LOGEMERG("Fatal: btcaddress invalid accoring to bitcoind");
+		dealloc(buf);
+		goto out;
+	}
 
 	/* Store this for use elsewhere */
 	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
@@ -2562,14 +2584,6 @@ int stratifier(proc_instance_t *pi)
 	 * id on restarts */
 	blockchange_id = workbase_id = ((int64_t)time(NULL)) << 32;
 
-	/* Wait for the generator to have something for us */
-	do {
-		if (!ping_main(ckp)) {
-			ret = 1;
-			goto out;
-		}
-		buf = send_recv_proc(ckp->generator, "ping");
-	} while (!buf);
 	dealloc(buf);
 
 	if (!ckp->serverurl)
