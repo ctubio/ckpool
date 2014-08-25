@@ -34,7 +34,7 @@ static const char *scriptsig_header = "01000000010000000000000000000000000000000
 static uchar scriptsig_header_bin[41];
 
 static char pubkeytxnbin[25];
-static char pubkeytxn[52];
+static char donkeytxnbin[25];
 
 /* Add unaccounted shares when they arrive, remove them with each update of
  * rolling stats. */
@@ -281,9 +281,9 @@ static const char *ckdb_ids[] = {
 
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 {
+	uint64_t *u64, g64, d64 = 0;
 	char header[228];
 	int len, ofs = 0;
-	uint64_t *u64;
 	ts_t now;
 
 	/* Strings in wb should have been zero memset prior. Generate binary
@@ -324,7 +324,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len += wb->enonce1varlen;
 	len += wb->enonce2varlen;
 
-	wb->coinb2bin = ckzalloc(128);
+	wb->coinb2bin = ckzalloc(256);
 	memcpy(wb->coinb2bin, "\x0a\x63\x6b\x70\x6f\x6f\x6c", 7);
 	wb->coinb2len = 7;
 	if (ckp->btcsig) {
@@ -347,15 +347,32 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	memcpy(wb->coinb2bin + wb->coinb2len, "\xff\xff\xff\xff", 4);
 	wb->coinb2len += 4;
 
-	wb->coinb2bin[wb->coinb2len++] = 1;
+	// Generation value
+	g64 = wb->coinbasevalue;
+	if (ckp->donvalid) {
+		d64 = g64 / 200; // 0.5% donation
+		g64 -= d64; // To guarantee integers add up to the original coinbasevalue
+		wb->coinb2bin[wb->coinb2len++] = 2; // 2 transactions
+	} else
+		wb->coinb2bin[wb->coinb2len++] = 1; // 2 transactions
+
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
-	*u64 = htole64(wb->coinbasevalue);
+	*u64 = htole64(g64);
 	wb->coinb2len += 8;
 
 	wb->coinb2bin[wb->coinb2len++] = 25;
-
 	memcpy(wb->coinb2bin + wb->coinb2len, pubkeytxnbin, 25);
 	wb->coinb2len += 25;
+
+	if (ckp->donvalid) {
+		u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
+		*u64 = htole64(d64);
+		wb->coinb2len += 8;
+
+		wb->coinb2bin[wb->coinb2len++] = 25;
+		memcpy(wb->coinb2bin + wb->coinb2len, donkeytxnbin, 25);
+		wb->coinb2len += 25;
+	}
 
 	wb->coinb2len += 4; // Blank lock
 
@@ -1537,7 +1554,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 		double diff, const char *coinbase, int cblen, const char *nonce2, const char *nonce)
 {
 	int transactions = wb->transactions + 1;
-	char hexcoinbase[512], blockhash[68];
+	char hexcoinbase[1024], blockhash[68];
 	char *gbt_block, varint[12];
 	json_t *val = NULL;
 	char cdfield[64];
@@ -1557,7 +1574,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
-	gbt_block = ckalloc(512);
+	gbt_block = ckalloc(1024);
 	sprintf(gbt_block, "submitblock:");
 	__bin2hex(gbt_block + 12, data, 80);
 	if (transactions < 0xfd) {
@@ -2544,23 +2561,29 @@ static void *statsupdate(void *arg)
 	return NULL;
 }
 
+static bool test_address(ckpool_t *ckp, const char *address)
+{
+	bool ret = false;
+	char *buf, *msg;
+
+	ASPRINTF(&msg, "checkaddr:%s", address);
+	buf = send_recv_proc(ckp->generator, msg);
+	dealloc(msg);
+	if (!buf)
+		return ret;
+	ret = cmdmatch(buf, "true");
+	dealloc(buf);
+	return ret;
+}
+
 int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_statsupdate;
 	ckpool_t *ckp = pi->ckp;
+	int ret = 1;
 	char *buf;
-	int ret;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
-
-	/* Store this for use elsewhere */
-	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
-	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
-	__bin2hex(pubkeytxn, pubkeytxnbin, 25);
-
-	/* Set the initial id to time as high bits so as to not send the same
-	 * id on restarts */
-	blockchange_id = workbase_id = ((int64_t)time(NULL)) << 32;
 
 	/* Wait for the generator to have something for us */
 	do {
@@ -2570,6 +2593,27 @@ int stratifier(proc_instance_t *pi)
 		}
 		buf = send_recv_proc(ckp->generator, "ping");
 	} while (!buf);
+
+	if (!ckp->proxy) {
+		if (!test_address(ckp, ckp->btcaddress)) {
+			LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
+			goto out;
+		}
+
+		/* Store this for use elsewhere */
+		hex2bin(scriptsig_header_bin, scriptsig_header, 41);
+		address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
+
+		if (test_address(ckp, ckp->donaddress)) {
+			ckp->donvalid = true;
+			address_to_pubkeytxn(donkeytxnbin, ckp->donaddress);
+		}
+	}
+
+	/* Set the initial id to time as high bits so as to not send the same
+	 * id on restarts */
+	blockchange_id = workbase_id = ((int64_t)time(NULL)) << 32;
+
 	dealloc(buf);
 
 	if (!ckp->serverurl)

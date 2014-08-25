@@ -1200,8 +1200,9 @@ int main(int argc, char **argv)
 		}
 	}
 
+	ckp.donaddress = "14BMjogz69qe8hk9thyzbmR5pg34mVKB1e";
 	if (!ckp.btcaddress)
-		ckp.btcaddress = strdup("15qSxP1SQcUX3o4nhkfdbgyoWEFMomJ4rZ");
+		ckp.btcaddress = ckp.donaddress;
 	if (!ckp.blockpoll)
 		ckp.blockpoll = 500;
 	if (!ckp.update_interval)

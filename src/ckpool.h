@@ -152,6 +152,8 @@ struct ckpool_instance {
 	/* Coinbase data */
 	char *btcaddress; // Address to mine to
 	char *btcsig; // Optional signature to add to coinbase
+	char *donaddress; // Donation address
+	bool donvalid; // Donation address works on this network
 
 	/* Stratum options */
 	server_instance_t **servers;
