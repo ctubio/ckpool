@@ -1254,11 +1254,12 @@ static json_t *parse_subscribe(int64_t client_id, json_t *params_val)
  * user or creates a new one. */
 static user_instance_t *authorise_user(const char *workername)
 {
-	char *username = strdupa(workername);
+	char *base_username = strdupa(workername), *username;
 	user_instance_t *instance;
 
-	username = strsep(&username, ".");
-	username = strsep(&username, "_");
+	username = strsep(&base_username, "._");
+	if (!username || !strlen(username))
+		username = base_username;
 	if (strlen(username) > 127)
 		username[127] = '\0';
 
@@ -1392,7 +1393,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty workername parameter");
 		goto out;
 	}
-	if (!memcmp(buf, ".", 1)) {
+	if (!memcmp(buf, ".", 1) || !memcmp(buf, "_", 1)) {
 		*err_val = json_string("Empty username parameter");
 		goto out;
 	}
