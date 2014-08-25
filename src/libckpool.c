@@ -1536,6 +1536,10 @@ void decay_time(double *f, double fadd, double fsecs, double interval)
 	ftotal = 1.0 + fprop;
 	*f += (fadd / fsecs * fprop);
 	*f /= ftotal;
+	/* Sanity check to prevent meaningless super small numbers that
+	 * eventually underflow libjansson's real number interpretation. */
+	if (unlikely(*f < 2E-16))
+		*f = 0;
 }
 
 /* Convert a double value into a truncated string for displaying with its
