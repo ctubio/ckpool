@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.53"
+#define CKDB_VERSION DB_VERSION"-0.54"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1807,6 +1807,7 @@ static void setnow(tv_t *now)
 	now->tv_usec = spec.tv_nsec / 1000;
 }
 
+// Limits are all +/-1s since on the live machine all were well within that
 static void check_createdate_ccl(char *cmd, tv_t *cd)
 {
 	static tv_t last_cd;
@@ -1819,13 +1820,14 @@ static void check_createdate_ccl(char *cmd, tv_t *cd)
 	    cd->tv_sec >= (reload_timestamp.tv_sec + ROLL_S)) {
 		ccl_mismatch_abs++;
 		td = tvdiff(cd, &reload_timestamp);
-		if (td < -10 || td > ROLL_S + 10)
+		if (td < -1 || td > ROLL_S + 1) {
 			ccl_mismatch++;
-		filename = rotating_filename("", reload_timestamp.tv_sec);
-		tv_to_buf(cd, cd_buf1, sizeof(cd_buf1));
-		LOGERR("%s(): CCL contains mismatch data: cmd:%s CCL:%.10s cd:%s",
-			__func__, cmd, filename, cd_buf1);
-		free(filename);
+			filename = rotating_filename("", reload_timestamp.tv_sec);
+			tv_to_buf(cd, cd_buf1, sizeof(cd_buf1));
+			LOGERR("%s(): CCL contains mismatch data: cmd:%s CCL:%.10s cd:%s",
+				__func__, cmd, filename, cd_buf1);
+			free(filename);
+		}
 		if (ccl_mismatch_min > td)
 			ccl_mismatch_min = td;
 		if (ccl_mismatch_max < td)
@@ -1838,7 +1840,7 @@ static void check_createdate_ccl(char *cmd, tv_t *cd)
 		if (ccl_unordered_most > td)
 			ccl_unordered_most = td;
 	}
-	if (td < -2.5) {
+	if (td < -1.0) {
 		ccl_unordered++;
 		tv_to_buf(&last_cd, cd_buf1, sizeof(cd_buf1));
 		tv_to_buf(cd, cd_buf2, sizeof(cd_buf2));
