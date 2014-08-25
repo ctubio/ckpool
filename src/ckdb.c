@@ -9207,9 +9207,9 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 	}
 
 	LOGERR("RESULT: %s->%s Total %"PRIu64" workinfoid %"PRId64"-%"PRId64
-		" missing: %"PRIu64" different: %"PRIu64,
+		" %s missing: %"PRIu64" different: %"PRIu64,
 		leftname, rightname, total, first_used, last_used,
-		missing, diff);
+		rightname, missing, diff);
 	if (miss_first) {
 		tv_to_buf(&miss_first_cd, cd_buf1, sizeof(cd_buf1));
 		tv_to_buf(&miss_last_cd, cd_buf2, sizeof(cd_buf2));
@@ -9693,15 +9693,23 @@ int main(int argc, char **argv)
 			case 'k':
 				ckp.killold = true;
 				break;
-			case 'n':
-				ckp.name = strdup(optarg);
-				break;
 			case 'l':
 				ckp.loglevel = atoi(optarg);
 				if (ckp.loglevel < LOG_EMERG || ckp.loglevel > LOG_DEBUG) {
 					quit(1, "Invalid loglevel (range %d - %d): %d",
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
+				break;
+			case 'n':
+				ckp.name = strdup(optarg);
+				break;
+			case 'p':
+				db_pass = strdup(optarg);
+				kill = optarg;
+				if (*kill)
+					*(kill++) = ' ';
+				while (*kill)
+					*(kill++) = '\0';
 				break;
 			case 'r':
 				restorefrom = strdup(optarg);
@@ -9717,14 +9725,6 @@ int main(int argc, char **argv)
 				break;
 			case 'v':
 				exit(0);
-			case 'p':
-				db_pass = strdup(optarg);
-				kill = optarg;
-				if (*kill)
-					*(kill++) = ' ';
-				while (*kill)
-					*(kill++) = '\0';
-				break;
 			case 'y':
 				confirm_sharesummary = true;
 				break;
