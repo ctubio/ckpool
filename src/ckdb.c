@@ -8110,9 +8110,9 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
     begin_workinfoid that has shares accounted to the total,
     up to the createdate of the block
    The user average hashrate would be:
-  	diffacc_user * 2^32 / pplns_elapsed
+	diffacc_user * 2^32 / pplns_elapsed
    PPLNS fraction of the block would be:
-  	diffacc_user / diffacc_total
+	diffacc_user / diffacc_total
 */
 
 static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
@@ -8129,8 +8129,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_TREE *mu_root;
 	K_STORE *mu_store;
 	int32_t height;
-	int64_t workinfoid;
-	int64_t end_workinfoid;
+	int64_t workinfoid, end_workinfoid;
 	int64_t begin_workinfoid;
 	tv_t cd, begin_tv, end_tv;
 	K_TREE_CTX ctx[1];
@@ -8176,6 +8175,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	hex2bin(ndiffbin, DATA_WORKINFO(w_item)->bits, 4);
 	ndiff = diff_from_nbits(ndiffbin);
+	begin_workinfoid = 0;
 	total = 0;
 
 	sharesummary.workinfoid = workinfoid;
