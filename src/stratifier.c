@@ -2594,18 +2594,20 @@ int stratifier(proc_instance_t *pi)
 		buf = send_recv_proc(ckp->generator, "ping");
 	} while (!buf);
 
-	if (!test_address(ckp, ckp->btcaddress)) {
-		LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
-		goto out;
-	}
+	if (!ckp->proxy) {
+		if (!test_address(ckp, ckp->btcaddress)) {
+			LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
+			goto out;
+		}
 
-	/* Store this for use elsewhere */
-	hex2bin(scriptsig_header_bin, scriptsig_header, 41);
-	address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
+		/* Store this for use elsewhere */
+		hex2bin(scriptsig_header_bin, scriptsig_header, 41);
+		address_to_pubkeytxn(pubkeytxnbin, ckp->btcaddress);
 
-	if (test_address(ckp, ckp->donaddress)) {
-		ckp->donvalid = true;
-		address_to_pubkeytxn(donkeytxnbin, ckp->donaddress);
+		if (test_address(ckp, ckp->donaddress)) {
+			ckp->donvalid = true;
+			address_to_pubkeytxn(donkeytxnbin, ckp->donaddress);
+		}
 	}
 
 	/* Set the initial id to time as high bits so as to not send the same
