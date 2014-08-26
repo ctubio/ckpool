@@ -209,6 +209,7 @@ static int gen_loop(proc_instance_t *pi)
 {
 	int sockd = -1, ret = 0, selret;
 	server_instance_t *si = NULL;
+	bool reconnecting = false;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
 	bool started = false;
@@ -218,14 +219,20 @@ static int gen_loop(proc_instance_t *pi)
 	char hash[68];
 
 reconnect:
-	if (si)
+	if (si) {
 		kill_server(si);
+		reconnecting = true;
+	}
 	si = live_server(ckp);
 	if (!si)
 		goto out;
 
 	gbt = si->data;
 	cs = &si->cs;
+	if (reconnecting) {
+		LOGWARNING("Failed over to bitcoind: %s:%s", cs->url, cs->port);
+		reconnecting = false;
+	}
 
 retry:
 	do {
@@ -238,7 +245,7 @@ retry:
 	} while (selret < 1);
 
 	if (unlikely(cs->fd < 0)) {
-		LOGWARNING("Bitcoind socket invalidated, will atempt failover");
+		LOGWARNING("Bitcoind socket invalidated, will attempt failover");
 		goto reconnect;
 	}
 
