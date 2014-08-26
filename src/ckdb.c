@@ -10266,6 +10266,7 @@ static struct option long_options[] = {
 static void sighandler(int sig)
 {
 	LOGWARNING("Received signal %d, shutting down", sig);
+	everyone_die = true;
 	cksleep_ms(420);
 	exit(0);
 }
