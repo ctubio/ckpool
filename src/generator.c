@@ -1353,15 +1353,24 @@ static void kill_proxy(proxy_instance_t *proxi)
 static int proxy_loop(proc_instance_t *pi)
 {
 	int sockd = -1, ret = 0, selret;
+	proxy_instance_t *proxi = NULL;
+	bool reconnecting = false;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
-	proxy_instance_t *proxi;
 	char *buf = NULL;
 
 reconnect:
+	if (proxi)
+		reconnecting = true;
 	proxi = live_proxy(ckp);
 	if (!proxi)
 		goto out;
+	if (reconnecting) {
+		connsock_t *cs = proxi->cs;
+		LOGWARNING("Successfully reconnected to %s:%s as proxy",
+			   cs->url, cs->port);
+		reconnecting = false;
+	}
 
 	/* We've just subscribed and authorised so tell the stratifier to
 	 * retrieve the first subscription. */
