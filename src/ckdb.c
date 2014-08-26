@@ -10263,6 +10263,13 @@ static struct option long_options[] = {
 	{ 0, 0, 0, 0 }
 };
 
+static void sighandler(int sig)
+{
+	LOGWARNING("Received signal %d, shutting down", sig);
+	cksleep_ms(420);
+	exit(0);
+}
+
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
@@ -10426,6 +10433,7 @@ int main(int argc, char **argv)
 
 		create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
+		handler.sa_handler = sighandler;
 		handler.sa_flags = 0;
 		sigemptyset(&handler.sa_mask);
 		sigaction(SIGTERM, &handler, NULL);
