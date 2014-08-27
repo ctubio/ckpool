@@ -271,6 +271,12 @@ function pgtop($dotop, $user, $douser)
 	$top .= '<span class=topdes>Network, Last Block:</span>';
 	$top .= "<span class=topdat>$nlb</span>";
 	$top .= '</td><td>';
+	$top .= '<span class=topdes>Users:</span>';
+	$top .= '<span class=topdat>'.$info['users'].'</span>';
+	$top .= '<br>';
+	$top .= '<span class=topdes>Workers:</span>';
+	$top .= '<span class=topdat>'.$info['workers'].'</span>';
+	$top .= '</td><td>';
 
 	if ($douser === true)
 	{
