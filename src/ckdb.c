@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.68"
+#define CKDB_VERSION DB_VERSION"-0.69"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -764,6 +764,7 @@ enum cmd_values {
 	CMD_SHUTDOWN,
 	CMD_PING,
 	CMD_VERSION,
+	CMD_LOGLEVEL,
 	CMD_SHARELOG,
 	CMD_AUTH,
 	CMD_ADDUSER,
@@ -8467,20 +8468,20 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 /* The socket command format is as follows:
  *  Basic structure:
- *    cmd.id.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
+ *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
  *   cmd is the cmd_str from the table below
- *   id is a string of anything but '.' - preferably just digits and/or letters
+ *   ID is a string of anything but '.' - preferably just digits and/or letters
  *   FLDSEP is a single character macro - defined in the code near the top
  *    no spaces around FLDSEP - they are added above for readability
- *     i.e. it's really: cmd.id.fld1=value1FLDSEPfld2...
+ *     i.e. it's really: cmd.ID.fld1=value1FLDSEPfld2...
  *   fldN names cannot contain '=' or FLDSEP
  *   valueN values cannot contain FLDSEP except for the json field (see below)
  *
- *  The reply will be id.timestamp.status.information...
+ *  The reply will be ID.timestamp.status.information...
  *  Status 'ok' means it succeeded
  *  Some cmds you can optionally send as just 'cmd' if 'noid' below is true
  *   then the reply will be .timestamp.status.information
- *   i.e. a zero length 'id' at the start of the reply
+ *   i.e. a zero length 'ID' at the start of the reply
  *
  *  Data from ckpool starts with a fld1: json={...} of field data
  *  This is assumed to be the only field data sent and any other fields after
@@ -8492,15 +8493,15 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
  *
  *  Examples of the commands not from ckpool with an example reply
  *  STAMP is the unix timestamp in seconds
- *   With no id:
+ *   With no ID:
  *	ping
  *	.STAMP.ok.pong
  *
  *	shutdown
  *	.STAMP.ok.exiting
  *
- *   With an id
- *   In each case the id in these examples, also returned, is 'ID' which can
+ *   With an ID
+ *   In each case the ID in these examples, also returned, is 'ID' which can
  *   of course be most any string, as stated above
  *   For commands with multiple fld=value the space between them must be typed
  *   as a TAB
@@ -8509,6 +8510,10 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
  *
  *	newid.ID.idname=fooid idvalue=1234
  *	ID.STAMP.ok.added fooid 1234
+ *
+ *  loglevel is a special case to make it quick and easy to use:
+ *	loglevel.ID
+ *  sets the loglevel to atoi(ID)
  */
 static struct CMDS {
 	enum cmd_values cmd_val;
@@ -8522,6 +8527,7 @@ static struct CMDS {
 	{ CMD_SHUTDOWN,	"shutdown",	true,	false,	NULL,		ACCESS_SYSTEM },
 	{ CMD_PING,	"ping",		true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
 	{ CMD_VERSION,	"version",	true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
+	{ CMD_LOGLEVEL,	"loglevel",	true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
 	{ CMD_SHARELOG,	STR_WORKINFO,	false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_SHARES,	false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_SHAREERRORS, false,	true,	cmd_sharelog,	ACCESS_POOL },
@@ -9053,6 +9059,7 @@ static void *socketer(__maybe_unused void *arg)
 	size_t siz;
 	tv_t now, cd;
 	bool dup, want_first;
+	int loglevel, oldloglevel;
 
 	pthread_detach(pthread_self());
 
@@ -9167,6 +9174,29 @@ static void *socketer(__maybe_unused void *arg)
 						snprintf(reply, sizeof(reply),
 							 "%s.%ld.ok.CKDB V%s",
 							 id, now.tv_sec, CKDB_VERSION);
+						send_unix_msg(sockd, reply);
+						break;
+					case CMD_LOGLEVEL:
+						oldloglevel = pi->ckp->loglevel;
+						loglevel = atoi(id);
+						LOGDEBUG("Listener received loglevel %d currently %d A",
+							 loglevel, oldloglevel);
+						if (loglevel < LOG_EMERG || loglevel > LOG_DEBUG) {
+							snprintf(reply, sizeof(reply),
+								 "%s.%ld.ERR.invalid loglevel %d"
+								 " - currently %d",
+								 id, now.tv_sec,
+								 loglevel, oldloglevel);
+						} else {
+							pi->ckp->loglevel = loglevel;
+							snprintf(reply, sizeof(reply),
+								 "%s.%ld.ok.loglevel now %d - was %d",
+								 id, now.tv_sec,
+								 pi->ckp->loglevel, oldloglevel);
+						}
+						// Do this twice since the loglevel may have changed
+						LOGDEBUG("Listener received loglevel %d currently %d B",
+							 loglevel, oldloglevel);
 						send_unix_msg(sockd, reply);
 						break;
 					// Always process immediately:
@@ -9400,6 +9430,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_SHUTDOWN:
 			case CMD_PING:
 			case CMD_VERSION:
+			case CMD_LOGLEVEL:
 			// Non pool commands, shouldn't be there
 			case CMD_ADDUSER:
 			case CMD_NEWPASS:
