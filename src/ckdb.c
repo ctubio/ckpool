@@ -4976,15 +4976,15 @@ flail:
 		else {
 			char pct[16] = "?";
 			char est[16] = "";
+			K_ITEM *w_item;
 
-			if (pool.diffacc) {
-				K_ITEM *w_item;
-				w_item = find_workinfo(DATA_BLOCKS(b_item)->workinfoid);
-				if (w_item) {
-					char wdiffbin[TXT_SML+1];
-					double wdiff;
-					hex2bin(wdiffbin, DATA_WORKINFO(w_item)->bits, 4);
-					wdiff = diff_from_nbits(wdiffbin);
+			w_item = find_workinfo(DATA_BLOCKS(b_item)->workinfoid);
+			if (w_item) {
+				char wdiffbin[TXT_SML+1];
+				double wdiff;
+				hex2bin(wdiffbin, DATA_WORKINFO(w_item)->bits, 4);
+				wdiff = diff_from_nbits(wdiffbin);
+				if (wdiff > 0.0) {
 					snprintf(pct, sizeof(pct), "%.2f",
 						 100.0 * pool.diffacc / wdiff);
 				}

@@ -199,7 +199,18 @@ function pgtop($dotop, $user, $douser)
 	}
 
 	if (isset($info['blockacc']))
-		$pac = number_format($info['blockacc'], 0);
+	{
+		$acc = $info['blockacc'];
+		$pac = number_format($acc, 0);
+		if ($acc >= 1000000)
+			$pac .= ' '.siprefmt($acc);
+		if (isset($info['currndiff']))
+		{
+			$cur = $info['currndiff'];
+			if ($cur != '?' && $cur > 0.0)
+				$pac .= ' ('.number_format(100.0*$acc/$cur, 2).'%)';
+		}
+	}
 
 	if (isset($info['blockerr']))
 		$per = number_format($info['blockerr'], 0);
