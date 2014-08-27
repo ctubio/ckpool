@@ -3601,7 +3601,6 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	if (conned)
 		PQfinish(conn);
 
-bye:
 	if (ss_already || ss_failed || shares_dumped) {
 		/* If all were already aged, and no shares
 		 * then we don't want a message */
@@ -3614,7 +3613,7 @@ bye:
 				shares_dumped);
 		}
 	}
-
+bye:
 	return ok;
 }
 
@@ -9218,7 +9217,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_LOGLEVEL:
 						if (!*id) {
 							LOGDEBUG("Listener received loglevel, currently %d",
-								 oldloglevel);
+								 pi->ckp->loglevel);
 							snprintf(reply, sizeof(reply),
 								 "%s.%ld.ok.loglevel currently %d",
 								 id, now.tv_sec,
