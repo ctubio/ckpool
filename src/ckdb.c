@@ -3486,6 +3486,7 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	K_TREE_CTX ss_ctx[1], s_ctx[1], tmp_ctx[1];
 	char cd_buf[DATE_BUFSIZ];
 	int64_t workinfoid;
+	int64_t ss_tot, ss_already, ss_failed, shares_tot, shares_dumped;
 	SHARESUMMARY sharesummary;
 	SHARES shares;
 	bool ok = false, conned = false, skipupdate;
@@ -3519,15 +3520,18 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	sharesummary.workername[0] = '\0';
 
 	ok = true;
+	ss_tot = ss_already = ss_failed = shares_tot = shares_dumped = 0;
 	ss_look.data = (void *)(&sharesummary);
 	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &ss_look, cmp_sharesummary_workinfoid, ss_ctx);
 	while (ss_item && DATA_SHARESUMMARY(ss_item)->workinfoid == workinfoid) {
+		ss_tot++;
 		error[0] = '\0';
 		skipupdate = false;
 		/* Reloading during a confirm will not have any old data
 		 * so finding an aged sharesummary here is an error */
 		if (reloading) {
 			if (DATA_SHARESUMMARY(ss_item)->complete[0] == SUMMARY_COMPLETE) {
+				ss_already++;
 				skipupdate = true;
 				if (confirm_sharesummary) {
 					LOGERR("%s(): Duplicate %s found during confirm %"PRId64"/%s/%"PRId64,
@@ -3546,6 +3550,7 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 			}
 
 			if (!sharesummary_update(conn, NULL, NULL, ss_item, by, code, inet, cd)) {
+				ss_failed++;
 				LOGERR("%s(): Failed to age share summary %"PRId64"/%s/%"PRId64,
 					__func__, DATA_SHARESUMMARY(ss_item)->userid,
 					DATA_SHARESUMMARY(ss_item)->workername,
@@ -3570,9 +3575,12 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 			    strcmp(DATA_SHARES(s_item)->workername, shares.workername) != 0)
 				break;
 
+			shares_tot++;
 			tmp_item = next_in_ktree(s_ctx);
 			shares_root = remove_from_ktree(shares_root, s_item, cmp_shares, tmp_ctx);
 			k_unlink_item(shares_store, s_item);
+			if (reloading && skipupdate)
+				shares_dumped++;
 			if (reloading && skipupdate && !error[0]) {
 				snprintf(error, sizeof(error),
 					 "reload found aged shares: %"PRId64"/%"PRId64"/%s",
@@ -3594,6 +3602,13 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 		PQfinish(conn);
 
 bye:
+	if (ss_already || ss_failed || shares_dumped) {
+		LOGERR("%s(): Summary aging of %s/%s sstotal=%"PRId64" already=%"PRId64
+			" failed=%"PRId64", sharestotal=%"PRId64" dumped=%"PRId64,
+			__func__, workinfoidstr, poolinstance, ss_tot, ss_already,
+			ss_failed, shares_tot, shares_dumped);
+	}
+
 	return ok;
 }
 
