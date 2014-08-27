@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.69"
+#define CKDB_VERSION DB_VERSION"-0.70"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -3603,10 +3603,16 @@ static bool workinfo_age(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 bye:
 	if (ss_already || ss_failed || shares_dumped) {
-		LOGERR("%s(): Summary aging of %s/%s sstotal=%"PRId64" already=%"PRId64
-			" failed=%"PRId64", sharestotal=%"PRId64" dumped=%"PRId64,
-			__func__, workinfoidstr, poolinstance, ss_tot, ss_already,
-			ss_failed, shares_tot, shares_dumped);
+		/* If all were already aged, and no shares
+		 * then we don't want a message */
+		if (!(ss_already == ss_tot && shares_tot == 0)) {
+			LOGERR("%s(): Summary aging of %s/%s sstotal=%"PRId64
+				" already=%"PRId64" failed=%"PRId64
+				", sharestotal=%"PRId64" dumped=%"PRId64,
+				__func__, workinfoidstr, poolinstance, ss_tot,
+				ss_already, ss_failed, shares_tot,
+				shares_dumped);
+		}
 	}
 
 	return ok;
