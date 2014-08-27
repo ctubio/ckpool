@@ -89,7 +89,7 @@ make
 
 Building from git also requires autoconf and automake
 
-sudo apt-get install build-essential libpq-dev autoconf automake
+sudo apt-get install build-essential libpq-dev autoconf automake libtool
 ./autogen.sh
 ./configure
 make
