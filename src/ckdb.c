@@ -9192,26 +9192,35 @@ static void *socketer(__maybe_unused void *arg)
 						send_unix_msg(sockd, reply);
 						break;
 					case CMD_LOGLEVEL:
-						oldloglevel = pi->ckp->loglevel;
-						loglevel = atoi(id);
-						LOGDEBUG("Listener received loglevel %d currently %d A",
-							 loglevel, oldloglevel);
-						if (loglevel < LOG_EMERG || loglevel > LOG_DEBUG) {
+						if (!*id) {
+							LOGDEBUG("Listener received loglevel, currently %d",
+								 oldloglevel);
 							snprintf(reply, sizeof(reply),
-								 "%s.%ld.ERR.invalid loglevel %d"
-								 " - currently %d",
+								 "%s.%ld.ok.loglevel currently %d",
 								 id, now.tv_sec,
-								 loglevel, oldloglevel);
+								 pi->ckp->loglevel);
 						} else {
-							pi->ckp->loglevel = loglevel;
-							snprintf(reply, sizeof(reply),
-								 "%s.%ld.ok.loglevel now %d - was %d",
-								 id, now.tv_sec,
-								 pi->ckp->loglevel, oldloglevel);
+							oldloglevel = pi->ckp->loglevel;
+							loglevel = atoi(id);
+							LOGDEBUG("Listener received loglevel %d currently %d A",
+								 loglevel, oldloglevel);
+							if (loglevel < LOG_EMERG || loglevel > LOG_DEBUG) {
+								snprintf(reply, sizeof(reply),
+									 "%s.%ld.ERR.invalid loglevel %d"
+									 " - currently %d",
+									 id, now.tv_sec,
+									 loglevel, oldloglevel);
+							} else {
+								pi->ckp->loglevel = loglevel;
+								snprintf(reply, sizeof(reply),
+									 "%s.%ld.ok.loglevel now %d - was %d",
+									 id, now.tv_sec,
+									 pi->ckp->loglevel, oldloglevel);
+							}
+							// Do this twice since the loglevel may have changed
+							LOGDEBUG("Listener received loglevel %d currently %d B",
+								 loglevel, oldloglevel);
 						}
-						// Do this twice since the loglevel may have changed
-						LOGDEBUG("Listener received loglevel %d currently %d B",
-							 loglevel, oldloglevel);
 						send_unix_msg(sockd, reply);
 						break;
 					// Always process immediately:
