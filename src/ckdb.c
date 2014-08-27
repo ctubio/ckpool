@@ -8133,7 +8133,7 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
 	block_ndiff * diff_times + diff_add
    The pplns_elapsed time of the shares is from the createdate of the
     begin_workinfoid that has shares accounted to the total,
-    up to the createdate of the block
+    up to the createdate of the last share
    The user average hashrate would be:
 	diffacc_user * 2^32 / pplns_elapsed
    PPLNS fraction of the block would be:
@@ -8158,7 +8158,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int64_t workinfoid, end_workinfoid;
 	int64_t begin_workinfoid;
 	int64_t share_count;
-	tv_t cd, begin_tv, end_tv;
+	char tv_buf[DATE_BUFSIZ];
+	tv_t cd, begin_tv, block_tv, end_tv;
 	K_TREE_CTX ctx[1];
 	double ndiff, total, elapsed;
 	double diff_times = 1.0;
@@ -8209,6 +8210,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		return strdup(reply);
 	}
 	workinfoid = DATA_BLOCKS(b_item)->workinfoid;
+	copy_tv(&block_tv, &(DATA_BLOCKS(b_item)->createdate));
 	copy_tv(&end_tv, &(DATA_BLOCKS(b_item)->createdate));
 
 	w_item = find_workinfo(workinfoid);
@@ -8242,7 +8244,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	mu_store = k_new_store(miningpayouts_free);
 	mu_root = new_ktree();
 	end_workinfoid = DATA_SHARESUMMARY(ss_item)->workinfoid;
-	// add up all sharesummaries until >= diff_want
+	/* add up all sharesummaries until >= diff_want
+	 * also record the latest lastshare - that will be the end pplns time
+	 *  which will be >= block_tv */
 	while (ss_item && total < diff_want) {
 		switch (DATA_SHARESUMMARY(ss_item)->complete[0]) {
 			case SUMMARY_CONFIRM:
@@ -8259,6 +8263,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		share_count++;
 		total += (int64_t)(DATA_SHARESUMMARY(ss_item)->diffacc);
 		begin_workinfoid = DATA_SHARESUMMARY(ss_item)->workinfoid;
+		if (tv_newer(&end_tv, &(DATA_SHARESUMMARY(ss_item)->lastshare)))
+			copy_tv(&end_tv, &(DATA_SHARESUMMARY(ss_item)->lastshare));
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     DATA_SHARESUMMARY(ss_item)->userid,
 				     (int64_t)(DATA_SHARESUMMARY(ss_item)->diffacc));
@@ -8301,12 +8307,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	copy_tv(&begin_tv, &(DATA_WORKINFO(wb_item)->createdate));
-	/* Elapsed is short by the remainder of the block's workinfoid
-	 *  after the block was found, but we include all shares
-	 *  that were accepted as part of the block's workinfoid anyway
-	 * All shares accepted in a workinfoid after the blocks workinfoid
+	/* Elapsed is from the start of the first workinfoid used to the time
+	 *  of the last share counted -
+	 *  which can be after the block, but must have the same workinfoid as
+	 *  the block, if it is after the block
+	 * All shares accepted in all workinfoids after the block's workinfoid
 	 *  will not be creditied in this block no matter what the height
-	 *  of the workinfoid - but will be candidates for the next block */
+	 *  of their workinfoid - but will be candidates for the next block */
 	elapsed = tvdiff(&end_tv, &begin_tv);
 
 	APPEND_REALLOC_INIT(buf, off, len);
@@ -8357,6 +8364,16 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		mu_item = next_in_ktree(ctx);
 	}
 	snprintf(tmp, sizeof(tmp), "rows=%d%c", rows, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	tv_to_buf(&begin_tv, tv_buf, sizeof(tv_buf));
+	snprintf(tmp, sizeof(tmp), "begin_stamp=%s%c", tv_buf, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	tv_to_buf(&block_tv, tv_buf, sizeof(tv_buf));
+	snprintf(tmp, sizeof(tmp), "block_stamp=%s%c", tv_buf, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	tv_to_buf(&end_tv, tv_buf, sizeof(tv_buf));
+	snprintf(tmp, sizeof(tmp), "end_stamp=%s%c", tv_buf, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c", ndiff, FLDSEP);
