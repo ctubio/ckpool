@@ -1731,12 +1731,12 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 {
 	bool share = false, result = false, invalid = true, submit = false;
 	user_instance_t *user_instance = client->user_instance;
-	const char *user, *job_id, *nonce2, *ntime, *nonce;
 	double diff = client->diff, wdiff = 0, sdiff = -1;
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
+	const char *user, *job_id, *ntime, *nonce;
+	char *fname = NULL, *s, *nonce2;
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
-	char *fname = NULL, *s;
 	char idstring[20];
 	uint32_t ntime32;
 	workbase_t *wb;
@@ -1772,7 +1772,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = JSON_ERR(err);
 		goto out;
 	}
-	nonce2 = json_string_value(json_array_get(params_val, 2));
+	nonce2 = (char *)json_string_value(json_array_get(params_val, 2));
 	if (unlikely(!nonce2 || !strlen(nonce2))) {
 		err = SE_NO_NONCE2;
 		*err_val = JSON_ERR(err);
@@ -1812,6 +1812,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	wdiff = wb->diff;
 	strcpy(idstring, wb->idstring);
 	ASPRINTF(&fname, "%s.sharelog", wb->logdir);
+	/* Fix broken clients sending too many chars */
+	if ((int)strlen(nonce2) > wb->enonce2varlen * 2)
+		nonce2[wb->enonce2varlen * 2] = '\0';
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 	bswap_256(sharehash, hash);
 	__bin2hex(hexhash, sharehash, 32);
@@ -1821,7 +1824,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		goto out_unlock;
 	}
-	if ((int)strlen(nonce2) != wb->enonce2varlen * 2) {
+	if ((int)strlen(nonce2) < wb->enonce2varlen * 2) {
 		err = SE_INVALID_NONCE2;
 		*err_val = JSON_ERR(err);
 		goto out_unlock;
