@@ -256,7 +256,7 @@ function pgtop($dotop, $user, $douser)
  $top .= '<div class=topd>';
  if ($dotop === true)
  {
-	$top .= '<table width=100%><tr><td>';
+	$top .= '<table cellpadding=0 cellspacing=0 border=0 width=100%><tr><td>';
 	$top .= '<span class=topdes>CKPool:</span>';
 	$top .= "<span class=topdat>$phr</span>";
 	$top .= '<br>';
@@ -284,10 +284,11 @@ function pgtop($dotop, $user, $douser)
 		{
 			$top .= "
 <form action=index.php method=POST>
-User: <input type=text name=User size=10 value=''>
-Pass: <input type=password name=Pass size=10 value=''>
-&nbsp;<input type=submit name=Login value=Login>
-&nbsp;<input type=submit name=Register value=Register>
+<table cellpadding=0 cellspacing=0 border=0><tr>
+<td>User:</td><td><input type=text name=User size=10 value=''></td>
+<td>&nbsp;<input type=submit name=Login value=Login></td></tr><tr>
+<td>Pass:</td><td><input type=password name=Pass size=10 value=''></td>
+<td>&nbsp;&nbsp;<input type=submit name=Register value=Register></td></tr></table>
 </form>";
 		}
 		else
