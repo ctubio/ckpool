@@ -202,8 +202,6 @@ function pgtop($dotop, $user, $douser)
 	{
 		$acc = $info['blockacc'];
 		$pac = number_format($acc, 0);
-		if ($acc >= 1000000)
-			$pac .= ' '.siprefmt($acc);
 		if (isset($info['currndiff']))
 		{
 			$cur = $info['currndiff'];
