@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.66"
+#define CKDB_VERSION DB_VERSION"-0.68"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -8100,12 +8100,15 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
 /* Find the block_workinfoid of the block requested
     then add all it's diffacc shares
     then keep stepping back shares until diffacc_total matches or exceeds
-     the blocks network difficulty (block_ndiff) - this is begin_workinfoid
+     the number required (diff_want) - this is begin_workinfoid
      (also summarising diffacc per user)
     then keep stepping back until we complete the current begin_workinfoid
      (also summarising diffacc per user)
    This will give us the total number of diff1 shares (diffacc_total)
     to use for the payment calculations
+   The value of diff_want defaults to the block's network difficulty
+    (block_ndiff) but can be changed with diff_times and diff_add to:
+	block_ndiff * diff_times + diff_add
    The pplns_elapsed time of the shares is from the createdate of the
     begin_workinfoid that has shares accounted to the total,
     up to the createdate of the block
@@ -8122,7 +8125,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 {
 	char reply[1024], tmp[1024], *buf;
 	size_t siz = sizeof(reply);
-	K_ITEM look, *i_height, *b_item, *w_item, *ss_item;
+	K_ITEM *i_height, *i_difftimes, *i_diffadd, *i_allowaged;
+	K_ITEM look, *b_item, *w_item, *ss_item;
 	K_ITEM *mu_item, *wb_item, *u_item;
 	SHARESUMMARY sharesummary;
 	BLOCKS blocks;
@@ -8131,9 +8135,14 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int32_t height;
 	int64_t workinfoid, end_workinfoid;
 	int64_t begin_workinfoid;
+	int64_t share_count;
 	tv_t cd, begin_tv, end_tv;
 	K_TREE_CTX ctx[1];
 	double ndiff, total, elapsed;
+	double diff_times = 1.0;
+	double diff_add = 0.0;
+	double diff_want;
+	bool allow_aged = false;
 	char ndiffbin[TXT_SML+1];
 	size_t len, off;
 	int rows;
@@ -8143,8 +8152,21 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	i_height = require_name(trf_root, "height", 1, NULL, reply, siz);
 	if (!i_height)
 		return strdup(reply);
-
 	TXT_TO_INT("height", DATA_TRANSFER(i_height)->data, height);
+
+	i_difftimes = optional_name(trf_root, "diff_times", 1, NULL);
+	if (i_difftimes)
+		TXT_TO_DOUBLE("diff_times", DATA_TRANSFER(i_difftimes)->data, diff_times);
+
+	i_diffadd = optional_name(trf_root, "diff_add", 1, NULL);
+	if (i_diffadd)
+		TXT_TO_DOUBLE("diff_add", DATA_TRANSFER(i_diffadd)->data, diff_add);
+
+	i_allowaged = optional_name(trf_root, "allow_aged", 1, NULL);
+	if (i_allowaged) {
+		if (toupper(DATA_TRANSFER(i_allowaged)->data[0]) == TRUE_STR[0])
+			allow_aged = true;
+	}
 
 	cd.tv_sec = cd.tv_usec = 0L;
 	blocks.height = height + 1;
@@ -8175,7 +8197,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	hex2bin(ndiffbin, DATA_WORKINFO(w_item)->bits, 4);
 	ndiff = diff_from_nbits(ndiffbin);
+	diff_want = ndiff * diff_times + diff_add;
 	begin_workinfoid = 0;
+	share_count = 0;
 	total = 0;
 
 	sharesummary.workinfoid = workinfoid;
@@ -8196,8 +8220,21 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	mu_store = k_new_store(miningpayouts_free);
 	mu_root = new_ktree();
 	end_workinfoid = DATA_SHARESUMMARY(ss_item)->workinfoid;
-	// add up all sharesummaries until >= ndiff
-	while (ss_item && total < ndiff) {
+	// add up all sharesummaries until >= diff_want
+	while (ss_item && total < diff_want) {
+		switch (DATA_SHARESUMMARY(ss_item)->complete[0]) {
+			case SUMMARY_CONFIRM:
+				break;
+			case SUMMARY_COMPLETE:
+				if (allow_aged)
+					break;
+			default:
+				snprintf(reply, siz,
+					 "ERR.sharesummary not ready in workinfo %"PRId64,
+					 DATA_SHARESUMMARY(ss_item)->workinfoid);
+				goto shazbot;
+		}
+		share_count++;
 		total += (int64_t)(DATA_SHARESUMMARY(ss_item)->diffacc);
 		begin_workinfoid = DATA_SHARESUMMARY(ss_item)->workinfoid;
 		mu_root = upd_add_mu(mu_root, mu_store,
@@ -8208,6 +8245,19 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	// include all the rest of the sharesummaries with begin_workinfoid
 	while (ss_item && DATA_SHARESUMMARY(ss_item)->workinfoid == begin_workinfoid) {
+		switch (DATA_SHARESUMMARY(ss_item)->complete[0]) {
+			case SUMMARY_CONFIRM:
+				break;
+			case SUMMARY_COMPLETE:
+				if (allow_aged)
+					break;
+			default:
+				snprintf(reply, siz,
+					 "ERR.sharesummary not ready in workinfo %"PRId64,
+					 DATA_SHARESUMMARY(ss_item)->workinfoid);
+				goto shazbot;
+		}
+		share_count++;
 		total += (int64_t)(DATA_SHARESUMMARY(ss_item)->diffacc);
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     DATA_SHARESUMMARY(ss_item)->userid,
@@ -8234,7 +8284,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	 *  that were accepted as part of the block's workinfoid anyway
 	 * All shares accepted in a workinfoid after the blocks workinfoid
 	 *  will not be creditied in this block no matter what the height
-	 *  of the workinfo - but will be candidates for the next block */
+	 *  of the workinfoid - but will be candidates for the next block */
 	elapsed = tvdiff(&end_tv, &begin_tv);
 
 	APPEND_REALLOC_INIT(buf, off, len);
@@ -8248,8 +8298,6 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "begin_workinfoid=%"PRId64"%c", begin_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "diffacc_total=%.0f%c", total, FLDSEP);
-	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c", ndiff, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "pplns_elapsed=%f%c", elapsed, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
@@ -8286,7 +8334,18 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 		mu_item = next_in_ktree(ctx);
 	}
-	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	snprintf(tmp, sizeof(tmp), "rows=%d%c", rows, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c", ndiff, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "diff_times=%f%c", diff_times, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "diff_add=%f%c", diff_add, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "diff_want=%f%c", diff_want, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "share_count=%"PRId64, share_count);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	mu_root = free_ktree(mu_root, NULL);
@@ -10204,6 +10263,14 @@ static struct option long_options[] = {
 	{ 0, 0, 0, 0 }
 };
 
+static void sighandler(int sig)
+{
+	LOGWARNING("Received signal %d, shutting down", sig);
+	everyone_die = true;
+	cksleep_ms(420);
+	exit(0);
+}
+
 int main(int argc, char **argv)
 {
 	struct sigaction handler;
@@ -10367,6 +10434,7 @@ int main(int argc, char **argv)
 
 		create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
+		handler.sa_handler = sighandler;
 		handler.sa_flags = 0;
 		sigemptyset(&handler.sa_mask);
 		sigaction(SIGTERM, &handler, NULL);
