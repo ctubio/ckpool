@@ -8552,6 +8552,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
  *  loglevel is a special case to make it quick and easy to use:
  *	loglevel.ID
  *  sets the loglevel to atoi(ID)
+ *  Without an ID, it just reports the current value
  */
 static struct CMDS {
 	enum cmd_values cmd_val;
@@ -8565,7 +8566,7 @@ static struct CMDS {
 	{ CMD_SHUTDOWN,	"shutdown",	true,	false,	NULL,		ACCESS_SYSTEM },
 	{ CMD_PING,	"ping",		true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
 	{ CMD_VERSION,	"version",	true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
-	{ CMD_LOGLEVEL,	"loglevel",	true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
+	{ CMD_LOGLEVEL,	"loglevel",	true,	false,	NULL,		ACCESS_SYSTEM },
 	{ CMD_SHARELOG,	STR_WORKINFO,	false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_SHARES,	false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_SHAREERRORS, false,	true,	cmd_sharelog,	ACCESS_POOL },
