@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.70"
+#define CKDB_VERSION DB_VERSION"-0.71"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1072,6 +1072,8 @@ static K_STORE *workinfo_store;
 static K_ITEM *workinfo_current;
 // first workinfo of current block
 static tv_t last_bc;
+// current network diff
+static double current_ndiff;
 
 // SHARES shares.id.json={...}
 typedef struct shares {
@@ -3336,6 +3338,7 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 	PGresult *res;
 	K_ITEM *item;
 	char cd_buf[DATE_BUFSIZ];
+	char ndiffbin[TXT_SML+1];
 	int n;
 	int64_t workinfoid = -1;
 	WORKINFO *row;
@@ -3438,6 +3441,9 @@ unparam:
 			free(row->transactiontree);
 			row->transactiontree = strdup(EMPTY);
 		}
+
+		hex2bin(ndiffbin, row->bits, 4);
+		current_ndiff = diff_from_nbits(ndiffbin);
 
 		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
 		k_add_head(workinfo_store, item);
@@ -4963,16 +4969,35 @@ flail:
 	K_WUNLOCK(blocks_free);
 
 	if (ok) {
-		char tmp[128];
+		char tmp[256];
 
 		if (confirmed[0] != BLOCKS_NEW)
 			tmp[0] = '\0';
 		else {
+			char pct[16] = "?";
+			char est[16] = "";
+
+			if (pool.diffacc) {
+				K_ITEM *w_item;
+				w_item = find_workinfo(DATA_BLOCKS(b_item)->workinfoid);
+				if (w_item) {
+					char wdiffbin[TXT_SML+1];
+					double wdiff;
+					hex2bin(wdiffbin, DATA_WORKINFO(w_item)->bits, 4);
+					wdiff = diff_from_nbits(wdiffbin);
+					snprintf(pct, sizeof(pct), "%.2f",
+						 100.0 * pool.diffacc / wdiff);
+				}
+			}
+			if (pool.diffacc >= 1000000.0) {
+				suffix_string(pool.diffacc, est, sizeof(est)-1, 1);
+				strcat(est, " ");
+			}
 			tv_to_buf(&(DATA_BLOCKS(b_item)->createdate), cd_buf, sizeof(cd_buf));
 			snprintf(tmp, sizeof(tmp),
-				 " Reward: %f, User: %s, Worker: %s, ShareEst: %.1f UTC:%s",
+				 " Reward: %f, User: %s, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
 				 BTC_TO_D(DATA_BLOCKS(b_item)->reward),
-				 username, workername, pool.diffacc, cd_buf);
+				 username, workername, pool.diffacc, est, pct, cd_buf);
 			if (pool.workinfoid < DATA_BLOCKS(b_item)->workinfoid) {
 				pool.workinfoid = DATA_BLOCKS(b_item)->workinfoid;
 				pool.diffacc = pool.differr =
@@ -7964,6 +7989,14 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
 		snprintf(tmp, sizeof(tmp), "lastbc=?%c", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	}
+
+	if (current_ndiff) {
+		snprintf(tmp, sizeof(tmp), "currndiff=%.1f%c", current_ndiff, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else {
+		snprintf(tmp, sizeof(tmp), "currndiff=?%c", FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
