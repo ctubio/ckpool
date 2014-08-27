@@ -25,6 +25,8 @@ function process($p, $user)
  );
  if ($user == 'Kano' || $user == 'ckolivas')
 	$menu['Help']['ckp'] = 'ckp';
+ if ($user == 'Kano' || $user == 'ckolivas' || $user == 'wvr2')
+	$menu['Pool']['PPLNS'] = 'pplns';
  $page = '';
  $n = '';
  foreach ($menu as $item => $options)

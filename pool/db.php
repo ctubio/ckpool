@@ -42,6 +42,15 @@ function repDecode($rep)
  $ans['ID'] = $major[0];
  $ans['STAMP'] = $major[1];
  $ans['STATUS'] = $major[2];
+ if ($major[2] == 'ok')
+	$ans['ERROR'] = null;
+ else
+ {
+	if (isset($major[3]))
+		$ans['ERROR'] = $major[3];
+	else
+		$ans['ERROR'] = 'unknown';
+ }
 
  return $ans;
 }
