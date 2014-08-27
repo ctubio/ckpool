@@ -260,7 +260,7 @@ function pgtop($dotop, $user, $douser)
 	$top .= '<span class=topdes>CKPool:</span>';
 	$top .= "<span class=topdat>$phr</span>";
 	$top .= '<br>';
-	$top .= '<span class=topdes>Block Shares:</span>';
+	$top .= '<span class=topdes>Shares:</span>';
 	$top .= "<span class=topdat>$pac</span>";
 	$top .= '</td><td>';
 	$top .= '<span class=topdes>Pool, Last Block:</span>';
