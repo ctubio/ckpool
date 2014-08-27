@@ -8307,24 +8307,24 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	copy_tv(&begin_tv, &(DATA_WORKINFO(wb_item)->createdate));
-	/* Elapsed is from the start of the first workinfoid used to the time
-	 *  of the last share counted -
+	/* Elapsed is from the start of the first workinfoid used,
+	 *  to the time of the last share counted -
 	 *  which can be after the block, but must have the same workinfoid as
 	 *  the block, if it is after the block
 	 * All shares accepted in all workinfoids after the block's workinfoid
-	 *  will not be creditied in this block no matter what the height
-	 *  of their workinfoid - but will be candidates for the next block */
+	 *  will not be creditied to this block no matter what the height
+	 *  of their workinfoid is - but will be candidates for the next block */
 	elapsed = tvdiff(&end_tv, &begin_tv);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 	snprintf(tmp, sizeof(tmp), "block=%d%c", height, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "begin_workinfoid=%"PRId64"%c", begin_workinfoid, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "block_workinfoid=%"PRId64"%c", workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "end_workinfoid=%"PRId64"%c", end_workinfoid, FLDSEP);
-	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "begin_workinfoid=%"PRId64"%c", begin_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "diffacc_total=%.0f%c", total, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
