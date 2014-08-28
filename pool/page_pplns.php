@@ -91,18 +91,21 @@ Block: <input type=text name=blk size=10 value=''>
 	$pg .= '<td class=dr>Diff Accepted</td>';
 	$pg .= '<td class=dr>%</td>';
 	$pg .= '<td class=dr>Base BTC</td>';
+	$pg .= '<td class=dr>Avg Hashrate</td>';
 	$pg .= "</tr>\n";
 
 	$diffacc_total = $ans['diffacc_total'];
 	if ($diffacc_total == 0)
 		$diffacc_total = pow(10,15);
-	$reward = 1.0 * $ans['block_reward'] / pow(10,8);
+	$reward = $ans['block_reward'] / pow(10,8);
+	$elapsed = $ans['pplns_elapsed'];
 	$count = $ans['rows'];
 	for ($i = 1; $i <= $count; $i++)
 	{
 		$diffacc_user = $ans['diffacc_user'.$i];
 		$diffacc_percent = number_format(100.0 * $diffacc_user / $diffacc_total, 2).'%';
 		$diffacc_btc = number_format($reward * $diffacc_user / $diffacc_total, 8);
+		$avg_hash = number_format($diffacc_user / $elapsed * pow(2,32), 0);
 
 		if (($i % 2) == 0)
 			$row = 'even';
@@ -114,6 +117,7 @@ Block: <input type=text name=blk size=10 value=''>
 		$pg .= "<td class=dr>$diffacc_user</td>";
 		$pg .= "<td class=dr>$diffacc_percent</td>";
 		$pg .= "<td class=dr>$diffacc_btc</td>";
+		$pg .= "<td class=dr>$avg_hash</td>";
 		$pg .= "</tr>\n";
 	}
 	$pg .= "</table>\n";
