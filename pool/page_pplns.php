@@ -44,22 +44,29 @@ Block: <input type=text name=blk size=10 value=''>
 		return '<font color=red size=+1><br>'.$ans['STATUS'].': '.$ans['ERROR'].'</font>';
 
 	$data = array(	'Block' => 'block',
+			'Block Hash' => 'block_hash',
+			'Block Reward (Satoshis)' => 'block_reward',
 			'PPLNS Wanted' => 'diff_want',
 			'PPLNS Used' => 'diffacc_total',
 			'Elapsed Seconds' => 'pplns_elapsed',
 			'Users' => 'rows',
 			'Oldest Workinfoid' => 'begin_workinfoid',
 			'Oldest Time' => 'begin_stamp',
+			'Oldest Epoch' => 'begin_epoch',
 			'Block Workinfoid' => 'block_workinfoid',
 			'Block Time' => 'block_stamp',
+			'Block Epoch' => 'block_epoch',
 			'Newest Workinfoid' => 'end_workinfoid',
-			'Newest Time' => 'end_stamp',
+			'Newest Share Time' => 'end_stamp',
+			'Newest Share Epoch' => 'end_epoch',
 			'Network Difficulty' => 'block_ndiff',
 			'PPLNS Factor' => 'diff_times',
 			'PPLNS Added' => 'diff_add',
 			'Share Count' => 'share_count');
 
-	$pg = "<br><table callpadding=0 cellspacing=0 border=0>\n";
+	$pg = '<br><a href=https://blockchain.info/block-height/';
+	$pg .= $ans['block'].'>Blockchain '.$ans['block']."</a><br>\n";
+	$pg .= "<br><table callpadding=0 cellspacing=0 border=0>\n";
 	$pg .= '<tr class=title>';
 	$pg .= '<td class=dl>Name</td>';
 	$pg .= '<td class=dr>Value</td>';

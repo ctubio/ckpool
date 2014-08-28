@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.71"
+#define CKDB_VERSION DB_VERSION"-0.100"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -5080,7 +5080,7 @@ static bool blocks_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "workername", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_BLOB("workername", field, row->workername);
+		TXT_TO_STR("workername", field, row->workername);
 
 		PQ_GET_FLD(res, i, "clientid", field, ok);
 		if (!ok)
@@ -5573,7 +5573,7 @@ static bool auths_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "enonce1", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_BLOB("enonce1", field, row->enonce1);
+		TXT_TO_STR("enonce1", field, row->enonce1);
 
 		PQ_GET_FLD(res, i, "useragent", field, ok);
 		if (!ok)
@@ -8352,6 +8352,14 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, "ok.");
 	snprintf(tmp, sizeof(tmp), "block=%d%c", height, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "block_hash=%s%c", DATA_BLOCKS(b_item)->blockhash, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "block_reward=%"PRId64"%c", DATA_BLOCKS(b_item)->reward, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "workername=%s%c", DATA_BLOCKS(b_item)->workername, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "nonce=%s%c", DATA_BLOCKS(b_item)->nonce, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "begin_workinfoid=%"PRId64"%c", begin_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "block_workinfoid=%"PRId64"%c", workinfoid, FLDSEP);
@@ -8401,11 +8409,17 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	tv_to_buf(&begin_tv, tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "begin_stamp=%s%c", tv_buf, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "begin_epoch=%ld%c", begin_tv.tv_sec, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	tv_to_buf(&block_tv, tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "block_stamp=%s%c", tv_buf, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "block_epoch=%ld%c", block_tv.tv_sec, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	tv_to_buf(&end_tv, tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "end_stamp=%s%c", tv_buf, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "end_epoch=%ld%c", end_tv.tv_sec, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c", ndiff, FLDSEP);
