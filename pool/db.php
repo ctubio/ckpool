@@ -151,4 +151,16 @@ function getPayments($user)
  return $rep;
 }
 #
+function getBlocks($user)
+{
+ if ($user == false)
+	showIndex();
+ $flds = array();
+ $msg = msgEncode('blocklist', 'blk', $flds);
+ $rep = sendsockreply('getBlocks', $msg);
+ if (!$rep)
+	dbdown();
+ return $rep;
+}
+#
 ?>

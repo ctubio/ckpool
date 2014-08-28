@@ -15,7 +15,8 @@ function process($p, $user)
 		'Settings' => 'settings'
 	),
 	'Pool' => array(
-		'Stats' => 'stats'
+		'Stats' => 'stats',
+		'Blocks' => 'blocks'
 	),
 	'gap' => NULL,
 	'Help' => array(

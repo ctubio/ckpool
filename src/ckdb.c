@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.100"
+#define CKDB_VERSION DB_VERSION"-0.101"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -773,6 +773,7 @@ enum cmd_values {
 	CMD_POOLSTAT,
 	CMD_USERSTAT,
 	CMD_BLOCK,
+	CMD_BLOCKLIST,
 	CMD_NEWID,
 	CMD_PAYMENTS,
 	CMD_WORKERS,
@@ -7073,6 +7074,72 @@ static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(reply);
 }
 
+static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
+			   __maybe_unused tv_t *now, __maybe_unused char *by,
+			   __maybe_unused char *code, __maybe_unused char *inet,
+			   __maybe_unused tv_t *notcd,
+			   __maybe_unused K_TREE *trf_root)
+{
+	K_TREE_CTX ctx[1];
+	K_ITEM *b_item;
+	char reply[1024] = "";
+	char tmp[1024];
+	char *buf;
+	size_t len, off;
+	int rows;
+	int32_t height;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	b_item = last_in_ktree(blocks_root, ctx);
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	rows = 0;
+	height = -1;
+	while (b_item && rows < 42) {
+		if (height != DATA_BLOCKS(b_item)->height) {
+			height = DATA_BLOCKS(b_item)->height;
+
+			snprintf(tmp, sizeof(tmp), "height%d=%d%c", rows, height, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			str_to_buf(DATA_BLOCKS(b_item)->blockhash, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "blockhash%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			str_to_buf(DATA_BLOCKS(b_item)->nonce, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "nonce%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			bigint_to_buf(DATA_BLOCKS(b_item)->reward, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "reward%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			str_to_buf(DATA_BLOCKS(b_item)->workername, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "workername%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp),
+				 "createdate%d=%ld%c", rows,
+				 DATA_BLOCKS(b_item)->createdate.tv_sec, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp),
+				 "status%d=%s%c", rows,
+				 blocks_confirmed(DATA_BLOCKS(b_item)->confirmed), FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			rows++;
+		}
+		b_item = prev_in_ktree(ctx);
+	}
+	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%d_blocks", id, rows);
+	return buf;
+}
+
 static char *cmd_newid(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 			char *code, char *inet, __maybe_unused tv_t *cd,
 			K_TREE *trf_root)
@@ -8624,6 +8691,7 @@ static struct CMDS {
 	{ CMD_POOLSTAT,	"poolstats",	false,	true,	cmd_poolstats,	ACCESS_POOL },
 	{ CMD_USERSTAT,	"userstats",	false,	true,	cmd_userstats,	ACCESS_POOL },
 	{ CMD_BLOCK,	"block",	false,	true,	cmd_blocks,	ACCESS_POOL },
+	{ CMD_BLOCKLIST,"blocklist",	false,	false,	cmd_blocklist,	ACCESS_WEB },
 	{ CMD_NEWID,	"newid",	false,	false,	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	false,	false,	cmd_payments,	ACCESS_WEB },
 	{ CMD_WORKERS,	"workers",	false,	false,	cmd_workers,	ACCESS_WEB },
@@ -9183,13 +9251,6 @@ static void *socketer(__maybe_unused void *arg)
 			else
 				LOGWARNING("Empty message in listener");
 		} else {
-			if (want_first) {
-				ck_wlock(&fpm_lock);
-				first_pool_message = strdup(buf);
-				ck_wunlock(&fpm_lock);
-				want_first = false;
-			}
-
 			/* For duplicates:
 			 *  Queued pool messages are handled by the queue code
 			 *   but since they reply ok.queued that message can
@@ -9295,9 +9356,17 @@ static void *socketer(__maybe_unused void *arg)
 						break;
 					// Always process immediately:
 					case CMD_AUTH:
+						// First message from the pool
+						if (want_first) {
+							ck_wlock(&fpm_lock);
+							first_pool_message = strdup(buf);
+							ck_wunlock(&fpm_lock);
+							want_first = false;
+						}
 					case CMD_CHKPASS:
 					case CMD_ADDUSER:
 					case CMD_NEWPASS:
+					case CMD_BLOCKLIST:
 					case CMD_NEWID:
 					case CMD_STATS:
 						ans = cmds[which_cmds].func(NULL, cmd, id, &now,
@@ -9405,6 +9474,14 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_POOLSTAT:
 					case CMD_USERSTAT:
 					case CMD_BLOCK:
+						// First message from the pool
+						if (want_first) {
+							ck_wlock(&fpm_lock);
+							first_pool_message = strdup(buf);
+							ck_wunlock(&fpm_lock);
+							want_first = false;
+						}
+
 						snprintf(reply, sizeof(reply),
 							 "%s.%ld.ok.queued",
 							 id, now.tv_sec);
@@ -9529,6 +9606,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_ADDUSER:
 			case CMD_NEWPASS:
 			case CMD_CHKPASS:
+			case CMD_BLOCKLIST:
 			case CMD_NEWID:
 			case CMD_PAYMENTS:
 			case CMD_WORKERS:
