@@ -3640,6 +3640,7 @@ static void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 				char *by, char *code, char *inet, tv_t *cd)
 {
 	static int64_t last_attempted_id = -1;
+	static int64_t prev_found = 0;
 	static int repeat;
 
 	char min_buf[DATE_BUFSIZ], max_buf[DATE_BUFSIZ];
@@ -3648,37 +3649,51 @@ static void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	tv_t ss_first_min, ss_last_max;
 	tv_t ss_first, ss_last;
 	int32_t wid_count;
+	SHARESUMMARY sharesummary;
 	K_TREE_CTX ctx[1];
-	K_ITEM *ss_item;
+	K_ITEM look, *ss_item;
 	int64_t age_id, do_id, to_id;
-	bool ok;
+	bool ok, found;
 
-	LOGDEBUG("%s(): %"PRId64, __func__, workinfoid);
+	LOGDEBUG("%s(): workinfoid=%"PRId64" prev=%"PRId64, __func__, workinfoid, prev_found);
+
+	age_id = prev_found;
+
+	// Find the oldest 'unaged' sharesummary < workinfoid and >= prev_found
+	sharesummary.workinfoid = prev_found;
+	sharesummary.userid = -1;
+	sharesummary.workername[0] = '\0';
+	look.data = (void *)(&sharesummary);
+	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &look,
+				      cmp_sharesummary_workinfoid, ctx);
 
 	ss_first_min.tv_sec = ss_first_min.tv_usec =
 	ss_last_max.tv_sec = ss_last_max.tv_usec = 0;
 	ss_count_tot = s_count_tot = s_diff_tot = 0;
 
-	age_id = 0;
-	// Find the oldest 'unaged' sharesummary < workinfoid
-	ss_item = first_in_ktree(sharesummary_workinfoid_root, ctx);
+	found = false;
 	while (ss_item && DATA_SHARESUMMARY(ss_item)->workinfoid < workinfoid) {
 		if (DATA_SHARESUMMARY(ss_item)->complete[0] == SUMMARY_NEW) {
 			age_id = DATA_SHARESUMMARY(ss_item)->workinfoid;
+			prev_found = age_id;
+			found = true;
 			break;
 		}
 		ss_item = next_in_ktree(ctx);
 	}
 
-	LOGDEBUG("%s(): age_id=%"PRId64, __func__, age_id);
-	/* Process all the consecutive sharesummaries that's aren't aged
-	 * This way we find each oldest 'batch' of sharesummaries that have
-	 *  been missed and can report the range of data that was aged,
-	 *  which would normally just be an approx 10min set of workinfoids
-	 *  from the last time ckpool stopped
-	 * Each next group of unaged sharesummaries following this, will be
-	 *  picked up by each next aging */
-	if (age_id) {
+	LOGDEBUG("%s(): age_id=%"PRId64" found=%d", __func__, age_id, found);
+	// Don't repeat searching old items to avoid accessing their ram
+	if (!found)
+		prev_found = workinfoid;
+	else {
+		/* Process all the consecutive sharesummaries that's aren't aged
+		 * This way we find each oldest 'batch' of sharesummaries that have
+		 *  been missed and can report the range of data that was aged,
+		 *  which would normally just be an approx 10min set of workinfoids
+		 *  from the last time ckpool stopped
+		 * Each next group of unaged sharesummaries following this, will be
+		 *  picked up by each next aging */
 		wid_count = 0;
 		do_id = age_id;
 		to_id = 0;
