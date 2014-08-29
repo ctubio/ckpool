@@ -313,25 +313,39 @@ static inline void json_strdup(char **buf, json_t *val, const char *key)
 	*buf = strdup(json_string_value(json_object_get(val, key)));
 }
 
-static inline void json_set_string(json_t *val, const char *key, const char *str)
+/* Helpers for setting a field will check for valid entry and print an error
+ * if it is unsuccessfully set. */
+static inline void _json_set_string(json_t *val, const char *key, const char *str,
+				    const char *file, const char *func, const int line)
 {
-	json_object_set_new_nocheck(val, key, json_string(str));
+	if (unlikely(json_object_set_new_nocheck(val, key, json_string(str))))
+		LOGERR("Failed to set json string from %s %s:%d", file, func, line);
 }
+#define json_set_string(val, key, str) _json_set_string(val, key, str, __FILE__, __func__, __LINE__)
 
-static inline void json_set_int(json_t *val, const char *key, int64_t integer)
+static inline void _json_set_int(json_t *val, const char *key, int64_t integer,
+				 const char *file, const char *func, const int line)
 {
-	json_object_set_new_nocheck(val, key, json_integer(integer));
+	if (unlikely(json_object_set_new_nocheck(val, key, json_integer(integer))))
+		LOGERR("Failed to set json int from %s %s:%d", file, func, line);
 }
+#define json_set_int(val, key, integer) _json_set_int(val, key, integer, __FILE__, __func__, __LINE__)
 
-static inline void json_set_double(json_t *val, const char *key, double real)
+static inline void _json_set_double(json_t *val, const char *key, double real,
+				    const char *file, const char *func, const int line)
 {
-	json_object_set_new_nocheck(val, key, json_real(real));
+	if (unlikely(json_object_set_new_nocheck(val, key, json_real(real))))
+		LOGERR("Failed to set json double from %s %s:%d", file, func, line);
 }
+#define json_set_double(val, key, real) _json_set_double(val, key, real, __FILE__, __func__, __LINE__)
 
-static inline void json_set_bool(json_t *val, const char *key, bool boolean)
+static inline void _json_set_bool(json_t *val, const char *key, bool boolean,
+				  const char *file, const char *func, const int line)
 {
-	json_object_set_new_nocheck(val, key, json_boolean(boolean));
+	if (unlikely(json_object_set_new_nocheck(val, key, json_boolean(boolean))))
+		LOGERR("Failed to set json bool from %s %s:%d", file, func, line);
 }
+#define json_set_bool(val, key, boolean) _json_set_bool(val, key, boolean, __FILE__, __func__, __LINE__)
 
 void rename_proc(const char *name);
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);
