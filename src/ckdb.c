@@ -9702,7 +9702,7 @@ static void *socketer(__maybe_unused void *arg)
 			k_list_transfer_to_head(trf_store, transfer_free);
 			trf_store = k_free_store(trf_store);
 			if (transfer_free->count == transfer_free->total &&
-			    transfer_free->total > ALLOC_TRANSFER * 16)
+			    transfer_free->total > ALLOC_TRANSFER * 64)
 				k_cull_list(transfer_free);
 			K_WUNLOCK(transfer_free);
 		}
