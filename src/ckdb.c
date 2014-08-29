@@ -9685,8 +9685,11 @@ static void *socketer(__maybe_unused void *arg)
 			}
 			K_WLOCK(transfer_free);
 			k_list_transfer_to_head(trf_store, transfer_free);
-			K_WUNLOCK(transfer_free);
 			trf_store = k_free_store(trf_store);
+			if (transfer_free->count == transfer_free->total &&
+			    transfer_free->total > ALLOC_TRANSFER * 16)
+				k_cull_list(transfer_free);
+			K_WUNLOCK(transfer_free);
 		}
 	}
 
