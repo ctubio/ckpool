@@ -268,6 +268,7 @@ static cklock_t share_lock;
 #define ID_POOLSTATS 5
 #define ID_USERSTATS 6
 #define ID_BLOCK 7
+#define ID_ADDRAUTH 8
 
 static const char *ckdb_ids[] = {
 	"authorise",
@@ -277,7 +278,8 @@ static const char *ckdb_ids[] = {
 	"shareerror",
 	"poolstats",
 	"userstats",
-	"block"
+	"block",
+	"addrauth",
 };
 
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
@@ -1337,7 +1339,10 @@ static int send_recv_auth(stratum_instance_t *client)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", client->address);
-	json_msg = ckdb_msg(ckp, val, ID_AUTH);
+	if (user_instance->btcaddress)
+		json_msg = ckdb_msg(ckp, val, ID_ADDRAUTH);
+	else
+		json_msg = ckdb_msg(ckp, val, ID_AUTH);
 	if (unlikely(!json_msg)) {
 		LOGWARNING("Failed to dump json in send_recv_auth");
 		return ret;
