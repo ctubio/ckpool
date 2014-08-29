@@ -192,6 +192,7 @@ struct user_instance {
 	char username[128];
 	int64_t id;
 	char *secondaryuserid;
+	bool btcaddress;
 
 	int workers;
 };
@@ -1250,17 +1251,35 @@ static json_t *parse_subscribe(int64_t client_id, json_t *params_val)
 	return ret;
 }
 
+static bool test_address(ckpool_t *ckp, const char *address)
+{
+	bool ret = false;
+	char *buf, *msg;
+
+	ASPRINTF(&msg, "checkaddr:%s", address);
+	buf = send_recv_proc(ckp->generator, msg);
+	dealloc(msg);
+	if (!buf)
+		return ret;
+	ret = cmdmatch(buf, "true");
+	dealloc(buf);
+	return ret;
+}
+
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. */
-static user_instance_t *authorise_user(const char *workername)
+static user_instance_t *authorise_user(ckpool_t *ckp, const char *workername)
 {
 	char *base_username = strdupa(workername), *username;
 	user_instance_t *instance;
+	bool new = false;
+	int len;
 
 	username = strsep(&base_username, "._");
 	if (!username || !strlen(username))
 		username = base_username;
-	if (strlen(username) > 127)
+	len = strlen(username);
+	if (unlikely(len > 127))
 		username[127] = '\0';
 
 	ck_ilock(&instance_lock);
@@ -1269,6 +1288,7 @@ static user_instance_t *authorise_user(const char *workername)
 		/* New user instance. Secondary user id will be NULL */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
+		new = true;
 
 		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
@@ -1276,6 +1296,14 @@ static user_instance_t *authorise_user(const char *workername)
 		ck_dwilock(&instance_lock);
 	}
 	ck_uilock(&instance_lock);
+
+	if (new) {
+		/* Is this a btc address based username? */
+		if (len > 26 && len < 35)
+			instance->btcaddress = test_address(ckp, username);
+		LOGNOTICE("Added new user %s%s", username, instance->btcaddress ?
+			  " as address based registration" : "");
+	}
 
 	return instance;
 }
@@ -1397,7 +1425,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty username parameter");
 		goto out;
 	}
-	user_instance = client->user_instance = authorise_user(buf);
+	user_instance = client->user_instance = authorise_user(client->ckp, buf);
 	client->user_id = user_instance->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
@@ -2564,21 +2592,6 @@ static void *statsupdate(void *arg)
 	}
 
 	return NULL;
-}
-
-static bool test_address(ckpool_t *ckp, const char *address)
-{
-	bool ret = false;
-	char *buf, *msg;
-
-	ASPRINTF(&msg, "checkaddr:%s", address);
-	buf = send_recv_proc(ckp->generator, msg);
-	dealloc(msg);
-	if (!buf)
-		return ret;
-	ret = cmdmatch(buf, "true");
-	dealloc(buf);
-	return ret;
 }
 
 int stratifier(proc_instance_t *pi)
