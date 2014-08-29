@@ -1327,18 +1327,18 @@ static int send_recv_auth(stratum_instance_t *client)
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
-	JSON_CPACK(val, "{ss,ss,ss,ss,sI,ss,sb,ss,ss,ss,ss}",
-			"username", user_instance->username,
-			"workername", client->workername,
-			"poolinstance", ckp->name,
-			"useragent", client->useragent,
-			"clientid", client->id,
-			"enonce1", client->enonce1,
-			"preauth", false,
-			"createdate", cdfield,
-			"createby", "code",
-			"createcode", __func__,
-			"createinet", client->address);
+	val = json_object();
+	json_set_string(val, "username", user_instance->username);
+	json_set_string(val, "workername", client->workername);
+	json_set_string(val, "poolinstance", ckp->name);
+	json_set_string(val, "useragent", client->useragent);
+	json_set_int(val, "clientid", client->id);
+	json_set_string(val,"enonce1", client->enonce1);
+	json_set_bool(val, "preauth", false);
+	json_set_string(val, "createdate", cdfield);
+	json_set_string(val, "createby", "code");
+	json_set_string(val, "createcode", __func__);
+	json_set_string(val, "createinet", client->address);
 	if (user_instance->btcaddress)
 		json_msg = ckdb_msg(ckp, val, ID_ADDRAUTH);
 	else
