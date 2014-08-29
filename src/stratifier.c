@@ -1430,6 +1430,10 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Empty username parameter");
 		goto out;
 	}
+	if (strchr(buf, '/')) {
+		*err_val = json_string("Invalid character in username");
+		goto out;
+	}
 	user_instance = client->user_instance = authorise_user(client->ckp, buf);
 	client->user_id = user_instance->id;
 	ts_realtime(&now);
