@@ -19,7 +19,7 @@ function doworker($data, $user)
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
-	$tot = 0;
+	$thr = 0;
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
@@ -90,7 +90,7 @@ function doworker($data, $user)
 			$uhr = '?GHs';
 		else
 		{
-			$tot += $uhr;
+			$thr += $uhr;
 			$uhr /= 10000000;
 			if ($uhr < 0.01)
 				$uhr = '0GHs';
