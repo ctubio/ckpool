@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.105"
+#define CKDB_VERSION DB_VERSION"-0.106"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -7273,20 +7273,18 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char *buf;
 	size_t len, off;
 	int rows;
-	int32_t height;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	b_item = last_in_ktree(blocks_root, ctx);
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 	rows = 0;
-	height = -1;
+	K_RLOCK(blocks_free);
+	b_item = last_in_ktree(blocks_root, ctx);
 	while (b_item && rows < 42) {
-		if (height != DATA_BLOCKS(b_item)->height) {
-			height = DATA_BLOCKS(b_item)->height;
-
-			snprintf(tmp, sizeof(tmp), "height%d=%d%c", rows, height, FLDSEP);
+		if (CURRENT(&(DATA_BLOCKS(b_item)->expirydate))) {
+			int_to_buf(DATA_BLOCKS(b_item)->height, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "height%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			str_to_buf(DATA_BLOCKS(b_item)->blockhash, reply, sizeof(reply));
@@ -7319,6 +7317,7 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 		b_item = prev_in_ktree(ctx);
 	}
+	K_RUNLOCK(blocks_free);
 	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 	APPEND_REALLOC(buf, off, len, tmp);
 
