@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.104"
+#define CKDB_VERSION DB_VERSION"-0.105"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -774,6 +774,7 @@ enum cmd_values {
 	CMD_USERSTAT,
 	CMD_BLOCK,
 	CMD_BLOCKLIST,
+	CMD_BLOCKSTATUS,
 	CMD_NEWID,
 	CMD_PAYMENTS,
 	CMD_WORKERS,
@@ -1187,10 +1188,18 @@ typedef struct blocks {
 #define DATA_BLOCKS(_item) ((BLOCKS *)(_item->data))
 
 #define BLOCKS_NEW 'n'
+#define BLOCKS_NEW_STR "n"
 #define BLOCKS_CONFIRM '1'
+#define BLOCKS_CONFIRM_STR "1"
+#define BLOCKS_42 'F'
+#define BLOCKS_42_STR "F"
+#define BLOCKS_ORPHAN 'O'
+#define BLOCKS_ORPHAN_STR "O"
 
 static const char *blocks_new = "New";
 static const char *blocks_confirm = "1-Confirm";
+static const char *blocks_42 = "42-Confirm";
+static const char *blocks_orphan = "Orphan";
 static const char *blocks_unknown = "?Unknown?";
 
 #define KANO -27972
@@ -4866,11 +4875,14 @@ static const char *blocks_confirmed(char *confirmed)
 			return blocks_new;
 		case BLOCKS_CONFIRM:
 			return blocks_confirm;
+		case BLOCKS_42:
+			return blocks_42;
+		case BLOCKS_ORPHAN:
+			return blocks_orphan;
 	}
 	return blocks_unknown;
 }
 
-// TODO: determine how to handle orphan blocks after 1 confirm
 static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			char *confirmed, char *workinfoid, char *username,
 			char *workername, char *clientid, char *enonce1,
@@ -4890,6 +4902,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	char *params[11 + HISTORYDATECOUNT];
 	bool ok = false, update_old = false;
 	int par = 0;
+	char want = '?';
 	int n;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -4984,32 +4997,46 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				goto unparam;
 			}
 			break;
-		case BLOCKS_CONFIRM:
-			if (!old_b_item) {
-				k_add_head(blocks_free, b_item);
+		case BLOCKS_ORPHAN:
+		case BLOCKS_42:
+			// These shouldn't be possible until startup completes
+			if (!startup_complete) {
 				K_WUNLOCK(blocks_free);
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
-				LOGERR("%s(): Can't confirm a non-existent block, Status: "
-					"%s, Block: %s/...%s/%s",
+				LOGERR("%s(): Status: %s invalid during startup. "
+					"Ignored: Block: %s/...%s/%s",
+					__func__,
+					blocks_confirmed(confirmed),
+					height, blk_dsp, cd_buf);
+				goto flail;
+			}
+			want = BLOCKS_CONFIRM;
+		case BLOCKS_CONFIRM:
+			if (!old_b_item) {
+				K_WUNLOCK(blocks_free);
+				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
+				LOGERR("%s(): Can't %s a non-existent Block: %s/...%s/%s",
 					__func__, blocks_confirmed(confirmed),
 					height, blk_dsp, cd_buf);
-				return false;
+				goto flail;
 			}
-			/* This will also treat an unrecognised 'confirmed' as a
-			 * duplicate since they shouldn't exist anyway */
-			if (DATA_BLOCKS(old_b_item)->confirmed[0] != BLOCKS_NEW) {
+			if (confirmed[0] == BLOCKS_CONFIRM)
+				want = BLOCKS_NEW;
+			if (DATA_BLOCKS(old_b_item)->confirmed[0] != want) {
 				k_add_head(blocks_free, b_item);
 				K_WUNLOCK(blocks_free);
-				if (!igndup || DATA_BLOCKS(old_b_item)->confirmed[0] != BLOCKS_CONFIRM) {
+				// No mismatch messages during startup
+				if (!startup_complete) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
-					LOGERR("%s(): Duplicate (%s) blocks ignored, Status: "
-						"%s, Block: %s/...%s/%s",
+					LOGERR("%s(): Request Status: %s requires Status: %s. "
+						"Ignored: Status: %s, Block: %s/...%s/%s",
 						__func__,
-						blocks_confirmed(DATA_BLOCKS(old_b_item)->confirmed),
 						blocks_confirmed(confirmed),
+						blocks_confirmed(BLOCKS_CONFIRM_STR),
+						blocks_confirmed(DATA_BLOCKS(old_b_item)->confirmed),
 						height, blk_dsp, cd_buf);
 				}
-				return true;
+				goto flail;
 			}
 			K_WUNLOCK(blocks_free);
 
@@ -5117,44 +5144,55 @@ flail:
 	K_WUNLOCK(blocks_free);
 
 	if (ok) {
+		char pct[16] = "?";
+		char est[16] = "";
+		K_ITEM *w_item;
 		char tmp[256];
+		bool blk;
 
-		if (confirmed[0] != BLOCKS_NEW)
-			tmp[0] = '\0';
-		else {
-			char pct[16] = "?";
-			char est[16] = "";
-			K_ITEM *w_item;
-
-			w_item = find_workinfo(DATA_BLOCKS(b_item)->workinfoid);
-			if (w_item) {
-				char wdiffbin[TXT_SML+1];
-				double wdiff;
-				hex2bin(wdiffbin, DATA_WORKINFO(w_item)->bits, 4);
-				wdiff = diff_from_nbits(wdiffbin);
-				if (wdiff > 0.0) {
-					snprintf(pct, sizeof(pct), "%.2f",
-						 100.0 * pool.diffacc / wdiff);
+		switch (confirmed[0]) {
+			case BLOCKS_NEW:
+				blk = true;
+				tmp[0] = '\0';
+				break;
+			case BLOCKS_CONFIRM:
+				blk = true;
+				w_item = find_workinfo(DATA_BLOCKS(b_item)->workinfoid);
+				if (w_item) {
+					char wdiffbin[TXT_SML+1];
+					double wdiff;
+					hex2bin(wdiffbin, DATA_WORKINFO(w_item)->bits, 4);
+					wdiff = diff_from_nbits(wdiffbin);
+					if (wdiff > 0.0) {
+						snprintf(pct, sizeof(pct), "%.2f",
+							 100.0 * pool.diffacc / wdiff);
+					}
 				}
-			}
-			if (pool.diffacc >= 1000000.0) {
-				suffix_string(pool.diffacc, est, sizeof(est)-1, 1);
-				strcat(est, " ");
-			}
-			tv_to_buf(&(DATA_BLOCKS(b_item)->createdate), cd_buf, sizeof(cd_buf));
-			snprintf(tmp, sizeof(tmp),
-				 " Reward: %f, User: %s, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
-				 BTC_TO_D(DATA_BLOCKS(b_item)->reward),
-				 username, workername, pool.diffacc, est, pct, cd_buf);
-			if (pool.workinfoid < DATA_BLOCKS(b_item)->workinfoid) {
-				pool.workinfoid = DATA_BLOCKS(b_item)->workinfoid;
-				pool.diffacc = pool.differr =
-				pool.best_sdiff = 0.0;
-			}
+				if (pool.diffacc >= 1000000.0) {
+					suffix_string(pool.diffacc, est, sizeof(est)-1, 1);
+					strcat(est, " ");
+				}
+				tv_to_buf(&(DATA_BLOCKS(b_item)->createdate), cd_buf, sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 " Reward: %f, User: %s, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
+					 BTC_TO_D(DATA_BLOCKS(b_item)->reward),
+					 username, workername, pool.diffacc, est, pct, cd_buf);
+				if (pool.workinfoid < DATA_BLOCKS(b_item)->workinfoid) {
+					pool.workinfoid = DATA_BLOCKS(b_item)->workinfoid;
+					pool.diffacc = pool.differr =
+					pool.best_sdiff = 0.0;
+				}
+				break;
+			case BLOCKS_ORPHAN:
+			case BLOCKS_42:
+			default:
+				blk = false;
+				tmp[0] = '\0';
+				break;
 		}
 
-		LOGWARNING("%s(): BLOCK! Status: %s, Block: %s/...%s%s",
-			   __func__,
+		LOGWARNING("%s(): %sStatus: %s, Block: %s/...%s%s",
+			   __func__, blk ? "BLOCK! " : "",
 			   blocks_confirmed(confirmed),
 			   height, blk_dsp, tmp);
 	}
@@ -7288,6 +7326,90 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
+			     tv_t *now, char *by, char *code, char *inet,
+			     __maybe_unused tv_t *cd, K_TREE *trf_root)
+{
+	K_ITEM *i_height, *i_blockhash, *i_action;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	K_ITEM *b_item;
+	BLOCKS *blocks;
+	int32_t height;
+	char *action;
+	bool ok = false;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_height = require_name(trf_root, "height", 1, NULL, reply, siz);
+	if (!i_height)
+		return strdup(reply);
+
+	TXT_TO_INT("height", DATA_TRANSFER(i_height)->data, height);
+
+	i_blockhash = require_name(trf_root, "blockhash", 1, NULL, reply, siz);
+	if (!i_blockhash)
+		return strdup(reply);
+
+	i_action = require_name(trf_root, "action", 1, NULL, reply, siz);
+	if (!i_action)
+		return strdup(reply);
+
+	action = DATA_TRANSFER(i_action)->data;
+
+	K_RLOCK(blocks_free);
+	b_item = find_blocks(height, DATA_TRANSFER(i_blockhash)->data);
+	K_RUNLOCK(blocks_free);
+
+	if (!b_item) {
+		snprintf(reply, siz, "ERR.unknown block");
+		LOGERR("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
+	blocks = DATA_BLOCKS(b_item);
+
+	if (strcasecmp(action, "orphan") == 0) {
+		switch (blocks->confirmed[0]) {
+			case BLOCKS_NEW:
+			case BLOCKS_CONFIRM:
+				ok = blocks_add(conn, DATA_TRANSFER(i_height)->data,
+						      blocks->blockhash,
+						      BLOCKS_ORPHAN_STR,
+						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      by, code, inet, now, false, id,
+						      trf_root);
+				if (!ok) {
+					snprintf(reply, siz,
+						 "DBE.action '%s'",
+						 action);
+					LOGERR("%s.%s", id, reply);
+					return strdup(reply);
+				}
+				// TODO: reset the share counter?
+				break;
+			default:
+				snprintf(reply, siz,
+					 "ERR.invalid action '%.*s%s' for block state '%s'",
+					 CMD_SIZ, action,
+					 (strlen(action) > CMD_SIZ) ? "..." : "",
+					 blocks_confirmed(blocks->confirmed));
+				LOGERR("%s.%s", id, reply);
+				return strdup(reply);
+		}
+	} else {
+		snprintf(reply, siz, "ERR.unknown action '%s'",
+			 DATA_TRANSFER(i_action)->data);
+		LOGERR("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
+	snprintf(reply, siz, "ok.%s %d", DATA_TRANSFER(i_action)->data, height);
+	LOGDEBUG("%s.%s", id, reply);
+	return strdup(reply);
+}
+
 static char *cmd_newid(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 			char *code, char *inet, __maybe_unused tv_t *cd,
 			K_TREE *trf_root)
@@ -8850,6 +8972,7 @@ static struct CMDS {
 	{ CMD_USERSTAT,	"userstats",	false,	true,	cmd_userstats,	ACCESS_POOL },
 	{ CMD_BLOCK,	"block",	false,	true,	cmd_blocks,	ACCESS_POOL },
 	{ CMD_BLOCKLIST,"blocklist",	false,	false,	cmd_blocklist,	ACCESS_WEB },
+	{ CMD_BLOCKSTATUS,"blockstatus",false,	false,	cmd_blockstatus,ACCESS_WEB },
 	{ CMD_NEWID,	"newid",	false,	false,	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	false,	false,	cmd_payments,	ACCESS_WEB },
 	{ CMD_WORKERS,	"workers",	false,	false,	cmd_workers,	ACCESS_WEB },
@@ -9596,6 +9719,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_PAYMENTS:
 					case CMD_PPLNS:
 					case CMD_DSP:
+					case CMD_BLOCKSTATUS:
 						if (!startup_complete) {
 							snprintf(reply, sizeof(reply),
 								 "%s.%ld.loading.%s",
@@ -9768,6 +9892,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_NEWPASS:
 			case CMD_CHKPASS:
 			case CMD_BLOCKLIST:
+			case CMD_BLOCKSTATUS:
 			case CMD_NEWID:
 			case CMD_PAYMENTS:
 			case CMD_WORKERS:
@@ -10053,7 +10178,8 @@ static void *listener(void *arg)
 		startup_complete = true;
 	}
 
-	conn = dbconnect();
+	if (!everyone_die)
+		conn = dbconnect();
 
 	// Process queued work
 	while (!everyone_die) {
@@ -10078,7 +10204,8 @@ static void *listener(void *arg)
 		}
 	}
 
-	PQfinish(conn);
+	if (conn)
+		PQfinish(conn);
 
 	return NULL;
 }
@@ -10619,6 +10746,7 @@ static struct option long_options[] = {
 	{ "name",		required_argument,	0,	'n' },
 	{ "dbpass",		required_argument,	0,	'p' },
 	{ "ckpool-logdir",	required_argument,	0,	'r' },
+	{ "logdir",		required_argument,	0,	'R' },
 	{ "sockdir",		required_argument,	0,	's' },
 	{ "dbuser",		required_argument,	0,	'u' },
 	{ "version",		no_argument,		0,	'v' },
@@ -10652,7 +10780,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:r:s:u:vyY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:r:R:s:u:vyY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
@@ -10703,6 +10831,9 @@ int main(int argc, char **argv)
 				break;
 			case 'r':
 				restorefrom = strdup(optarg);
+				break;
+			case 'R':
+				ckp.logdir = strdup(optarg);
 				break;
 			case 's':
 				ckp.socket_dir = strdup(optarg);
