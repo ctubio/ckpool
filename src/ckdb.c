@@ -5009,13 +5009,12 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				k_add_head(blocks_free, b_item);
 				K_WUNLOCK(blocks_free);
 				// No mismatch messages during startup
-				if (!startup_complete) {
+				if (startup_complete) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
-					LOGERR("%s(): Request Status: %s requires Status: %s. "
+					LOGERR("%s(): New Status: %s requires Status: %c. "
 						"Ignored: Status: %s, Block: %s/...%s/%s",
 						__func__,
-						blocks_confirmed(confirmed),
-						blocks_confirmed(BLOCKS_CONFIRM_STR),
+						blocks_confirmed(confirmed), want,
 						blocks_confirmed(DATA_BLOCKS(old_b_item)->confirmed),
 						height, blk_dsp, cd_buf);
 				}
@@ -8218,7 +8217,10 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
 	}
 
 	if (!ok) {
-		LOGERR("%s() %s.failed.DBE", __func__, id);
+		/* Ignore during startup,
+		 * another error should have shown if it matters */
+		if (startup_complete)
+			LOGERR("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
 	}
 
