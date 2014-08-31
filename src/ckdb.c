@@ -8580,6 +8580,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	hex2bin(ndiffbin, DATA_WORKINFO(w_item)->bits, 4);
 	ndiff = diff_from_nbits(ndiffbin);
 	diff_want = ndiff * diff_times + diff_add;
+	if (diff_want < 1.0) {
+		snprintf(reply, siz,
+			 "ERR.invalid diff_want result %f",
+			 diff_want);
+		return strdup(reply);
+	}
+
 	begin_workinfoid = 0;
 	share_count = 0;
 	total = 0;
@@ -8614,7 +8621,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 					break;
 			default:
 				snprintf(reply, siz,
-					 "ERR.sharesummary not ready in workinfo %"PRId64,
+					 "ERR.sharesummary1 not ready in workinfo %"PRId64,
 					 DATA_SHARESUMMARY(ss_item)->workinfoid);
 				goto shazbot;
 		}
@@ -8639,7 +8646,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 					break;
 			default:
 				snprintf(reply, siz,
-					 "ERR.sharesummary not ready in workinfo %"PRId64,
+					 "ERR.sharesummary2 not ready in workinfo %"PRId64,
 					 DATA_SHARESUMMARY(ss_item)->workinfoid);
 				goto shazbot;
 		}
