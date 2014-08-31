@@ -128,8 +128,6 @@ static char *restorefrom;
  *  ckdb aborting and needing a complete restart resolves it
  * The users table, required for the authorise messages, is always updated
  *  immediately and is not affected by ckpool messages until we
- *   TODO: allow bitcoin addresses - this will also need to be handled
- *    while filling the queue during reload, once we allow BTC addresses
  * During the reload, when checking the timeframe for summarisation, we
  *  use the current last userstats createdate as 'now' to avoid touching a
  *  timeframe where data could still be waiting to be loaded
@@ -3993,7 +3991,6 @@ static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *wor
 
 	shares = DATA_SHARES(s_item);
 
-	// TODO: allow BTC address later?
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
@@ -4133,7 +4130,6 @@ static bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 
 	shareerrors = DATA_SHAREERRORS(s_item);
 
-	// TODO: allow BTC address later?
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
