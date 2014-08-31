@@ -767,6 +767,7 @@ enum cmd_values {
 	CMD_LOGLEVEL,
 	CMD_SHARELOG,
 	CMD_AUTH,
+	CMD_ADDRAUTH,
 	CMD_ADDUSER,
 	CMD_NEWPASS,
 	CMD_CHKPASS,
@@ -2478,7 +2479,7 @@ unparam:
 	return ok;
 }
 
-static bool users_add(PGconn *conn, char *username, char *emailaddress,
+static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 			char *passwordhash, char *by, char *code, char *inet,
 			tv_t *cd, K_TREE *trf_root)
 {
@@ -2571,7 +2572,10 @@ unitem:
 	}
 	K_WUNLOCK(users_free);
 
-	return ok;
+	if (ok)
+		return item;
+	else
+		return NULL;
 }
 
 static bool users_fill(PGconn *conn)
@@ -5558,7 +5562,8 @@ static cmp_t cmp_auths(K_ITEM *a, K_ITEM *b)
 static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,
 			char *useragent, char *preauth, char *by, char *code,
-			char *inet, tv_t *cd, bool igndup, K_TREE *trf_root)
+			char *inet, tv_t *cd, bool igndup, K_TREE *trf_root,
+			bool addressuser)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -5584,8 +5589,18 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
-	if (!u_item)
-		goto unitem;
+	if (!u_item) {
+		if (addressuser) {
+			if (conn == NULL) {
+				conn = dbconnect();
+				conned = true;
+			}
+			u_item = users_add(conn, username, EMPTY, EMPTY,
+					   by, code, inet, cd, trf_root);
+		}
+		if (!u_item)
+			goto unitem;
+	}
 
 	STRNCPY(row->poolinstance, poolinstance);
 	row->userid = DATA_USERS(u_item)->userid;
@@ -5606,6 +5621,9 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	if (find_in_ktree(auths_root, a_item, cmp_auths, ctx)) {
 		k_add_head(auths_free, a_item);
 		K_WUNLOCK(auths_free);
+
+		if (conned)
+			PQfinish(conn);
 
 		if (!igndup) {
 			tv_to_buf(cd, cd_buf, sizeof(cd_buf));
@@ -6939,9 +6957,7 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-
-	K_ITEM *i_username, *i_emailaddress, *i_passwordhash;
-	bool ok;
+	K_ITEM *i_username, *i_emailaddress, *i_passwordhash, *u_item;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -6957,12 +6973,12 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 	if (!i_passwordhash)
 		return strdup(reply);
 
-	ok = users_add(conn, DATA_TRANSFER(i_username)->data,
-			     DATA_TRANSFER(i_emailaddress)->data,
-			     DATA_TRANSFER(i_passwordhash)->data,
-			     by, code, inet, now, trf_root);
+	u_item = users_add(conn, DATA_TRANSFER(i_username)->data,
+				 DATA_TRANSFER(i_emailaddress)->data,
+				 DATA_TRANSFER(i_passwordhash)->data,
+				 by, code, inet, now, trf_root);
 
-	if (!ok) {
+	if (!u_item) {
 		LOGERR("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
 	}
@@ -8279,7 +8295,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				    DATA_TRANSFER(i_enonce1)->data,
 				    DATA_TRANSFER(i_useragent)->data,
 				    DATA_TRANSFER(i_preauth)->data,
-				    by, code, inet, cd, igndup, trf_root);
+				    by, code, inet, cd, igndup, trf_root, false);
 
 	if (!secuserid) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
@@ -8307,6 +8323,83 @@ static char *cmd_auth(PGconn *conn, char *cmd, char *id,
 	}
 
 	return cmd_auth_do(conn, cmd, id, by, code, inet, cd, igndup, trf_root);
+}
+
+static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
+				char *code, char *inet, tv_t *cd, bool igndup,
+				K_TREE *trf_root)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
+	K_ITEM *i_enonce1, *i_useragent, *i_preauth;
+	char *secuserid;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_poolinstance = optional_name(trf_root, "poolinstance", 1, NULL);
+	if (!i_poolinstance)
+		i_poolinstance = &auth_poolinstance;
+
+	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
+	if (!i_workername)
+		return strdup(reply);
+
+	i_clientid = require_name(trf_root, "clientid", 1, NULL, reply, siz);
+	if (!i_clientid)
+		return strdup(reply);
+
+	i_enonce1 = require_name(trf_root, "enonce1", 1, NULL, reply, siz);
+	if (!i_enonce1)
+		return strdup(reply);
+
+	i_useragent = require_name(trf_root, "useragent", 0, NULL, reply, siz);
+	if (!i_useragent)
+		return strdup(reply);
+
+	i_preauth = require_name(trf_root, "preauth", 1, NULL, reply, siz);
+	if (!i_preauth)
+		return strdup(reply);
+
+	secuserid = auths_add(conn, DATA_TRANSFER(i_poolinstance)->data,
+				    DATA_TRANSFER(i_username)->data,
+				    DATA_TRANSFER(i_workername)->data,
+				    DATA_TRANSFER(i_clientid)->data,
+				    DATA_TRANSFER(i_enonce1)->data,
+				    DATA_TRANSFER(i_useragent)->data,
+				    DATA_TRANSFER(i_preauth)->data,
+				    by, code, inet, cd, igndup, trf_root, true);
+
+	if (!secuserid) {
+		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
+		return strdup("failed.DBE");
+	}
+
+	LOGDEBUG("%s.ok.auth added for %s", id, secuserid);
+	snprintf(reply, siz, "ok.%s", secuserid);
+	return strdup(reply);
+}
+
+static char *cmd_addrauth(PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, char *by,
+			char *code, char *inet, tv_t *cd,
+			K_TREE *trf_root)
+{
+	bool igndup = false;
+
+	// confirm_summaries() doesn't call this
+	if (reloading) {
+		if (tv_equal(cd, &(dbstatus.newest_createdate_auths)))
+			igndup = true;
+		else if (tv_newer(cd, &(dbstatus.newest_createdate_auths)))
+			return NULL;
+	}
+
+	return cmd_addrauth_do(conn, cmd, id, by, code, inet, cd, igndup, trf_root);
 }
 
 static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
@@ -8972,6 +9065,7 @@ static struct CMDS {
 	{ CMD_SHARELOG,	STR_SHAREERRORS, false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_SHARELOG,	STR_AGEWORKINFO, false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_AUTH,	"authorise",	false,	true,	cmd_auth,	ACCESS_POOL },
+	{ CMD_ADDRAUTH,	"addrauth",	false,	true,	cmd_addrauth,	ACCESS_POOL },
 	{ CMD_ADDUSER,	"adduser",	false,	false,	cmd_adduser,	ACCESS_WEB },
 	{ CMD_NEWPASS,	"newpass",	false,	false,	cmd_newpass,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	false,	false,	cmd_chkpass,	ACCESS_WEB },
@@ -9478,6 +9572,16 @@ static void *logger(__maybe_unused void *arg)
 	return NULL;
 }
 
+#define STORELASTREPLY(_cmd) do { \
+		if (last_ ## _cmd) \
+			free(last_ ## _cmd); \
+		last_ ## _cmd = buf; \
+		buf = NULL; \
+		if (reply_ ## _cmd) \
+			free(reply_ ## _cmd); \
+		reply_ ## _cmd = rep; \
+	} while (0)
+
 static void *socketer(__maybe_unused void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
@@ -9485,6 +9589,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *end, *ans = NULL, *rep = NULL, *buf = NULL, *dot;
 	char cmd[CMD_SIZ+1], id[ID_SIZ+1], reply[1024+1];
 	char *last_auth = NULL, *reply_auth = NULL;
+	char *last_addrauth = NULL, *reply_addrauth = NULL;
 	char *last_chkpass = NULL, *reply_chkpass = NULL;
 	char *last_adduser = NULL, *reply_adduser = NULL;
 	char *last_newpass = NULL, *reply_newpass = NULL;
@@ -9555,6 +9660,7 @@ static void *socketer(__maybe_unused void *arg)
 			 *   the reply without reprocessing the message
 			 */
 			dup = false;
+			// These are ordered approximately most likely first
 			if (last_auth && strcmp(last_auth, buf) == 0) {
 				reply_last = reply_auth;
 				dup = true;
@@ -9569,6 +9675,9 @@ static void *socketer(__maybe_unused void *arg)
 				dup = true;
 			} else if (last_newid && strcmp(last_newid, buf) == 0) {
 				reply_last = reply_newid;
+				dup = true;
+			} else if (last_addrauth && strcmp(last_addrauth, buf) == 0) {
+				reply_last = reply_auth;
 				dup = true;
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
@@ -9644,6 +9753,7 @@ static void *socketer(__maybe_unused void *arg)
 						break;
 					// Always process immediately:
 					case CMD_AUTH:
+					case CMD_ADDRAUTH:
 						// First message from the pool
 						if (want_first) {
 							ck_wlock(&fpm_lock);
@@ -9670,49 +9780,22 @@ static void *socketer(__maybe_unused void *arg)
 						ans = NULL;
 						switch (cmdnum) {
 							case CMD_AUTH:
-								if (last_auth)
-									free(last_auth);
-								last_auth = buf;
-								buf = NULL;
-								if (reply_auth)
-									free(reply_auth);
-								reply_auth = rep;
+								STORELASTREPLY(auth);
+								break;
+							case CMD_ADDRAUTH:
+								STORELASTREPLY(addrauth);
 								break;
 							case CMD_CHKPASS:
-								if (last_chkpass)
-									free(last_chkpass);
-								last_chkpass = buf;
-								buf = NULL;
-								if (reply_chkpass)
-									free(reply_chkpass);
-								reply_chkpass = rep;
+								STORELASTREPLY(chkpass);
 								break;
 							case CMD_ADDUSER:
-								if (last_adduser)
-									free(last_adduser);
-								last_adduser = buf;
-								buf = NULL;
-								if (reply_adduser)
-									free(reply_adduser);
-								reply_adduser = rep;
+								STORELASTREPLY(adduser);
 								break;
 							case CMD_NEWPASS:
-								if (last_newpass)
-									free(last_newpass);
-								last_newpass = buf;
-								buf = NULL;
-								if (reply_newpass)
-									free(reply_newpass);
-								reply_newpass = rep;
+								STORELASTREPLY(newpass);
 								break;
 							case CMD_NEWID:
-								if (last_newid)
-									free(last_newid);
-								last_newid = buf;
-								buf = NULL;
-								if (reply_newid)
-									free(reply_newid);
-								reply_newid = rep;
+								STORELASTREPLY(newid);
 								break;
 							default:
 								free(rep);
@@ -9912,6 +9995,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 					__func__, count, cmd);
 				break;
 			case CMD_AUTH:
+			case CMD_ADDRAUTH:
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
 			case CMD_BLOCK:
