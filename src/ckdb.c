@@ -46,8 +46,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.7"
-#define CKDB_VERSION DB_VERSION"-0.106"
+#define DB_VERSION "0.8"
+#define CKDB_VERSION DB_VERSION"-0.200"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -841,6 +841,8 @@ static K_LIST *transfer_free;
 // older version missing field defaults
 static TRANSFER auth_1 = { "poolinstance", "", auth_1.value };
 static K_ITEM auth_poolinstance = { "tmp", NULL, NULL, (void *)(&auth_1) };
+static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.value };
+static K_ITEM auth_preauth = { "tmp", NULL, NULL, (void *)(&auth_2) };
 static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.value };
 static K_ITEM poolstats_elapsed = { "tmp", NULL, NULL, (void *)(&poolstats_1) };
 static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.value };
@@ -1254,6 +1256,7 @@ typedef struct auths {
 	int32_t clientid;
 	char enonce1[TXT_SML+1];
 	char useragent[TXT_BIG+1];
+	char preauth[TXT_FLAG+1];
 	HISTORYDATECONTROLFIELDS;
 } AUTHS;
 
@@ -5554,8 +5557,8 @@ static cmp_t cmp_auths(K_ITEM *a, K_ITEM *b)
 
 static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,
-			char *useragent, char *by, char *code, char *inet,
-			tv_t *cd, bool igndup, K_TREE *trf_root)
+			char *useragent, char *preauth, char *by, char *code,
+			char *inet, tv_t *cd, bool igndup, K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -5567,7 +5570,7 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	AUTHS *row;
 	char *ins;
 	char *secuserid = NULL;
-	char *params[7 + HISTORYDATECOUNT];
+	char *params[8 + HISTORYDATECOUNT];
 	int par;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -5594,6 +5597,7 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	TXT_TO_INT("clientid", clientid, row->clientid);
 	STRNCPY(row->enonce1, enonce1);
 	STRNCPY(row->useragent, useragent);
+	STRNCPY(row->preauth, preauth);
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -5633,12 +5637,13 @@ static char *auths_add(PGconn *conn, char *poolinstance, char *username,
 	params[par++] = int_to_buf(row->clientid, NULL, 0);
 	params[par++] = str_to_buf(row->enonce1, NULL, 0);
 	params[par++] = str_to_buf(row->useragent, NULL, 0);
+	params[par++] = str_to_buf(row->preauth, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into auths "
-		"(authid,poolinstance,userid,workername,clientid,enonce1,useragent"
-		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
+		"(authid,poolinstance,userid,workername,clientid,enonce1,useragent,preauth"
+		HISTORYDATECONTROL ") values (" PQPARAM13 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
@@ -8223,7 +8228,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
-	K_ITEM *i_enonce1, *i_useragent;
+	K_ITEM *i_enonce1, *i_useragent, *i_preauth;
 	char *secuserid;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -8252,12 +8257,17 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!i_useragent)
 		return strdup(reply);
 
+	i_preauth = optional_name(trf_root, "preauth", 1, NULL);
+	if (!i_preauth)
+		i_preauth = &auth_preauth;
+
 	secuserid = auths_add(conn, DATA_TRANSFER(i_poolinstance)->data,
 				    DATA_TRANSFER(i_username)->data,
 				    DATA_TRANSFER(i_workername)->data,
 				    DATA_TRANSFER(i_clientid)->data,
 				    DATA_TRANSFER(i_enonce1)->data,
 				    DATA_TRANSFER(i_useragent)->data,
+				    DATA_TRANSFER(i_preauth)->data,
 				    by, code, inet, cd, igndup, trf_root);
 
 	if (!secuserid) {
