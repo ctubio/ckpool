@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.200"
+#define CKDB_VERSION DB_VERSION"-0.201"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -7256,6 +7256,8 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024];
 	char *buf;
 	size_t len, off;
+	int32_t height = -1;
+	tv_t first_cd = {0,0};
 	int rows;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -7266,6 +7268,10 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RLOCK(blocks_free);
 	b_item = last_in_ktree(blocks_root, ctx);
 	while (b_item && rows < 42) {
+		if (height != DATA_BLOCKS(b_item)->height) {
+			height = DATA_BLOCKS(b_item)->height;
+			copy_tv(&first_cd, &(DATA_BLOCKS(b_item)->createdate));
+		}
 		if (CURRENT(&(DATA_BLOCKS(b_item)->expirydate))) {
 			int_to_buf(DATA_BLOCKS(b_item)->height, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "height%d=%s%c", rows, reply, FLDSEP);
@@ -7285,6 +7291,11 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 			str_to_buf(DATA_BLOCKS(b_item)->workername, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "workername%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp),
+				 "firstcreatedate%d=%ld%c", rows,
+				 first_cd.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
