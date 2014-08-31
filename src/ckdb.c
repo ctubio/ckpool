@@ -1043,7 +1043,7 @@ static K_LIST *optioncontrol_free;
 static K_STORE *optioncontrol_store;
 */
 
-// TODO: aging/discarding workinfo,shares
+// TODO: discarding workinfo,shares
 // WORKINFO workinfo.id.json={...}
 typedef struct workinfo {
 	int64_t workinfoid;
@@ -3158,7 +3158,7 @@ static bool payments_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
-	// TODO: handle selecting a subset, eg 20 per web page
+	// TODO: handle selecting a subset, eg 20 per web page (in blocklist also)
 	sel = "select "
 		"userid,paydate,payaddress,originaltxn,amount,committxn,commitblockhash"
 		HISTORYDATECONTROL
@@ -3481,20 +3481,6 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 static cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
 static cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 
-/* N.B. a DB check can be done to find sharesummaries that have missed being
- *  aged (and a possible problem with the aging process):
- *  e.g. for a date D in the past of at least a few hours
- *	select count(*) from sharesummary where createdate<'D' and complete='n';
- *   and can be easily corrected:
- *	update sharesummary set complete='a' where createdate<'D' and complete='n';
- * It's important to make sure the D value is far enough in the past such that
- *  all the matching sharesummary records in ckdb have certainly completed
- *  ckdb would need to restart to get the updated DB information though it would
- *  not affect current ckdb code
- * TODO: This will happen until auto aging is added here - since ckpool can not reliably
- *  age all workinfo that was active when it exits (e.g. a crash) so best to not
- *  try, but get ckdb to auto age old unaged data
- */
 static bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			 char *by, char *code, char *inet, tv_t *cd,
 			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
@@ -4097,9 +4083,6 @@ unitem:
 
 static bool shares_fill()
 {
-	// TODO: reload shares from workinfo from log file
-	// and verify workinfo while doing that
-
 	return true;
 }
 
@@ -4234,9 +4217,6 @@ unitem:
 
 static bool shareerrors_fill()
 {
-	// TODO: reload shareerrors from workinfo from log file
-	// and verify workinfo while doing that
-
 	return true;
 }
 
@@ -5704,7 +5684,7 @@ static bool auths_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
-	// TODO: keep last x - since a user may login and mine for 100 days
+	// TODO: add/update a (single) fake auth every ~10min or 10min after the last one?
 	sel = "select "
 		"authid,userid,workername,clientid,enonce1,useragent"
 		HISTORYDATECONTROL
@@ -6810,7 +6790,6 @@ static void clean_up(ckpool_t *ckp)
 	fclose(ckp->logfp);
 }
 
-// TODO: skip ones not needed for confirm_summaries()
 static void alloc_storage()
 {
 	workqueue_free = k_new_list("WorkQueue", sizeof(WORKQUEUE),
@@ -8509,6 +8488,7 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
    The value of diff_want defaults to the block's network difficulty
     (block_ndiff) but can be changed with diff_times and diff_add to:
 	block_ndiff * diff_times + diff_add
+    N.B. diff_times and diff_add can be zero, positive or negative
    The pplns_elapsed time of the shares is from the createdate of the
     begin_workinfoid that has shares accounted to the total,
     up to the createdate of the last share
@@ -10411,11 +10391,8 @@ static void confirm_reload()
 	/* The last workinfo we should process
 	 * The reason for going past the last 'a' up to before
 	 *  the first 'n' is in case there were shares missed between them -
-	 *  but that should only be the case with a code bug - so it checks that
-	 * TODO: auto aging will clear 'n' sections inside the 'a's that
-	 *  will always occur when ckpool restarts, since ckpool will never
-	 *  send workinfo age records for workinfo that's active at shutdown -
-	 *  Aging these can (for now) easily be done manually in psql */
+	 *  but that should only be the case with a code bug -
+	 *  so it checks that */
 	if (dbstatus.newest_workinfoid_a > 0) {
 		confirm_last_workinfoid = dbstatus.newest_workinfoid_a;
 		last_reason = "newest aged";
