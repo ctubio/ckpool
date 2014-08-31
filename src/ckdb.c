@@ -8439,7 +8439,9 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	// TODO: handle orphans
+	K_RLOCK(blocks_free);
 	b_item = last_in_ktree(blocks_root, ctx);
+	K_RUNLOCK(blocks_free);
 	if (b_item) {
 		tvs_to_buf(&(DATA_BLOCKS(b_item)->createdate), reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastblock=%s%cconfirmed=%s%c",
@@ -8666,8 +8668,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	blocks.height = height + 1;
 	blocks.blockhash[0] = '\0';
 	look.data = (void *)(&blocks);
+	K_RLOCK(blocks_free);
 	b_item = find_before_in_ktree(blocks_root, &look, cmp_blocks, ctx);
 	if (!b_item) {
+		K_RUNLOCK(blocks_free);
 		snprintf(reply, siz, "ERR.no block height %d", height);
 		return strdup(reply);
 	}
@@ -8676,6 +8680,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			break;
 		b_item = prev_in_ktree(ctx);
 	}
+	K_RUNLOCK(blocks_free);
 	if (!b_item || DATA_BLOCKS(b_item)->height != height) {
 		snprintf(reply, siz, "ERR.unconfirmed block %d", height);
 		return strdup(reply);
