@@ -5157,9 +5157,10 @@ flail:
 				}
 				tv_to_buf(&(DATA_BLOCKS(b_item)->createdate), cd_buf, sizeof(cd_buf));
 				snprintf(tmp, sizeof(tmp),
-					 " Reward: %f, User: %s, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
+					 " Reward: %f, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
 					 BTC_TO_D(DATA_BLOCKS(b_item)->reward),
-					 username, workername, pool.diffacc, est, pct, cd_buf);
+					 DATA_BLOCKS(b_item)->workername,
+					 pool.diffacc, est, pct, cd_buf);
 				if (pool.workinfoid < DATA_BLOCKS(b_item)->workinfoid) {
 					pool.workinfoid = DATA_BLOCKS(b_item)->workinfoid;
 					pool.diffacc = pool.differr =
