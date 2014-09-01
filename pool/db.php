@@ -3,6 +3,17 @@
 include_once('socket.php');
 include_once('base.php');
 #
+# List of db fucntions to call and get the results
+# back from ckdb
+# From homeInfo and the rest after that
+# The result is an array of all ckdb result field names and their values
+# Also is included:
+#	['ID'] the id sent
+#	['STAMP'] the ckdb reply timestamp
+#	['STATUS'] the ckdb reply status (!'ok' = error)
+#	['ERROR'] if status not 'ok' the error message reply
+# The reply is false if the ckdb return data was corrupt
+#
 global $send_sep, $fld_sep, $val_sep;
 $send_sep = '.';
 $fld_sep = Chr(0x9);
