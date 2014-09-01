@@ -3,11 +3,10 @@
 include_once('socket.php');
 include_once('base.php');
 #
-# List of db fucntions to call and get the results
-# back from ckdb
-# From homeInfo and the rest after that
+# List of db functions to call and get the results back from ckdb
+# From homeInfo() and the rest after that
 # The result is an array of all ckdb result field names and their values
-# Also is included:
+# Also included:
 #	['ID'] the id sent
 #	['STAMP'] the ckdb reply timestamp
 #	['STATUS'] the ckdb reply status (!'ok' = error)
