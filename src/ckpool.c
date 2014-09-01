@@ -1208,7 +1208,7 @@ int main(int argc, char **argv)
 	if (!ckp.btcaddress)
 		ckp.btcaddress = ckp.donaddress;
 	if (!ckp.blockpoll)
-		ckp.blockpoll = 500;
+		ckp.blockpoll = 50;
 	if (!ckp.update_interval)
 		ckp.update_interval = 30;
 	if (!ckp.mindiff)
