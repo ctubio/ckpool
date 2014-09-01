@@ -4819,6 +4819,38 @@ void sharesummary_reload()
 	PQfinish(conn);
 }
 
+// TODO: do this better ... :)
+static void dsp_hash(char *hash, char *buf, size_t siz)
+{
+	char *ptr;
+
+	ptr = hash + strlen(hash) - (siz - 1) - 8;
+	if (ptr < hash)
+		ptr = hash;
+	STRNCPYSIZ(buf, ptr, siz);
+}
+
+static void dsp_blocks(K_ITEM *item, FILE *stream)
+{
+	char createdate_buf[DATE_BUFSIZ], expirydate_buf[DATE_BUFSIZ];
+	BLOCKS *b = NULL;
+	char hash_dsp[16+1];
+
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		b = DATA_BLOCKS(item);
+
+		dsp_hash(b->blockhash, hash_dsp, sizeof(hash_dsp));
+		tv_to_buf(&(b->createdate), createdate_buf, sizeof(createdate_buf));
+		tv_to_buf(&(b->expirydate), expirydate_buf, sizeof(expirydate_buf));
+		fprintf(stream, " hi=%d hash='%.16s' uid=%"PRId64" w='%s' "
+				"cd=%s ed=%s\n",
+				b->height, hash_dsp, b->userid, b->workername,
+				createdate_buf, expirydate_buf);
+	}
+}
+
 // order by height asc,blockhash asc,expirydate desc
 static cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b)
 {
@@ -4879,7 +4911,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	K_TREE_CTX ctx[1];
 	K_ITEM *b_item, *u_item, *old_b_item;
 	char cd_buf[DATE_BUFSIZ];
-	char blk_dsp[16+1], *ptr;
+	char hash_dsp[16+1];
 	BLOCKS *row;
 	char *upd, *ins;
 	char *params[11 + HISTORYDATECOUNT];
@@ -4901,11 +4933,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 
-	// TODO: do this better ... :)
-	ptr = blockhash + strlen(blockhash) - (sizeof(blk_dsp)-1) - 8;
-	if (ptr < blockhash)
-		ptr = blockhash;
-	STRNCPY(blk_dsp, ptr);
+	dsp_hash(blockhash, hash_dsp, sizeof(hash_dsp));
 
 	K_WLOCK(blocks_free);
 	old_b_item = find_blocks(row->height, blockhash);
@@ -4923,7 +4951,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 						__func__,
 						blocks_confirmed(DATA_BLOCKS(old_b_item)->confirmed),
 						blocks_confirmed(confirmed),
-						height, blk_dsp, cd_buf);
+						height, hash_dsp, cd_buf);
 				}
 				return true;
 			}
@@ -4990,7 +5018,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					"Ignored: Block: %s/...%s/%s",
 					__func__,
 					blocks_confirmed(confirmed),
-					height, blk_dsp, cd_buf);
+					height, hash_dsp, cd_buf);
 				goto flail;
 			}
 			want = BLOCKS_CONFIRM;
@@ -5000,7 +5028,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 				LOGERR("%s(): Can't %s a non-existent Block: %s/...%s/%s",
 					__func__, blocks_confirmed(confirmed),
-					height, blk_dsp, cd_buf);
+					height, hash_dsp, cd_buf);
 				goto flail;
 			}
 			if (confirmed[0] == BLOCKS_CONFIRM)
@@ -5016,7 +5044,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 						__func__,
 						blocks_confirmed(confirmed), want,
 						blocks_confirmed(DATA_BLOCKS(old_b_item)->confirmed),
-						height, blk_dsp, cd_buf);
+						height, hash_dsp, cd_buf);
 				}
 				goto flail;
 			}
@@ -5177,7 +5205,7 @@ flail:
 		LOGWARNING("%s(): %sStatus: %s, Block: %s/...%s%s",
 			   __func__, blk ? "BLOCK! " : "",
 			   blocks_confirmed(confirmed),
-			   height, blk_dsp, tmp);
+			   height, hash_dsp, tmp);
 	}
 
 	return ok;
@@ -6867,6 +6895,7 @@ static void alloc_storage()
 					ALLOC_BLOCKS, LIMIT_BLOCKS, true);
 	blocks_store = k_new_store(blocks_free);
 	blocks_root = new_ktree();
+	blocks_free->dsp_func = dsp_blocks;
 
 	miningpayouts_free = k_new_list("MiningPayouts", sizeof(MININGPAYOUTS),
 					ALLOC_MININGPAYOUTS, LIMIT_MININGPAYOUTS, true);
@@ -8922,6 +8951,8 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 	i_file = require_name(trf_root, "file", 1, NULL, reply, siz);
 	if (!i_file)
 		return strdup(reply);
+
+	dsp_ktree(blocks_free, blocks_root, DATA_BLOCKS(i_file)->data, NULL);
 
 	dsp_ktree(transfer_free, trf_root, DATA_TRANSFER(i_file)->data, NULL);
 
