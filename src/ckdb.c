@@ -8656,8 +8656,21 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		tvs_to_buf(&last_bc, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "lastbc=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
+		if (workinfo_current) {
+			WORKINFO *wic;
+			int32_t hi;
+			DATA_WORKINFO(wic, workinfo_current);
+			hi = coinbase1height(wic->coinbase1);
+			snprintf(tmp, sizeof(tmp), "lastheight=%d%c",
+						   hi-1, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		} else {
+			snprintf(tmp, sizeof(tmp), "lastheight=?%c", FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
 	} else {
-		snprintf(tmp, sizeof(tmp), "lastbc=?%c", FLDSEP);
+		snprintf(tmp, sizeof(tmp), "lastbc=?%clastheight=?%c",
+					   FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
@@ -8680,8 +8693,13 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 					   reply, FLDSEP,
 					   blocks->confirmed, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "lastblockheight=%d%c",
+					   blocks->height, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "lastblock=?%cconfirmed=?%c", FLDSEP, FLDSEP);
+		snprintf(tmp, sizeof(tmp), "lastblock=?%cconfirmed=?%c"
+					   "lastblockheight=?%c",
+					   FLDSEP, FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 

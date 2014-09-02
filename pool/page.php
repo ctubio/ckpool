@@ -187,6 +187,9 @@ function pgtop($dotop, $user, $douser)
 		}
 	}
 
+	if (isset($info['lastblockheight']))
+		$plb .= ' ('.$info['lastblockheight'].')';
+
 	if (isset($info['lastbc']))
 	{
 		$nlb = $info['lastbc'];
@@ -200,6 +203,9 @@ function pgtop($dotop, $user, $douser)
 				$nlb .= " ${s}s";
 		}
 	}
+
+	if (isset($info['lastheight']))
+		$nlb .= ' ('.$info['lastheight'].')';
 
 	if (isset($info['blockacc']))
 	{
