@@ -2,6 +2,8 @@
 #
 function doblocks($data, $user)
 {
+ $blink = '<a href=https://blockchain.info/block-height/';
+
  $pg = '<h1>Blocks</h1>';
 
  $ans = getBlocks($user);
@@ -31,8 +33,11 @@ function doblocks($data, $user)
 		if ($stat == '1-Confirm')
 			$stat = 'Conf';
 
+		$hi = $ans['height'.$i];
+		$hifld = "$blink$hi>$hi</a>";
+
 		$pg .= "<tr class=$row>";
-		$pg .= "<td class=dl$ex>".$ans['height'.$i].'</td>';
+		$pg .= "<td class=dl$ex>$hifld</td>";
 		$pg .= "<td class=dl$ex>".$ans['workername'.$i].'</td>';
 		$pg .= "<td class=dr$ex>".btcfmt($ans['reward'.$i]).'</td>';
 		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate'.$i]).'</td>';
