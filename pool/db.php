@@ -124,7 +124,7 @@ function checkPass($user, $pass)
  $rep = sendsockreply('checkpass', $msg);
  if (!$rep)
 	dbdown();
- return repDecode($rep);
+ return $rep;
 }
 #
 function userReg($user, $email, $pass)
