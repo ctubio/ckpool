@@ -195,6 +195,12 @@ struct user_instance {
 	bool btcaddress;
 
 	int workers;
+
+	double dsps1; /* Diff shares per second, 1 minute rolling average */
+	double dsps5; /* ... 5 minute ... */
+	double dsps60;/* etc */
+	double dsps1440;
+	tv_t last_share;
 };
 
 typedef struct user_instance user_instance_t;
@@ -259,6 +265,13 @@ typedef struct share share_t;
 static share_t *shares;
 
 static cklock_t share_lock;
+
+static int gen_priority;
+
+/* Priority levels for generator messages */
+#define GEN_LAX 0
+#define GEN_NORMAL 1
+#define GEN_PRIORITY 2
 
 #define ID_AUTH 0
 #define ID_WORKINFO 1
@@ -585,17 +598,62 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	}
 }
 
+/* Mandatory send_recv to the generator which sets the message priority if this
+ * message is higher priority. Races galore on gen_priority mean this might
+ * read the wrong priority but occasional wrong values are harmless. */
+static char *__send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
+{
+	char *buf = NULL;
+	bool set;
+
+	if (prio > gen_priority) {
+		gen_priority = prio;
+		set = true;
+	} else
+		set = false;
+	buf = send_recv_proc(ckp->generator, msg);
+	if (set)
+		gen_priority = 0;
+
+	return buf;
+}
+
+/* Conditionally send_recv a message only if it's equal or higher priority than
+ * any currently being serviced. */
+static char *send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
+{
+	char *buf = NULL;
+
+	if (prio >= gen_priority)
+		buf = __send_recv_generator(ckp, msg, prio);
+	return buf;
+}
+
+static void send_generator(ckpool_t *ckp, const char *msg, int prio)
+{
+	bool set;
+
+	if (prio > gen_priority) {
+		gen_priority = prio;
+		set = true;
+	} else
+		set = false;
+	send_proc(ckp->generator, msg);
+	if (set)
+		gen_priority = 0;
+}
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
-static void update_base(ckpool_t *ckp)
+static void update_base(ckpool_t *ckp, int prio)
 {
 	bool new_block = false;
 	workbase_t *wb;
 	json_t *val;
 	char *buf;
 
-	buf = send_recv_proc(ckp->generator, "getbase");
+	buf = send_recv_generator(ckp, "getbase", prio);
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get base from generator in update_base");
 		return;
@@ -1020,7 +1078,7 @@ static void block_solve(ckpool_t *ckp)
 			"createinet", ckp->serverurl);
 	ck_runlock(&workbase_lock);
 
-	update_base(ckp);
+	update_base(ckp, GEN_PRIORITY);
 
 	ck_rlock(&workbase_lock);
 	json_set_string(val, "blockhash", current_workbase->prevhash);
@@ -1053,7 +1111,7 @@ retry:
 				copy_tv(&start_tv, &end_tv);
 				LOGDEBUG("%ds elapsed in strat_loop, updating gbt base",
 					 ckp->update_interval);
-				update_base(ckp);
+				update_base(ckp, GEN_NORMAL);
 				continue;
 			}
 		}
@@ -1092,7 +1150,7 @@ retry:
 		ret = 0;
 		goto out;
 	} else if (cmdmatch(buf, "update")) {
-		update_base(ckp);
+		update_base(ckp, GEN_PRIORITY);
 	} else if (cmdmatch(buf, "subscribe")) {
 		/* Proxifier has a new subscription */
 		if (!update_subscribe(ckp))
@@ -1148,7 +1206,7 @@ static void *blockupdate(void *arg)
 	memset(hash, 0, 68);
 	while (42) {
 		dealloc(buf);
-		buf = send_recv_proc(ckp->generator, request);
+		buf = send_recv_generator(ckp, request, GEN_LAX);
 		if (buf && strcmp(buf, hash) && !cmdmatch(buf, "failed")) {
 			strcpy(hash, buf);
 			LOGNOTICE("Block hash changed to %s", hash);
@@ -1259,7 +1317,8 @@ static bool test_address(ckpool_t *ckp, const char *address)
 	char *buf, *msg;
 
 	ASPRINTF(&msg, "checkaddr:%s", address);
-	buf = send_recv_proc(ckp->generator, msg);
+	/* Must wait for a response here */
+	buf = __send_recv_generator(ckp, msg, GEN_LAX);
 	dealloc(msg);
 	if (!buf)
 		return ret;
@@ -1505,6 +1564,7 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid)
 {
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
+	user_instance_t *instance = client->user_instance;
 	int64_t next_blockid, optimal;
 	tv_t now_t;
 
@@ -1518,16 +1578,24 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 		network_diff = current_workbase->network_diff;
 	ck_runlock(&workbase_lock);
 
-	tdiff = sane_tdiff(&now_t, &client->last_share);
 	if (unlikely(!client->first_share.tv_sec)) {
 		copy_tv(&client->first_share, &now_t);
 		copy_tv(&client->ldc, &now_t);
 	}
+
+	tdiff = sane_tdiff(&now_t, &client->last_share);
 	decay_time(&client->dsps1, diff, tdiff, 60);
 	decay_time(&client->dsps5, diff, tdiff, 300);
 	decay_time(&client->dsps60, diff, tdiff, 3600);
 	decay_time(&client->dsps1440, diff, tdiff, 86400);
 	copy_tv(&client->last_share, &now_t);
+
+	tdiff = sane_tdiff(&now_t, &instance->last_share);
+	decay_time(&instance->dsps1, diff, tdiff, 60);
+	decay_time(&instance->dsps5, diff, tdiff, 300);
+	decay_time(&instance->dsps60, diff, tdiff, 3600);
+	decay_time(&instance->dsps1440, diff, tdiff, 86400);
+	copy_tv(&instance->last_share, &now_t);
 	client->idle = false;
 
 	client->ssdc++;
@@ -1562,10 +1630,6 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 		return;
 
 	optimal = round(dsps * 3.33);
-	/* Don't drop diff to rapidly in case the client simply switched away
-	 * and has just returned */
-	if (optimal < client->diff / 2)
-		optimal = client->diff / 2;
 	/* Clamp to mindiff ~ network_diff */
 	if (optimal < ckp->mindiff)
 		optimal = ckp->mindiff;
@@ -1573,6 +1637,14 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 		optimal = network_diff;
 	if (client->diff == optimal)
 		return;
+
+	/* If this is the first share in a change, reset the last diff change
+	 * to make sure the client hasn't just fallen back after a leave of
+	 * absence */
+	if (optimal < client->diff && client->ssdc == 1) {
+		copy_tv(&client->ldc, &now_t);
+		return;
+	}
 
 	client->ssdc = 0;
 
@@ -1636,7 +1708,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 	if (wb->transactions)
 		realloc_strcat(&gbt_block, wb->txn_data);
 	ckp = wb->ckp;
-	send_proc(ckp->generator, gbt_block);
+	send_generator(ckp, gbt_block, GEN_PRIORITY);
 	free(gbt_block);
 
 	flip_32(swap, hash);
@@ -1757,7 +1829,7 @@ static void submit_share(stratum_instance_t *client, int64_t jobid, const char *
 			     "msg_id", msg_id);
 	msg = json_dumps(json_msg, 0);
 	json_decref(json_msg);
-	send_proc(ckp->generator, msg);
+	send_generator(ckp, msg, GEN_LAX);
 	free(msg);
 }
 
@@ -2417,10 +2489,11 @@ static void *statsupdate(void *arg)
 
 	while (42) {
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
-		double ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
+		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
 		char suffix360[16], suffix1440[16];
-		double sps1, sps5, sps15, sps60;
+		user_instance_t *instance, *tmpuser;
 		stratum_instance_t *client, *tmp;
+		double sps1, sps5, sps15, sps60;
 		char fname[512] = {};
 		tv_t now, diff;
 		ts_t ts_now;
@@ -2461,7 +2534,7 @@ static void *statsupdate(void *arg)
 		ghs1440 = stats.dsps1440 * nonces / bias;
 		suffix_string(ghs1440, suffix1440, 16, 0);
 
-		snprintf(fname, 511, "%s/pool.status", ckp->logdir);
+		snprintf(fname, 511, "%s/pool/pool.status", ckp->logdir);
 		fp = fopen(fname, "we");
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
@@ -2470,7 +2543,7 @@ static void *statsupdate(void *arg)
 				"runtime", diff.tv_sec,
 				"Users", stats.users,
 				"Workers", stats.workers);
-		s = json_dumps(val, JSON_NO_UTF8);
+		s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
 		fprintf(fp, "%s\n", s);
@@ -2483,7 +2556,7 @@ static void *statsupdate(void *arg)
 				"hashrate1hr", suffix60,
 				"hashrate6hr", suffix360,
 				"hashrate1d", suffix1440);
-		s = json_dumps(val, JSON_NO_UTF8);
+		s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
 		fprintf(fp, "%s\n", s);
@@ -2494,7 +2567,7 @@ static void *statsupdate(void *arg)
 				"SPS5m", sps5,
 				"SPS15m", sps15,
 				"SPS1h", sps60);
-		s = json_dumps(val, JSON_NO_UTF8);
+		s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
 		fprintf(fp, "%s\n", s);
@@ -2503,14 +2576,10 @@ static void *statsupdate(void *arg)
 
 		ck_rlock(&instance_lock);
 		HASH_ITER(hh, stratum_instances, client, tmp) {
-			double ghs;
-			bool idle;
-
 			if (!client->authorised)
 				continue;
 
 			if (now.tv_sec - client->last_share.tv_sec > 60) {
-				idle = true;
 				/* No shares for over a minute, decay to 0 */
 				decay_time(&client->dsps1, 0, tdiff, 60);
 				decay_time(&client->dsps5, 0, tdiff, 300);
@@ -2518,35 +2587,47 @@ static void *statsupdate(void *arg)
 				decay_time(&client->dsps1440, 0, tdiff, 86400);
 				if (now.tv_sec - client->last_share.tv_sec > 600)
 					client->idle = true;
-			} else
-				idle = false;
-			ghs = client->dsps1 * nonces;
+				continue;
+			}
+		}
+
+		HASH_ITER(hh, user_instances, instance, tmpuser) {
+			bool idle = false;
+
+			if (now.tv_sec - instance->last_share.tv_sec > 60) {
+				/* No shares for over a minute, decay to 0 */
+				decay_time(&instance->dsps1, 0, tdiff, 60);
+				decay_time(&instance->dsps5, 0, tdiff, 300);
+				decay_time(&instance->dsps60, 0, tdiff, 3600);
+				decay_time(&instance->dsps1440, 0, tdiff, 86400);
+				idle = true;
+			}
+			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
-			ghs = client->dsps5 * nonces;
+			ghs = instance->dsps5 * nonces;
 			suffix_string(ghs, suffix5, 16, 0);
-			ghs = client->dsps60 * nonces;
+			ghs = instance->dsps60 * nonces;
 			suffix_string(ghs, suffix60, 16, 0);
-			ghs = client->dsps1440 * nonces;
+			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
 
-			JSON_CPACK(val, "{ss,ss,ss,ss}",
+			JSON_CPACK(val, "{ss,ss,ss,ss,si}",
 					"hashrate1m", suffix1,
 					"hashrate5m", suffix5,
 					"hashrate1hr", suffix60,
-					"hashrate1d", suffix1440);
+					"hashrate1d", suffix1440,
+					"workers", instance->workers);
 
-			snprintf(fname, 511, "%s/%s", ckp->logdir, client->workername);
+			snprintf(fname, 511, "%s/users/%s", ckp->logdir, instance->username);
 			fp = fopen(fname, "we");
 			if (unlikely(!fp)) {
 				LOGERR("Failed to fopen %s", fname);
 				continue;
 			}
-			s = json_dumps(val, JSON_NO_UTF8);
+			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 			fprintf(fp, "%s\n", s);
-			/* Only display the status of connected users to the
-			 * console log. */
 			if (!idle)
-				LOGNOTICE("Worker %s:%s", client->workername, s);
+				LOGNOTICE("User %s:%s", instance->username, s);
 			dealloc(s);
 			json_decref(val);
 			fclose(fp);
