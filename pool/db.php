@@ -116,7 +116,7 @@ function homeInfo($user)
  return $ans;
 }
 #
-function checkpass($user, $pass)
+function checkPass($user, $pass)
 {
  $passhash = myhash($pass);
  $flds = array('username' => $user, 'passwordhash' => $passhash);
@@ -124,7 +124,18 @@ function checkpass($user, $pass)
  $rep = sendsockreply('checkpass', $msg);
  if (!$rep)
 	dbdown();
- return $rep;
+ return repDecode($rep);
+}
+#
+function userReg($user, $email, $pass)
+{
+ $passhash = myhash($pass);
+ $flds = array('username' => $user, 'emailaddress' => $email, 'passwordhash' => $passhash);
+ $msg = msgEncode('adduser', 'reg', $flds);
+ $rep = sendsockreply('adduser', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
 }
 #
 function getAllUsers()
@@ -134,7 +145,7 @@ function getAllUsers()
  $rep = sendsockreply('getAllUsers', $msg);
  if (!$rep)
 	dbdown();
- return $rep;
+ return repDecode($rep);
 }
 #
 function getWorkers($user)
@@ -146,7 +157,7 @@ function getWorkers($user)
  $rep = sendsockreply('getWorkers', $msg);
  if (!$rep)
 	dbdown();
- return $rep;
+ return repDecode($rep);
 }
 #
 function getPayments($user)
@@ -158,7 +169,7 @@ function getPayments($user)
  $rep = sendsockreply('getPayments', $msg);
  if (!$rep)
 	dbdown();
- return $rep;
+ return repDecode($rep);
 }
 #
 function getBlocks($user)
@@ -170,7 +181,7 @@ function getBlocks($user)
  $rep = sendsockreply('getBlocks', $msg);
  if (!$rep)
 	dbdown();
- return $rep;
+ return repDecode($rep);
 }
 #
 ?>

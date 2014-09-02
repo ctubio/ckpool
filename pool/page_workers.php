@@ -4,8 +4,7 @@ function doworker($data, $user)
 {
  $pg = '<h1>Workers</h1>';
 
- $rep = getWorkers($user);
- $ans = repDecode($rep);
+ $ans = getWorkers($user);
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";

@@ -4,8 +4,7 @@ function dopayments($data, $user)
 {
  $pg = '<h1>Payments</h1>';
 
- $rep = getPayments($user);
- $ans = repDecode($rep);
+ $ans = getPayments($user);
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";

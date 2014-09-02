@@ -192,10 +192,11 @@ include_once('db.php');
 #
 function validUserPass($user, $pass)
 {
- $rep = checkpass($user, $pass);
- $ans = repDecode($rep);
+ $rep = checkPass($user, $pass);
+ if ($rep != null)
+	 $ans = repDecode($rep);
  usleep(100000); // Max 10x per second
- if ($ans['STATUS'] == 'ok')
+ if ($rep != null && $ans['STATUS'] == 'ok')
  {
 	$key = 'ckp'.rand(1000000,9999999);
 	$_SESSION['ckpkey'] = $key;

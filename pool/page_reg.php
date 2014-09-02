@@ -129,20 +129,11 @@ function show_reg($menu, $name, $u)
 
  if ($ok === true)
  {
-	$passhash = myhash($pass);
-	$flds = array('username' => $user,
-			'emailaddress' => $mail,
-			'passwordhash' => $passhash);
-	$msg = msgEncode('adduser', 'reg', $flds);
-	$rep = sendsockreply('show_reg', $msg);
-	if (!$rep)
-		dbdown();
-
-	$ans = repDecode($rep);
+	$ans = userReg($user, $mail, $pass);
 	if ($ans['STATUS'] == 'ok')
 		gopage($data, 'doreg2', $menu, $name, $u, true, true, false);
 	else
-		$data['error'] = "Invalid details";
+		$data['error'] = "Invalid username, password or email address";
  }
 
  gopage($data, 'doreg', $menu, $name, $u, true, true, false);

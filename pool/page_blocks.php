@@ -4,8 +4,7 @@ function doblocks($data, $user)
 {
  $pg = '<h1>Blocks</h1>';
 
- $rep = getBlocks($user);
- $ans = repDecode($rep);
+ $ans = getBlocks($user);
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
