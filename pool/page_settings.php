@@ -39,9 +39,9 @@ function settings($data, $user, $email, $addr, $err)
  $pg .= 'To change your payout address, enter a new address and your password';
  $pg .= '</td></tr>';
  $pg .= '<tr class=dc><td class=dr>';
- $pg .= 'Address:';
+ $pg .= 'BTC Address:';
  $pg .= '</td><td class=dl>';
- $pg .= "<input type=text name=addr value='$addr' size=42>";
+ $pg .= "<input type=text name=baddr value='$addr' size=42>";
  $pg .= '</td></tr>';
  $pg .= '<tr class=dc><td class=dr>';
  $pg .= 'Password:';
@@ -101,7 +101,7 @@ function dosettings($data, $user)
 	$check = true;
 	break;
   case 'Address':
-	$addr = getparam('addr', false);
+	$addr = getparam('baddr', false);
 	$pass = getparam('pass', false);
 	$ans = userSettings($user, null, $addr, $pass);
 	$check = true;
