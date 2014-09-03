@@ -65,9 +65,9 @@ function dostats($data, $user)
  return $pg;
 }
 #
-function show_stats($menu, $name, $user)
+function show_stats($page, $menu, $name, $user)
 {
- gopage(NULL, 'dostats', $menu, $name, $user);
+ gopage(NULL, 'dostats', $page, $menu, $name, $user);
 }
 #
 ?>

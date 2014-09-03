@@ -52,6 +52,14 @@ function makeLink($page, $rest = '')
  return $href;
 }
 #
+function makeForm($page)
+{
+ $form = '<form action=index.php method=POST>';
+ if (strlen($page) > 0)
+	$form .= "<input type=hidden name=k value=$page>";
+ return $form;
+}
+#
 function dotrm($html, $dontdoit)
 {
  if ($dontdoit === true)
@@ -82,7 +90,7 @@ function pghead($script_marker, $name)
 
  $head .= "<style type='text/css'>
 form {display: inline-block;}
-html, body {height: 100%; font-family:Arial, Verdana, sans-serif; font-size:12pt; background-color:#eff; text-align: center;}
+html, body {height: 100%; font-family:Arial, Verdana, sans-serif; font-size:12pt; background-color:#eff; text-align: center; background-repeat: no-repeat; background-position: center; }
 .page {min-height: 100%; height: auto !important; height: 100%; margin: 0 auto -50px; position: relative;}
 div.jst {color:red; background-color: #ffa; font-weight: font-size: 8; bold; border-style: solid; border-width: 2px; vertical-align: top;}
 div.topd {background-color:#cff; border-color: #cff; border-style: solid; border-width: 9px;}
@@ -93,6 +101,9 @@ span.login {float: right; margin-left: 8px; margin-right: 24px;}
 span.hil {color:blue;}
 span.warn {color:orange; font-weight:bold;}
 span.urg {color:red; font-weight:bold;}
+span.err {color:red; font-weight:bold; font-size:120%;}
+span.alert {color:red; font-weight:bold; font-size:250%;}
+input.tiny {width: 0px; height: 0px; margin: 0px; padding: 0px; outline: none; border: 0px;}
 #n42 {margin:0; position: relative; color:#fff; background:#07e;}
 #n42 a {color:#fff; text-decoration:none; margin: 4px;}
 #n42 td {min-width: 100px; float: left; vertical-align: top; padding: 2px;}
@@ -291,33 +302,38 @@ function pgtop($dotop, $user, $douser)
 		list($who, $whoid) = validate();
 		if ($who == false)
 		{
-			$top .= "
-<form action=index.php method=POST>
+			$top .= makeForm('')."
+<table cellpadding=0 cellspacing=0 border=0><tr><td>
 <table cellpadding=0 cellspacing=0 border=0><tr>
 <td>User:</td><td><input type=text name=User size=10 value=''></td>
-<td>&nbsp;<input type=submit name=Login value=Login></td></tr><tr>
+</tr><tr>
 <td>Pass:</td><td><input type=password name=Pass size=10 value=''></td>
-<td>&nbsp;&nbsp;<input type=submit name=Register value=Register></td></tr></table>
-</form>";
+</tr></table></td><td>
+<table cellpadding=0 cellspacing=0 border=0><tr>
+<td>&nbsp;<input type=submit name=Login value=Login></td></tr><tr>
+<td>&nbsp;&nbsp;
+<input type=submit name=Register value=Register></td></tr></table>
+</td></tr></table></form>";
 		}
 		else
 		{
 			$top .= "
 <span class=topwho>$who&nbsp;</span>
 <span class=topdes>Hash Rate:</span>
-<span class=topdat>$uhr$u1hr</span>
-<form action=index.php method=POST>
+<span class=topdat>$uhr$u1hr</span>";
+			$top .= makeForm('')."
 &nbsp;<input type=submit name=Logout value=Logout>
 </form>";
 		}
 
 		$top .= '</span>';
 	}
+	$top .= '</td></tr></table>';
  }
  else
 	$top .= '&nbsp;';
 
- $top .= '</td></tr></table></div>';
+ $top .= '</div>';
  return $top;
 }
 #
@@ -357,16 +373,18 @@ function pgmenu($menus)
 	}
 	$ret .= "<tr><td class=ts>".makeLink($item,'class=as')."$submenu</a></td></tr>";
   }
-  $ret .= '</table></div></td></tr></table></td>';
+  if ($first == false)
+	$ret .= '</table></div></td></tr></table>';
+  $ret .= '</td>';
  }
  $ret .= "</tr></table></td></tr></table>\n";
  return $ret;
 }
 #
-function pgbody($menu, $dotop, $user, $douser)
+function pgbody($page, $menu, $dotop, $user, $douser)
 {
- $body = '<body onload="jst()">';
- $body .= '<div class=page>';
+ $body = '<body onload="jst()"';
+ $body .= '><div class=page>';
  $body .=  '<table border=0 cellpadding=0 cellspacing=0 width=100%>';
 
  $body .=   '<tr><td><center>';
@@ -402,7 +420,7 @@ function pgfoot()
  return $foot;
 }
 #
-function gopage($data, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
+function gopage($data, $pagefun, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
 {
  global $dbg;
  global $page_scripts;
@@ -416,15 +434,15 @@ function gopage($data, $page, $menu, $name, $user, $ispage = true, $dotop = true
 	$pg = '';
 
  if ($ispage == true)
-	$pg .= $page($data, $user);
+	$pg .= $pagefun($data, $user);
  else
-	$pg .= $page;
+	$pg .= $pagefun;
 
 // if (isset($_SESSION['logkey']))
 //	unset($_SESSION['logkey']);
 
  $head = pghead($script_marker, $name);
- $body = pgbody($menu, $dotop, $user, $douser);
+ $body = pgbody($page, $menu, $dotop, $user, $douser);
  $foot = pgfoot();
 
  if ($dbg === true)

@@ -131,9 +131,9 @@ function doworkers($data, $user)
  return $pg;
 }
 #
-function show_workers($menu, $name, $user)
+function show_workers($page, $menu, $name, $user)
 {
- gopage(NULL, 'doworkers', $menu, $name, $user);
+ gopage(NULL, 'doworkers', $page, $menu, $name, $user);
 }
 #
 ?>

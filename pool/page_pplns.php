@@ -23,9 +23,7 @@ function dopplns($data, $user)
  $blk = getparam('blk', true);
  if (nuem($blk))
  {
-	$pg = "<br>
-<form action=index.php method=POST>
-<input type=hidden name=k value=pplns>
+	$pg = '<br>'.makeForm('pplns')."
 Block: <input type=text name=blk size=10 value=''>
 &nbsp;<input type=submit name=Calc value=Calc>
 </form>";
@@ -126,9 +124,9 @@ Block: <input type=text name=blk size=10 value=''>
  return $pg;
 }
 #
-function show_pplns($menu, $name, $user)
+function show_pplns($page, $menu, $name, $user)
 {
- gopage(NULL, 'dopplns', $menu, $name, $user);
+ gopage(NULL, 'dopplns', $page, $menu, $name, $user);
 }
 #
 ?>

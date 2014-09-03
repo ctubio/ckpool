@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.211"
+#define CKDB_VERSION DB_VERSION"-0.213"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -783,6 +783,7 @@ enum cmd_values {
 	CMD_ADDUSER,
 	CMD_NEWPASS,
 	CMD_CHKPASS,
+	CMD_USERSET,
 	CMD_POOLSTAT,
 	CMD_USERSTAT,
 	CMD_BLOCK,
@@ -1009,7 +1010,6 @@ static K_STORE *workers_store;
 #define IDLENOTIFICATIONTIME_DEF IDLENOTIFICATIONTIME_MIN
 #define IDLENOTIFICATIONTIME_DEF_STR STRINT(IDLENOTIFICATIONTIME_DEF)
 
-/* unused yet
 // PAYMENTADDRESSES
 typedef struct paymentaddresses {
 	int64_t paymentaddressid;
@@ -1027,7 +1027,6 @@ typedef struct paymentaddresses {
 static K_TREE *paymentaddresses_root;
 static K_LIST *paymentaddresses_free;
 static K_STORE *paymentaddresses_store;
-*/
 
 // PAYMENTS
 typedef struct payments {
@@ -2491,9 +2490,9 @@ static K_ITEM *find_userid(int64_t userid)
 	return find_in_ktree(userid_root, &look, cmp_userid, ctx);
 }
 
-static bool users_pass(PGconn *conn, K_ITEM *u_item, char *oldhash,
-			char *newhash, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root)
+static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
+			     char *newhash, char *email, char *by, char *code,
+			     char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -2505,12 +2504,18 @@ static bool users_pass(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	char *upd, *ins;
 	bool ok = false;
 	char *params[4 + HISTORYDATECOUNT];
+	bool hash;
 	int par;
 
 	LOGDEBUG("%s(): change", __func__);
 
+	if (oldhash != NULL)
+		hash = true;
+	else
+		hash = false;
+
 	DATA_USERS(users, u_item);
-	if (strcasecmp(oldhash, users->passwordhash))
+	if (hash && strcasecmp(oldhash, users->passwordhash))
 		return false;
 
 	K_WLOCK(users_free);
@@ -2519,17 +2524,20 @@ static bool users_pass(PGconn *conn, K_ITEM *u_item, char *oldhash,
 
 	DATA_USERS(row, item);
 	memcpy(row, users, sizeof(*row));
-	STRNCPY(row->passwordhash, newhash);
+	// Update one, leave the other
+	if (hash)
+		STRNCPY(row->passwordhash, newhash);
+	else
+		STRNCPY(row->emailaddress, email);
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
-	upd = "update users set expirydate=$1 where userid=$2 and passwordhash=$3 and expirydate=$4";
+	upd = "update users set expirydate=$1 where userid=$2 and expirydate=$3";
 	par = 0;
 	params[par++] = tv_to_buf(cd, NULL, 0);
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(oldhash, NULL, 0);
 	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
-	PARCHKVAL(par, 4, params);
+	PARCHKVAL(par, 3, params);
 
 	if (conn == NULL) {
 		conn = dbconnect();
@@ -2558,17 +2566,18 @@ static bool users_pass(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	par = 0;
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
 	params[par++] = tv_to_buf(cd, NULL, 0);
+	// Copy them both in - one will be new and one will be old
+	params[par++] = str_to_buf(row->emailaddress, NULL, 0);
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
-	PARCHKVAL(par, 3 + HISTORYDATECOUNT, params); // 8 as per ins
+	PARCHKVAL(par, 4 + HISTORYDATECOUNT, params); // 9 as per ins
 
 	ins = "insert into users "
 		"(userid,username,emailaddress,joineddate,passwordhash,"
 		"secondaryuserid"
 		HISTORYDATECONTROL ") select "
-		"userid,username,emailaddress,joineddate,$3,"
-		"secondaryuserid,"
-		"$4,$5,$6,$7,$8 from users where "
+		"userid,username,$3,joineddate,$4,secondaryuserid,"
+		"$5,$6,$7,$8,$9 from users where "
 		"userid=$1 and expirydate=$2";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -3258,6 +3267,264 @@ void workers_reload()
 	workers_fill(conn);
 
 	PQfinish(conn);
+}
+
+// order by userid asc,expirydate desc,payaddress asc
+static cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b)
+{
+	PAYMENTADDRESSES *pa, *pb;
+	DATA_PAYMENTADDRESSES(pa, a);
+	DATA_PAYMENTADDRESSES(pb, b);
+	cmp_t c = CMP_BIGINT(pa->userid, pb->userid);
+	if (c == 0) {
+		c = CMP_TV(pb->expirydate, pa->expirydate);
+		if (c == 0)
+			c = CMP_STR(pa->payaddress, pb->payaddress);
+	}
+	return c;
+}
+
+static K_ITEM *find_paymentaddresses(int64_t userid)
+{
+	PAYMENTADDRESSES paymentaddresses, *pa;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *item;
+
+	paymentaddresses.userid = userid;
+	paymentaddresses.payaddress[0] = '\0';
+	paymentaddresses.expirydate.tv_sec = DATE_S_EOT;
+
+	INIT_PAYMENTADDRESSES(&look);
+	look.data = (void *)(&paymentaddresses);
+	item = find_after_in_ktree(paymentaddresses_root, &look, cmp_paymentaddresses, ctx);
+	if (item) {
+		DATA_PAYMENTADDRESSES(pa, item);
+		if (pa->userid == userid && CURRENT(&(pa->expirydate)))
+			return item;
+		else
+			return NULL;
+	} else
+		return NULL;
+}
+
+// Whatever the current paymentaddresses are, replace them with this one
+static K_ITEM *paymentaddresses_set(PGconn *conn, int64_t userid, char *payaddress,
+					char *by, char *code, char *inet, tv_t *cd,
+					K_TREE *trf_root)
+{
+	ExecStatusType rescode;
+	bool conned = false;
+	PGresult *res;
+	K_TREE_CTX ctx[1], ctx2[1];
+	K_ITEM *item, *old, *this, look;
+	PAYMENTADDRESSES *row, pa, *thispa;
+	char *upd, *ins;
+	bool ok = false;
+	char *params[4 + HISTORYDATECOUNT];
+	int par;
+	int n;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(paymentaddresses_free);
+	item = k_unlink_head(paymentaddresses_free);
+	K_WUNLOCK(paymentaddresses_free);
+
+	DATA_PAYMENTADDRESSES(row, item);
+
+	row->paymentaddressid = nextid(conn, "paymentaddressid", 1,
+					cd, by, code, inet);
+	if (row->paymentaddressid == 0)
+		goto unitem;
+
+	row->userid = userid;
+	STRNCPY(row->payaddress, payaddress);
+	row->payratio = 1000000;
+
+	HISTORYDATEINIT(row, cd, by, code, inet);
+	HISTORYDATETRANSFER(trf_root, row);
+
+	upd = "update paymentaddresses set expirydate=$1 where userid=$2 and expirydate=$3";
+	par = 0;
+	params[par++] = tv_to_buf(cd, NULL, 0);
+	params[par++] = bigint_to_buf(row->userid, NULL, 0);
+	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+	PARCHKVAL(par, 3, params);
+
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+
+	res = PQexec(conn, "Begin", CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Begin", rescode, conn);
+		goto unparam;
+	}
+	PQclear(res);
+
+	res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Update", rescode, conn);
+		res = PQexec(conn, "Rollback", CKPQ_WRITE);
+		goto unparam;
+	}
+
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	ins = "insert into paymentaddresses "
+		"(paymentaddressid,userid,payaddress,payratio"
+		HISTORYDATECONTROL ") values (" PQPARAM9 ")";
+
+	par = 0;
+	params[par++] = bigint_to_buf(row->paymentaddressid, NULL, 0);
+	params[par++] = bigint_to_buf(row->userid, NULL, 0);
+	params[par++] = str_to_buf(row->payaddress, NULL, 0);
+	params[par++] = int_to_buf(row->payratio, NULL, 0);
+	HISTORYDATEPARAMS(params, par, row);
+	PARCHK(par, params);
+
+	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Insert", rescode, conn);
+		goto unparam;
+	}
+
+	res = PQexec(conn, "Commit", CKPQ_WRITE);
+
+	ok = true;
+unparam:
+	PQclear(res);
+	if (conned)
+		PQfinish(conn);
+	for (n = 0; n < par; n++)
+		free(params[n]);
+unitem:
+	K_WLOCK(paymentaddresses_free);
+	if (!ok)
+		k_add_head(paymentaddresses_free, item);
+	else {
+		// Remove old (unneeded) records
+		pa.userid = userid;
+		pa.expirydate.tv_sec = 0L;
+		pa.payaddress[0] = '\0';
+		INIT_PAYMENTADDRESSES(&look);
+		look.data = (void *)(&pa);
+		old = find_after_in_ktree(paymentaddresses_root, &look,
+					  cmp_paymentaddresses, ctx);
+		while (old) {
+			this = old;
+			DATA_PAYMENTADDRESSES(thispa, this);
+			if (thispa->userid != userid)
+				break;
+			old = next_in_ktree(ctx);
+			paymentaddresses_root = remove_from_ktree(paymentaddresses_root, this,
+								  cmp_paymentaddresses, ctx2);
+			k_add_head(paymentaddresses_free, this);
+		}
+		paymentaddresses_root = add_to_ktree(paymentaddresses_root, item,
+						     cmp_paymentaddresses);
+		k_add_head(paymentaddresses_store, item);
+	}
+	K_WUNLOCK(paymentaddresses_free);
+
+	if (ok)
+		return item;
+	else
+		return NULL;
+}
+
+static bool paymentaddresses_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	PAYMENTADDRESSES *row;
+	char *params[1];
+	int par;
+	char *field;
+	char *sel;
+	int fields = 4;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	sel = "select "
+		"paymentaddressid,userid,payaddress,payratio"
+		HISTORYDATECONTROL
+		" from paymentaddresses where expirydate=$1";
+	par = 0;
+	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
+	PARCHK(par, params);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(paymentaddresses_free);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(paymentaddresses_free);
+		DATA_PAYMENTADDRESSES(row, item);
+
+		PQ_GET_FLD(res, i, "paymentaddressid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("paymentaddressid", field, row->paymentaddressid);
+
+		PQ_GET_FLD(res, i, "userid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userid", field, row->userid);
+
+		PQ_GET_FLD(res, i, "payaddress", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("payaddress", field, row->payaddress);
+
+		PQ_GET_FLD(res, i, "payratio", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("payratio", field, row->payratio);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		paymentaddresses_root = add_to_ktree(paymentaddresses_root, item, cmp_paymentaddresses);
+		k_add_head(paymentaddresses_store, item);
+	}
+	if (!ok)
+		k_add_head(paymentaddresses_free, item);
+
+	K_WUNLOCK(paymentaddresses_free);
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d paymentaddresses records", __func__, n);
+	}
+
+	return ok;
 }
 
 // order by userid asc,paydate asc,payaddress asc,expirydate desc
@@ -6811,6 +7078,8 @@ static bool getdata2()
 	if (!(ok = blocks_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!confirm_sharesummary) {
+		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
+			goto sukamudai;
 		if (!(ok = payments_fill(conn)) || everyone_die)
 			goto sukamudai;
 	}
@@ -7019,6 +7288,13 @@ static void alloc_storage()
 	workers_store = k_new_store(workers_free);
 	workers_root = new_ktree();
 
+	paymentaddresses_free = k_new_list("PaymentAddresses",
+					   sizeof(PAYMENTADDRESSES),
+					   ALLOC_PAYMENTADDRESSES,
+					   LIMIT_PAYMENTADDRESSES, true);
+	paymentaddresses_store = k_new_store(paymentaddresses_free);
+	paymentaddresses_root = new_ktree();
+
 	payments_free = k_new_list("Payments", sizeof(PAYMENTS),
 					ALLOC_PAYMENTS, LIMIT_PAYMENTS, true);
 	payments_store = k_new_store(payments_free);
@@ -7205,10 +7481,11 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RUNLOCK(users_free);
 
 	if (u_item) {
-		ok = users_pass(NULL, u_item,
-				      transfer_data(i_oldhash),
-				      transfer_data(i_newhash),
-				      by, code, inet, now, trf_root);
+		ok = users_pass_email(NULL, u_item,
+					    transfer_data(i_oldhash),
+					    transfer_data(i_newhash),
+					    NULL,
+					    by, code, inet, now, trf_root);
 	}
 
 	if (!ok) {
@@ -7260,6 +7537,124 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
 	return strdup("ok.");
+}
+
+static char *cmd_userset(PGconn *conn, char *cmd, char *id,
+			 __maybe_unused tv_t *now, __maybe_unused char *by,
+			 __maybe_unused char *code, __maybe_unused char *inet,
+			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_username, *i_passwordhash, *i_address, *i_email, *u_item, *pa_item;
+	char *email, *address;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char tmp[1024];
+	PAYMENTADDRESSES *paymentaddresses;
+	USERS *users;
+	char *reason = NULL;
+	char *answer = NULL;
+	size_t len, off;
+	bool ok;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	if (!i_username) {
+		// For web this message is detailed enough
+		reason = "System error";
+		goto struckout;
+	}
+
+	K_RLOCK(users_free);
+	u_item = find_users(transfer_data(i_username));
+	K_RUNLOCK(users_free);
+
+	if (!u_item) {
+		reason = "Unknown user";
+		goto struckout;
+	} else {
+		DATA_USERS(users, u_item);
+		i_passwordhash = optional_name(trf_root, "passwordhash",
+						64, (char *)hashpatt);
+		if (!i_passwordhash) {
+			APPEND_REALLOC_INIT(answer, off, len);
+			snprintf(tmp, sizeof(tmp), "email=%s%c",
+				 users->emailaddress, FLDSEP);
+			APPEND_REALLOC(answer, off, len, tmp);
+
+			K_RLOCK(paymentaddresses_free);
+			pa_item = find_paymentaddresses(users->userid);
+			K_RUNLOCK(paymentaddresses_free);
+
+			if (pa_item) {
+				DATA_PAYMENTADDRESSES(paymentaddresses, pa_item);
+				snprintf(tmp, sizeof(tmp), "addr=%s",
+					 paymentaddresses->payaddress);
+				APPEND_REALLOC(answer, off, len, tmp);
+			} else {
+				snprintf(tmp, sizeof(tmp), "addr=");
+				APPEND_REALLOC(answer, off, len, tmp);
+			}
+		} else {
+			if (strcasecmp(transfer_data(i_passwordhash),
+					users->passwordhash) == 0) {
+				reason = "Incorrect password";
+				goto struckout;
+			}
+			i_email = optional_name(trf_root, "email", 1, (char *)mailpatt);
+			if (i_email)
+				email = transfer_data(i_email);
+			else
+				email = NULL;
+			i_address = optional_name(trf_root, "address", 1, NULL);
+			if (i_address)
+				address = transfer_data(i_address);
+			else
+				address = NULL;
+			if ((email == NULL || *email == '\0') &&
+			    (address == NULL || *address == '\0')) {
+				reason = "Missing/Invalid value";
+				goto struckout;
+			}
+
+//			if (address && *address)
+//				TODO: validate it
+
+			if (email && *email) {
+				ok = users_pass_email(conn, u_item, NULL,
+							    NULL, email,
+							    by, code, inet,
+							    now, trf_root);
+				if (!ok) {
+					reason = "email error";
+					goto struckout;
+				}
+			}
+
+			if (address && *address) {
+				ok = paymentaddresses_set(conn, users->userid,
+								address, by,
+								code, inet,
+								now, trf_root);
+				if (!ok) {
+					reason = "address error";
+					goto struckout;
+				}
+			}
+			answer = strdup("updated");
+		}
+	}
+
+struckout:
+	if (reason) {
+		snprintf(reply, siz, "ERR.%s", reason);
+		LOGERR("%s.%s", id, reply);
+		return strdup(reply);
+	}
+	snprintf(reply, siz, "ok.%s", answer);
+	LOGDEBUG("%s.%s", id, answer);
+	free(answer);
+	return strdup(reply);
 }
 
 static char *cmd_poolstats_do(PGconn *conn, char *cmd, char *id, char *by,
@@ -9248,6 +9643,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	USEINFO(users, 1, 2);
 	USEINFO(workers, 1, 1);
+	USEINFO(paymentaddresses, 1, 1);
 	USEINFO(payments, 1, 1);
 	USEINFO(idcontrol, 1, 0);
 	USEINFO(workinfo, 1, 1);
@@ -9349,6 +9745,7 @@ static struct CMDS {
 	{ CMD_ADDUSER,	"adduser",	false,	false,	cmd_adduser,	ACCESS_WEB },
 	{ CMD_NEWPASS,	"newpass",	false,	false,	cmd_newpass,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	false,	false,	cmd_chkpass,	ACCESS_WEB },
+	{ CMD_USERSET,	"usersettings",	false,	false,	cmd_userset,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	false,	true,	cmd_poolstats,	ACCESS_POOL },
 	{ CMD_USERSTAT,	"userstats",	false,	true,	cmd_userstats,	ACCESS_POOL },
 	{ CMD_BLOCK,	"block",	false,	true,	cmd_blocks,	ACCESS_POOL },
@@ -9886,6 +10283,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *last_chkpass = NULL, *reply_chkpass = NULL;
 	char *last_adduser = NULL, *reply_adduser = NULL;
 	char *last_newpass = NULL, *reply_newpass = NULL;
+	char *last_userset = NULL, *reply_userset = NULL;
 	char *last_newid = NULL, *reply_newid = NULL;
 	char *last_web = NULL, *reply_web = NULL;
 	char *reply_last, duptype[CMD_SIZ+1];
@@ -10058,6 +10456,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_CHKPASS:
 					case CMD_ADDUSER:
 					case CMD_NEWPASS:
+					case CMD_USERSET:
 					case CMD_BLOCKLIST:
 					case CMD_NEWID:
 					case CMD_STATS:
@@ -10087,6 +10486,9 @@ static void *socketer(__maybe_unused void *arg)
 								break;
 							case CMD_NEWPASS:
 								STORELASTREPLY(newpass);
+								break;
+							case CMD_USERSET:
+								STORELASTREPLY(userset);
 								break;
 							case CMD_NEWID:
 								STORELASTREPLY(newid);
@@ -10277,6 +10679,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_ADDUSER:
 			case CMD_NEWPASS:
 			case CMD_CHKPASS:
+			case CMD_USERSET:
 			case CMD_BLOCKLIST:
 			case CMD_BLOCKSTATUS:
 			case CMD_NEWID:

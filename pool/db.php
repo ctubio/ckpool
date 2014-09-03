@@ -59,7 +59,7 @@ function repDecode($rep)
 	if (isset($major[3]))
 		$ans['ERROR'] = $major[3];
 	else
-		$ans['ERROR'] = 'unknown';
+		$ans['ERROR'] = 'system error';
  }
 
  return $ans;
@@ -121,10 +121,22 @@ function checkPass($user, $pass)
  $passhash = myhash($pass);
  $flds = array('username' => $user, 'passwordhash' => $passhash);
  $msg = msgEncode('chkpass', 'log', $flds);
- $rep = sendsockreply('checkpass', $msg);
+ $rep = sendsockreply('checkPass', $msg);
  if (!$rep)
 	dbdown();
  return $rep;
+}
+#
+function setPass($user, $oldpass, $newpass)
+{
+ $oldhash = myhash($oldpass);
+ $newhash = myhash($newpass);
+ $flds = array('username' => $user, 'oldhash' => $oldhash, 'newhash' => $newhash);
+ $msg = msgEncode('newpass', 'log', $flds);
+ $rep = sendsockreply('setPass', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
 }
 #
 function userReg($user, $email, $pass)
@@ -132,7 +144,23 @@ function userReg($user, $email, $pass)
  $passhash = myhash($pass);
  $flds = array('username' => $user, 'emailaddress' => $email, 'passwordhash' => $passhash);
  $msg = msgEncode('adduser', 'reg', $flds);
- $rep = sendsockreply('adduser', $msg);
+ $rep = sendsockreply('userReg', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
+}
+#
+function userSettings($user, $email = null, $addr = null, $pass = null)
+{
+ $flds = array('username' => $user);
+ if ($email != null)
+	$flds['email'] = $email;
+ if ($addr != null)
+	$flds['address'] = $addr;
+ if ($pass != null)
+	$flds['passwordhash'] = myhash($pass);
+ $msg = msgEncode('usersettings', 'userset', $flds);
+ $rep = sendsockreply('userSettings', $msg);
  if (!$rep)
 	dbdown();
  return repDecode($rep);

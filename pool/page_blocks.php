@@ -50,9 +50,9 @@ function doblocks($data, $user)
  return $pg;
 }
 #
-function show_blocks($menu, $name, $user)
+function show_blocks($page, $menu, $name, $user)
 {
- gopage(NULL, 'doblocks', $menu, $name, $user);
+ gopage(NULL, 'doblocks', $page, $menu, $name, $user);
 }
 #
 ?>
