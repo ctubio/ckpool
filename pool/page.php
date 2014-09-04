@@ -288,7 +288,7 @@ function pgtop($dotop, $user, $douser)
 	$top .= '<span class=topdes>Shares:</span>';
 	$top .= "<span class=topdat>$pac</span>";
 	$top .= '<br>';
-	$top .= '<span class=topdes>Rejects:</span>';
+	$top .= '<span class=topdes>Invalid:</span>';
 	$top .= "<span class=topdat>$per</span>";
 	$top .= '</td><td>';
 	$top .= '<span class=topdes>Pool, Last Block:</span>';
