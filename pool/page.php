@@ -231,7 +231,12 @@ function pgtop($dotop, $user, $douser)
 	}
 
 	if (isset($info['blockerr']))
+	{
+		$rej = $info['blockerr'];
 		$per = number_format($info['blockerr'], 0);
+		if (isset($info['blockacc']) && ($acc+$rej) > 0)
+			$per .= ' ('.number_format(100.0*$rej/($acc+$rej), 3).'%)';
+	}
 
 	if (isset($info['u_hashrate5m']))
 	{
@@ -282,6 +287,9 @@ function pgtop($dotop, $user, $douser)
 	$top .= '<br>';
 	$top .= '<span class=topdes>Shares:</span>';
 	$top .= "<span class=topdat>$pac</span>";
+	$top .= '<br>';
+	$top .= '<span class=topdes>Rejects:</span>';
+	$top .= "<span class=topdat>$per</span>";
 	$top .= '</td><td>';
 	$top .= '<span class=topdes>Pool, Last Block:</span>';
 	$top .= "<span class=topdat>$plb</span>";
