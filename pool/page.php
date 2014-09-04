@@ -92,11 +92,11 @@ function pghead($script_marker, $name)
 form {display: inline-block;}
 html, body {height: 100%; font-family:Arial, Verdana, sans-serif; font-size:12pt; background-color:#eff; text-align: center; background-repeat: no-repeat; background-position: center; }
 .page {min-height: 100%; height: auto !important; height: 100%; margin: 0 auto -50px; position: relative;}
-div.jst {color:red; background-color: #ffa; font-weight: font-size: 8; bold; border-style: solid; border-width: 2px; vertical-align: top;}
+div.jst {color:red; font-weight: bold; font-size: 8; text-align: center; vertical-align: top;}
 div.topd {background-color:#cff; border-color: #cff; border-style: solid; border-width: 9px;}
-span.topdes {color:blue;}
-span.topwho {color:black; font-weight: bold; margin-right: 8px;}
-span.topdat {margin-left: 8px; margin-right: 24px; color:green; font-weight: bold;}
+.topdes {color:blue; text-align: right;}
+.topwho {color:black; font-weight: bold; margin-right: 8px;}
+.topdat {margin-left: 8px; margin-right: 24px; color:green; font-weight: bold;}
 span.login {float: right; margin-left: 8px; margin-right: 24px;}
 span.hil {color:blue;}
 span.warn {color:orange; font-weight:bold;}
@@ -282,26 +282,25 @@ function pgtop($dotop, $user, $douser)
  if ($dotop === true)
  {
 	$top .= '<table cellpadding=0 cellspacing=0 border=0 width=100%><tr><td>';
-	$top .= '<span class=topdes>CKPool:</span>';
-	$top .= "<span class=topdat>$phr</span>";
-	$top .= '<br>';
-	$top .= '<span class=topdes>Shares:</span>';
-	$top .= "<span class=topdat>$pac</span>";
-	$top .= '<br>';
-	$top .= '<span class=topdes>Invalid:</span>';
-	$top .= "<span class=topdat>$per</span>";
+	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
+	$top .= '<tr><td class=topdes>CKPool:&nbsp;</td>';
+	$top .= "<td class=topdat>&nbsp;$phr</td></tr>";
+	$top .= '<tr><td class=topdes>Shares:&nbsp;</td>';
+	$top .= "<td class=topdat>&nbsp;$pac</td></tr>";
+	$top .= '<tr><td class=topdes>Invalid:&nbsp;</td>';
+	$top .= "<td class=topdat>&nbsp;$per</td></tr></table>";
 	$top .= '</td><td>';
-	$top .= '<span class=topdes>Pool, Last Block:</span>';
-	$top .= "<span class=topdat>$plb</span>";
-	$top .= '<br>';
-	$top .= '<span class=topdes>Network, Last Block:</span>';
-	$top .= "<span class=topdat>$nlb</span>";
+	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
+	$top .= '<tr><td class=topdes>Pool, Last Block:&nbsp;</td>';
+	$top .= "<td class=topdat>&nbsp;$plb</td></tr>";
+	$top .= '<tr><td class=topdes>Network, Last Block:&nbsp;</td>';
+	$top .= "<td class=topdat>&nbsp;$nlb</td></tr></table>";
 	$top .= '</td><td>';
-	$top .= '<span class=topdes>Users:</span>';
-	$top .= '<span class=topdat>'.$info['users'].'</span>';
-	$top .= '<br>';
-	$top .= '<span class=topdes>Workers:</span>';
-	$top .= '<span class=topdat>'.$info['workers'].'</span>';
+	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
+	$top .= '<tr><td class=topdes>Users:</td>';
+	$top .= '<td class=topdat>'.$info['users'].'</td></tr>';
+	$top .= '<tr><td class=topdes>Workers:</td>';
+	$top .= '<td class=topdat>'.$info['workers'].'</td></tr></table>';
 	$top .= '</td><td>';
 
 	if ($douser === true)
