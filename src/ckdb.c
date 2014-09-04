@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.230"
+#define CKDB_VERSION DB_VERSION"-0.231"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -10841,7 +10841,7 @@ static bool reload_from(tv_t *start)
 		processing++;
 		count = 0;
 
-		while (!matched && fgets_unlocked(reload_buf, MAX_READ, fp))
+		while (!everyone_die && !matched && fgets_unlocked(reload_buf, MAX_READ, fp))
 			matched = reload_line(conn, filename, ++count, reload_buf);
 
 		if (ferror(fp)) {
@@ -10850,14 +10850,15 @@ static bool reload_from(tv_t *start)
 				    filename, err, strerror(err));
 		}
 
-		LOGWARNING("%s(): read %"PRIu64" line%s from %s",
+		LOGWARNING("%s(): %sread %"PRIu64" line%s from %s",
 			   __func__,
+			   everyone_die ? "Shutdown, aborting - " : "",
 			   count, count == 1 ? "" : "s",
 			   filename);
 		total += count;
 		fclose(fp);
 		free(filename);
-		if (matched)
+		if (everyone_die || matched)
 			break;
 		reload_timestamp.tv_sec += ROLL_S;
 		if (confirm_sharesummary && tv_newer(&confirm_finish, &reload_timestamp)) {
