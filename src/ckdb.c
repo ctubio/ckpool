@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.220"
+#define CKDB_VERSION DB_VERSION"-0.230"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -4388,9 +4388,9 @@ static K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t worki
 
 // Memory (and log file) only
 static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername,
-			char *clientid, char *enonce1, char *nonce2, char *nonce,
-			char *diff, char *sdiff, char *secondaryuserid, char *by,
-			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
+			char *clientid, char *errn, char *enonce1, char *nonce2,
+			char *nonce, char *diff, char *sdiff, char *secondaryuserid,
+			char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
 	char cd_buf[DATE_BUFSIZ];
@@ -4424,6 +4424,7 @@ static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *wor
 	TXT_TO_BIGINT("workinfoid", workinfoid, shares->workinfoid);
 	STRNCPY(shares->workername, workername);
 	TXT_TO_INT("clientid", clientid, shares->clientid);
+	TXT_TO_INT("errn", errn, shares->errn);
 	STRNCPY(shares->enonce1, enonce1);
 	STRNCPY(shares->nonce2, nonce2);
 	STRNCPY(shares->nonce, nonce);
@@ -4936,17 +4937,19 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 				params[par++] = double_to_buf(row->sharerej, NULL, 0);
 				params[par++] = tv_to_buf(&(row->firstshare), NULL, 0);
 				params[par++] = tv_to_buf(&(row->lastshare), NULL, 0);
+				params[par++] = bigint_to_buf(row->sharecount, NULL, 0);
+				params[par++] = bigint_to_buf(row->errorcount, NULL, 0);
 				params[par++] = double_to_buf(row->lastdiffacc, NULL, 0);
 				params[par++] = str_to_buf(row->complete, NULL, 0);
 				MODIFYUPDATEPARAMS(params, par, row);
-				PARCHKVAL(par, 21, params);
+				PARCHKVAL(par, 23, params);
 
 				upd = "update sharesummary "
 					"set diffacc=$4,diffsta=$5,diffdup=$6,diffhi=$7,diffrej=$8,"
 					"shareacc=$9,sharesta=$10,sharedup=$11,sharehi=$12,"
 					"sharerej=$13,firstshare=$14,lastshare=$15,"
-					"lastdiffacc=$16,complete=$17"
-					",modifydate=$18,modifyby=$19,modifycode=$20,modifyinet=$21 "
+					"sharecount=$16,errorcount=$17,lastdiffacc=$18,complete=$19"
+					",modifydate=$20,modifyby=$21,modifycode=$22,modifyinet=$23 "
 					"where userid=$1 and workername=$2 and workinfoid=$3";
 
 				res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -8573,8 +8576,9 @@ wiconf:
 		snprintf(reply, siz, "ok.%"PRId64, workinfoid);
 		return strdup(reply);
 	} else if (strcasecmp(cmd, STR_SHARES) == 0) {
-		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_enonce1;
-		K_ITEM *i_nonce2, *i_nonce, *i_diff, *i_sdiff, *i_secondaryuserid;
+		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
+		K_ITEM *i_enonce1, *i_nonce2, *i_nonce, *i_diff, *i_sdiff;
+		K_ITEM *i_secondaryuserid;
 		bool ok;
 
 		// This just excludes the shares we certainly don't need
@@ -8611,6 +8615,10 @@ wiconf:
 		if (!i_clientid)
 			return strdup(reply);
 
+		i_errn = require_name(trf_root, "errn", 1, NULL, reply, siz);
+		if (!i_errn)
+			return strdup(reply);
+
 		i_enonce1 = require_name(trf_root, "enonce1", 1, NULL, reply, siz);
 		if (!i_enonce1)
 			return strdup(reply);
@@ -8635,6 +8643,7 @@ wiconf:
 				      transfer_data(i_username),
 				      transfer_data(i_workername),
 				      transfer_data(i_clientid),
+				      transfer_data(i_errn),
 				      transfer_data(i_enonce1),
 				      transfer_data(i_nonce2),
 				      transfer_data(i_nonce),
