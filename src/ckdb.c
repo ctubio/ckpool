@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.213"
+#define CKDB_VERSION DB_VERSION"-0.220"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -7882,37 +7882,37 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 		if (CURRENT(&(blocks->expirydate))) {
 			int_to_buf(blocks->height, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "height%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "height:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			str_to_buf(blocks->blockhash, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "blockhash%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "blockhash:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			str_to_buf(blocks->nonce, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "nonce%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "nonce:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			bigint_to_buf(blocks->reward, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "reward%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "reward:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			str_to_buf(blocks->workername, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "workername%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
-				 "firstcreatedate%d=%ld%c", rows,
+				 "firstcreatedate:%d=%ld%c", rows,
 				 first_cd.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
-				 "createdate%d=%ld%c", rows,
+				 "createdate:%d=%ld%c", rows,
 				 blocks->createdate.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
-				 "status%d=%s%c", rows,
+				 "status:%d=%s%c", rows,
 				 blocks_confirmed(blocks->confirmed), FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
@@ -7921,7 +7921,14 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 		b_item = prev_in_ktree(ctx);
 	}
 	K_RUNLOCK(blocks_free);
-	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "height,blockhash,nonce,reward,workername,firstcreatedate,"
+		 "createdate,status", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Blocks", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%d_blocks", id, rows);
@@ -8134,22 +8141,27 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 	rows = 0;
 	while (p_item && payments->userid == users->userid) {
 		tv_to_buf(&(payments->paydate), reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "paydate%d=%s%c", rows, reply, FLDSEP);
+		snprintf(tmp, sizeof(tmp), "paydate:%d=%s%c", rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		str_to_buf(payments->payaddress, reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "payaddress%d=%s%c", rows, reply, FLDSEP);
+		snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c", rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		bigint_to_buf(payments->amount, reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "amount%d=%s%c", rows, reply, FLDSEP);
+		snprintf(tmp, sizeof(tmp), "amount:%d=%s%c", rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		rows++;
 		p_item = next_in_ktree(ctx);
 		DATA_PAYMENTS_NULL(payments, p_item);
 	}
-	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "paydate,payaddress,amount", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Payments", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
@@ -8210,19 +8222,19 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
 			str_to_buf(workers->workername, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "workername%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			int_to_buf(workers->difficultydefault, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "difficultydefault%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "difficultydefault:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			str_to_buf(workers->idlenotificationenabled, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "idlenotificationenabled%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "idlenotificationenabled:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			int_to_buf(workers->idlenotificationtime, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "idlenotificationtime%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "idlenotificationtime:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			if (stats) {
@@ -8279,23 +8291,23 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				}
 
 				double_to_buf(w_hashrate5m, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_hashrate5m%d=%s%c", rows, reply, FLDSEP);
+				snprintf(tmp, sizeof(tmp), "w_hashrate5m:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				double_to_buf(w_hashrate1hr, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
+				snprintf(tmp, sizeof(tmp), "w_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				bigint_to_buf(w_elapsed, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_elapsed%d=%s%c", rows, reply, FLDSEP);
+				snprintf(tmp, sizeof(tmp), "w_elapsed:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				int_to_buf((int)(w_lastshare.tv_sec), reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_lastshare%d=%s%c", rows, reply, FLDSEP);
+				snprintf(tmp, sizeof(tmp), "w_lastshare:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				double_to_buf((int)(w_lastdiff), reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_lastdiff%d=%s%c", rows, reply, FLDSEP);
+				snprintf(tmp, sizeof(tmp), "w_lastdiff:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				userstats_workername_root = free_ktree(userstats_workername_root, NULL);
@@ -8307,7 +8319,15 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		w_item = next_in_ktree(w_ctx);
 		DATA_WORKERS_NULL(workers, w_item);
 	}
-	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%s%c",
+		 rows, FLDSEP,
+		 "workername,difficultydefault,idlenotificationenabled,idlenotificationtime",
+		 stats ? ",w_hashrate5m,w_hashrate1hr,w_elapsed,w_lastshare,w_lastdiff" : "",
+		 FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Workers", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
@@ -8378,19 +8398,19 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				} else {
 					DATA_USERS(users, u_item);
 					str_to_buf(users->username, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "username%d=%s%c", rows, reply, FLDSEP);
+					snprintf(tmp, sizeof(tmp), "username:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
 					bigint_to_buf(userid, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "userid%d=%s%c", rows, reply, FLDSEP);
+					snprintf(tmp, sizeof(tmp), "userid:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
 					double_to_buf(u_hashrate5m, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "u_hashrate5m%d=%s%c", rows, reply, FLDSEP);
+					snprintf(tmp, sizeof(tmp), "u_hashrate5m:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
 					double_to_buf(u_hashrate1hr, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "u_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
+					snprintf(tmp, sizeof(tmp), "u_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
 					rows++;
@@ -8418,19 +8438,19 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		} else {
 			DATA_USERS(users, u_item);
 			str_to_buf(users->username, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "username%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "username:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			bigint_to_buf(userid, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "userid%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "userid:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			double_to_buf(u_hashrate5m, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "u_hashrate5m%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "u_hashrate5m:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			double_to_buf(u_hashrate1hr, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "u_hashrate1hr%d=%s%c", rows, reply, FLDSEP);
+			snprintf(tmp, sizeof(tmp), "u_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			rows++;
@@ -8440,7 +8460,13 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	userstats_workername_root = free_ktree(userstats_workername_root, NULL);
 	K_WUNLOCK(userstats_free);
 
-	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "username,userid,u_hashrate5m,u_hashrate1hr", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Users", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.allusers", id);
@@ -9493,7 +9519,6 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	mu_item = first_in_ktree(mu_root, ctx);
 	while (mu_item) {
 		DATA_MININGPAYOUTS(miningpayouts, mu_item);
-		rows++;
 
 		K_RLOCK(users_free);
 		u_item = find_userid(miningpayouts->userid);
@@ -9501,13 +9526,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		if (u_item) {
 			DATA_USERS(users, u_item);
 			snprintf(tmp, sizeof(tmp),
-				 "user%d=%s%c",
+				 "user:%d=%s%c",
 				 rows,
 				 users->username,
 				 FLDSEP);
 		} else {
 			snprintf(tmp, sizeof(tmp),
-				 "user%d=%"PRId64"%c",
+				 "user:%d=%"PRId64"%c",
 				 rows,
 				 miningpayouts->userid,
 				 FLDSEP);
@@ -9515,15 +9540,23 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		snprintf(tmp, sizeof(tmp),
-				 "diffacc_user%d=%"PRId64"%c",
+				 "diffacc_user:%d=%"PRId64"%c",
 				 rows,
 				 miningpayouts->amount,
 				 FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		mu_item = next_in_ktree(ctx);
+		rows++;
 	}
-	snprintf(tmp, sizeof(tmp), "rows=%d%c", rows, FLDSEP);
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%c,flds=%s%c",
+		 rows, FLDSEP,
+		 "user,diffacc_user", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+				   "Users", FLDSEP, "", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	tv_to_buf(&begin_tv, tv_buf, sizeof(tv_buf));
@@ -9614,13 +9647,12 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t len, off;
 	uint64_t ram, tot = 0;
 	K_LIST *klist;
-	int i = 0;
+	int rows = 0;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
-	APPEND_REALLOC(buf, off, len, cmd);
 
 // Doesn't include blob memory
 // - average transactiontree length of ~119k I have is ~28k (>3.3GB)
@@ -9630,16 +9662,16 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 		klist->allocate * klist->item_mem_count * klist->siz + \
 		sizeof(K_TREE) * (klist->total - klist->count) * _trees; \
 	snprintf(tmp, sizeof(tmp), \
-		 "%cname%d=" #_obj "%callocated%d=%d%cstore%d=%d" \
-		 "%ctrees%d=%d%cram%d=%"PRIu64, \
-		 i ? FLDSEP : '.', i, \
-		 FLDSEP, i, klist->total, \
-		 FLDSEP, i, klist->total - klist->count, \
-		 FLDSEP, i, _trees, \
-		 FLDSEP, i, ram); \
+		 "name:%d=" #_obj "%callocated:%d=%d%cstore:%d=%d" \
+		 "%ctrees:%d=%d%cram:%d=%"PRIu64"%c", \
+		 rows, FLDSEP, \
+		 rows, klist->total, FLDSEP, \
+		 rows, klist->total - klist->count, FLDSEP, \
+		 rows, _trees, FLDSEP, \
+		 rows, ram, FLDSEP); \
 	APPEND_REALLOC(buf, off, len, tmp); \
 	tot += ram; \
-	i++;
+	rows++;
 
 	USEINFO(users, 1, 2);
 	USEINFO(workers, 1, 1);
@@ -9659,7 +9691,16 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(transfer, 0, 0);
 	USEINFO(logqueue, 1, 0);
 
-	snprintf(tmp, sizeof(tmp), "%ctotalram=%"PRIu64, FLDSEP, tot);
+	snprintf(tmp, sizeof(tmp), "totalram=%"PRIu64"%c", tot, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "name,allocated,store,trees,ram", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Users", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%s...", id, cmd);

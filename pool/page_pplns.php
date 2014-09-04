@@ -98,9 +98,9 @@ Block: <input type=text name=blk size=10 value=''>
 	$reward = $ans['block_reward'] / pow(10,8);
 	$elapsed = $ans['pplns_elapsed'];
 	$count = $ans['rows'];
-	for ($i = 1; $i <= $count; $i++)
+	for ($i = 0; $i < $count; $i++)
 	{
-		$diffacc_user = $ans['diffacc_user'.$i];
+		$diffacc_user = $ans['diffacc_user:'.$i];
 		$diffacc_percent = number_format(100.0 * $diffacc_user / $diffacc_total, 2).'%';
 		$diffacc_btc = number_format($reward * $diffacc_user / $diffacc_total, 8);
 		$avg_hash = number_format($diffacc_user / $elapsed * pow(2,32), 0);
@@ -111,7 +111,7 @@ Block: <input type=text name=blk size=10 value=''>
 			$row = 'odd';
 
 		$pg .= "<tr class=$row>";
-		$pg .= '<td class=dl>'.$ans['user'.$i].'</td>';
+		$pg .= '<td class=dl>'.$ans['user:'.$i].'</td>';
 		$pg .= "<td class=dr>$diffacc_user</td>";
 		$pg .= "<td class=dr>$diffacc_percent</td>";
 		$pg .= "<td class=dr>$diffacc_btc</td>";

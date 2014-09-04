@@ -28,10 +28,10 @@ function doworker($data, $user)
 			$row = 'odd';
 
 		$pg .= "<tr class=$row>";
-		$pg .= '<td class=dl>'.$ans['workername'.$i].'</td>';
+		$pg .= '<td class=dl>'.$ans['workername:'.$i].'</td>';
 /*
-		$pg .= '<td class=dr>'.$ans['difficultydefault'.$i].'</td>';
-		$nots = $ans['idlenotificationenabled'.$i];
+		$pg .= '<td class=dr>'.$ans['difficultydefault:'.$i].'</td>';
+		$nots = $ans['idlenotificationenabled:'.$i];
 		switch ($nots)
 		{
 		case 'Y':
@@ -42,14 +42,14 @@ function doworker($data, $user)
 			$nots = 'N';
 		}
 		$pg .= '<td class=dc>'.$nots.'</td>';
-		$pg .= '<td class=dr>'.$ans['idlenotificationtime'.$i].'</td>';
+		$pg .= '<td class=dr>'.$ans['idlenotificationtime:'.$i].'</td>';
 */
-		if ($ans['w_lastdiff'.$i] > 0)
-			$ld = difffmt($ans['w_lastdiff'.$i]);
+		if ($ans['w_lastdiff:'.$i] > 0)
+			$ld = difffmt($ans['w_lastdiff:'.$i]);
 		else
 			$ld = '&nbsp;';
 		$pg .= "<td class=dr>$ld</td>";
-		$lst = $ans['STAMP'] - $ans['w_lastshare'.$i];
+		$lst = $ans['STAMP'] - $ans['w_lastshare:'.$i];
 		if ($lst < 60)
 			$lstdes = $lst.'s';
 		else
@@ -81,10 +81,10 @@ function doworker($data, $user)
 			}
 		}
 		$pg .= "<td class=dr>$lstdes</td>";
-		if ($ans['w_elapsed'.$i] > 3600)
-			$uhr = $ans['w_hashrate1hr'.$i];
+		if ($ans['w_elapsed:'.$i] > 3600)
+			$uhr = $ans['w_hashrate1hr:'.$i];
 		else
-			$uhr = $ans['w_hashrate5m'.$i];
+			$uhr = $ans['w_hashrate5m:'.$i];
 		if ($uhr == '?')
 			$uhr = '?GHs';
 		else

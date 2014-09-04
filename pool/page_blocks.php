@@ -27,20 +27,20 @@ function doblocks($data, $user)
 			$row = 'odd';
 
 		$ex = '';
-		$stat = $ans['status'.$i];
+		$stat = $ans['status:'.$i];
 		if ($stat == 'Orphan')
 			$ex = 's';
 		if ($stat == '1-Confirm')
 			$stat = 'Conf';
 
-		$hi = $ans['height'.$i];
+		$hi = $ans['height:'.$i];
 		$hifld = "$blink$hi>$hi</a>";
 
 		$pg .= "<tr class=$row>";
 		$pg .= "<td class=dl$ex>$hifld</td>";
-		$pg .= "<td class=dl$ex>".$ans['workername'.$i].'</td>';
-		$pg .= "<td class=dr$ex>".btcfmt($ans['reward'.$i]).'</td>';
-		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate'.$i]).'</td>';
+		$pg .= "<td class=dl$ex>".$ans['workername:'.$i].'</td>';
+		$pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
+		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate:'.$i]).'</td>';
 		$pg .= "<td class=dr$ex>".$stat.'</td>';
 		$pg .= "</tr>\n";
 	}

@@ -25,9 +25,9 @@ function dostats($data, $user)
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
-		$all[] = array('username' => $ans['username'.$i],
-				'userid' => $ans['userid'.$i],
-				'u_hashrate5m' => $ans['u_hashrate5m'.$i]);
+		$all[] = array('username' => $ans['username:'.$i],
+				'userid' => $ans['userid:'.$i],
+				'u_hashrate5m' => $ans['u_hashrate5m:'.$i]);
 	}
 
 	usort($all, 'allusersort');

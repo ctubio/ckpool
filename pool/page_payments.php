@@ -23,9 +23,9 @@ function dopayments($data, $user)
 			$row = 'odd';
 
 		$pg .= "<tr class=$row>";
-		$pg .= '<td class=dl>'.$ans['paydate'.$i].'</td>';
-		$pg .= '<td class=dl>'.$ans['payaddress'.$i].'</td>';
-		$pg .= '<td class=dr>'.btcfmt($ans['amount'.$i]).'</td>';
+		$pg .= '<td class=dl>'.$ans['paydate:'.$i].'</td>';
+		$pg .= '<td class=dl>'.$ans['payaddress:'.$i].'</td>';
+		$pg .= '<td class=dr>'.btcfmt($ans['amount:'.$i]).'</td>';
 		$pg .= "</tr>\n";
 	}
  }
