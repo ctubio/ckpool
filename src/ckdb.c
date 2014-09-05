@@ -234,7 +234,7 @@ static LOADSTATUS dbstatus;
 typedef struct poolstatus {
 	int64_t workinfoid; // Last block
 	double diffacc;
-	double differr;
+	double diffinv;
 	double best_sdiff; // TODO
 } POOLSTATUS;
 static POOLSTATUS pool;
@@ -1510,6 +1510,11 @@ typedef struct workerstatus {
 	double last_diff;
 	tv_t last_stats;
 	tv_t last_idle;
+	// Below gets reset on each block
+	double diffacc;
+	double diffinv; // Non-acc
+	double shareacc;
+	double shareinv; // Non-acc
 } WORKERSTATUS;
 
 #define ALLOC_WORKERSTATUS 1000
@@ -4481,7 +4486,7 @@ static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *wor
 				if (sharesummary->workinfoid >= pool.workinfoid) {
 					// Negate coz the shares will re-add
 					pool.diffacc -= sharesummary->sharecount;
-					pool.differr -= sharesummary->errorcount;
+					pool.diffinv -= sharesummary->errorcount;
 				}
 				zero_sharesummary(sharesummary, cd, shares->diff);
 				sharesummary->reset = true;
@@ -4618,7 +4623,7 @@ static bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 				if (sharesummary->workinfoid >= pool.workinfoid) {
 					// Negate coz the shares will re-add
 					pool.diffacc -= sharesummary->sharecount;
-					pool.differr -= sharesummary->errorcount;
+					pool.diffinv -= sharesummary->errorcount;
 				}
 				zero_sharesummary(sharesummary, cd, 0.0);
 				sharesummary->reset = true;
@@ -4799,25 +4804,25 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 					row->diffsta += s_row->diff;
 					row->sharesta++;
 					if (row->workinfoid >= pool.workinfoid)
-						pool.differr += s_row->diff;
+						pool.diffinv += s_row->diff;
 					break;
 				case SE_DUPE:
 					row->diffdup += s_row->diff;
 					row->sharedup++;
 					if (row->workinfoid >= pool.workinfoid)
-						pool.differr += s_row->diff;
+						pool.diffinv += s_row->diff;
 					break;
 				case SE_HIGH_DIFF:
 					row->diffhi += s_row->diff;
 					row->sharehi++;
 					if (row->workinfoid >= pool.workinfoid)
-						pool.differr += s_row->diff;
+						pool.diffinv += s_row->diff;
 					break;
 				default:
 					row->diffrej += s_row->diff;
 					row->sharerej++;
 					if (row->workinfoid >= pool.workinfoid)
-						pool.differr += s_row->diff;
+						pool.diffinv += s_row->diff;
 					break;
 			}
 		}
@@ -5209,7 +5214,7 @@ static bool sharesummary_fill(PGconn *conn)
 
 		if (row->workinfoid >= pool.workinfoid) {
 			pool.diffacc += row->diffacc;
-			pool.differr += row->diffsta + row->diffdup +
+			pool.diffinv += row->diffsta + row->diffdup +
 					row->diffhi + row->diffrej;
 		}
 
@@ -5621,7 +5626,7 @@ flail:
 					 pool.diffacc, est, pct, cd_buf);
 				if (pool.workinfoid < row->workinfoid) {
 					pool.workinfoid = row->workinfoid;
-					pool.diffacc = pool.differr =
+					pool.diffacc = pool.diffinv =
 					pool.best_sdiff = 0.0;
 				}
 				break;
@@ -9147,7 +9152,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "blockerr=%.1f%c",
-				   pool.differr, FLDSEP);
+				   pool.diffinv, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	// TODO: assumes only one poolinstance (for now)
