@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.233"
+#define CKDB_VERSION DB_VERSION"-0.234"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -913,26 +913,29 @@ static char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS)
 	return mvalue;
 }
 
+// So the records below have the same 'name' as the klist
+static const char Transfer[] = "Transfer";
+
 // older version missing field defaults
 static TRANSFER auth_1 = { "poolinstance", "", auth_1.svalue };
-static K_ITEM auth_poolinstance = { "tmp", NULL, NULL, (void *)(&auth_1) };
+static K_ITEM auth_poolinstance = { Transfer, NULL, NULL, (void *)(&auth_1) };
 static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue };
-static K_ITEM auth_preauth = { "tmp", NULL, NULL, (void *)(&auth_2) };
+static K_ITEM auth_preauth = { Transfer, NULL, NULL, (void *)(&auth_2) };
 static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue };
-static K_ITEM poolstats_elapsed = { "tmp", NULL, NULL, (void *)(&poolstats_1) };
+static K_ITEM poolstats_elapsed = { Transfer, NULL, NULL, (void *)(&poolstats_1) };
 static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.svalue };
-static K_ITEM userstats_elapsed = { "tmp", NULL, NULL, (void *)(&userstats_1) };
+static K_ITEM userstats_elapsed = { Transfer, NULL, NULL, (void *)(&userstats_1) };
 static TRANSFER userstats_2 = { "workername", "all", userstats_2.svalue };
-static K_ITEM userstats_workername = { "tmp", NULL, NULL, (void *)(&userstats_2) };
+static K_ITEM userstats_workername = { Transfer, NULL, NULL, (void *)(&userstats_2) };
 static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.svalue };
-static K_ITEM userstats_idle = { "tmp", NULL, NULL, (void *)(&userstats_3) };
+static K_ITEM userstats_idle = { Transfer, NULL, NULL, (void *)(&userstats_3) };
 static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.svalue };
-static K_ITEM userstats_eos = { "tmp", NULL, NULL, (void *)(&userstats_4) };
+static K_ITEM userstats_eos = { Transfer, NULL, NULL, (void *)(&userstats_4) };
 
 static TRANSFER shares_1 = { "secondaryuserid", TRUE_STR, shares_1.svalue };
-static K_ITEM shares_secondaryuserid = { "", NULL, NULL, (void *)(&shares_1) };
+static K_ITEM shares_secondaryuserid = { Transfer, NULL, NULL, (void *)(&shares_1) };
 static TRANSFER shareerrors_1 = { "secondaryuserid", TRUE_STR, shareerrors_1.svalue };
-static K_ITEM shareerrors_secondaryuserid = { "", NULL, NULL, (void *)(&shareerrors_1) };
+static K_ITEM shareerrors_secondaryuserid = { Transfer, NULL, NULL, (void *)(&shareerrors_1) };
 // Time limit that this problem occurred
 // 24-Aug-2014 05:20+00 (1st one shortly after this)
 static tv_t missing_secuser_min = { 1408857600L, 0L };
@@ -7278,7 +7281,7 @@ static void alloc_storage()
 					ALLOC_WORKQUEUE, LIMIT_WORKQUEUE, true);
 	workqueue_store = k_new_store(workqueue_free);
 
-	transfer_free = k_new_list("Transfer", sizeof(TRANSFER),
+	transfer_free = k_new_list(Transfer, sizeof(TRANSFER),
 					ALLOC_TRANSFER, LIMIT_TRANSFER, true);
 	transfer_free->dsp_func = dsp_transfer;
 
