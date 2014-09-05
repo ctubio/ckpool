@@ -29,9 +29,11 @@ function dockp($data, $user)
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= '<tr class=title>';
  $pg .= '<td class=dl>Name</td>';
+ $pg .= '<td class=dr>Initial</td>';
  $pg .= '<td class=dr>Allocated</td>';
  $pg .= '<td class=dr>Store</td>';
  $pg .= '<td class=dr>RAM</td>';
+ $pg .= '<td class=dr>Cull</td>';
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
@@ -45,9 +47,11 @@ function dockp($data, $user)
 
 		$pg .= "<tr class=$row>";
 		$pg .= '<td class=dl>'.$ans['name:'.$i].'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['initial:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['allocated:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['store:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['ram:'.$i]).'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['cull:'.$i]).'</td>';
 		$pg .= "</tr>\n";
 	}
  }

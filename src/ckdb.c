@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.231"
+#define CKDB_VERSION DB_VERSION"-0.232"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -855,6 +855,7 @@ typedef struct workqueue {
 
 #define ALLOC_WORKQUEUE 1024
 #define LIMIT_WORKQUEUE 0
+#define CULL_WORKQUEUE 16
 #define INIT_WORKQUEUE(_item) INIT_GENERIC(_item, workqueue)
 #define DATA_WORKQUEUE(_var, _item) DATA_GENERIC(_var, _item, workqueue, true)
 
@@ -872,6 +873,7 @@ typedef struct transfer {
 
 #define ALLOC_TRANSFER 64
 #define LIMIT_TRANSFER 0
+#define CULL_TRANSFER 64
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
@@ -8762,9 +8764,12 @@ seconf:
 			LOGERR("%s(%s) %s.failed.DATA", __func__, cmd, id);
 			return strdup("failed.DATA");
 		} else {
-			// Don't slow down the reload - do them later
+			/* Don't slow down the reload - do them later
+			 * N.B. this means if you abort/shutdown the reload,
+			 * next restart will again go back to the oldest
+			 * unaged sharesummary due to a pool shutdown */
 			if (!reloading) {
-				// Aging is a queued item so the reply is ignored
+				// Aging is a queued item thus the reply is ignored
 				auto_age_older(conn, workinfoid,
 						     transfer_data(i_poolinstance),
 						     by, code, inet, cd);
@@ -9671,13 +9676,16 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 		klist->allocate * klist->item_mem_count * klist->siz + \
 		sizeof(K_TREE) * (klist->total - klist->count) * _trees; \
 	snprintf(tmp, sizeof(tmp), \
-		 "name:%d=" #_obj "%callocated:%d=%d%cstore:%d=%d" \
-		 "%ctrees:%d=%d%cram:%d=%"PRIu64"%c", \
+		 "name:%d=" #_obj "%cinitial:%d=%d%callocated:%d=%d%c" \
+		 "store:%d=%d%ctrees:%d=%d%cram:%d=%"PRIu64"%c" \
+		 "cull:%d=%d%c", \
 		 rows, FLDSEP, \
+		 rows, klist->allocate, FLDSEP, \
 		 rows, klist->total, FLDSEP, \
 		 rows, klist->total - klist->count, FLDSEP, \
 		 rows, _trees, FLDSEP, \
-		 rows, ram, FLDSEP); \
+		 rows, ram, FLDSEP, \
+		 rows, klist->cull_count, FLDSEP); \
 	APPEND_REALLOC(buf, off, len, tmp); \
 	tot += ram; \
 	rows++;
@@ -9706,7 +9714,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "name,allocated,store,trees,ram", FLDSEP);
+		 "name,initial,allocated,store,trees,ram,cull", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Users", FLDSEP, "");
@@ -10663,7 +10671,7 @@ static void *socketer(__maybe_unused void *arg)
 			k_list_transfer_to_head(trf_store, transfer_free);
 			trf_store = k_free_store(trf_store);
 			if (transfer_free->count == transfer_free->total &&
-			    transfer_free->total > ALLOC_TRANSFER * 64)
+			    transfer_free->total > ALLOC_TRANSFER * CULL_TRANSFER)
 				k_cull_list(transfer_free);
 			K_WUNLOCK(transfer_free);
 		}
@@ -10979,6 +10987,9 @@ static void process_queued(PGconn *conn, K_ITEM *wq_item)
 
 	K_WLOCK(workqueue_free);
 	k_add_head(workqueue_free, wq_item);
+	if (workqueue_free->count == workqueue_free->total &&
+	    workqueue_free->total > ALLOC_WORKQUEUE * CULL_WORKQUEUE)
+		k_cull_list(workqueue_free);
 	K_WUNLOCK(workqueue_free);
 }
 
