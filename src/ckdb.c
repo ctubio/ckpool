@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.232"
+#define CKDB_VERSION DB_VERSION"-0.233"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -9717,7 +9717,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 "name,initial,allocated,store,trees,ram,cull", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Users", FLDSEP, "");
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Stats", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%s...", id, cmd);
