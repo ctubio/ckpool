@@ -35,26 +35,19 @@ function dockp($data, $user)
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
-	for ($i = 0; $i < 999; $i++)
+	$count = $ans['rows'];
+	for ($i = 0; $i < $count; $i++)
 	{
-		if ($i == 0)
-			$name = 'stats.name';
-		else
-			$name = 'name';
-
-		if (!isset($ans[$name.$i]))
-			break;
-
 		if (($i % 2) == 0)
 			$row = 'even';
 		else
 			$row = 'odd';
 
 		$pg .= "<tr class=$row>";
-		$pg .= '<td class=dl>'.$ans[$name.$i].'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['allocated'.$i]).'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['store'.$i]).'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['ram'.$i]).'</td>';
+		$pg .= '<td class=dl>'.$ans['name:'.$i].'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['allocated:'.$i]).'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['store:'.$i]).'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['ram:'.$i]).'</td>';
 		$pg .= "</tr>\n";
 	}
  }
@@ -63,9 +56,9 @@ function dockp($data, $user)
  return $pg;
 }
 #
-function show_ckp($menu, $name, $user)
+function show_ckp($page, $menu, $name, $user)
 {
- gopage(NULL, 'dockp', $menu, $name, $user);
+ gopage(NULL, 'dockp', $page, $menu, $name, $user);
 }
 #
 ?>
