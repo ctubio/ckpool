@@ -232,6 +232,7 @@ struct stratum_instance {
 
 	char address[INET6_ADDRSTRLEN];
 	bool authorised;
+	bool invalid;
 	bool idle;
 	bool notified_idle;
 
@@ -2094,18 +2095,10 @@ static void send_json_err(int64_t client_id, json_t *id_val, const char *err_msg
 	stratum_add_send(val, client_id);
 }
 
-static void update_client(const int64_t client_id)
+static void update_client(stratum_instance_t *client, const int64_t client_id)
 {
-	stratum_instance_t *client;
-
 	stratum_send_update(client_id, true);
-
-	ck_rlock(&instance_lock);
-	client = __instance_by_id(client_id);
-	ck_runlock(&instance_lock);
-
-	if (likely(client))
-		stratum_send_diff(client);
+	stratum_send_diff(client);
 }
 
 static json_params_t *create_json_params(const int64_t client_id, const json_t *params, const json_t *id_val, const char *address)
@@ -2126,23 +2119,6 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	const char *method;
 	char buf[256];
 
-	/* Random broken clients send something not an integer as the id so we copy
-	 * the json item for id_val as is for the response. */
-	method = json_string_value(method_val);
-	if (cmdmatch(method, "mining.subscribe")) {
-		json_t *val, *result_val = parse_subscribe(client_id, params_val);
-
-		if (!result_val)
-			return;
-		val = json_object();
-		json_object_set_new_nocheck(val, "result", result_val);
-		json_object_set_nocheck(val, "id", id_val);
-		json_object_set_new_nocheck(val, "error", json_null());
-		stratum_add_send(val, client_id);
-		update_client(client_id);
-		return;
-	}
-
 	ck_rlock(&instance_lock);
 	client = __instance_by_id(client_id);
 	ck_runlock(&instance_lock);
@@ -2150,6 +2126,34 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	if (unlikely(!client)) {
 		LOGINFO("Failed to find client id %d in hashtable!", client_id);
 		return;
+	}
+
+	/* Random broken clients send something not an integer as the id so we copy
+	 * the json item for id_val as is for the response. */
+	method = json_string_value(method_val);
+	if (cmdmatch(method, "mining.subscribe")) {
+		json_t *val, *result_val = parse_subscribe(client_id, params_val);
+
+		if (unlikely(!result_val))
+			return;
+		val = json_object();
+		json_object_set_new_nocheck(val, "result", result_val);
+		json_object_set_nocheck(val, "id", id_val);
+		json_object_set_new_nocheck(val, "error", json_null());
+		stratum_add_send(val, client_id);
+		if (unlikely(!json_is_true(result_val))) {
+			client->invalid = true;
+			return;
+		}
+		update_client(client, client_id);
+		return;
+	}
+
+	if (unlikely(client->invalid)) {
+		LOGINFO("Dropping invalidated client %d", client->id);
+		snprintf(buf, 255, "dropclient=%ld", client->id);
+		send_proc(client->ckp->connector, buf);
+		drop_client(client->id);
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
@@ -2176,13 +2180,14 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	}
 
 	/* We should only accept authorised requests from here on */
-	if (!client->authorised) {
+	if (unlikely(!client->authorised)) {
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
 		LOGINFO("Dropping unauthorised client %d", client->id);
 		snprintf(buf, 255, "dropclient=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
+		drop_client(client->id);
 		return;
 	}
 
