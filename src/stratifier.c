@@ -2094,18 +2094,10 @@ static void send_json_err(int64_t client_id, json_t *id_val, const char *err_msg
 	stratum_add_send(val, client_id);
 }
 
-static void update_client(const int64_t client_id)
+static void update_client(stratum_instance_t *client, const int64_t client_id)
 {
-	stratum_instance_t *client;
-
 	stratum_send_update(client_id, true);
-
-	ck_rlock(&instance_lock);
-	client = __instance_by_id(client_id);
-	ck_runlock(&instance_lock);
-
-	if (likely(client))
-		stratum_send_diff(client);
+	stratum_send_diff(client);
 }
 
 static json_params_t *create_json_params(const int64_t client_id, const json_t *params, const json_t *id_val, const char *address)
@@ -2126,6 +2118,15 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	const char *method;
 	char buf[256];
 
+	ck_rlock(&instance_lock);
+	client = __instance_by_id(client_id);
+	ck_runlock(&instance_lock);
+
+	if (unlikely(!client)) {
+		LOGINFO("Failed to find client id %d in hashtable!", client_id);
+		return;
+	}
+
 	/* Random broken clients send something not an integer as the id so we copy
 	 * the json item for id_val as is for the response. */
 	method = json_string_value(method_val);
@@ -2139,16 +2140,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 		json_object_set_nocheck(val, "id", id_val);
 		json_object_set_new_nocheck(val, "error", json_null());
 		stratum_add_send(val, client_id);
-		update_client(client_id);
-		return;
-	}
-
-	ck_rlock(&instance_lock);
-	client = __instance_by_id(client_id);
-	ck_runlock(&instance_lock);
-
-	if (unlikely(!client)) {
-		LOGINFO("Failed to find client id %d in hashtable!", client_id);
+		update_client(client, client_id);
 		return;
 	}
 
