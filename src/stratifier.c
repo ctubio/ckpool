@@ -232,7 +232,6 @@ struct stratum_instance {
 
 	char address[INET6_ADDRSTRLEN];
 	bool authorised;
-	bool invalid;
 	bool idle;
 	bool notified_idle;
 
@@ -2134,26 +2133,15 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	if (cmdmatch(method, "mining.subscribe")) {
 		json_t *val, *result_val = parse_subscribe(client_id, params_val);
 
-		if (unlikely(!result_val))
+		if (!result_val)
 			return;
 		val = json_object();
 		json_object_set_new_nocheck(val, "result", result_val);
 		json_object_set_nocheck(val, "id", id_val);
 		json_object_set_new_nocheck(val, "error", json_null());
 		stratum_add_send(val, client_id);
-		if (unlikely(!json_is_true(result_val))) {
-			client->invalid = true;
-			return;
-		}
 		update_client(client, client_id);
 		return;
-	}
-
-	if (unlikely(client->invalid)) {
-		LOGINFO("Dropping invalidated client %d", client->id);
-		snprintf(buf, 255, "dropclient=%ld", client->id);
-		send_proc(client->ckp->connector, buf);
-		drop_client(client->id);
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
@@ -2180,14 +2168,13 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	}
 
 	/* We should only accept authorised requests from here on */
-	if (unlikely(!client->authorised)) {
+	if (!client->authorised) {
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
 		LOGINFO("Dropping unauthorised client %d", client->id);
 		snprintf(buf, 255, "dropclient=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
-		drop_client(client->id);
 		return;
 	}
 
