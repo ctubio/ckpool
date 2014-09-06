@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.8"
-#define CKDB_VERSION DB_VERSION"-0.234"
+#define CKDB_VERSION DB_VERSION"-0.240"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -4485,8 +4485,11 @@ static bool shares_add(PGconn *conn, char *workinfoid, char *username, char *wor
 			if (!sharesummary->reset) {
 				if (sharesummary->workinfoid >= pool.workinfoid) {
 					// Negate coz the shares will re-add
-					pool.diffacc -= sharesummary->sharecount;
-					pool.diffinv -= sharesummary->errorcount;
+					pool.diffacc -= sharesummary->diffacc;
+					pool.diffinv -= (sharesummary->diffsta +
+							 sharesummary->diffdup +
+							 sharesummary->diffhi +
+							 sharesummary->diffrej);
 				}
 				zero_sharesummary(sharesummary, cd, shares->diff);
 				sharesummary->reset = true;
@@ -4622,8 +4625,11 @@ static bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 			if (!sharesummary->reset) {
 				if (sharesummary->workinfoid >= pool.workinfoid) {
 					// Negate coz the shares will re-add
-					pool.diffacc -= sharesummary->sharecount;
-					pool.diffinv -= sharesummary->errorcount;
+					pool.diffacc -= sharesummary->diffacc;
+					pool.diffinv -= (sharesummary->diffsta +
+							 sharesummary->diffdup +
+							 sharesummary->diffhi +
+							 sharesummary->diffrej);
 				}
 				zero_sharesummary(sharesummary, cd, 0.0);
 				sharesummary->reset = true;
