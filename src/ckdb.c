@@ -4866,6 +4866,10 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 		}
 	}
 
+	// During startup, don't save 'new' sharesummaries, to reduce DB I/O
+	if (!startup_complete && row->complete[0] == SUMMARY_NEW)
+		goto startupskip;
+
 	if (conn == NULL && !confirm_sharesummary) {
 		conn = dbconnect();
 		conned = true;
@@ -4875,6 +4879,7 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 		MODIFYDATEINIT(row, cd, by, code, inet);
 
 		par = 0;
+
 		if (!confirm_sharesummary) {
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
 			params[par++] = str_to_buf(row->workername, NULL, 0);
@@ -5003,7 +5008,7 @@ static bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row
 			}
 		}
 	}
-
+startupskip:
 	ok = true;
 unparam:
 	if (par) {
