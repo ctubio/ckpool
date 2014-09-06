@@ -86,7 +86,12 @@ function pghead($script_marker, $name)
 
  $head = "<!DOCTYPE html>\n";
 
- $head .= "<html><head><title>$page_title$name</title><meta content='text/html; charset=iso-8859-1' http-equiv='Content-Type'>";
+ $head .= "<html><head><title>$page_title$name</title>";
+ $head .= "<meta content='text/html; charset=iso-8859-1' http-equiv='Content-Type'>";
+
+ $head .= "<script type='text/javascript'>\n";
+ $head .= "function jst(){document.getElementById('jst').style.visibility='hidden';}\n";
+ $head .= "window.onpaint=jst();\n</script>\n";
 
  $head .= "<style type='text/css'>
 form {display: inline-block;}
@@ -274,7 +279,6 @@ function pgtop($dotop, $user, $douser)
 	}
  }
 
- addscript("function jst(){document.getElementById('jst').style.visibility='hidden';}");
  $top = "<div class=jst id=jst>&nbsp;Javascript isn't enabled.";
  $top .= " You need to enable javascript to use";
  $top .= " the $site_title web site.</div>";
