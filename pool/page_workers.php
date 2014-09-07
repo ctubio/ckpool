@@ -19,6 +19,9 @@ function doworker($data, $user)
  $pg .= "<td class=dr>Invalid</td>";
  $pg .= "<td class=dr>Hash Rate</td>";
  $pg .= "</tr>\n";
+ $tsh = 0;
+ $tdif = 0;
+ $tinv = 0;
  $thr = 0;
  $i = 0;
  if ($ans['STATUS'] == 'ok')
@@ -87,7 +90,9 @@ function doworker($data, $user)
 		$pg .= "<td class=dr>$lstdes</td>";
 
 		$shareacc = number_format($ans['w_shareacc:'.$i], 0);
+		$tsh += $ans['w_shareacc:'.$i];
 		$diffacc = number_format($ans['w_diffacc:'.$i], 0);
+		$tdif += $ans['w_diffacc:'.$i];
 		$pg .= "<td class=dr>$shareacc</td>";
 		$pg .= "<td class=dr>$diffacc</td>";
 
@@ -96,6 +101,7 @@ function doworker($data, $user)
 			$rej = number_format(100.0 * $ans['w_diffinv:'.$i] / $dtot, 3);
 		else
 			$rej = '0';
+		$tinv +=  $ans['w_diffinv:'.$i];
 
 		$pg .= "<td class=dr>$rej%</td>";
 
@@ -138,7 +144,17 @@ function doworker($data, $user)
 	$row = 'even';
  else
 	$row = 'odd';
- $pg .= "<tr class=$row><td colspan=6 class=dl></td>";
+ $pg .= "<tr class=$row><td colspan=3 class=dl></td>";
+ $shareacc = number_format($tsh, 0);
+ $pg .= "<td class=dr>$shareacc</td>";
+ $diffacc = number_format($tdif, 0);
+ $pg .= "<td class=dr>$diffacc</td>";
+ $dtot = $tdif + $tinv;
+ if ($dtot > 0)
+	$rej = number_format(100.0 * $tinv / $dtot, 3);
+ else
+	$rej = '0';
+ $pg .= "<td class=dr>$rej%</td>";
  $pg .= "<td class=dr>$thr</td></tr>\n";
  $pg .= "</table>\n";
 
