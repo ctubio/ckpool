@@ -14,11 +14,15 @@ function doworker($data, $user)
 // $pg .= "<td class=dr>Idle Notification Time</td>";
  $pg .= "<td class=dr>Work Diff</td>";
  $pg .= "<td class=dr>Last Share</td>";
+ $pg .= "<td class=dr>Shares</td>";
+ $pg .= "<td class=dr>Diff</td>";
+ $pg .= "<td class=dr>Invalid</td>";
  $pg .= "<td class=dr>Hash Rate</td>";
  $pg .= "</tr>\n";
+ $thr = 0;
+ $i = 0;
  if ($ans['STATUS'] == 'ok')
  {
-	$thr = 0;
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
@@ -81,6 +85,20 @@ function doworker($data, $user)
 			}
 		}
 		$pg .= "<td class=dr>$lstdes</td>";
+
+		$shareacc = number_format($ans['w_shareacc:'.$i], 0);
+		$diffacc = number_format($ans['w_diffacc:'.$i], 0);
+		$pg .= "<td class=dr>$shareacc</td>";
+		$pg .= "<td class=dr>$diffacc</td>";
+
+		$dtot = $ans['w_diffacc:'.$i] + $ans['w_diffinv:'.$i];
+		if ($dtot > 0)
+			$rej = number_format(100.0 * $ans['w_diffinv:'.$i] / $dtot, 3);
+		else
+			$rej = '0';
+
+		$pg .= "<td class=dr>$rej%</td>";
+
 		if ($ans['w_elapsed:'.$i] > 3600)
 			$uhr = $ans['w_hashrate1hr:'.$i];
 		else
@@ -102,6 +120,7 @@ function doworker($data, $user)
 			}
 		}
 		$pg .= "<td class=dr>$uhr</td>";
+
 		$pg .= "</tr>\n";
 	}
  }
@@ -119,7 +138,8 @@ function doworker($data, $user)
 	$row = 'even';
  else
 	$row = 'odd';
- $pg .= "<tr class=$row><td colspan=3 class=dl></td><td class=dr>$thr</td></tr>\n";
+ $pg .= "<tr class=$row><td colspan=6 class=dl></td>";
+ $pg .= "<td class=dr>$thr</td></tr>\n";
  $pg .= "</table>\n";
 
  return $pg;
