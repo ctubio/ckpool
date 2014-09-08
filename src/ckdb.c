@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.251"
+#define CKDB_VERSION DB_VERSION"-0.252"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -10528,7 +10528,7 @@ static void summarise_blocks()
 	BLOCKS *blocks, *prev_blocks;
 	WORKINFO *prev_workinfo;
 	SHARESUMMARY looksharesummary, *sharesummary;
-	int32_t hi;
+	int32_t hi, prev_hi;
 	bool ok;
 
 	setnow(&now);
@@ -10572,6 +10572,7 @@ static void summarise_blocks()
 	if (!b_prev) {
 		wi_start = 0;
 		elapsed_start.tv_sec = elapsed_start.tv_usec = 0L;
+		prev_hi = 0;
 	} else {
 		DATA_BLOCKS(prev_blocks, b_prev);
 		wi_start = prev_blocks->workinfoid;
@@ -10587,6 +10588,7 @@ static void summarise_blocks()
 		}
 		DATA_WORKINFO(prev_workinfo, wi_item);
 		copy_tv(&elapsed_start, &(prev_workinfo->createdate));
+		prev_hi = prev_blocks->height;
 	}
 	elapsed_finish.tv_sec = elapsed_finish.tv_usec = 0L;
 
@@ -10606,7 +10608,7 @@ static void summarise_blocks()
 		LOGERR("%s() block %d, prev %d no sharesummaries "
 			"on or before %"PRId64,
 			__func__, blocks->height,
-			prev_blocks->height, wi_finish);
+			prev_hi, wi_finish);
 		return;
 	}
 	DATA_SHARESUMMARY(sharesummary, ss_item);
