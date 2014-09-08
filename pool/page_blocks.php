@@ -89,9 +89,9 @@ function doblocks($data, $user)
 			list($fg, $bg) = pctcolour($pct);
 			$bpct = "<font color=$fg>".number_format($pct, 2).'%</font>';
 			$bg = " bgcolor=$bg";
-			$nettot += $netdiff;
+			$blktot += $diffacc;
 			if ($stat != 'Orphan')
-				$blktot += $diffacc;
+				$nettot += $netdiff;
 		}
 		else
 		{
