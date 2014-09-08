@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.252"
+#define CKDB_VERSION DB_VERSION"-0.260"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2460,7 +2460,7 @@ static void set_block_share_counters()
 
 		ss_item = prev_in_ktree(ctx);
 	}
-	K_RLOCK(sharesummary_free);
+	K_RUNLOCK(sharesummary_free);
 }
 
 /* All data is loaded, now update workerstatus fields
@@ -4196,7 +4196,6 @@ static bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		if (error[0])
 			LOGERR("%s(): %s", __func__, error);
 	}
-	K_RUNLOCK(sharesummary_free);
 
 	if (conned)
 		PQfinish(conn);
@@ -4305,9 +4304,7 @@ static void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			wid_count++;
 			K_RLOCK(sharesummary_free);
 			while (ss_item && sharesummary->workinfoid == to_id) {
-				K_RLOCK(sharesummary_free);
 				ss_item = next_in_ktree(ctx);
-				K_RUNLOCK(sharesummary_free);
 				DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 			}
 			K_RUNLOCK(sharesummary_free);
@@ -5224,7 +5221,6 @@ static bool sharesummary_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
-	K_WLOCK(sharesummary_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(sharesummary_free);
 		DATA_SHARESUMMARY(row, item);
@@ -5369,7 +5365,6 @@ static bool sharesummary_fill(PGconn *conn)
 	if (!ok)
 		k_add_head(sharesummary_free, item);
 
-	K_WUNLOCK(sharesummary_free);
 	PQclear(res);
 
 	if (ok) {
@@ -5384,11 +5379,9 @@ void sharesummary_reload()
 {
 	PGconn *conn = dbconnect();
 
-	K_WLOCK(sharesummary_free);
 	sharesummary_root = free_ktree(sharesummary_root, NULL);
 	sharesummary_workinfoid_root = free_ktree(sharesummary_workinfoid_root, NULL);
 	k_list_transfer_to_head(sharesummary_store, sharesummary_free);
-	K_WUNLOCK(sharesummary_free);
 
 	sharesummary_fill(conn);
 
