@@ -144,7 +144,7 @@ function doworker($data, $user)
 	$row = 'even';
  else
 	$row = 'odd';
- $pg .= "<tr class=$row><td colspan=3 class=dl></td>";
+ $pg .= "<tr class=$row><td class=dl>Total:</td><td colspan=2 class=dl></td>";
  $shareacc = number_format($tsh, 0);
  $pg .= "<td class=dr>$shareacc</td>";
  $diffacc = number_format($tdif, 0);
