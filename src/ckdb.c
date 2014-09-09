@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.273"
+#define CKDB_VERSION DB_VERSION"-0.275"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -10012,18 +10012,28 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		u_item = find_userid(miningpayouts->userid);
 		K_RUNLOCK(users_free);
 		if (u_item) {
+			K_ITEM *pa_item;
+			PAYMENTADDRESSES *pa;
+			char *payaddress;
+
+			pa_item = find_paymentaddresses(miningpayouts->userid);
+			if (pa_item) {
+				DATA_PAYMENTADDRESSES(pa, pa_item);
+				payaddress = pa->payaddress;
+			} else
+				payaddress = "none";
+
 			DATA_USERS(users, u_item);
 			snprintf(tmp, sizeof(tmp),
-				 "user:%d=%s%c",
-				 rows,
-				 users->username,
-				 FLDSEP);
+				 "user:%d=%s%cpayaddress:%d=%s%c",
+				 rows, users->username, FLDSEP,
+				 rows, payaddress, FLDSEP);
+
 		} else {
 			snprintf(tmp, sizeof(tmp),
-				 "user:%d=%"PRId64"%c",
-				 rows,
-				 miningpayouts->userid,
-				 FLDSEP);
+				 "user:%d=%"PRId64"%cpayaddress:%d=none%c",
+				 rows, miningpayouts->userid, FLDSEP,
+				 rows, FLDSEP);
 		}
 		APPEND_REALLOC(buf, off, len, tmp);
 
@@ -10038,9 +10048,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		rows++;
 	}
 	snprintf(tmp, sizeof(tmp),
-		 "rows=%d%c,flds=%s%c",
+		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "user,diffacc_user", FLDSEP);
+		 "user,diffacc_user,payaddress", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
