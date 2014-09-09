@@ -76,6 +76,16 @@ function doblocks($data, $user)
 		if ($stat == '1-Confirm')
 			$stat = 'Conf';
 
+		$stara = '';
+		$starp = '';
+		if (isset($ans['status:'.($i+1)]))
+			if ($ans['status:'.($i+1)] == 'Orphan'
+			&&  $stat != 'Orphan')
+			{
+				$stara = '<span class=st1>*</span>';
+				$starp = '<span class=st0>*</span>';
+			}
+
 		$hi = $ans['height:'.$i];
 		$hifld = "$blink$hi>$hi</a>";
 
@@ -87,11 +97,11 @@ function doblocks($data, $user)
 		{
 			$pct = 100.0 * $diffacc / $netdiff;
 			list($fg, $bg) = pctcolour($pct);
-			$bpct = "<font color=$fg>".number_format($pct, 2).'%</font>';
+			$bpct = "<font color=$fg>$starp".number_format($pct, 2).'%</font>';
 			$bg = " bgcolor=$bg";
-			$nettot += $netdiff;
+			$blktot += $diffacc;
 			if ($stat != 'Orphan')
-				$blktot += $diffacc;
+				$nettot += $netdiff;
 		}
 		else
 		{
@@ -105,8 +115,8 @@ function doblocks($data, $user)
 		$pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
 		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate:'.$i]).'</td>';
 		$pg .= "<td class=dr$ex>".$stat.'</td>';
-		$pg .= "<td class=dr$ex>".$acc.'</td>';
-		$pg .= "<td class=dr$ex$bg>".$bpct.'</td>';
+		$pg .= "<td class=dr>$stara$acc</td>";
+		$pg .= "<td class=dr$bg>$bpct</td>";
 		$pg .= "</tr>\n";
 	}
  }

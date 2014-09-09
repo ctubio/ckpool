@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.252"
+#define CKDB_VERSION DB_VERSION"-0.273"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -674,7 +674,8 @@ static const tv_t date_begin = { DATE_BEGIN, 0L };
 #define PQPARAM14 PQPARAM8 ",$9,$10,$11,$12,$13,$14"
 #define PQPARAM15 PQPARAM8 ",$9,$10,$11,$12,$13,$14,$15"
 #define PQPARAM16 PQPARAM8 ",$9,$10,$11,$12,$13,$14,$15,$16"
-#define PQPARAM27 PQPARAM16 ",$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27"
+#define PQPARAM22 PQPARAM16 ",$17,$18,$19,$20,$21,$22"
+#define PQPARAM27 PQPARAM22 ",$23,$24,$25,$26,$27"
 
 #define PARCHK(_par, _params) do { \
 		if (_par != (int)(sizeof(_params)/sizeof(_params[0]))) { \
@@ -911,7 +912,7 @@ static char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS)
 		 * since mvalue is NULL */
 		quitfrom(1, file, func, line,
 			 "Transfer '%s' '%s' has NULL mvalue",
-			 transfer->name, transfer->mvalue);
+			 transfer->name, transfer->svalue);
 	}
 	return mvalue;
 }
@@ -960,6 +961,7 @@ typedef struct users {
 #define LIMIT_USERS 0
 #define INIT_USERS(_item) INIT_GENERIC(_item, users)
 #define DATA_USERS(_var, _item) DATA_GENERIC(_var, _item, users, true)
+#define DATA_USERS_NULL(_var, _item) DATA_GENERIC(_var, _item, users, false)
 
 static K_TREE *users_root;
 static K_TREE *userid_root;
@@ -1302,7 +1304,9 @@ typedef struct blocks {
 #define BLOCKS_ORPHAN_STR "O"
 
 #define BLOCKS_STATSPENDING FALSE_CHR
+#define BLOCKS_STATSPENDING_STR FALSE_STR
 #define BLOCKS_STATSCONFIRMED TRUE_CHR
+#define BLOCKS_STATSCONFIRMED_STR TRUE_STR
 
 static const char *blocks_new = "New";
 static const char *blocks_confirm = "1-Confirm";
@@ -2460,7 +2464,7 @@ static void set_block_share_counters()
 
 		ss_item = prev_in_ktree(ctx);
 	}
-	K_RLOCK(sharesummary_free);
+	K_RUNLOCK(sharesummary_free);
 }
 
 /* All data is loaded, now update workerstatus fields
@@ -4196,7 +4200,6 @@ static bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		if (error[0])
 			LOGERR("%s(): %s", __func__, error);
 	}
-	K_RUNLOCK(sharesummary_free);
 
 	if (conned)
 		PQfinish(conn);
@@ -4305,9 +4308,7 @@ static void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			wid_count++;
 			K_RLOCK(sharesummary_free);
 			while (ss_item && sharesummary->workinfoid == to_id) {
-				K_RLOCK(sharesummary_free);
 				ss_item = next_in_ktree(ctx);
-				K_RUNLOCK(sharesummary_free);
 				DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 			}
 			K_RUNLOCK(sharesummary_free);
@@ -5224,7 +5225,6 @@ static bool sharesummary_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
-	K_WLOCK(sharesummary_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(sharesummary_free);
 		DATA_SHARESUMMARY(row, item);
@@ -5369,7 +5369,6 @@ static bool sharesummary_fill(PGconn *conn)
 	if (!ok)
 		k_add_head(sharesummary_free, item);
 
-	K_WUNLOCK(sharesummary_free);
 	PQclear(res);
 
 	if (ok) {
@@ -5384,11 +5383,9 @@ void sharesummary_reload()
 {
 	PGconn *conn = dbconnect();
 
-	K_WLOCK(sharesummary_free);
 	sharesummary_root = free_ktree(sharesummary_root, NULL);
 	sharesummary_workinfoid_root = free_ktree(sharesummary_workinfoid_root, NULL);
 	k_list_transfer_to_head(sharesummary_store, sharesummary_free);
-	K_WUNLOCK(sharesummary_free);
 
 	sharesummary_fill(conn);
 
@@ -5420,9 +5417,10 @@ static void dsp_blocks(K_ITEM *item, FILE *stream)
 		dsp_hash(b->blockhash, hash_dsp, sizeof(hash_dsp));
 		tv_to_buf(&(b->createdate), createdate_buf, sizeof(createdate_buf));
 		tv_to_buf(&(b->expirydate), expirydate_buf, sizeof(expirydate_buf));
-		fprintf(stream, " hi=%d hash='%.16s' uid=%"PRId64" w='%s' "
-				"cd=%s ed=%s\n",
-				b->height, hash_dsp, b->userid, b->workername,
+		fprintf(stream, " hi=%d hash='%.16s' conf=%s uid=%"PRId64
+				" w='%s' sconf=%s cd=%s ed=%s\n",
+				b->height, hash_dsp, b->confirmed, b->userid,
+				b->workername, b->statsconfirmed,
 				createdate_buf, expirydate_buf);
 	}
 }
@@ -5532,12 +5530,12 @@ static bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 	K_RUNLOCK(blocks_free);
 
 	if (!old_b_item) {
-		LOGERR("%s(): Non-existent Block: %s/...%s",
+		LOGERR("%s(): Non-existent Block: %d/...%s",
 			__func__, height, hash_dsp);
 		return false;
 	}
 
-	DATA_BLOCKS_NULL(oldblocks, old_b_item);
+	DATA_BLOCKS(oldblocks, old_b_item);
 
 	K_WLOCK(blocks_free);
 	b_item = k_unlink_head(blocks_free);
@@ -5666,7 +5664,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	BLOCKS *row, *oldblocks;
 	USERS *users;
 	char *upd, *ins;
-	char *params[11 + HISTORYDATECOUNT];
+	char *params[17 + HISTORYDATECOUNT];
 	bool ok = false, update_old = false;
 	int par = 0;
 	char want = '?';
@@ -5685,14 +5683,16 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 
 	dsp_hash(blockhash, hash_dsp, sizeof(hash_dsp));
 
-	K_WLOCK(blocks_free);
+	K_RLOCK(blocks_free);
 	old_b_item = find_blocks(row->height, blockhash);
+	K_RUNLOCK(blocks_free);
 	DATA_BLOCKS_NULL(oldblocks, old_b_item);
 
 	switch (confirmed[0]) {
 		case BLOCKS_NEW:
 			// None should exist - so must be a duplicate
 			if (old_b_item) {
+				K_WLOCK(blocks_free);
 				k_add_head(blocks_free, b_item);
 				K_WUNLOCK(blocks_free);
 				if (!igndup) {
@@ -5706,7 +5706,6 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				}
 				return true;
 			}
-			K_WUNLOCK(blocks_free);
 
 			K_RLOCK(users_free);
 			u_item = find_users(username);
@@ -5726,6 +5725,13 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			STRNCPY(row->nonce2, nonce2);
 			STRNCPY(row->nonce, nonce);
 			TXT_TO_BIGINT("reward", reward, row->reward);
+			// Specify them
+			row->diffacc = 0;
+			row->diffinv = 0;
+			row->shareacc = 0;
+			row->shareinv = 0;
+			row->elapsed = 0;
+			STRNCPY(row->statsconfirmed, BLOCKS_STATSPENDING_STR);
 
 			HISTORYDATEINIT(row, cd, by, code, inet);
 			HISTORYDATETRANSFER(trf_root, row);
@@ -5742,14 +5748,21 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			params[par++] = str_to_buf(row->nonce, NULL, 0);
 			params[par++] = bigint_to_buf(row->reward, NULL, 0);
 			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			params[par++] = double_to_buf(row->diffacc, NULL, 0);
+			params[par++] = double_to_buf(row->diffinv, NULL, 0);
+			params[par++] = double_to_buf(row->shareacc, NULL, 0);
+			params[par++] = double_to_buf(row->shareinv, NULL, 0);
+			params[par++] = bigint_to_buf(row->elapsed, NULL, 0);
+			params[par++] = str_to_buf(row->statsconfirmed, NULL, 0);
 			HISTORYDATEPARAMS(params, par, row);
 			PARCHK(par, params);
 
-			// db default stats values
 			ins = "insert into blocks "
 				"(height,blockhash,workinfoid,userid,workername,"
-				"clientid,enonce1,nonce2,nonce,reward,confirmed"
-				HISTORYDATECONTROL ") values (" PQPARAM16 ")";
+				"clientid,enonce1,nonce2,nonce,reward,confirmed,"
+				"diffacc,diffinv,shareacc,shareinv,elapsed,"
+				"statsconfirmed"
+				HISTORYDATECONTROL ") values (" PQPARAM22 ")";
 
 			if (conn == NULL) {
 				conn = dbconnect();
@@ -5767,7 +5780,6 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 		case BLOCKS_42:
 			// These shouldn't be possible until startup completes
 			if (!startup_complete) {
-				K_WUNLOCK(blocks_free);
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 				LOGERR("%s(): Status: %s invalid during startup. "
 					"Ignored: Block: %s/...%s/%s",
@@ -5779,7 +5791,6 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			want = BLOCKS_CONFIRM;
 		case BLOCKS_CONFIRM:
 			if (!old_b_item) {
-				K_WUNLOCK(blocks_free);
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 				LOGERR("%s(): Can't %s a non-existent Block: %s/...%s/%s",
 					__func__, blocks_confirmed(confirmed),
@@ -5789,8 +5800,6 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			if (confirmed[0] == BLOCKS_CONFIRM)
 				want = BLOCKS_NEW;
 			if (oldblocks->confirmed[0] != want) {
-				k_add_head(blocks_free, b_item);
-				K_WUNLOCK(blocks_free);
 				// No mismatch messages during startup
 				if (startup_complete) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
@@ -5803,7 +5812,6 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				}
 				goto flail;
 			}
-			K_WUNLOCK(blocks_free);
 
 			upd = "update blocks set expirydate=$1 where blockhash=$2 and expirydate=$3";
 			par = 0;
@@ -5887,7 +5895,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					"height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,"
 					"$3,diffacc,diffinv,shareacc,shareinv,elapsed,"
-					"statsconfirmed"
+					"statsconfirmed,"
 					"$4,$5,$6,$7,$8 from blocks where "
 					"blockhash=$1 and expirydate=$2";
 			}
@@ -5906,7 +5914,6 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			res = PQexec(conn, "Commit", CKPQ_WRITE);
 			break;
 		default:
-			K_WUNLOCK(blocks_free);
 			LOGERR("%s(): %s.failed.invalid confirm='%s'",
 			       __func__, id, confirmed);
 			goto flail;
@@ -6034,7 +6041,6 @@ static bool blocks_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
-	K_WLOCK(blocks_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(blocks_free);
 		DATA_BLOCKS(row, item);
@@ -6140,7 +6146,6 @@ static bool blocks_fill(PGconn *conn)
 	if (!ok)
 		k_add_head(blocks_free, item);
 
-	K_WUNLOCK(blocks_free);
 	PQclear(res);
 
 	if (ok) {
@@ -6155,10 +6160,8 @@ void blocks_reload()
 {
 	PGconn *conn = dbconnect();
 
-	K_WLOCK(blocks_free);
 	blocks_root = free_ktree(blocks_root, NULL);
 	k_list_transfer_to_head(blocks_store, blocks_free);
-	K_WUNLOCK(blocks_free);
 
 	blocks_fill(conn);
 
@@ -7994,7 +7997,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			}
 		} else {
 			if (strcasecmp(transfer_data(i_passwordhash),
-					users->passwordhash) == 0) {
+					users->passwordhash)) {
 				reason = "Incorrect password";
 				goto struckout;
 			}
@@ -8749,23 +8752,23 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				snprintf(tmp, sizeof(tmp), "w_lastshare:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_lastdiff), reply, sizeof(reply));
+				double_to_buf(w_lastdiff, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_lastdiff:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_diffacc), reply, sizeof(reply));
+				double_to_buf(w_diffacc, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_diffacc:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_diffinv), reply, sizeof(reply));
+				double_to_buf(w_diffinv, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_diffinv:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_shareacc), reply, sizeof(reply));
+				double_to_buf(w_shareacc, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_shareacc:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_shareinv), reply, sizeof(reply));
+				double_to_buf(w_shareinv, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_shareinv:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 

@@ -129,6 +129,10 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .dls {text-align: left; padding: 2px 8px; text-decoration:line-through; font-weight:lighter; }
 .drs {text-align: right; padding: 2px 8px; text-decoration:line-through; font-weight:lighter; }
 .dcs {text-align: center; padding: 2px 8px; text-decoration:line-through; font-weight:lighter; }
+.st0 {font-weight:bold; }
+.st1 {color:red; font-weight:bold; }
+.st2 {color:green; font-weight:bold; }
+.st3 {color:blue; font-weight:bold; }
 </style>\n";
 
  $head .= '<meta name="robots" content="noindex">';
