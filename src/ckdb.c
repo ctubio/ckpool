@@ -911,7 +911,7 @@ static char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS)
 		 * since mvalue is NULL */
 		quitfrom(1, file, func, line,
 			 "Transfer '%s' '%s' has NULL mvalue",
-			 transfer->name, transfer->mvalue);
+			 transfer->name, transfer->svalue);
 	}
 	return mvalue;
 }
