@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.272"
+#define CKDB_VERSION DB_VERSION"-0.273"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -7997,7 +7997,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			}
 		} else {
 			if (strcasecmp(transfer_data(i_passwordhash),
-					users->passwordhash) == 0) {
+					users->passwordhash)) {
 				reason = "Incorrect password";
 				goto struckout;
 			}
