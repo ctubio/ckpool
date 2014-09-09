@@ -106,7 +106,7 @@ function doblocks($data, $user)
 		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate:'.$i]).'</td>';
 		$pg .= "<td class=dr$ex>".$stat.'</td>';
 		$pg .= "<td class=dr>".$acc.'</td>';
-		$pg .= "<td class=dr$ex$bg>".$bpct.'</td>';
+		$pg .= "<td class=dr$bg>".$bpct.'</td>';
 		$pg .= "</tr>\n";
 	}
  }
