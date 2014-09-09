@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.270"
+#define CKDB_VERSION DB_VERSION"-0.271"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -5894,7 +5894,7 @@ static bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					"height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,"
 					"$3,diffacc,diffinv,shareacc,shareinv,elapsed,"
-					"statsconfirmed"
+					"statsconfirmed,"
 					"$4,$5,$6,$7,$8 from blocks where "
 					"blockhash=$1 and expirydate=$2";
 			}
