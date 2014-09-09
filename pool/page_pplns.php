@@ -140,7 +140,7 @@ Block: <input type=text name=blk size=10 value=''>
 	$pg .= '<td class=dl colspan=3></td>';
 	$pg .= "<td class=dr>".number_format($tot_btc,8)."</td>";
 	$pg .= '<td class=dr></td>';
-	$pg .= '<td class=dr>'.number_format($pay_btc,8).'</td>';
+	$pg .= '<td class=dr>'.number_format($tot_pay,8).'</td>';
 	$pg .= '<td class=dr></td>';
 	$pg .= "</tr>\n";
 
