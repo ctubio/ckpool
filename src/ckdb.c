@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.271"
+#define CKDB_VERSION DB_VERSION"-0.272"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -961,6 +961,7 @@ typedef struct users {
 #define LIMIT_USERS 0
 #define INIT_USERS(_item) INIT_GENERIC(_item, users)
 #define DATA_USERS(_var, _item) DATA_GENERIC(_var, _item, users, true)
+#define DATA_USERS_NULL(_var, _item) DATA_GENERIC(_var, _item, users, false)
 
 static K_TREE *users_root;
 static K_TREE *userid_root;
@@ -8751,23 +8752,23 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				snprintf(tmp, sizeof(tmp), "w_lastshare:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_lastdiff), reply, sizeof(reply));
+				double_to_buf(w_lastdiff, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_lastdiff:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_diffacc), reply, sizeof(reply));
+				double_to_buf(w_diffacc, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_diffacc:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_diffinv), reply, sizeof(reply));
+				double_to_buf(w_diffinv, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_diffinv:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_shareacc), reply, sizeof(reply));
+				double_to_buf(w_shareacc, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_shareacc:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf((int)(w_shareinv), reply, sizeof(reply));
+				double_to_buf(w_shareinv, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_shareinv:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
