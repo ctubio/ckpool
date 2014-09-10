@@ -723,7 +723,7 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 		LOGWARNING("Invalid message length zero sent to recv_unix_msg");
 		goto out;
 	}
-	ret = wait_read_select(sockd, 0);
+	ret = wait_read_select(sockd, 5);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select2 failed in recv_unix_msg");
 		goto out;
