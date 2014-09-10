@@ -47,7 +47,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.273"
+#define CKDB_VERSION DB_VERSION"-0.276"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2915,6 +2915,11 @@ static bool users_fill(PGconn *conn)
 		item = k_unlink_head(users_free);
 		DATA_USERS(row, item);
 
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
 		PQ_GET_FLD(res, i, "userid", field, ok);
 		if (!ok)
 			break;
@@ -3363,6 +3368,11 @@ static bool workers_fill(PGconn *conn)
 		item = k_unlink_head(workers_free);
 		DATA_WORKERS(row, item);
 
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
 		PQ_GET_FLD(res, i, "userid", field, ok);
 		if (!ok)
 			break;
@@ -3652,6 +3662,11 @@ static bool paymentaddresses_fill(PGconn *conn)
 		item = k_unlink_head(paymentaddresses_free);
 		DATA_PAYMENTADDRESSES(row, item);
 
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
 		PQ_GET_FLD(res, i, "paymentaddressid", field, ok);
 		if (!ok)
 			break;
@@ -3758,6 +3773,11 @@ static bool payments_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(payments_free);
 		DATA_PAYMENTS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
 
 		PQ_GET_FLD(res, i, "userid", field, ok);
 		if (!ok)
@@ -4383,7 +4403,7 @@ static bool workinfo_fill(PGconn *conn)
 
 	// TODO: select the data based on sharesummary since old data isn't needed
 	//  however, the ageing rules for workinfo will decide that also
-	//  keep the last block + current?
+	//  keep the last block + current? Rules will depend on payout scheme also
 	sel = "select "
 //		"workinfoid,poolinstance,transactiontree,merklehash,prevhash,"
 		"workinfoid,poolinstance,merklehash,prevhash,"
@@ -4416,6 +4436,11 @@ static bool workinfo_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(workinfo_free);
 		DATA_WORKINFO(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
 
 		PQ_GET_FLD(res, i, "workinfoid", field, ok);
 		if (!ok)
@@ -5228,6 +5253,11 @@ static bool sharesummary_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(sharesummary_free);
 		DATA_SHARESUMMARY(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
 
 		row->inserted = true;
 
@@ -6045,6 +6075,11 @@ static bool blocks_fill(PGconn *conn)
 		item = k_unlink_head(blocks_free);
 		DATA_BLOCKS(row, item);
 
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
 		PQ_GET_FLD(res, i, "height", field, ok);
 		if (!ok)
 			break;
@@ -6320,6 +6355,11 @@ static bool miningpayouts_fill(PGconn *conn)
 		item = k_unlink_head(miningpayouts_free);
 		DATA_MININGPAYOUTS(row, item);
 
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
 		PQ_GET_FLD(res, i, "miningpayoutid", field, ok);
 		if (!ok)
 			break;
@@ -6582,6 +6622,11 @@ static bool auths_fill(PGconn *conn)
 		item = k_unlink_head(auths_free);
 		DATA_AUTHS(row, item);
 
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
 		PQ_GET_FLD(res, i, "authid", field, ok);
 		if (!ok)
 			break;
@@ -6816,6 +6861,11 @@ static bool poolstats_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(poolstats_free);
 		DATA_POOLSTATS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
 
 		row->stored = true;
 
@@ -7259,6 +7309,11 @@ static bool userstats_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(userstats_free);
 		DATA_USERSTATS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
 
 		// Not a DB field
 		row->poolinstance[0] = '\0';
@@ -10012,18 +10067,28 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		u_item = find_userid(miningpayouts->userid);
 		K_RUNLOCK(users_free);
 		if (u_item) {
+			K_ITEM *pa_item;
+			PAYMENTADDRESSES *pa;
+			char *payaddress;
+
+			pa_item = find_paymentaddresses(miningpayouts->userid);
+			if (pa_item) {
+				DATA_PAYMENTADDRESSES(pa, pa_item);
+				payaddress = pa->payaddress;
+			} else
+				payaddress = "none";
+
 			DATA_USERS(users, u_item);
 			snprintf(tmp, sizeof(tmp),
-				 "user:%d=%s%c",
-				 rows,
-				 users->username,
-				 FLDSEP);
+				 "user:%d=%s%cpayaddress:%d=%s%c",
+				 rows, users->username, FLDSEP,
+				 rows, payaddress, FLDSEP);
+
 		} else {
 			snprintf(tmp, sizeof(tmp),
-				 "user:%d=%"PRId64"%c",
-				 rows,
-				 miningpayouts->userid,
-				 FLDSEP);
+				 "user:%d=%"PRId64"%cpayaddress:%d=none%c",
+				 rows, miningpayouts->userid, FLDSEP,
+				 rows, FLDSEP);
 		}
 		APPEND_REALLOC(buf, off, len, tmp);
 
@@ -10038,9 +10103,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		rows++;
 	}
 	snprintf(tmp, sizeof(tmp),
-		 "rows=%d%c,flds=%s%c",
+		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "user,diffacc_user", FLDSEP);
+		 "user,diffacc_user,payaddress", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
