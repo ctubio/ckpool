@@ -39,6 +39,6 @@ BEGIN
   select sum(diffacc) from sharesummary where workinfoid > wi0
 	and workinfoid <= wi into da;
 
-  RAISE WARNING 'diffacc: %', da;
+  RAISE WARNING 'diffacc: %', to_char(da::bigint, 'FM999,999,999,999,999,990');
  END IF;
 END $$;
