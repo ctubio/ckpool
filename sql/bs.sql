@@ -20,7 +20,7 @@ BEGIN
  END IF;
 
  select max(height) from blocks where height < hi into hi0;
- IF found THEN
+ IF NOT found THEN
   wi0 := -1;
  ELSE
   select workinfoid from blocks where height = hi0
