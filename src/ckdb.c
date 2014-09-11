@@ -25,7 +25,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <regex.h>
+#include <sha2.h>
 #ifdef HAVE_LIBPQ_FE_H
 #include <libpq-fe.h>
 #elif defined (HAVE_POSTGRESQL_LIBPQ_FE_H)
@@ -46,8 +48,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.9.1"
-#define CKDB_VERSION DB_VERSION"-0.280"
+#define DB_VERSION "0.9.2"
+#define CKDB_VERSION DB_VERSION"-0.300"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -950,6 +952,8 @@ static tv_t missing_secuser_max = { 1408860000L, 0L };
 typedef struct users {
 	int64_t userid;
 	char username[TXT_BIG+1];
+	// Anything in 'status' disables the account
+	char status[TXT_BIG+1];
 	char emailaddress[TXT_BIG+1];
 	tv_t joineddate;
 	char passwordhash[TXT_BIG+1];
@@ -964,6 +968,12 @@ typedef struct users {
 #define DATA_USERS(_var, _item) DATA_GENERIC(_var, _item, users, true)
 #define DATA_USERS_NULL(_var, _item) DATA_GENERIC(_var, _item, users, false)
 
+#define SHA256SIZHEX	64
+#define SHA256SIZBIN	32
+#define SALTSIZHEX	32
+#define SALTSIZBIN	16
+
+
 static K_TREE *users_root;
 static K_TREE *userid_root;
 static K_LIST *users_free;
@@ -973,6 +983,8 @@ static K_STORE *users_store;
 // USERATTS
 typedef struct useratts {
 	int64_t userid;
+	char attname[TXT_BIG+1];
+	char status[TXT_BIG+1];
 	char attstr[TXT_BIG+1];
 	char attstr2[TXT_BIG+1];
 	int64_t attnum;
@@ -2652,6 +2664,97 @@ static K_ITEM *find_userid(int64_t userid)
 	return find_in_ktree(userid_root, &look, cmp_userid, ctx);
 }
 
+static void make_salt(USERS *users)
+{
+	long int r1, r2, r3, r4;
+
+	r1 = random();
+	r2 = random();
+	r3 = random();
+	r4 = random();
+
+	__bin2hex(users->salt, (void *)(&r1), 4);
+	__bin2hex(users->salt+8, (void *)(&r2), 4);
+	__bin2hex(users->salt+16, (void *)(&r3), 4);
+	__bin2hex(users->salt+24, (void *)(&r4), 4);
+}
+
+static void password_hash(char *username, char *passwordhash, char *salt, char *result, size_t siz)
+{
+	char tohash[TXT_BIG+1];
+	char buf[TXT_BIG+1];
+	size_t len, tot;
+	char why[1024];
+
+	if (siz < SHA256SIZHEX+1) {
+		snprintf(why, sizeof(why),
+			 "target result too small (%d/%d)",
+			 (int)siz, SHA256SIZHEX+1);
+		goto hashfail;
+	}
+
+	if (sizeof(buf) < SHA256SIZBIN) {
+		snprintf(why, sizeof(why),
+			 "temporary target buf too small (%d/%d)",
+			 (int)sizeof(buf), SHA256SIZBIN);
+		goto hashfail;
+	}
+
+	tot = len = strlen(passwordhash) / 2;
+	if (len != SHA256SIZBIN) {
+		snprintf(why, sizeof(why),
+			 "passwordhash wrong size (%d/%d)",
+			 (int)len, SHA256SIZBIN);
+		goto hashfail;
+	}
+	if (len > sizeof(tohash)) {
+		snprintf(why, sizeof(why),
+			 "temporary tohash too small (%d/%d)",
+			 (int)sizeof(tohash), (int)len);
+		goto hashfail;
+	}
+
+	hex2bin(tohash, passwordhash, len);
+
+	len = strlen(salt) / 2;
+	if (len != SALTSIZBIN) {
+		snprintf(why, sizeof(why),
+			 "salt wrong size (%d/%d)",
+			 (int)len, SALTSIZBIN);
+		goto hashfail;
+	}
+	if ((tot + len) > sizeof(tohash)) {
+		snprintf(why, sizeof(why),
+			 "passwordhash+salt too big (%d/%d)",
+			 (int)(tot + len), (int)sizeof(tohash));
+		goto hashfail;
+	}
+
+	hex2bin(tohash+tot, salt, len);
+	tot += len;
+
+	sha256((const unsigned char *)tohash, (unsigned int)tot, (unsigned char *)buf);
+
+	__bin2hex(result, (void *)buf, SHA256SIZBIN);
+
+	return;
+hashfail:
+	LOGERR("%s() Failed to hash '%s' password: %s",
+		__func__, username, why);
+	result[0] = '\0';
+}
+
+static bool check_hash(USERS *users, char *passwordhash)
+{
+	char hex[SHA256SIZHEX+1];
+
+	if (*(users->salt)) {
+		password_hash(users->username, passwordhash, users->salt, hex, sizeof(hex));
+		return (strcasecmp(hex, users->passwordhash) == 0);
+	} else
+		return (strcasecmp(passwordhash, users->passwordhash) == 0);
+}
+
 static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			     char *newhash, char *email, char *by, char *code,
 			     char *inet, tv_t *cd, K_TREE *trf_root)
@@ -2665,7 +2768,7 @@ static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	USERS *row, *users;
 	char *upd, *ins;
 	bool ok = false;
-	char *params[4 + HISTORYDATECOUNT];
+	char *params[5 + HISTORYDATECOUNT];
 	bool hash;
 	int par;
 
@@ -2677,7 +2780,8 @@ static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		hash = false;
 
 	DATA_USERS(users, u_item);
-	if (hash && strcasecmp(oldhash, users->passwordhash))
+	// i.e. if oldhash == EMPTY, just overwrite with new
+	if (hash && oldhash != EMPTY && !check_hash(users, oldhash))
 		return false;
 
 	K_WLOCK(users_free);
@@ -2687,10 +2791,14 @@ static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	DATA_USERS(row, item);
 	memcpy(row, users, sizeof(*row));
 	// Update one, leave the other
-	if (hash)
-		STRNCPY(row->passwordhash, newhash);
-	else
+	if (hash) {
+		// New salt each password change
+		make_salt(row);
+		password_hash(row->username, newhash, row->salt,
+			      row->passwordhash, sizeof(row->passwordhash));
+	} else
 		STRNCPY(row->emailaddress, email);
+
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
@@ -2731,15 +2839,18 @@ static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	// Copy them both in - one will be new and one will be old
 	params[par++] = str_to_buf(row->emailaddress, NULL, 0);
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
+	// New salt for each password change (or recopy old)
+	params[par++] = str_to_buf(row->salt, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
-	PARCHKVAL(par, 4 + HISTORYDATECOUNT, params); // 9 as per ins
+	PARCHKVAL(par, 5 + HISTORYDATECOUNT, params); // 10 as per ins
 
 	ins = "insert into users "
-		"(userid,username,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid,salt"
+		"(userid,username,status,emailaddress,joineddate,"
+		"passwordhash,secondaryuserid,salt"
 		HISTORYDATECONTROL ") select "
-		"userid,username,$3,joineddate,$4,secondaryuserid,salt,"
-		"$5,$6,$7,$8,$9 from users where "
+		"userid,username,status,$3,joineddate,"
+		"$4,secondaryuserid,$5,"
+		"$6,$7,$8,$9,$10 from users where "
 		"userid=$1 and expirydate=$2";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -2794,7 +2905,7 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	uint64_t hash;
 	__maybe_unused uint64_t tmp;
 	bool ok = false;
-	char *params[7 + HISTORYDATECOUNT];
+	char *params[8 + HISTORYDATECOUNT];
 	int par;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -2805,7 +2916,7 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 
 	DATA_USERS(row, item);
 
-	row->userid = nextid(conn, "userid", (int64_t)(666 + (rand() % 334)),
+	row->userid = nextid(conn, "userid", (int64_t)(666 + (random() % 334)),
 				cd, by, code, inet);
 	if (row->userid == 0)
 		goto unitem;
@@ -2813,6 +2924,7 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	// TODO: pre-check the username exists? (to save finding out via a DB error)
 
 	STRNCPY(row->username, username);
+	row->status[0] = '\0';
 	STRNCPY(row->emailaddress, emailaddress);
 	STRNCPY(row->passwordhash, passwordhash);
 
@@ -2820,7 +2932,7 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	HASH_BER(tohash, strlen(tohash), 1, hash, tmp);
 	__bin2hex(row->secondaryuserid, (void *)(&hash), sizeof(hash));
 
-	row->salt[0] = '\0';
+	make_salt(row);
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -2832,6 +2944,7 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	par = 0;
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
 	params[par++] = str_to_buf(row->username, NULL, 0);
+	params[par++] = str_to_buf(row->status, NULL, 0);
 	params[par++] = str_to_buf(row->emailaddress, NULL, 0);
 	params[par++] = tv_to_buf(&(row->joineddate), NULL, 0);
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
@@ -2841,9 +2954,9 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	PARCHK(par, params);
 
 	ins = "insert into users "
-		"(userid,username,emailaddress,joineddate,passwordhash,"
+		"(userid,username,status,emailaddress,joineddate,passwordhash,"
 		"secondaryuserid,salt"
-		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
+		HISTORYDATECONTROL ") values (" PQPARAM13 ")";
 
 	if (!conn) {
 		conn = dbconnect();
@@ -2890,14 +3003,14 @@ static bool users_fill(PGconn *conn)
 	USERS *row;
 	char *field;
 	char *sel;
-	int fields = 7;
+	int fields = 8;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
-		"userid,username,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid,salt"
+		"userid,username,status,emailaddress,joineddate,"
+		"passwordhash,secondaryuserid,salt"
 		HISTORYDATECONTROL
 		" from users";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -2938,6 +3051,11 @@ static bool users_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_STR("username", field, row->username);
+
+		PQ_GET_FLD(res, i, "status", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("status", field, row->status);
 
 		PQ_GET_FLD(res, i, "emailaddress", field, ok);
 		if (!ok)
@@ -7930,6 +8048,7 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	bool ok = false;
+	char *oldhash;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -7937,9 +8056,11 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!i_username)
 		return strdup(reply);
 
-	i_oldhash = require_name(trf_root, "oldhash", 64, (char *)hashpatt, reply, siz);
-	if (!i_oldhash)
-		return strdup(reply);
+	i_oldhash = optional_name(trf_root, "oldhash", 64, (char *)hashpatt);
+	if (i_oldhash)
+		oldhash = transfer_data(i_oldhash);
+	else
+		oldhash = EMPTY;
 
 	i_newhash = require_name(trf_root, "newhash", 64, (char *)hashpatt, reply, siz);
 	if (!i_newhash)
@@ -7951,7 +8072,7 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	if (u_item) {
 		ok = users_pass_email(NULL, u_item,
-					    transfer_data(i_oldhash),
+					    oldhash,
 					    transfer_data(i_newhash),
 					    NULL,
 					    by, code, inet, now, trf_root);
@@ -7994,10 +8115,7 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 		ok = false;
 	else {
 		DATA_USERS(users, u_item);
-		if (strcasecmp(transfer_data(i_passwordhash), users->passwordhash) == 0)
-			ok = true;
-		else
-			ok = false;
+		ok = check_hash(users, transfer_data(i_passwordhash));
 	}
 
 	if (!ok) {
@@ -8065,8 +8183,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				APPEND_REALLOC(answer, off, len, tmp);
 			}
 		} else {
-			if (strcasecmp(transfer_data(i_passwordhash),
-					users->passwordhash)) {
+			if (!check_hash(users, transfer_data(i_passwordhash))) {
 				reason = "Incorrect password";
 				goto struckout;
 			}
@@ -12472,7 +12589,7 @@ int main(int argc, char **argv)
 				ckp.logdir, ckp.name, dbcode);
 
 	setnow(&now);
-	srand((unsigned int)(now.tv_usec * 4096 + now.tv_sec % 4096));
+	srandom((unsigned int)(now.tv_usec * 4096 + now.tv_sec % 4096));
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
