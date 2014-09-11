@@ -46,8 +46,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.9"
-#define CKDB_VERSION DB_VERSION"-0.276"
+#define DB_VERSION "0.9.1"
+#define CKDB_VERSION DB_VERSION"-0.280"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -838,8 +838,6 @@ typedef struct logqueue {
 
 static K_LIST *logqueue_free;
 static K_STORE *logqueue_store;
-static pthread_mutex_t wq_waitlock;
-static pthread_cond_t wq_waitcond;
 
 // WORKQUEUE
 typedef struct workqueue {
@@ -865,6 +863,8 @@ typedef struct workqueue {
 
 static K_LIST *workqueue_free;
 static K_STORE *workqueue_store;
+static pthread_mutex_t wq_waitlock;
+static pthread_cond_t wq_waitcond;
 
 // TRANSFER
 #define NAME_SIZE 63
@@ -954,6 +954,7 @@ typedef struct users {
 	tv_t joineddate;
 	char passwordhash[TXT_BIG+1];
 	char secondaryuserid[TXT_SML+1];
+	char salt[TXT_BIG+1];
 	HISTORYDATECONTROLFIELDS;
 } USERS;
 
@@ -968,23 +969,28 @@ static K_TREE *userid_root;
 static K_LIST *users_free;
 static K_STORE *users_store;
 
-/* TODO: for account settings - but do we want manual/auto payouts?
-// USERACCOUNTS
-typedef struct useraccounts {
+/* TODO:
+// USERATTS
+typedef struct useratts {
 	int64_t userid;
-	int64_t payoutlimit;
-	char autopayout[TXT_FLG+1];
+	char attstr[TXT_BIG+1];
+	char attstr2[TXT_BIG+1];
+	int64_t attnum;
+	int64_t attnum2;
+	tv_t attdate;
+	tv_t attdate2;
 	HISTORYDATECONTROLFIELDS;
-} USERACCOUNTS;
+} USERATTS;
 
-#define ALLOC_USERACCOUNTS 1024
-#define LIMIT_USERACCOUNTS 0
-#define INIT_USERACCOUNTS(_item) INIT_GENERIC(_item, useraccounts)
-#define DATA_USERACCOUNTS(_var, _item) DATA_GENERIC(_var, _item, useraccounts, true)
+#define ALLOC_USERATTS 1024
+#define LIMIT_USERATTS 0
+#define INIT_USERATTS(_item) INIT_GENERIC(_item, useratts)
+#define DATA_USERATTS(_var, _item) DATA_GENERIC(_var, _item, useratts, true)
+#define DATA_USERATTS_NULL(_var, _item) DATA_GENERIC(_var, _item, useratts, true)
 
-static K_TREE *useraccounts_root;
-static K_LIST *useraccounts_free;
-static K_STORE *useraccounts_store;
+static K_TREE *useratts_root;
+static K_LIST *useratts_free;
+static K_STORE *useratts_store;
 */
 
 // WORKERS
@@ -2202,8 +2208,8 @@ static PGconn *dbconnect()
 
 	snprintf(conninfo, sizeof(conninfo),
 		 "host=127.0.0.1 dbname=%s user=%s%s%s",
-		 db_name,
-		 db_user, db_pass ? " password=" : "",
+		 db_name, db_user,
+		 db_pass ? " password=" : "",
 		 db_pass ? db_pass : "");
 
 	conn = PQconnectdb(conninfo);
@@ -2730,9 +2736,9 @@ static bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 
 	ins = "insert into users "
 		"(userid,username,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid"
+		"secondaryuserid,salt"
 		HISTORYDATECONTROL ") select "
-		"userid,username,$3,joineddate,$4,secondaryuserid,"
+		"userid,username,$3,joineddate,$4,secondaryuserid,salt,"
 		"$5,$6,$7,$8,$9 from users where "
 		"userid=$1 and expirydate=$2";
 
@@ -2788,7 +2794,7 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	uint64_t hash;
 	__maybe_unused uint64_t tmp;
 	bool ok = false;
-	char *params[6 + HISTORYDATECOUNT];
+	char *params[7 + HISTORYDATECOUNT];
 	int par;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -2814,6 +2820,8 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	HASH_BER(tohash, strlen(tohash), 1, hash, tmp);
 	__bin2hex(row->secondaryuserid, (void *)(&hash), sizeof(hash));
 
+	row->salt[0] = '\0';
+
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
@@ -2828,13 +2836,14 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	params[par++] = tv_to_buf(&(row->joineddate), NULL, 0);
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
 	params[par++] = str_to_buf(row->secondaryuserid, NULL, 0);
+	params[par++] = str_to_buf(row->salt, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into users "
 		"(userid,username,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid"
-		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+		"secondaryuserid,salt"
+		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
 
 	if (!conn) {
 		conn = dbconnect();
@@ -2881,14 +2890,14 @@ static bool users_fill(PGconn *conn)
 	USERS *row;
 	char *field;
 	char *sel;
-	int fields = 6;
+	int fields = 7;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"userid,username,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid"
+		"secondaryuserid,salt"
 		HISTORYDATECONTROL
 		" from users";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -2949,6 +2958,11 @@ static bool users_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_STR("secondaryuserid", field, row->secondaryuserid);
+
+		PQ_GET_FLD(res, i, "salt", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("salt", field, row->salt);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -3585,7 +3599,7 @@ unitem:
 	if (!ok)
 		k_add_head(paymentaddresses_free, item);
 	else {
-		// Remove old (unneeded) records
+		// Remove from ram, old (unneeded) records
 		pa.userid = userid;
 		pa.expirydate.tv_sec = 0L;
 		pa.payaddress[0] = '\0';
