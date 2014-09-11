@@ -16,7 +16,7 @@ function doallwork($data, $user)
 
  $pg .= worktitle($data, $user);
 
- $ans = getAllUsers();
+ $ans = getAllUsers($user);
  if ($ans['STATUS'] == 'ok')
  {
 	$count = $ans['rows'];

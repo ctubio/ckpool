@@ -166,7 +166,7 @@ function userSettings($user, $email = null, $addr = null, $pass = null)
  return repDecode($rep);
 }
 #
-function getAllUsers()
+function getAllUsers($user)
 {
  $flds = array();
  $msg = msgEncode('allusers', 'all', $flds);
