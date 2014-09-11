@@ -19,7 +19,7 @@ BEGIN
 
 END $$;
 
-ALTER TABLE ONLY usersatts
+ALTER TABLE ONLY useratts
   ADD COLUMN status character varying(256) DEFAULT ''::character varying NOT NULL;
 
 ALTER TABLE ONLY users
