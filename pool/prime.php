@@ -1,5 +1,8 @@
 <?php
 #
+global $stt;
+$stt = microtime();
+#
 include_once('param.php');
 include_once('base.php');
 #
