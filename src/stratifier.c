@@ -1471,6 +1471,10 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("params missing array entries");
 		goto out;
 	}
+	if (unlikely(!client->useragent)) {
+		*err_val = json_string("Failed subscription");
+		goto out;
+	}
 	buf = json_string_value(json_array_get(params_val, 0));
 	if (!buf) {
 		*err_val = json_string("Invalid workername parameter");
