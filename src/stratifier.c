@@ -1913,8 +1913,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		strcpy(idstring, job_id);
 		ASPRINTF(&fname, "%s.sharelog", current_workbase->logdir);
-		ck_runlock(&workbase_lock);
-		goto out;
+		goto out_unlock;
 	}
 	share = true;
 	wdiff = wb->diff;
@@ -1949,6 +1948,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		submit = true;
 out_unlock:
 	ck_runlock(&workbase_lock);
+
+	if (unlikely(!share))
+		goto out;
 
 	if (submit)
 		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
