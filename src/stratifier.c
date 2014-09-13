@@ -79,7 +79,7 @@ static pool_stats_t stats;
 
 static pthread_mutex_t stats_lock;
 
-static uint64_t enonce1_64;
+static uint64_t enonce1_64 = 1;
 
 struct workbase {
 	/* Hash table data */
@@ -1027,7 +1027,7 @@ static void drop_client(int64_t id)
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client */
-		if (!old_client)
+		if (!old_client && client->enonce1_64)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		else // Keep around instance so we don't get a dereference
 			HASH_ADD(hh, dead_instances, enonce1_64, sizeof(uint64_t), client);
