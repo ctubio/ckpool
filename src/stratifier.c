@@ -1911,6 +1911,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&workbase_lock);
 	HASH_FIND_I64(workbases, &id, wb);
 	if (unlikely(!wb)) {
+		id = current_workbase->id;
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		strcpy(idstring, job_id);
