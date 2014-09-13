@@ -122,6 +122,60 @@ struct proxy_instance {
 
 typedef struct proxy_instance proxy_instance_t;
 
+static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
+{
+	char *userpass = NULL;
+	bool ret = false;
+	connsock_t *cs;
+	gbtbase_t *gbt;
+
+	cs = &si->cs;
+	if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
+		LOGWARNING("Failed to extract address from %s", si->url);
+		return ret;
+	}
+	userpass = strdup(si->auth);
+	realloc_strcat(&userpass, ":");
+	realloc_strcat(&userpass, si->pass);
+	cs->auth = http_base64(userpass);
+	dealloc(userpass);
+	if (!cs->auth) {
+		LOGWARNING("Failed to create base64 auth from %s", userpass);
+		return ret;
+	}
+
+	cs->fd = connect_socket(cs->url, cs->port);
+	if (cs->fd < 0) {
+		if (!pinging)
+			LOGWARNING("Failed to connect socket to %s:%s !", cs->url, cs->port);
+		return ret;
+	}
+
+	/* Test we can connect, authorise and get a block template */
+	gbt = ckzalloc(sizeof(gbtbase_t));
+	si->data = gbt;
+	if (!gen_gbtbase(cs, gbt)) {
+		if (!pinging) {
+			LOGINFO("Failed to get test block template from %s:%s!",
+				cs->url, cs->port);
+		}
+		goto out_close;
+	}
+	clear_gbtbase(gbt);
+	if (!validate_address(cs, ckp->btcaddress)) {
+		LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
+		goto out_close;
+	}
+	ret = true;
+out_close:
+	if (!ret)
+		close(cs->fd);
+	else
+		keep_sockalive(cs->fd);
+	return ret;
+}
+
+/* Find the highest priority server alive and return it */
 static server_instance_t *live_server(ckpool_t *ckp)
 {
 	server_instance_t *alive = NULL;
@@ -134,49 +188,12 @@ retry:
 		goto out;
 
 	for (i = 0; i < ckp->btcds; i++) {
-		server_instance_t *si;
-		char *userpass = NULL;
-		gbtbase_t *gbt;
+		server_instance_t *si = ckp->servers[i];
 
-		si = ckp->servers[i];
-		cs = &si->cs;
-		if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
-			LOGWARNING("Failed to extract address from %s", si->url);
-			continue;
+		if (server_alive(ckp, si, false)) {
+			alive = si;
+			break;
 		}
-		userpass = strdup(si->auth);
-		realloc_strcat(&userpass, ":");
-		realloc_strcat(&userpass, si->pass);
-		cs->auth = http_base64(userpass);
-		dealloc(userpass);
-		if (!cs->auth) {
-			LOGWARNING("Failed to create base64 auth from %s", userpass);
-			continue;
-		}
-
-		cs->fd = connect_socket(cs->url, cs->port);
-		if (cs->fd < 0) {
-			LOGWARNING("Failed to connect socket to %s:%s !", cs->url, cs->port);
-			continue;
-		}
-
-		keep_sockalive(cs->fd);
-
-		/* Test we can connect, authorise and get a block template */
-		gbt = ckzalloc(sizeof(gbtbase_t));
-		si->data = gbt;
-		if (!gen_gbtbase(cs, gbt)) {
-			LOGINFO("Failed to get test block template from %s:%s!",
-				cs->url, cs->port);
-			continue;
-		}
-		clear_gbtbase(gbt);
-		if (!validate_address(cs, ckp->btcaddress)) {
-			LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
-			continue;
-		}
-		alive = si;
-		break;
 	}
 	if (!alive) {
 		LOGWARNING("CRITICAL: No bitcoinds active!");
