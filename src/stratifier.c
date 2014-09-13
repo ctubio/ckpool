@@ -1906,6 +1906,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	sscanf(job_id, "%lx", &id);
 	sscanf(ntime, "%x", &ntime32);
 
+	share = true;
+
 	ck_rlock(&workbase_lock);
 	HASH_FIND_I64(workbases, &id, wb);
 	if (unlikely(!wb)) {
@@ -1913,10 +1915,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		strcpy(idstring, job_id);
 		ASPRINTF(&fname, "%s.sharelog", current_workbase->logdir);
-		ck_runlock(&workbase_lock);
-		goto out;
+		goto out_unlock;
 	}
-	share = true;
 	wdiff = wb->diff;
 	strcpy(idstring, wb->idstring);
 	ASPRINTF(&fname, "%s.sharelog", wb->logdir);
