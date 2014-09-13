@@ -159,7 +159,7 @@ static struct {
 
 static int64_t workbase_id;
 static int64_t blockchange_id;
-static char lasthash[68];
+static char lasthash[68], lastswaphash[68];
 
 struct json_params {
 	json_t *params;
@@ -556,10 +556,14 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 
 	ck_wlock(&workbase_lock);
 	wb->id = workbase_id++;
-
 	if (strncmp(wb->prevhash, lasthash, 64)) {
+		char bin[32], swap[32];
+
 		*new_block = true;
 		memcpy(lasthash, wb->prevhash, 65);
+		hex2bin(bin, lasthash, 32);
+		swap_256(swap, bin);
+		__bin2hex(lastswaphash, swap, 32);
 		blockchange_id = wb->id;
 	}
 	if (*new_block && ckp->logshares) {
@@ -1193,7 +1197,7 @@ out:
 static void *blockupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	char *buf = NULL, hash[68];
+	char *buf = NULL;
 	char request[8];
 
 	pthread_detach(pthread_self());
@@ -1204,14 +1208,12 @@ static void *blockupdate(void *arg)
 	else
 		sprintf(request, "getlast");
 
-	memset(hash, 0, 68);
 	while (42) {
 		dealloc(buf);
 		buf = send_recv_generator(ckp, request, GEN_LAX);
-		if (buf && strcmp(buf, hash) && !cmdmatch(buf, "failed")) {
-			strcpy(hash, buf);
-			LOGNOTICE("Block hash changed to %s", hash);
-			send_proc(ckp->stratifier, "update");
+		if (buf && strcmp(buf, lastswaphash) && !cmdmatch(buf, "failed")) {
+			LOGNOTICE("Block hash changed to %s", buf);
+			update_base(ckp, GEN_PRIORITY);
 		} else
 			cksleep_ms(ckp->blockpoll);
 	}
