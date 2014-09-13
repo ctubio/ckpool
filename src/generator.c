@@ -1270,6 +1270,46 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 	ckmsgq_add(proxi->passsends, pm);
 }
 
+static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
+			connsock_t *cs, bool pinging)
+{
+	if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
+		LOGWARNING("Failed to extract address from %s", si->url);
+		return false;
+	}
+	if (!connect_proxy(cs)) {
+		if (!pinging) {
+			LOGINFO("Failed to connect to %s:%s in proxy_mode!",
+				cs->url, cs->port);
+		}
+		return false;
+	}
+	if (ckp->passthrough) {
+		if (!passthrough_stratum(cs, proxi)) {
+			LOGWARNING("Failed initial passthrough to %s:%s !",
+				   cs->url, cs->port);
+			return false;
+		}
+		return true;
+	}
+	/* Test we can connect, authorise and get stratum information */
+	if (!subscribe_stratum(cs, proxi)) {
+		if (!pinging) {
+			LOGINFO("Failed initial subscribe to %s:%s !",
+				cs->url, cs->port);
+		}
+		return false;
+	}
+	if (!auth_stratum(cs, proxi)) {
+		if (!pinging) {
+			LOGWARNING("Failed initial authorise to %s:%s with %s:%s !",
+				   cs->url, cs->port, si->auth, si->pass);
+		}
+		return false;
+	}
+	return true;
+}
+
 /* Cycle through the available proxies and find the first alive one */
 static proxy_instance_t *live_proxy(ckpool_t *ckp)
 {
@@ -1289,37 +1329,10 @@ retry:
 		si = ckp->servers[i];
 		proxi = si->data;
 		cs = proxi->cs;
-		if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
-			LOGWARNING("Failed to extract address from %s", si->url);
-			continue;
-		}
-		if (!connect_proxy(cs)) {
-			LOGINFO("Failed to connect to %s:%s in proxy_mode!",
-				cs->url, cs->port);
-			continue;
-		}
-		if (ckp->passthrough) {
-			if (!passthrough_stratum(cs, proxi)) {
-				LOGWARNING("Failed initial passthrough to %s:%s !",
-					   cs->url, cs->port);
-				continue;
-			}
+		if (proxy_alive(ckp, si, proxi, cs, false)) {
 			alive = proxi;
 			break;
 		}
-		/* Test we can connect, authorise and get stratum information */
-		if (!subscribe_stratum(cs, proxi)) {
-			LOGINFO("Failed initial subscribe to %s:%s !",
-				cs->url, cs->port);
-			continue;
-		}
-		if (!auth_stratum(cs, proxi)) {
-			LOGWARNING("Failed initial authorise to %s:%s with %s:%s !",
-				   cs->url, cs->port, si->auth, si->pass);
-			continue;
-		}
-		alive = proxi;
-		break;
 	}
 	if (!alive) {
 		send_proc(ckp->stratifier, "dropall");
