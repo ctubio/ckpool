@@ -3163,7 +3163,7 @@ static bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begu
 	char *upd, *ins;
 	bool ok = false;
 	char *params[9 + HISTORYDATECOUNT];
-	int n, par;
+	int n, par = 0;
 
 	LOGDEBUG("%s(): add", __func__);
 
