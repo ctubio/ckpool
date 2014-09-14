@@ -1211,7 +1211,9 @@ static void *blockupdate(void *arg)
 	while (42) {
 		dealloc(buf);
 		buf = send_recv_generator(ckp, request, GEN_LAX);
-		if (buf && strcmp(buf, lastswaphash) && !cmdmatch(buf, "failed")) {
+		if (buf && cmdmatch(buf, "notify"))
+			cksleep_ms(5000);
+		else if (buf && strcmp(buf, lastswaphash) && !cmdmatch(buf, "failed")) {
 			LOGNOTICE("Block hash changed to %s", buf);
 			update_base(ckp, GEN_PRIORITY);
 		} else

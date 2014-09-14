@@ -299,10 +299,12 @@ retry:
 			clear_gbtbase(gbt);
 		}
 	} else if (cmdmatch(buf, "getbest")) {
-		if (!get_bestblockhash(cs, hash)) {
+		if (si->notify)
+			send_unix_msg(sockd, "notify");
+		else if (!get_bestblockhash(cs, hash)) {
 			LOGINFO("No best block hash support from %s:%s",
 				cs->url, cs->port);
-			send_unix_msg(sockd, "Failed");
+			send_unix_msg(sockd, "failed");
 		} else {
 			if (unlikely(!started)) {
 				started = true;
@@ -311,15 +313,17 @@ retry:
 			send_unix_msg(sockd, hash);
 		}
 	} else if (cmdmatch(buf, "getlast")) {
-		int height = get_blockcount(cs);
+		int height;
 
-		if (height == -1) {
-			send_unix_msg(sockd,  "Failed");
+		if (si->notify)
+			send_unix_msg(sockd, "notify");
+		else if ((height = get_blockcount(cs)) == -1) {
+			send_unix_msg(sockd,  "failed");
 			goto reconnect;
 		} else {
 			LOGDEBUG("Height: %d", height);
 			if (!get_blockhash(cs, height, hash)) {
-				send_unix_msg(sockd, "Failed");
+				send_unix_msg(sockd, "failed");
 				goto reconnect;
 			} else {
 				if (unlikely(!started)) {
@@ -1497,6 +1501,7 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 		si->url = ckp->btcdurl[i];
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
+		si->notify = ckp->btcdnotify[i];
 	}
 
 	ret = gen_loop(pi);
