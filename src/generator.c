@@ -122,6 +122,8 @@ struct proxy_instance {
 
 typedef struct proxy_instance proxy_instance_t;
 
+static ckmsgq_t *srvchk;	// Server check message queue
+
 static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 {
 	char *userpass = NULL;
@@ -252,6 +254,8 @@ reconnect:
 	}
 
 retry:
+	ckmsgq_add(srvchk, si);
+
 	do {
 		selret = wait_read_select(us->sockd, 5);
 		if (!selret && !ping_main(ckp)) {
@@ -299,10 +303,12 @@ retry:
 			clear_gbtbase(gbt);
 		}
 	} else if (cmdmatch(buf, "getbest")) {
-		if (!get_bestblockhash(cs, hash)) {
+		if (si->notify)
+			send_unix_msg(sockd, "notify");
+		else if (!get_bestblockhash(cs, hash)) {
 			LOGINFO("No best block hash support from %s:%s",
 				cs->url, cs->port);
-			send_unix_msg(sockd, "Failed");
+			send_unix_msg(sockd, "failed");
 		} else {
 			if (unlikely(!started)) {
 				started = true;
@@ -311,15 +317,17 @@ retry:
 			send_unix_msg(sockd, hash);
 		}
 	} else if (cmdmatch(buf, "getlast")) {
-		int height = get_blockcount(cs);
+		int height;
 
-		if (height == -1) {
-			send_unix_msg(sockd,  "Failed");
+		if (si->notify)
+			send_unix_msg(sockd, "notify");
+		else if ((height = get_blockcount(cs)) == -1) {
+			send_unix_msg(sockd,  "failed");
 			goto reconnect;
 		} else {
 			LOGDEBUG("Height: %d", height);
 			if (!get_blockhash(cs, height, hash)) {
-				send_unix_msg(sockd, "Failed");
+				send_unix_msg(sockd, "failed");
 				goto reconnect;
 			} else {
 				if (unlikely(!started)) {
@@ -340,6 +348,8 @@ retry:
 			send_unix_msg(sockd, "true");
 		else
 			send_unix_msg(sockd, "false");
+	} else if (cmdmatch(buf, "fallback")) {
+		goto reconnect;
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ping")) {
@@ -1460,6 +1470,8 @@ retry:
 				LOGWARNING("Block rejected locally.");
 		} else
 			LOGNOTICE("No backup btcd to send block to ourselves");
+	} else if (cmdmatch(buf, "fallback")) {
+		goto reconnect;
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ping")) {
@@ -1497,6 +1509,7 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 		si->url = ckp->btcdurl[i];
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
+		si->notify = ckp->btcdnotify[i];
 	}
 
 	ret = gen_loop(pi);
@@ -1612,12 +1625,59 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	return ret;
 }
 
+/* Tell the watchdog what the current server instance is and decide if we
+ * should check to see if the higher priority servers are alive and fallback */
+static void server_watchdog(ckpool_t *ckp, server_instance_t *cursi)
+{
+	static time_t last_t = 0;
+	bool alive = false;
+	time_t now_t;
+	int i, srvs;
+
+	/* Rate limit to checking only once every 5 seconds */
+	now_t = time(NULL);
+	if (now_t <= last_t + 5)
+		return;
+
+	last_t = now_t;
+
+	/* Is this the highest priority server already? */
+	if (cursi == ckp->servers[0])
+		return;
+
+	if (ckp->proxy)
+		srvs = ckp->proxies;
+	else
+		srvs = ckp->btcds;
+	for (i = 0; i < srvs; i++) {
+		server_instance_t *si = ckp->servers[i];
+
+		/* Have we reached the current server? */
+		if (si == cursi)
+			return;
+
+		if (ckp->proxy) {
+			proxy_instance_t *proxi = si->data;
+			connsock_t *cs = proxi->cs;
+
+			alive = proxy_alive(ckp, si, proxi, cs, true);
+		} else
+			alive = server_alive(ckp, si, true);
+		if (alive)
+			break;
+	}
+	if (alive)
+		send_proc(ckp->generator, "fallback");
+}
+
 int generator(proc_instance_t *pi)
 {
 	ckpool_t *ckp = pi->ckp;
 	int ret;
 
 	LOGWARNING("%s generator starting", ckp->name);
+
+	srvchk = create_ckmsgq(ckp, "srvchk", &server_watchdog);
 
 	if (ckp->proxy)
 		ret = proxy_mode(ckp, pi);
