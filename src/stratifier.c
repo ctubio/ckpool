@@ -79,7 +79,7 @@ static pool_stats_t stats;
 
 static pthread_mutex_t stats_lock;
 
-static uint64_t enonce1_64;
+static uint64_t enonce1_64 = 1;
 
 struct workbase {
 	/* Hash table data */
@@ -159,7 +159,7 @@ static struct {
 
 static int64_t workbase_id;
 static int64_t blockchange_id;
-static char lasthash[68];
+static char lasthash[68], lastswaphash[68];
 
 struct json_params {
 	json_t *params;
@@ -556,10 +556,14 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 
 	ck_wlock(&workbase_lock);
 	wb->id = workbase_id++;
-
 	if (strncmp(wb->prevhash, lasthash, 64)) {
+		char bin[32], swap[32];
+
 		*new_block = true;
 		memcpy(lasthash, wb->prevhash, 65);
+		hex2bin(bin, lasthash, 32);
+		swap_256(swap, bin);
+		__bin2hex(lastswaphash, swap, 32);
 		blockchange_id = wb->id;
 	}
 	if (*new_block && ckp->logshares) {
@@ -1027,7 +1031,7 @@ static void drop_client(int64_t id)
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client */
-		if (!old_client)
+		if (!old_client && client->enonce1_64)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		else // Keep around instance so we don't get a dereference
 			HASH_ADD(hh, dead_instances, enonce1_64, sizeof(uint64_t), client);
@@ -1193,7 +1197,7 @@ out:
 static void *blockupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	char *buf = NULL, hash[68];
+	char *buf = NULL;
 	char request[8];
 
 	pthread_detach(pthread_self());
@@ -1204,14 +1208,12 @@ static void *blockupdate(void *arg)
 	else
 		sprintf(request, "getlast");
 
-	memset(hash, 0, 68);
 	while (42) {
 		dealloc(buf);
 		buf = send_recv_generator(ckp, request, GEN_LAX);
-		if (buf && strcmp(buf, hash) && !cmdmatch(buf, "failed")) {
-			strcpy(hash, buf);
-			LOGNOTICE("Block hash changed to %s", hash);
-			send_proc(ckp->stratifier, "update");
+		if (buf && strcmp(buf, lastswaphash) && !cmdmatch(buf, "failed")) {
+			LOGNOTICE("Block hash changed to %s", buf);
+			update_base(ckp, GEN_PRIORITY);
 		} else
 			cksleep_ms(ckp->blockpoll);
 	}
@@ -1467,6 +1469,10 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	arr_size = json_array_size(params_val);
 	if (unlikely(arr_size < 1)) {
 		*err_val = json_string("params missing array entries");
+		goto out;
+	}
+	if (unlikely(!client->useragent)) {
+		*err_val = json_string("Failed subscription");
 		goto out;
 	}
 	buf = json_string_value(json_array_get(params_val, 0));
@@ -1905,6 +1911,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&workbase_lock);
 	HASH_FIND_I64(workbases, &id, wb);
 	if (unlikely(!wb)) {
+		id = current_workbase->id;
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		strcpy(idstring, job_id);
