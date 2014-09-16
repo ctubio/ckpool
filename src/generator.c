@@ -104,7 +104,6 @@ struct proxy_instance {
 	pthread_mutex_t notify_lock;
 	notify_instance_t *notify_instances;
 	notify_instance_t *current_notify;
-	int notify_id;
 
 	pthread_t pth_precv;
 	pthread_t pth_psend;
@@ -121,6 +120,8 @@ struct proxy_instance {
 };
 
 typedef struct proxy_instance proxy_instance_t;
+
+static int proxy_notify_id;	// Globally increasing notify id
 
 static ckmsgq_t *srvchk;	// Server check message queue
 
@@ -729,7 +730,7 @@ static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 	ni->notify_time = time(NULL);
 
 	mutex_lock(&proxi->notify_lock);
-	ni->id = proxi->notify_id++;
+	ni->id = proxy_notify_id++;
 	HASH_ADD_INT(proxi->notify_instances, id, ni);
 	proxi->current_notify = ni;
 	mutex_unlock(&proxi->notify_lock);
