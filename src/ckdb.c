@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.303"
+#define CKDB_VERSION DB_VERSION"-0.305"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -236,6 +236,7 @@ static LOADSTATUS dbstatus;
 // Share stats since last block
 typedef struct poolstatus {
 	int64_t workinfoid; // Last block
+	int32_t height;
 	double diffacc;
 	double diffinv; // Non-acc
 	double shareacc;
@@ -314,6 +315,8 @@ static char *pqerrmsg(PGconn *conn)
 {
 	char *ptr, *buf = strdup(PQerrorMessage(conn));
 
+	if (!buf)
+		quithere(1, "malloc OOM");
 	ptr = buf + strlen(buf) - 1;
 	while (ptr >= buf && (*ptr == '\n' || *ptr == '\r'))
 		*(ptr--) = '\0';
@@ -388,7 +391,7 @@ enum data_type {
 #define TXT_TO_INT(__nam, __fld, __data) txt_to_int(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_TV(__nam, __fld, __data) txt_to_tv(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_CTV(__nam, __fld, __data) txt_to_ctv(__nam, __fld, &(__data), sizeof(__data))
-#define TXT_TO_BLOB(__nam, __fld, __data) txt_to_blob(__nam, __fld, __data)
+#define TXT_TO_BLOB(__nam, __fld, __data) txt_to_blob(__nam, __fld, &(__data))
 #define TXT_TO_DOUBLE(__nam, __fld, __data) txt_to_double(__nam, __fld, &(__data), sizeof(__data))
 
 #define PQ_GET_FLD(__res, __row, __name, __fld, __ok) do { \
@@ -803,6 +806,8 @@ enum cmd_values {
 	CMD_GETATTS,
 	CMD_SETATTS,
 	CMD_EXPATTS,
+	CMD_GETOPTS,
+	CMD_SETOPTS,
 	CMD_DSP,
 	CMD_STATS,
 	CMD_PPLNS,
@@ -1135,7 +1140,6 @@ typedef struct idcontrol {
 static K_LIST *idcontrol_free;
 static K_STORE *idcontrol_store;
 
-/* unused yet
 // OPTIONCONTROL
 typedef struct optioncontrol {
 	char optionname[TXT_SML+1];
@@ -1149,11 +1153,14 @@ typedef struct optioncontrol {
 #define LIMIT_OPTIONCONTROL 0
 #define INIT_OPTIONCONTROL(_item) INIT_GENERIC(_item, optioncontrol)
 #define DATA_OPTIONCONTROL(_var, _item) DATA_GENERIC(_var, _item, optioncontrol, true)
+#define DATA_OPTIONCONTROL_NULL(_var, _item) DATA_GENERIC(_var, _item, optioncontrol, false)
+
+// Value it must default to (to work properly)
+#define OPTIONCONTROL_HEIGHT	1
 
 static K_TREE *optioncontrol_root;
 static K_LIST *optioncontrol_free;
 static K_STORE *optioncontrol_store;
-*/
 
 // TODO: discarding workinfo,shares
 // WORKINFO workinfo.id.json={...}
@@ -1535,6 +1542,8 @@ static K_STORE *userstats_summ;
 				((_old)->tv_sec < (_new)->tv_sec))
 #define tv_equal(_a, _b) (((_a)->tv_sec == (_b)->tv_sec) && \
 				((_a)->tv_usec == (_b)->tv_usec))
+// newer OR equal
+#define tv_newer_eq(_old, _new) (!(tv_newer(_new, _old)))
 
 // WORKERSTATUS from various incoming data
 typedef struct workerstatus {
@@ -1716,9 +1725,9 @@ static void _txt_to_ctv(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_
 	_txt_to_data(TYPE_CTV, nam, fld, (void *)data, siz, WHERE_FFL_PASS);
 }
 
-static void _txt_to_blob(char *nam, char *fld, char *data, WHERE_FFL_ARGS)
+static void _txt_to_blob(char *nam, char *fld, char **data, WHERE_FFL_ARGS)
 {
-	_txt_to_data(TYPE_BLOB, nam, fld, (void *)(&data), 0, WHERE_FFL_PASS);
+	_txt_to_data(TYPE_BLOB, nam, fld, (void *)data, 0, WHERE_FFL_PASS);
 }
 
 static void _txt_to_double(char *nam, char *fld, double *data, size_t siz, WHERE_FFL_ARGS)
@@ -1760,7 +1769,7 @@ static char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz,
 
 		buf = malloc(siz);
 		if (!buf)
-			quithere(1, "OOM (%d)" WHERE_FFL, (int)siz, WHERE_FFL_PASS);
+			quithere(1, "(%d) OOM" WHERE_FFL, (int)siz, WHERE_FFL_PASS);
 	}
 
 	switch (typ) {
@@ -1896,6 +1905,8 @@ static void log_queue_message(char *msg)
 	lq_item = k_unlink_head(logqueue_free);
 	DATA_LOGQUEUE(lq, lq_item);
 	lq->msg = strdup(msg);
+	if (!(lq->msg))
+		quithere(1, "malloc (%d) OOM", (int)strlen(msg));
 	k_add_tail(logqueue_store, lq_item);
 	K_WUNLOCK(logqueue_free);
 }
@@ -3164,7 +3175,7 @@ static bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begu
 	char *upd, *ins;
 	bool ok = false;
 	char *params[9 + HISTORYDATECOUNT];
-	int n, par = 0;
+	int n, par;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -3178,6 +3189,7 @@ static bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begu
 	/* N.B. the values of the old ua_item record, if it exists,
 	 * are completely ignored i.e. you must provide all values required */
 
+	par = 0;
 	if (!conn) {
 		conn = dbconnect();
 		conned = true;
@@ -3187,11 +3199,11 @@ static bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begu
 		// Beginning of a write txn
 		res = PQexec(conn, "Begin", CKPQ_WRITE);
 		rescode = PQresultStatus(res);
+		PQclear(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Begin", rescode, conn);
 			goto unparam;
 		}
-		PQclear(res);
 	}
 
 	if (old_item) {
@@ -3206,6 +3218,7 @@ static bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begu
 
 		res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 		rescode = PQresultStatus(res);
+		PQclear(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Update", rescode, conn);
 			goto unparam;
@@ -3235,22 +3248,23 @@ static bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begu
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
-	if (!begun) {
-		PQclear(res);
-		if (!PGOK(rescode)) {
-			PGLOGERR("Insert", rescode, conn);
-			res = PQexec(conn, "Rollback", CKPQ_WRITE);
-			goto unparam;
-		}
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Insert", rescode, conn);
+		goto rollback;
+	}
 
-		res = PQexec(conn, "Commit", CKPQ_WRITE);
-		ok = true;
-	} else {
-		if (PGOK(rescode))
-			ok = true;
+	ok = true;
+rollback:
+	if (!begun) {
+		if (ok)
+			res = PQexec(conn, "Commit", CKPQ_WRITE);
+		else
+			res = PQexec(conn, "Rollback", CKPQ_WRITE);
+
+		PQclear(res);
 	}
 unparam:
-	PQclear(res);
 	if (conned)
 		PQfinish(conn);
 	for (n = 0; n < par; n++)
@@ -3258,6 +3272,7 @@ unparam:
 
 	K_WLOCK(useratts_free);
 	if (ok) {
+		// Update it
 		if (old_item) {
 			useratts_root = remove_from_ktree(useratts_root, old_item, cmp_useratts, ctx);
 			copy_tv(&(old_useratts->expirydate), cd);
@@ -3333,10 +3348,11 @@ static __maybe_unused K_ITEM *useratts_add(PGconn *conn, char *username, char *a
 
 	ok = useratts_item_add(conn, item, cd, begun);
 unitem:
-	K_WLOCK(useratts_free);
-	if (!ok)
+	if (!ok) {
+		K_WLOCK(useratts_free);
 		k_add_head(useratts_free, item);
-	K_WUNLOCK(useratts_free);
+		K_WUNLOCK(useratts_free);
+	}
 
 	if (ok)
 		return item;
@@ -4407,6 +4423,350 @@ void payments_reload()
 	PQfinish(conn);
 }
 
+// order by optionname asc,activationdate asc,activationheight asc,expirydate desc
+static cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b)
+{
+	OPTIONCONTROL *oca, *ocb;
+	DATA_OPTIONCONTROL(oca, a);
+	DATA_OPTIONCONTROL(ocb, b);
+	cmp_t c = CMP_STR(oca->optionname, ocb->optionname);
+	if (c == 0) {
+		c = CMP_TV(oca->activationdate, ocb->activationdate);
+		if (c == 0) {
+			c = CMP_INT(oca->activationheight, ocb->activationheight);
+			if (c == 0)
+				c = CMP_TV(ocb->expirydate, oca->expirydate);
+		}
+	}
+	return c;
+}
+
+// Must be R or W locked before call
+static K_ITEM *find_optioncontrol(char *optionname, tv_t *now)
+{
+	OPTIONCONTROL optioncontrol, *oc, *ocbest;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *item, *best;
+
+	/* Step through all records having optionaname and check:
+	 * 1) activationdate is <= now
+	 *  and
+	 * 2) height <= current
+	 * Remember the active record with the newest activationdate
+	 * If two records have the same activation date, then
+	 *  remember the active record with the highest height
+	 * In optioncontrol_add(), when not specified,
+	 *  the default activation date is DATE_BEGIN
+	 *  and the default height is 1 (OPTIONCONTROL_HEIGHT)
+	 * Thus if records have both values set, then
+	 *  activationdate will determine the newests record
+	 * To have activationheight decide selection,
+	 *  create all records with only activationheight and then
+	 *  activationdate will all be the default value and not
+	 *  decide the outcome */
+	STRNCPY(optioncontrol.optionname, optionname);
+	optioncontrol.activationdate.tv_sec = 0L;
+	optioncontrol.activationdate.tv_usec = 0L;
+	optioncontrol.activationheight = OPTIONCONTROL_HEIGHT - 1;
+	optioncontrol.expirydate.tv_sec = default_expiry.tv_sec;
+	optioncontrol.expirydate.tv_usec = default_expiry.tv_usec;
+
+	INIT_OPTIONCONTROL(&look);
+	look.data = (void *)(&optioncontrol);
+	item = find_after_in_ktree(optioncontrol_root, &look, cmp_optioncontrol, ctx);
+	ocbest = NULL;
+	best = NULL;
+	while (item) {
+		DATA_OPTIONCONTROL(oc, item);
+		// Ordered first by optionname
+		if (strcmp(oc->optionname, optionname) != 0)
+			break;
+
+		// Is oc active?
+		if (CURRENT(&(oc->expirydate)) &&
+		    oc->activationheight <= pool.height &&
+		    tv_newer_eq(&(oc->activationdate), now)) {
+			// Is oc newer than ocbest?
+			if (!ocbest ||
+			    tv_newer(&(ocbest->activationdate), &(oc->activationdate)) ||
+			    (tv_equal(&(ocbest->activationdate), &(oc->activationdate)) &&
+			     ocbest->activationheight < oc->activationheight)) {
+				ocbest = oc;
+				best = item;
+			}
+		}
+		item = next_in_ktree(ctx);
+	}
+	return best;
+}
+
+static K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool begun)
+{
+	ExecStatusType rescode;
+	bool conned = false;
+	K_TREE_CTX ctx[1];
+	PGresult *res;
+	K_ITEM *old_item, look;
+	int n;
+	OPTIONCONTROL *row;
+	char *upd, *ins;
+	bool ok = false;
+	char *params[4 + HISTORYDATECOUNT];
+	int par;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	DATA_OPTIONCONTROL(row, oc_item);
+
+	INIT_OPTIONCONTROL(&look);
+	look.data = (void *)row;
+	K_RLOCK(optioncontrol_free);
+	old_item = find_in_ktree(optioncontrol_root, &look, cmp_optioncontrol, ctx);
+	K_RUNLOCK(optioncontrol_free);
+
+	par = 0;
+	if (!conn) {
+		conn = dbconnect();
+		conned = true;
+	}
+
+	if (!begun) {
+		res = PQexec(conn, "Begin", CKPQ_WRITE);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Begin", rescode, conn);
+			goto nostart;
+		}
+	}
+
+	if (old_item) {
+		upd = "update optioncontrol "
+			"set expirydate=$1 where optionname=$2 and "
+			"activationdate=$3 and activationheight=$4 and "
+			"expirydate=$5";
+
+		par = 0;
+		params[par++] = tv_to_buf(cd, NULL, 0);
+		params[par++] = str_to_buf(row->optionname, NULL, 0);
+		params[par++] = tv_to_buf(&(row->activationdate), NULL, 0);
+		params[par++] = int_to_buf(row->activationheight, NULL, 0);
+		params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+		PARCHKVAL(par, 5, params);
+
+		res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Update", rescode, conn);
+			goto rollback;
+		}
+
+		for (n = 0; n < par; n++)
+			free(params[n]);
+	}
+
+	par = 0;
+	params[par++] = str_to_buf(row->optionname, NULL, 0);
+	params[par++] = str_to_buf(row->optionvalue, NULL, 0);
+	params[par++] = tv_to_buf(&(row->activationdate), NULL, 0);
+	params[par++] = int_to_buf(row->activationheight, NULL, 0);
+	HISTORYDATEPARAMS(params, par, row);
+	PARCHK(par, params);
+
+	ins = "insert into optioncontrol "
+		"(optionname,optionvalue,activationdate,activationheight"
+		HISTORYDATECONTROL ") values (" PQPARAM9 ")";
+
+	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Insert", rescode, conn);
+		goto rollback;
+	}
+
+	ok = true;
+rollback:
+	if (!begun) {
+		if (ok)
+			res = PQexec(conn, "Commit", CKPQ_WRITE);
+		else
+			res = PQexec(conn, "Rollback", CKPQ_WRITE);
+
+		PQclear(res);
+	}
+nostart:
+	if (conned)
+		PQfinish(conn);
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	K_WLOCK(optioncontrol_free);
+	if (!ok)
+		k_add_head(optioncontrol_free, oc_item);
+	else {
+		// Discard it
+		if (old_item) {
+			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
+							       cmp_optioncontrol, ctx);
+			k_add_head(optioncontrol_free, old_item);
+		}
+		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
+		k_add_head(optioncontrol_store, oc_item);
+	}
+	K_WUNLOCK(optioncontrol_free);
+
+	if (ok)
+		return oc_item;
+	else
+		return NULL;
+}
+
+static __maybe_unused K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
+				 char *activationdate, char *activationheight,
+				 char *by, char *code, char *inet, tv_t *cd,
+				 K_TREE *trf_root, bool begun)
+{
+	K_ITEM *item;
+	OPTIONCONTROL *row;
+	bool ok = false;
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(optioncontrol_free);
+	item = k_unlink_head(optioncontrol_free);
+	K_WUNLOCK(optioncontrol_free);
+
+	DATA_OPTIONCONTROL(row, item);
+
+	STRNCPY(row->optionname, optionname);
+	row->optionvalue = strdup(optionvalue);
+	if (!(row->optionvalue))
+		quithere(1, "malloc (%d) OOM", (int)strlen(optionvalue));
+	if (activationdate && *activationdate) {
+		TXT_TO_CTV("activationdate", activationdate,
+			   row->activationdate);
+	} else
+		copy_tv(&(row->activationdate), &date_begin);
+	if (activationheight && *activationheight) {
+		TXT_TO_INT("activationheight", activationheight,
+			   row->activationheight);
+	} else
+		row->activationheight = 1;
+
+	HISTORYDATEINIT(row, cd, by, code, inet);
+	HISTORYDATETRANSFER(trf_root, row);
+
+	ok = optioncontrol_item_add(conn, item, cd, begun);
+
+	if (!ok) {
+		free(row->optionvalue);
+		K_WLOCK(optioncontrol_free);
+		k_add_head(optioncontrol_free, item);
+		K_WUNLOCK(optioncontrol_free);
+	}
+
+	if (ok)
+		return item;
+	else
+		return NULL;
+}
+
+static bool optioncontrol_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	OPTIONCONTROL *row;
+	char *params[1];
+	int par;
+	char *field;
+	char *sel;
+	int fields = 4;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// No need to keep old versions in ram for now ...
+	sel = "select "
+		"optionname,optionvalue,activationdate,activationheight"
+		HISTORYDATECONTROL
+		" from optioncontrol where expirydate=$1";
+	par = 0;
+	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
+	PARCHK(par, params);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	K_WLOCK(optioncontrol_free);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(optioncontrol_free);
+		DATA_OPTIONCONTROL(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "optionname", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("optionname", field, row->optionname);
+
+		PQ_GET_FLD(res, i, "optionvalue", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BLOB("optionvalue", field, row->optionvalue);
+
+		PQ_GET_FLD(res, i, "activationdate", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("activationdate", field, row->activationdate);
+
+		PQ_GET_FLD(res, i, "activationheight", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_INT("activationheight", field, row->activationheight);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		optioncontrol_root = add_to_ktree(optioncontrol_root, item, cmp_optioncontrol);
+		k_add_head(optioncontrol_store, item);
+	}
+	if (!ok)
+		k_add_head(optioncontrol_free, item);
+
+	K_WUNLOCK(optioncontrol_free);
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d optioncontrol records", __func__, n);
+	}
+
+	return ok;
+}
+
 // order by workinfoid asc,expirydate asc
 static cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b)
 {
@@ -4513,7 +4873,11 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 	TXT_TO_BIGINT("workinfoid", workinfoidstr, row->workinfoid);
 	STRNCPY(row->poolinstance, poolinstance);
 	row->transactiontree = strdup(transactiontree);
+	if (!(row->transactiontree))
+		quithere(1, "malloc (%d) OOM", (int)strlen(transactiontree));
 	row->merklehash = strdup(merklehash);
+	if (!(row->merklehash))
+		quithere(1, "malloc (%d) OOM", (int)strlen(merklehash));
 	STRNCPY(row->prevhash, prevhash);
 	STRNCPY(row->coinbase1, coinbase1);
 	STRNCPY(row->coinbase2, coinbase2);
@@ -6565,6 +6929,7 @@ flail:
 					 pool.diffacc, est, pct, cd_buf);
 				if (pool.workinfoid < row->workinfoid) {
 					pool.workinfoid = row->workinfoid;
+					pool.height = row->height;
 					zero_on_new_block();
 				}
 				break;
@@ -6728,8 +7093,10 @@ static bool blocks_fill(PGconn *conn)
 		if (tv_newer(&(dbstatus.newest_createdate_blocks), &(row->createdate)))
 			copy_tv(&(dbstatus.newest_createdate_blocks), &(row->createdate));
 
-		if (pool.workinfoid < row->workinfoid)
+		if (pool.workinfoid < row->workinfoid) {
 			pool.workinfoid = row->workinfoid;
+			pool.height = row->height;
+		}
 	}
 	if (!ok)
 		k_add_head(blocks_free, item);
@@ -8052,6 +8419,8 @@ static bool check_db_version(PGconn *conn)
 
 /* Load tables required to support auths,adduser,chkpass and newid
  * N.B. idcontrol is DB internal so is always ready
+ * OptionControl is loaded first in case it is needed by other loads
+ *  (though not yet)
  */
 static bool getdata1()
 {
@@ -8059,6 +8428,8 @@ static bool getdata1()
 	bool ok = true;
 
 	if (!(ok = check_db_version(conn)))
+		goto matane;
+	if (!(ok = optioncontrol_fill(conn)))
 		goto matane;
 	if (!(ok = users_fill(conn)))
 		goto matane;
@@ -8292,6 +8663,12 @@ static void alloc_storage()
 					ALLOC_USERATTS, LIMIT_USERATTS, true);
 	useratts_store = k_new_store(useratts_free);
 	useratts_root = new_ktree();
+
+	optioncontrol_free = k_new_list("OptionControl", sizeof(OPTIONCONTROL),
+					ALLOC_OPTIONCONTROL,
+					LIMIT_OPTIONCONTROL, true);
+	optioncontrol_store = k_new_store(optioncontrol_free);
+	optioncontrol_root = new_ktree();
 
 	workers_free = k_new_list("Workers", sizeof(WORKERS),
 					ALLOC_WORKERS, LIMIT_WORKERS, true);
@@ -10511,7 +10888,7 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	TRANSFER *transfer;
-	USERATTS *useratts;
+	USERATTS *useratts = NULL;
 	USERS *users;
 	char attname[sizeof(useratts->attname)*2];
 	char *reason = NULL;
@@ -10739,6 +11116,239 @@ rats:
 	}
 	snprintf(reply, siz, "ok.exp %d,%d", db, mis);
 	LOGDEBUG("%s.%s.%s", cmd, id, reply);
+	return strdup(reply);
+}
+
+/* Return the list of optioncontrols
+ * Format is optlist=optionname,optionname,optionname,...
+ * Replies will be optionname=value
+ * Any optionnames not in the DB or not yet active will be missing
+ */
+static char *cmd_getopts(__maybe_unused PGconn *conn, char *cmd, char *id,
+			 tv_t *now, __maybe_unused char *by,
+			 __maybe_unused char *code, __maybe_unused char *inet,
+			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_optlist, *oc_item;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char tmp[1024];
+	OPTIONCONTROL *optioncontrol;
+	char *reason = NULL;
+	char *answer = NULL;
+	char *optlist = NULL, *ptr, *comma;
+	size_t len, off;
+	bool first;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_optlist = require_name(trf_root, "optlist", 1, NULL, reply, siz);
+	if (!i_optlist) {
+		reason = "Missing optlist";
+		goto ruts;
+	}
+
+	APPEND_REALLOC_INIT(answer, off, len);
+	optlist = ptr = strdup(transfer_data(i_optlist));
+	first = true;
+	while (ptr && *ptr) {
+		comma = strchr(ptr, ',');
+		if (comma)
+			*(comma++) = '\0';
+		K_RLOCK(optioncontrol_free);
+		oc_item = find_optioncontrol(ptr, now);
+		K_RUNLOCK(optioncontrol_free);
+		/* web code must check the existance of the optionname
+		 * in the reply since it will be missing if it doesn't
+		 * exist in the DB */
+		if (oc_item) {
+			DATA_OPTIONCONTROL(optioncontrol, oc_item);
+			snprintf(tmp, sizeof(tmp), "%s%s=%s",
+				 first ? EMPTY : FLDSEPSTR,
+				 optioncontrol->optionname,
+				 optioncontrol->optionvalue);
+			APPEND_REALLOC(answer, off, len, tmp);
+			first = false;
+		}
+		ptr = comma;
+	}
+ruts:
+	if (optlist)
+		free(optlist);
+
+	if (reason) {
+		if (answer)
+			free(answer);
+		snprintf(reply, siz, "ERR.%s", reason);
+		LOGERR("%s.%s.%s", cmd, id, reply);
+		return strdup(reply);
+	}
+	snprintf(reply, siz, "ok.%s", answer);
+	LOGDEBUG("%s.%s", id, answer);
+	free(answer);
+	return strdup(reply);
+}
+
+// This is the same as att_set_date() for now
+#define opt_set_date(_date, _data, _now) att_set_date(_date, _data, _now)
+
+/* Store optioncontrols in the DB
+ * Format is 1 or more: oc_optionname.fld=value
+ *  i.e. each starts with the constant "oc_"
+ * optionname cannot contain Tab . or =
+ * fld is one of the 3: value, date, height
+ * value must exist
+ * None, one or both of date and height can exist
+ * If a matching optioncontrol (same name, date and height) exists,
+ *  it will have it's expiry date set to now and be replaced with the new value
+ * The date field requires either an epoch sec,usec
+ *  (usec is optional and defaults to 0) or one of: now or now+NNN
+ *  now is the current epoch value and now+NNN is the epoch + NNN seconds
+ *  See opt_set_date() above */
+static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
+			 tv_t *now, char *by, char *code, char *inet,
+			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	bool conned = false;
+	K_ITEM *t_item, *oc_item = NULL;
+	K_TREE_CTX ctx[1];
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	TRANSFER *transfer;
+	OPTIONCONTROL *optioncontrol;
+	char optionname[sizeof(optioncontrol->optionname)*2];
+	char *reason = NULL;
+	char *dot, *data;
+	bool begun = false, gotvalue = false;
+	int db = 0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	t_item = first_in_ktree(trf_root, ctx);
+	while (t_item) {
+		DATA_TRANSFER(transfer, t_item);
+		if (strncmp(transfer->name, "oc_", 3) == 0) {
+			data = transfer_data(t_item);
+			STRNCPY(optionname, transfer->name + 3);
+			dot = strchr(optionname, '.');
+			if (!dot) {
+				reason = "Missing field";
+				goto rollback;
+			}
+			*(dot++) = '\0';
+			// If we already had a different one, save it to the DB
+			if (oc_item && strcmp(optioncontrol->optionname, optionname) != 0) {
+				if (!gotvalue) {
+					reason = "Missing value";
+					goto rollback;
+				}
+				if (conn == NULL) {
+					conn = dbconnect();
+					conned = true;
+				}
+				if (!begun) {
+					// Beginning of a write txn
+					res = PQexec(conn, "Begin", CKPQ_WRITE);
+					rescode = PQresultStatus(res);
+					PQclear(res);
+					if (!PGOK(rescode)) {
+						PGLOGERR("Begin", rescode, conn);
+						reason = "DBERR";
+						goto rollback;
+					}
+					begun = true;
+				}
+				if (optioncontrol_item_add(conn, oc_item, now, begun)) {
+					oc_item = NULL;
+					db++;
+				} else {
+					reason = "DBERR";
+					goto rollback;
+				}
+			}
+			if (!oc_item) {
+				K_RLOCK(optioncontrol_free);
+				oc_item = k_unlink_head(optioncontrol_free);
+				K_RUNLOCK(optioncontrol_free);
+				DATA_OPTIONCONTROL(optioncontrol, oc_item);
+				bzero(optioncontrol, sizeof(*optioncontrol));
+				STRNCPY(optioncontrol->optionname, optionname);
+				optioncontrol->activationheight = OPTIONCONTROL_HEIGHT;
+				HISTORYDATEINIT(optioncontrol, now, by, code, inet);
+				HISTORYDATETRANSFER(trf_root, optioncontrol);
+				gotvalue = false;
+			}
+			if (strcmp(dot, "value") == 0) {
+				optioncontrol->optionvalue = strdup(data);
+				if (!(optioncontrol->optionvalue))
+					quithere(1, "malloc (%d) OOM", (int)strlen(data));
+				gotvalue = true;
+			} else if (strcmp(dot, "date") == 0) {
+				att_to_date(&(optioncontrol->activationdate), data, now);
+			} else if (strcmp(dot, "height") == 0) {
+				TXT_TO_INT("height", data, optioncontrol->activationheight);
+			} else {
+				reason = "Unknown field";
+				goto rollback;
+			}
+		}
+		t_item = next_in_ktree(ctx);
+	}
+	if (oc_item) {
+		if (!gotvalue) {
+			reason = "Missing value";
+			goto rollback;
+		}
+		if (conn == NULL) {
+			conn = dbconnect();
+			conned = true;
+		}
+		if (!begun) {
+			// Beginning of a write txn
+			res = PQexec(conn, "Begin", CKPQ_WRITE);
+			rescode = PQresultStatus(res);
+			PQclear(res);
+			if (!PGOK(rescode)) {
+				PGLOGERR("Begin", rescode, conn);
+				reason = "DBERR";
+				goto rollback;
+			}
+			begun = true;
+		}
+		if (!optioncontrol_item_add(conn, oc_item, now, begun)) {
+			reason = "DBERR";
+			goto rollback;
+		}
+		db++;
+	}
+rollback:
+	if (begun) {
+		if (reason)
+			res = PQexec(conn, "Rollback", CKPQ_WRITE);
+		else
+			res = PQexec(conn, "Commit", CKPQ_WRITE);
+
+		PQclear(res);
+	}
+
+	if (conned)
+		PQfinish(conn);
+	if (reason) {
+		if (oc_item) {
+			if (optioncontrol->optionvalue)
+				free(optioncontrol->optionvalue);
+			K_WLOCK(optioncontrol_free);
+			k_add_head(optioncontrol_free, oc_item);
+			K_WUNLOCK(optioncontrol_free);
+		}
+		snprintf(reply, siz, "ERR.%s", reason);
+		LOGERR("%s.%s.%s", cmd, id, reply);
+		return strdup(reply);
+	}
+	snprintf(reply, siz, "ok.set %d", db);
+	LOGDEBUG("%s.%s", id, reply);
 	return strdup(reply);
 }
 
@@ -11327,6 +11937,8 @@ static struct CMDS {
 	{ CMD_GETATTS,	"getatts",	false,	false,	cmd_getatts,	ACCESS_WEB },
 	{ CMD_SETATTS,	"setatts",	false,	false,	cmd_setatts,	ACCESS_WEB },
 	{ CMD_EXPATTS,	"expatts",	false,	false,	cmd_expatts,	ACCESS_WEB },
+	{ CMD_GETOPTS,	"getopts",	false,	false,	cmd_getopts,	ACCESS_WEB },
+	{ CMD_SETOPTS,	"setopts",	false,	false,	cmd_setopts,	ACCESS_WEB },
 	{ CMD_DSP,	"dsp",		false,	false,	cmd_dsp,	ACCESS_SYSTEM },
 	{ CMD_STATS,	"stats",	true,	false,	cmd_stats,	ACCESS_SYSTEM },
 	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	ACCESS_SYSTEM },
@@ -11996,6 +12608,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *last_userset = NULL, *reply_userset = NULL;
 	char *last_newid = NULL, *reply_newid = NULL;
 	char *last_setatts = NULL, *reply_setatts = NULL;
+	char *last_setopts = NULL, *reply_setopts = NULL;
 	char *last_web = NULL, *reply_web = NULL;
 	char *reply_last, duptype[CMD_SIZ+1];
 	enum cmd_values cmdnum;
@@ -12090,6 +12703,9 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_setatts && strcmp(last_setatts, buf) == 0) {
 				reply_last = reply_setatts;
 				dup = true;
+			} else if (last_setopts && strcmp(last_setopts, buf) == 0) {
+				reply_last = reply_setopts;
+				dup = true;
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
 				dup = true;
@@ -12179,6 +12795,8 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_GETATTS:
 					case CMD_SETATTS:
 					case CMD_EXPATTS:
+					case CMD_GETOPTS:
+					case CMD_SETOPTS:
 					case CMD_BLOCKLIST:
 					case CMD_NEWID:
 					case CMD_STATS:
@@ -12217,6 +12835,9 @@ static void *socketer(__maybe_unused void *arg)
 								break;
 							case CMD_SETATTS:
 								STORELASTREPLY(setatts);
+								break;
+							case CMD_SETOPTS:
+								STORELASTREPLY(setopts);
 								break;
 							// The rest
 							default:
@@ -12416,6 +13037,8 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_GETATTS:
 			case CMD_SETATTS:
 			case CMD_EXPATTS:
+			case CMD_GETOPTS:
+			case CMD_SETOPTS:
 			case CMD_DSP:
 			case CMD_STATS:
 			case CMD_PPLNS:
@@ -12490,7 +13113,7 @@ static bool reload_from(tv_t *start)
 
 	reload_buf = malloc(MAX_READ);
 	if (!reload_buf)
-		quithere(1, "OOM");
+		quithere(1, "(%d) OOM", MAX_READ);
 
 	reloading = true;
 
