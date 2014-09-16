@@ -218,8 +218,10 @@ static void kill_server(server_instance_t *si)
 {
 	connsock_t *cs;
 
-	if (!si)
+	if (!si) // This shouldn't happen
 		return;
+
+	LOGNOTICE("Killing server");
 	cs = &si->cs;
 	close(cs->fd);
 	cs->fd = -1;
@@ -487,6 +489,7 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Failed to receive line in parse_subscribe");
 		goto out;
 	}
+	LOGDEBUG("parse_subscribe received %s", cs->buf);
 	val = json_msg_result(cs->buf, &res_val);
 	if (!val) {
 		LOGWARNING("Failed to get a json result in parse_subscribe, got: %s", cs->buf);
@@ -593,14 +596,12 @@ retry:
 	json_decref(req);
 	if (!ret) {
 		LOGWARNING("Failed to send message in subscribe_stratum");
-		close(cs->fd);
 		goto out;
 	}
 	ret = parse_subscribe(cs, proxi);
 	if (ret)
 		goto out;
 
-	close(cs->fd);
 	if (proxi->no_params) {
 		LOGWARNING("Failed all subscription options in subscribe_stratum");
 		goto out;
@@ -621,10 +622,10 @@ retry:
 	goto retry;
 
 out:
-	/* Only keep any downstream connections if we're successfully resuming
-	 * to the existing stratum sessionid */
-	if (!ret || !proxi->sessionid)
-		send_proc(proxi->ckp->stratifier, "dropall");
+	if (!ret) {
+		close(cs->fd);
+		cs->fd = -1;
+	}
 	return ret;
 }
 
@@ -1364,8 +1365,8 @@ retry:
 		}
 	}
 	if (!alive) {
-		send_proc(ckp->stratifier, "dropall");
 		send_proc(ckp->connector, "reject");
+		send_proc(ckp->stratifier, "dropall");
 		if (!ckp->chosen_server) {
 			LOGWARNING("Failed to connect to any servers as proxy, retrying in 5s!");
 			sleep(5);
@@ -1376,7 +1377,6 @@ retry:
 	cs = alive->cs;
 	LOGNOTICE("Connected to upstream server %s:%s as proxy%s", cs->url, cs->port,
 		  ckp->passthrough ? " in passthrough mode" : "");
-	mutex_init(&alive->notify_lock);
 	if (ckp->passthrough) {
 		create_pthread(&alive->pth_precv, passthrough_recv, alive);
 		alive->passsends = create_ckmsgq(ckp, "passsend", &passthrough_send);
@@ -1391,13 +1391,18 @@ out:
 	return alive;
 }
 
-static void kill_proxy(proxy_instance_t *proxi)
+static void kill_proxy(ckpool_t *ckp, proxy_instance_t *proxi)
 {
 	notify_instance_t *ni, *tmp;
 	connsock_t *cs;
 
-	if (!proxi)
+	send_proc(ckp->connector, "reject");
+	send_proc(ckp->stratifier, "dropall");
+
+	if (!proxi) // This shouldn't happen
 		return;
+
+	LOGNOTICE("Killing proxy");
 	cs = proxi->cs;
 	close(cs->fd);
 	cs->fd = -1;
@@ -1425,7 +1430,7 @@ static int proxy_loop(proc_instance_t *pi)
 
 reconnect:
 	if (proxi) {
-		kill_proxy(proxi);
+		kill_proxy(ckp, proxi);
 		reconnecting = true;
 	}
 	proxi = live_proxy(ckp);
@@ -1517,7 +1522,7 @@ retry:
 	close(sockd);
 	goto retry;
 out:
-	kill_proxy(proxi);
+	kill_proxy(ckp, proxi);
 	close(sockd);
 	return ret;
 }
@@ -1605,6 +1610,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		proxi->si = si;
 		proxi->ckp = ckp;
 		proxi->cs = &si->cs;
+		mutex_init(&proxi->notify_lock);
 	}
 
 	if (ckp->btcds) {
