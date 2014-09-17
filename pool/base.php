@@ -65,6 +65,12 @@ function emailStr($str)
  return preg_replace(array($all,$beg,$fin), '', $str);
 }
 #
+function passrequires()
+{
+ return "Passwords require 6 or more characters, including<br>" .
+	"at least one of each uppercase, lowercase and a digit, but not Tab";
+}
+#
 function safepass($pass)
 {
  if (strlen($pass) < 6)
@@ -174,6 +180,16 @@ function dbdown()
  gopage(NULL, 'dbd', 'dbd', NULL, '', '', true, false, false);
 }
 #
+function syse($data, $user)
+{
+ return "<span class=err><br>System error</span>";
+}
+#
+function syserror()
+{
+ gopage(NULL, 'syse', 'syse', NULL, '', '', true, false, false);
+}
+#
 function f404($data)
 {
  return "<span class=alert><br>404</span>";
@@ -250,7 +266,8 @@ function logout()
 function requestRegister()
 {
  $reg = getparam('Register', false);
- if ($reg !== NULL)
+ $reg2 = getparam('Reset', false);
+ if ($reg !== NULL || $reg2 !== NULL)
  {
 	logout();
 	return true;
