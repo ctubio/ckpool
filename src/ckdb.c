@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.310"
+#define CKDB_VERSION DB_VERSION"-0.311"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -8356,13 +8356,14 @@ static bool check_db_version(PGconn *conn)
 	PGresult *res;
 	char *field;
 	char *sel;
-	int fields = 2;
+	char *pgv;
+	int fields = 3;
 	bool ok;
 	int n;
 
 	LOGDEBUG("%s(): select", __func__);
 
-	sel = "select * from version;";
+	sel = "select version() as pgv,* from version;";
 	res = PQexec(conn, sel, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
@@ -8417,10 +8418,19 @@ static bool check_db_version(PGconn *conn)
 		return false;
 	}
 
+	PQ_GET_FLD(res, 0, "pgv", field, ok);
+	if (ok)
+		pgv = strdup(field);
+	else
+		pgv = strdup("Failed to get postgresql version information");
+
 	PQclear(res);
 
 	LOGWARNING("%s(): DB version (%s) correct (CKDB V%s)",
 		   __func__, DB_VERSION, CKDB_VERSION);
+	LOGWARNING("%s(): %s", __func__, pgv);
+
+	free(pgv);
 
 	return true;
 }
