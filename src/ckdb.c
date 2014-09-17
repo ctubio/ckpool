@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.311"
+#define CKDB_VERSION DB_VERSION"-0.313"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1605,22 +1605,27 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 						WHERE_FFL,
 						nam, (int)siz, (int)sizeof(tv_t), WHERE_FFL_PASS);
 			}
-			unsigned int yyyy, mm, dd, HH, MM, SS, uS = 0, tz;
+			unsigned int yyyy, mm, dd, HH, MM, SS, uS = 0, tz, tzm = 0;
 			char pm[2];
 			struct tm tm;
 			time_t tim;
 			int n;
-			n = sscanf(fld, "%u-%u-%u %u:%u:%u%1[+-]%u",
-					&yyyy, &mm, &dd, &HH, &MM, &SS, pm, &tz);
-			if (n != 8) {
+			// A timezone looks like: +10 or +09:30 or -05 etc
+			n = sscanf(fld, "%u-%u-%u %u:%u:%u%1[+-]%u:%u",
+					&yyyy, &mm, &dd, &HH, &MM, &SS, pm, &tz, &tzm);
+			if (n < 8) {
 				// allow uS
-				n = sscanf(fld, "%u-%u-%u %u:%u:%u.%u%1[+-]%u",
-						&yyyy, &mm, &dd, &HH, &MM, &SS, &uS, pm, &tz);
-				if (n != 9) {
+				n = sscanf(fld, "%u-%u-%u %u:%u:%u.%u%1[+-]%u:%u",
+						&yyyy, &mm, &dd, &HH, &MM, &SS, &uS, pm, &tz, &tzm);
+				if (n < 9) {
 					quithere(1, "Field %s tv_t unhandled date '%s' (%d)" WHERE_FFL,
 						 nam, fld, n, WHERE_FFL_PASS);
 				}
-			}
+
+				if (n < 10)
+					tzm = 0;
+			} else if (n < 9)
+				tzm = 0;
 			tm.tm_sec = (int)SS;
 			tm.tm_min = (int)MM;
 			tm.tm_hour = (int)HH;
@@ -1633,9 +1638,7 @@ static void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 				((tv_t *)data)->tv_sec = default_expiry.tv_sec;
 				((tv_t *)data)->tv_usec = default_expiry.tv_usec;
 			} else {
-				// 2 digit tz (vs 4 digit)
-				if (tz < 25)
-					tz *= 60;
+				tz = tz * 60 + tzm;
 				// time was converted ignoring tz - so correct it
 				if (pm[0] == '-')
 					tim += 60 * tz;
@@ -1920,20 +1923,40 @@ void logmsg(int loglevel, const char *fmt, ...)
 	va_list ap;
 	char stamp[128];
 	char *extra = EMPTY;
+	char tzinfo[16];
+	char tzch;
+	long minoff, hroff;
 
 	if (loglevel > global_ckp->loglevel)
 		return;
 
 	now_t = time(NULL);
 	localtime_r(&now_t, &tm);
+	minoff = timezone / 60;
+	if (minoff < 0) {
+		tzch = '+';
+		minoff *= -1;
+	} else
+		tzch = '-';
+	hroff = minoff / 60;
+	if (minoff % 60) {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld:%02ld",
+			 tzch, hroff, minoff % 60);
+	} else {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld",
+			 tzch, hroff);
+	}
 	snprintf(stamp, sizeof(stamp),
-			"[%d-%02d-%02d %02d:%02d:%02d]",
+			"[%d-%02d-%02d %02d:%02d:%02d%s]",
 			tm.tm_year + 1900,
 			tm.tm_mon + 1,
 			tm.tm_mday,
 			tm.tm_hour,
 			tm.tm_min,
-			tm.tm_sec);
+			tm.tm_sec,
+			tzinfo);
 
 	if (!fmt) {
 		fprintf(stderr, "%s %s() called without fmt\n", stamp, __func__);
