@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.305"
+#define CKDB_VERSION DB_VERSION"-0.310"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2227,8 +2227,9 @@ static K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 
 static PGconn *dbconnect()
 {
-	char conninfo[128];
+	char conninfo[256];
 	PGconn *conn;
+	int i, retry = 10;
 
 	snprintf(conninfo, sizeof(conninfo),
 		 "host=127.0.0.1 dbname=%s user=%s%s%s",
@@ -2237,9 +2238,20 @@ static PGconn *dbconnect()
 		 db_pass ? db_pass : "");
 
 	conn = PQconnectdb(conninfo);
-	if (PQstatus(conn) != CONNECTION_OK)
-		quithere(1, "ERR: Failed to connect to db '%s'", pqerrmsg(conn));
-
+	if (PQstatus(conn) != CONNECTION_OK) {
+		LOGERR("%s(): Failed 1st connect to db '%s'", __func__, pqerrmsg(conn));
+		LOGERR("%s(): Retrying for %d seconds ...", __func__, retry);
+		for (i = 0; i < retry; i++) {
+			sleep(1);
+			conn = PQconnectdb(conninfo);
+			if (PQstatus(conn) == CONNECTION_OK) {
+				LOGWARNING("%s(): Connected on attempt %d", __func__, i+2);
+				return conn;
+			}
+		}
+		quithere(1, "ERR: Failed to connect %d times to db '%s'",
+			 retry+1, pqerrmsg(conn));
+	}
 	return conn;
 }
 
@@ -13291,7 +13303,8 @@ static void *listener(void *arg)
 	pthread_t sock_pt;
 	pthread_t summ_pt;
 	K_ITEM *wq_item;
-	int qc;
+	time_t now;
+	int wqcount, wqgot;
 
 	logqueue_free = k_new_list("LogQueue", sizeof(LOGQUEUE),
 					ALLOC_LOGQUEUE, LIMIT_LOGQUEUE, true);
@@ -13315,23 +13328,34 @@ static void *listener(void *arg)
 
 	if (!everyone_die) {
 		K_RLOCK(workqueue_store);
-		qc = workqueue_store->count;
+		wqcount = workqueue_store->count;
 		K_RUNLOCK(workqueue_store);
 
-		LOGWARNING("%s(): ckdb ready, queue %d", __func__, qc);
+		LOGWARNING("%s(): ckdb ready, queue %d", __func__, wqcount);
 
 		startup_complete = true;
 	}
 
-	if (!everyone_die)
-		conn = dbconnect();
-
 	// Process queued work
+	conn = dbconnect();
+	now = time(NULL);
+	wqgot = 0;
 	while (!everyone_die) {
 		K_WLOCK(workqueue_store);
 		wq_item = k_unlink_head(workqueue_store);
 		K_WUNLOCK(workqueue_store);
+
+		/* Don't keep a connection for more than ~10s or ~1000 items
+		 *  but always have a connection open */
+		if ((time(NULL) - now) > 10 || wqgot > 1000) {
+			PQfinish(conn);
+			conn = dbconnect();
+			now = time(NULL);
+			wqgot = 0;
+		}
+
 		if (wq_item) {
+			wqgot++;
 			process_queued(conn, wq_item);
 			tick();
 		} else {
@@ -13459,6 +13483,15 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 	}
 }
 
+/* TODO: have a seperate option to find/store missing workinfo/shares/etc
+ *  from the reload files, in a supplied UTC time range
+ *  since there is no automatic way to get them in the DB after later ones
+ *  have been stored e.g. a database failure/recovery or short outage but
+ *  later workinfos/shares/etc have been stored so earlier ones will not be
+ *  picked up by the reload
+ * However, will need to deal with, via reporting an error and/or abort,
+ *  if a stored workinfoid is in a range that has already been paid
+ *  and the payment is now wrong */
 static void confirm_reload()
 {
 	K_TREE *sharesummary_workinfoid_save;
