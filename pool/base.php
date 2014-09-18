@@ -177,7 +177,7 @@ function dbd($data, $user)
 #
 function dbdown()
 {
- gopage(NULL, 'dbd', 'dbd', NULL, '', '', true, false, false);
+ gopage(NULL, 'dbd', 'dbd', def_menu(), '', '', true, false, false);
 }
 #
 function syse($data, $user)
@@ -187,7 +187,7 @@ function syse($data, $user)
 #
 function syserror()
 {
- gopage(NULL, 'syse', 'syse', NULL, '', '', true, false, false);
+ gopage(NULL, 'syse', 'syse', def_menu(), '', '', true, false, false);
 }
 #
 function f404($data)
@@ -197,7 +197,7 @@ function f404($data)
 #
 function do404()
 {
- gopage(NULL, 'f404', 'f404', NULL, '', '', true, false, false);
+ gopage(NULL, 'f404', 'f404', def_menu(), '', '', true, false, false);
 }
 #
 function showPage($page, $menu, $name, $user)
@@ -216,7 +216,7 @@ function showPage($page, $menu, $name, $user)
 #
 function showIndex()
 {
- showPage('index', NULL, '', false);
+ showPage('index', def_menu(), '', false);
 }
 #
 function offline()

@@ -36,12 +36,18 @@ function process($p, $user, $menu)
 	showPage($page, $menu, $n, $user);
 }
 #
-function check()
+function def_menu()
 {
  $dmenu = array('Home'  => array('Home' => ''),
 		'gap'  => NULL,
 		'Help' => array('Help' => 'help',
 				'Payouts' => 'payout'));
+ return $dmenu;
+}
+#
+function check()
+{
+ $dmenu = def_menu();
  $menu = array(
 	'Home' => array(
 		'Home' => ''
