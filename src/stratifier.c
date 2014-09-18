@@ -1103,10 +1103,9 @@ static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret = 0;
 	unixsock_t *us = &pi->us;
+	tv_t start_tv = {0, 0};
 	char *buf = NULL;
-	tv_t start_tv;
 
-	tv_time(&start_tv);
 retry:
 	do {
 		if (!ckp->proxy) {
