@@ -361,6 +361,9 @@ function pgmenu($menus)
  $side = '';
  foreach ($menus as $menu => $submenus)
  {
+  if ($menu == 'Admin' && $submenus == null)
+	continue;
+
   if ($menu == 'gap')
   {
 	$side = 'r';
