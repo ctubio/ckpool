@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.321"
+#define CKDB_VERSION DB_VERSION"-0.322"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -11861,15 +11861,18 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	rows++;
 
 	USEINFO(users, 1, 2);
+	USEINFO(useratts, 1, 1);
 	USEINFO(workers, 1, 1);
 	USEINFO(paymentaddresses, 1, 1);
 	USEINFO(payments, 1, 1);
 	USEINFO(idcontrol, 1, 0);
+	USEINFO(optioncontrol, 1, 1);
 	USEINFO(workinfo, 1, 1);
 	USEINFO(shares, 1, 1);
 	USEINFO(shareerrors, 1, 1);
 	USEINFO(sharesummary, 1, 2);
 	USEINFO(blocks, 1, 1);
+	USEINFO(miningpayouts, 1, 1);
 	USEINFO(auths, 1, 1);
 	USEINFO(poolstats, 1, 1);
 	USEINFO(userstats, 4, 2);
