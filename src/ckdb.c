@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.313"
+#define CKDB_VERSION DB_VERSION"-0.320"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2710,7 +2710,7 @@ static K_ITEM *find_userid(int64_t userid)
 	return find_in_ktree(userid_root, &look, cmp_userid, ctx);
 }
 
-// TODO: endian?
+// TODO: endian? (to avoid being all zeros?)
 static void make_salt(USERS *users)
 {
 	long int r1, r2, r3, r4;
@@ -2976,13 +2976,14 @@ static K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	STRNCPY(row->username, username);
 	row->status[0] = '\0';
 	STRNCPY(row->emailaddress, emailaddress);
-	STRNCPY(row->passwordhash, passwordhash);
 
 	snprintf(tohash, sizeof(tohash), "%s&#%s", username, emailaddress);
 	HASH_BER(tohash, strlen(tohash), 1, hash, tmp);
 	__bin2hex(row->secondaryuserid, (void *)(&hash), sizeof(hash));
 
 	make_salt(row);
+	password_hash(row->username, passwordhash, row->salt,
+		      row->passwordhash, sizeof(row->passwordhash));
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
