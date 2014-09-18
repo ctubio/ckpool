@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.320"
+#define CKDB_VERSION DB_VERSION"-0.321"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -233,6 +233,9 @@ typedef struct loadstatus {
 } LOADSTATUS;
 static LOADSTATUS dbstatus;
 
+// So cmd_getopts works on a new empty pool
+#define START_POOL_HEIGHT 2
+
 // Share stats since last block
 typedef struct poolstatus {
 	int64_t workinfoid; // Last block
@@ -243,7 +246,7 @@ typedef struct poolstatus {
 	double shareinv; // Non-acc
 	double best_sdiff; // TODO (maybe)
 } POOLSTATUS;
-static POOLSTATUS pool;
+static POOLSTATUS pool = { 0, START_POOL_HEIGHT, 0, 0, 0, 0, 0 };
 /* TODO: when we know about orphans, the count reset to zero
  * will need to be undone - i.e. recalculate this data from
  * the memory tables - maybe ... */
@@ -1156,7 +1159,12 @@ typedef struct optioncontrol {
 #define DATA_OPTIONCONTROL_NULL(_var, _item) DATA_GENERIC(_var, _item, optioncontrol, false)
 
 // Value it must default to (to work properly)
-#define OPTIONCONTROL_HEIGHT	1
+#define OPTIONCONTROL_HEIGHT 1
+
+// Test it here rather than obscuring the #define elsewhere
+#if ((OPTIONCONTROL_HEIGHT+1) != START_POOL_HEIGHT)
+#error "START_POOL_HEIGHT must = (OPTIONCONTROL_HEIGHT+1)"
+#endif
 
 static K_TREE *optioncontrol_root;
 static K_LIST *optioncontrol_free;
