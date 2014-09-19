@@ -24,7 +24,7 @@
 struct notify_instance {
 	/* Hash table data */
 	UT_hash_handle hh;
-	int64_t id;
+	int id;
 
 	char prevhash[68];
 	char *jobid;
@@ -121,7 +121,7 @@ struct proxy_instance {
 
 typedef struct proxy_instance proxy_instance_t;
 
-static int64_t proxy_notify_id;	// Globally increasing notify id
+static int proxy_notify_id;	// Globally increasing notify id
 
 static ckmsgq_t *srvchk;	// Server check message queue
 
@@ -731,7 +731,7 @@ static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 
 	mutex_lock(&proxi->notify_lock);
 	ni->id = proxy_notify_id++;
-	HASH_ADD_I64(proxi->notify_instances, id, ni);
+	HASH_ADD_INT(proxi->notify_instances, id, ni);
 	proxi->current_notify = ni;
 	mutex_unlock(&proxi->notify_lock);
 
@@ -991,7 +991,7 @@ static void send_notify(proxy_instance_t *proxi, int sockd)
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
-	JSON_CPACK(json_msg, "{sIsssssssosssssssb}",
+	JSON_CPACK(json_msg, "{sisssssssosssssssb}",
 			     "jobid", ni->id, "prevhash", ni->prevhash,
 			     "coinbase1", ni->coinbase1, "coinbase2", ni->coinbase2,
 			     "merklehash", merkle_arr, "bbversion", ni->bbversion,
@@ -1189,7 +1189,7 @@ static void *proxy_send(void *arg)
 		char *jobid = NULL;
 		bool ret = true;
 		json_t *val;
-		int64_t id;
+		uint32_t id;
 
 		mutex_lock(&proxi->psend_lock);
 		if (!proxi->psends)
@@ -1202,10 +1202,10 @@ static void *proxy_send(void *arg)
 		if (unlikely(!msg))
 			continue;
 
-		json_int64cpy(&id, msg->json_msg, "jobid");
+		json_uintcpy(&id, msg->json_msg, "jobid");
 
 		mutex_lock(&proxi->notify_lock);
-		HASH_FIND_I64(proxi->notify_instances, &id, ni);
+		HASH_FIND_INT(proxi->notify_instances, &id, ni);
 		if (ni)
 			jobid = strdup(ni->jobid);
 		mutex_unlock(&proxi->notify_lock);
@@ -1221,7 +1221,7 @@ static void *proxy_send(void *arg)
 			ret = send_json_msg(cs, val);
 			json_decref(val);
 		} else
-			LOGWARNING("Failed to find matching jobid for %016lx in proxysend", id);
+			LOGWARNING("Failed to find matching jobid in proxysend");
 		json_decref(msg->json_msg);
 		free(msg);
 		if (!ret && cs->fd > 0) {
@@ -1630,11 +1630,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 			free(si);
 		}
 	}
-
-	/* Set the initial id to time as high bits so as to not send the same
-	 * id on restarts */
-	proxy_notify_id = ((int64_t)time(NULL)) << 32;
-	LOGDEBUG("Setting proxy notify id to %016lx", proxy_notify_id);
 
 	LOGWARNING("%s generator ready", ckp->name);
 
