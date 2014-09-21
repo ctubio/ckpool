@@ -1,6 +1,6 @@
 CKPOOL + CKDB + libckpool by Con Kolivas and Andrew Smith.
 
-Ultra low overhead massively scaleable multi-process, multi-threaded modular
+Ultra low overhead massively scalable multi-process, multi-threaded modular
 bitcoin mining pool, proxy, passthrough, library and database interface in c
 for Linux.
 
