@@ -1987,7 +1987,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	invalid = false;
 out_submit:
-	submit = wb->proxy;
+	if (wb->proxy && sdiff >= wdiff)
+		submit = true;
 out_unlock:
 	ck_runlock(&workbase_lock);
 
