@@ -766,7 +766,7 @@ static bool update_subscribe(ckpool_t *ckp)
 	proxy_base.enonce1constlen = strlen(proxy_base.enonce1) / 2;
 	hex2bin(proxy_base.enonce1bin, proxy_base.enonce1, proxy_base.enonce1constlen);
 	proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
-	if (proxy_base.nonce2len > 5)
+	if (proxy_base.nonce2len > 7)
 		proxy_base.enonce1varlen = 4;
 	else
 		proxy_base.enonce1varlen = 2;
