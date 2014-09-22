@@ -782,6 +782,8 @@ static bool update_subscribe(ckpool_t *ckp)
 	return true;
 }
 
+static void update_diff(ckpool_t *ckp);
+
 static void update_notify(ckpool_t *ckp)
 {
 	bool new_block = false, clean;
@@ -844,6 +846,9 @@ static void update_notify(ckpool_t *ckp)
 	hex2bin(wb->headerbin, header, 112);
 	wb->txn_hashes = ckzalloc(1);
 
+	/* Check diff on each notify */
+	update_diff(ckp);
+
 	ck_rlock(&workbase_lock);
 	strcpy(wb->enonce1const, proxy_base.enonce1);
 	wb->enonce1constlen = proxy_base.enonce1constlen;
@@ -892,7 +897,7 @@ static void update_diff(ckpool_t *ckp)
 	if (old_diff < diff)
 		return;
 
-	/* If the diff has dropped, iterated over all the clients and check
+	/* If the diff has dropped, iterate over all the clients and check
 	 * they're at or below the new diff, and update it if not. */
 	ck_rlock(&instance_lock);
 	for (client = stratum_instances; client != NULL; client = client->hh.next) {
