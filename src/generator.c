@@ -412,9 +412,11 @@ static json_t *json_result(json_t *val)
 	json_t *res_val = NULL, *err_val;
 
 	res_val = json_object_get(val, "result");
+	/* (null) is a valid result while no value is an error, so mask out
+	 * (null) and only handle lack of result */
 	if (json_is_null(res_val))
 		res_val = NULL;
-	if (!res_val) {
+	else if (!res_val) {
 		char *ss;
 
 		err_val = json_object_get(val, "error");
