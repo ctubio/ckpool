@@ -879,6 +879,11 @@ static void update_diff(ckpool_t *ckp)
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
 
+	/* We only really care about integer diffs so clamp the lower limit to
+	 * 1 or it will round down to zero. */
+	if (unlikely(diff < 1))
+		diff = 1;
+
 	ck_wlock(&workbase_lock);
 	old_diff = proxy_base.diff;
 	current_workbase->diff = proxy_base.diff = diff;
