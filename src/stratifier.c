@@ -872,6 +872,11 @@ static void update_diff(ckpool_t *ckp)
 	json_t *val;
 	char *buf;
 
+	if (unlikely(!current_workbase)) {
+		LOGINFO("No current workbase to update diff yet");
+		return;
+	}
+
 	buf = send_recv_proc(ckp->generator, "getdiff");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get diff from generator in update_diff");
