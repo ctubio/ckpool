@@ -1987,13 +1987,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	invalid = false;
 out_submit:
-	if (wb->proxy && sdiff >= wdiff)
-		submit = true;
+	submit = wb->proxy;
 out_unlock:
 	ck_runlock(&workbase_lock);
-
-	if (submit)
-		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
 
 	/* Accept the lower of new and old diffs until the next update */
 	if (id < client->diff_change_job_id && client->old_diff < client->diff)
@@ -2012,15 +2008,25 @@ out_unlock:
 				json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 				LOGINFO("Rejected client %d dupe diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
+				submit = false;
 			}
 		} else {
 			err = SE_HIGH_DIFF;
 			LOGINFO("Rejected client %d high diff %.1f/%.0f/%s: %s",
 				client->id, sdiff, diff, wdiffsuffix, hexhash);
 			json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
+			submit = false;
 		}
 	}  else
 		LOGINFO("Rejected client %d invalid share", client->id);
+
+	/* Submit share to upstream pool in proxy mode. We submit valid and
+	 * stale shares and filter out the rest. */
+	if (submit) {
+		LOGINFO("Submitting share upstream: %s", hexhash);
+		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
+	}
+
 	add_submit(ckp, client, diff, result);
 
 	/* Now write to the pool's sharelog. */
