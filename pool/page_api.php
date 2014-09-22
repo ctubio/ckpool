@@ -8,8 +8,14 @@ function no_api()
 #
 function show_api($page, $menu, $name, $user)
 {
+ global $fld_sep;
  $u = getparam('username', true);
+ if (nutem($u))
+	no_api();
  $api = getparam('api', true);
+ if (nutem($api))
+	no_api();
+ $jfu = getparam('json', true);
  $ans = getAtts($u, 'KAPIKey.str');
  if ($ans['STATUS'] != 'ok')
 	no_api();
@@ -31,7 +37,13 @@ function show_api($page, $menu, $name, $user)
  $rep .= fldEncode($ans, 'p_hashrate1hr', false);
  $rep .= fldEncode($ans, 'u_hashrate5m', false);
  $rep .= fldEncode($ans, 'u_hashrate1hr', false);
- echo $rep;
+ if (nuem($jfu))
+	echo $rep;
+ else
+ {
+	$j = preg_replace("/([^=]+)=([^$fld_sep]+)$fld_sep/", '"$1":"$2",', $rep.$fld_sep);
+	echo '{'.substr($j, 0, -1).'}';
+ }
  exit(0);
 }
 #
