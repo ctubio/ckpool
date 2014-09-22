@@ -155,6 +155,8 @@ static struct {
 
 	int nonce2len;
 	int enonce2varlen;
+
+	bool subscribed;
 } proxy_base;
 
 static int64_t workbase_id;
@@ -760,6 +762,7 @@ static bool update_subscribe(ckpool_t *ckp)
 	free(buf);
 
 	ck_wlock(&workbase_lock);
+	proxy_base.subscribed = true;
 	proxy_base.diff = ckp->startdiff;
 	/* Length is checked by generator */
 	strcpy(proxy_base.enonce1, json_string_value(json_object_get(val, "enonce1")));
@@ -791,6 +794,11 @@ static void update_notify(ckpool_t *ckp)
 	buf = send_recv_proc(ckp->generator, "getnotify");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get notify from generator in update_notify");
+		return;
+	}
+
+	if (unlikely(!proxy_base.subscribed)) {
+		LOGINFO("No valid proxy subscription to update notify yet");
 		return;
 	}
 
