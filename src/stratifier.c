@@ -112,8 +112,8 @@ struct workbase {
 	json_t *merkle_array;
 
 	/* Template variables, lengths are binary lengths! */
-	char coinb1[256]; // coinbase1
-	uchar coinb1bin[128];
+	char *coinb1; // coinbase1
+	uchar *coinb1bin;
 	int coinb1len; // length of above
 
 	char enonce1const[32]; // extranonce1 section that is constant
@@ -306,6 +306,10 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	int len, ofs = 0;
 	ts_t now;
 
+	/* Set fixed length coinb1 arrays to be more than enough */
+	wb->coinb1 = ckzalloc(256);
+	wb->coinb1bin = ckzalloc(128);
+
 	/* Strings in wb should have been zero memset prior. Generate binary
 	 * templates first, then convert to hex */
 	memcpy(wb->coinb1bin, scriptsig_header_bin, 41);
@@ -418,6 +422,8 @@ static void clear_workbase(workbase_t *wb)
 	free(wb->txn_data);
 	free(wb->txn_hashes);
 	free(wb->logdir);
+	free(wb->coinb1bin);
+	free(wb->coinb1);
 	free(wb->coinb2bin);
 	free(wb->coinb2);
 	json_decref(wb->merkle_array);
@@ -797,8 +803,10 @@ static void update_notify(ckpool_t *ckp)
 
 	json_int64cpy(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
+	json_intcpy(&wb->coinb1len, val, "coinb1len");
+	wb->coinb1bin = ckalloc(wb->coinb1len);
+	wb->coinb1 = ckalloc(wb->coinb1len * 2 + 1);
 	json_strcpy(wb->coinb1, val, "coinbase1");
-	wb->coinb1len = strlen(wb->coinb1) / 2;
 	hex2bin(wb->coinb1bin, wb->coinb1, wb->coinb1len);
 	wb->height = get_sernumber(wb->coinb1bin + 42);
 	json_strdup(&wb->coinb2, val, "coinbase2");
