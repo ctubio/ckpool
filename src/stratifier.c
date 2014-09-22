@@ -1962,7 +1962,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	if (id < blockchange_id) {
 		err = SE_STALE;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
-		goto out_unlock;
+		goto out_submit;
 	}
 	if ((int)strlen(nonce2) < len) {
 		err = SE_INVALID_NONCE2;
@@ -1976,6 +1976,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		goto out_unlock;
 	}
 	invalid = false;
+out_submit:
 	if (wb->proxy && sdiff >= wdiff)
 		submit = true;
 out_unlock:
