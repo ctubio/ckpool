@@ -79,7 +79,7 @@ static pool_stats_t stats;
 
 static pthread_mutex_t stats_lock;
 
-static uint64_t enonce1_64 = 1;
+static uint64_t enonce1_64;
 
 struct workbase {
 	/* Hash table data */
@@ -775,8 +775,10 @@ static bool update_subscribe(ckpool_t *ckp)
 	proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
 	if (proxy_base.nonce2len > 7)
 		proxy_base.enonce1varlen = 4;
-	else
+	else if (proxy_base.nonce2len > 5)
 		proxy_base.enonce1varlen = 2;
+	else
+		proxy_base.enonce1varlen = 1;
 	proxy_base.enonce2varlen = proxy_base.nonce2len - proxy_base.enonce1varlen;
 	ck_wunlock(&workbase_lock);
 
@@ -1061,6 +1063,8 @@ static void drop_client(int64_t id)
 	stratum_instance_t *client = NULL;
 	bool dec = false;
 
+	LOGINFO("Stratifier dropping client %ld", id);
+
 	ck_ilock(&instance_lock);
 	client = __instance_by_id(id);
 	if (client) {
@@ -1264,31 +1268,83 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-static void new_enonce1(stratum_instance_t *client)
+static inline bool enonce1_free(uint64_t enonce1)
 {
+	stratum_instance_t *client, *tmp;
+	bool ret = true;
+
+	if (unlikely(!enonce1)) {
+		ret = false;
+		goto out;
+	}
+	HASH_ITER(hh, stratum_instances, client, tmp) {
+		if (client->enonce1_64 == enonce1) {
+			ret = false;
+			break;
+		}
+	}
+out:
+	return ret;
+}
+
+/* Create a new enonce1 from the 64 bit enonce1_64 value, using only the number
+ * of bytes we have to work with when we are proxying with a split nonce2.
+ * When the proxy space is less than 32 bits to work with, we look for an
+ * unused enonce1 value and reject clients instead if there is no space left */
+static bool new_enonce1(stratum_instance_t *client)
+{
+	void *enoncev = &enonce1_64;
+	uint32_t *enonce1_32 = enoncev;
+	uint16_t *enonce1_16 = enoncev;
+	uint8_t *enonce1_8 = enoncev;
+	bool ret = false;
 	workbase_t *wb;
+	int i;
 
 	ck_wlock(&workbase_lock);
-	client->enonce1_64 = enonce1_64;
 	wb = current_workbase;
-	if (wb->enonce1varlen == 8) {
-		enonce1_64++;
-	} else if (wb->enonce1varlen == 2) {
-		uint16_t *enonce1_16 = (uint16_t *)&enonce1_64;
-
-		++(*enonce1_16);
-	} else {
-		uint32_t *enonce1_32 = (uint32_t *)&enonce1_64;
-
-		++(*enonce1_32);
+	switch(wb->enonce1varlen) {
+		case 8:
+			enonce1_64++;
+			LOGWARNING("Enonce1_64 is %lu", enonce1_64);
+			ret = true;
+			break;
+		case 4:
+			++(*enonce1_32);
+			LOGWARNING("Enonce1_32 is %lu", *enonce1_32);
+			ret = true;
+			break;
+		case 2:
+			i = 0;
+			do {
+				++(*enonce1_16);
+				ret = enonce1_free(enonce1_64);
+			} while (++i < 65536 && !ret);
+			break;
+		case 1:
+			i = 0;
+			do {
+				++(*enonce1_8);
+				ret = enonce1_free(enonce1_64);
+			} while (++i < 256 && !ret);
+			break;
 	}
+	if (ret)
+		client->enonce1_64 = enonce1_64;
 	if (wb->enonce1constlen)
 		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
 	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
 	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
 	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
 	ck_wunlock(&workbase_lock);
+
+	if (unlikely(!ret))
+		LOGWARNING("Enonce1 space exhausted! Proxy rejecting clients");
+
+	return ret;
 }
+
+static void stratum_send_message(stratum_instance_t *client, const char *msg);
 
 /* Extranonce1 must be set here */
 static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, json_t *params_val)
@@ -1298,11 +1354,15 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 	json_t *ret;
 	int n2len;
 
-	if (unlikely(!json_is_array(params_val)))
+	if (unlikely(!json_is_array(params_val))) {
+		stratum_send_message(client, "Invalid json: params not an array");
 		return json_string("params not an array");
+	}
 
-	if (unlikely(!current_workbase))
+	if (unlikely(!current_workbase)) {
+		stratum_send_message(client, "Pool Initialising");
 		return json_string("Initialising");
+	}
 
 	arr_size = json_array_size(params_val);
 	if (arr_size > 0) {
@@ -1328,7 +1388,10 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 		client->useragent = ckzalloc(1);
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
-		new_enonce1(client);
+		if (!new_enonce1(client)) {
+			stratum_send_message(client, "Pool full of clients");
+			return json_string("proxy full");
+		}
 		LOGINFO("Set new subscription %ld to new enonce1 %s", client->id,
 			client->enonce1);
 	} else {
