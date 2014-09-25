@@ -210,10 +210,16 @@ typedef struct user_instance user_instance_t;
 
 static user_instance_t *user_instances;
 
+typedef struct stratum_instance stratum_instance_t;
+
 /* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
 	int64_t id;
+
+	/* For the dead instances linked list */
+	stratum_instance_t *next;
+	stratum_instance_t *prev;
 
 	char enonce1[32];
 	uchar enonce1bin[16];
@@ -248,8 +254,6 @@ struct stratum_instance {
 
 	time_t last_txns; /* Last time this worker requested txn hashes */
 };
-
-typedef struct stratum_instance stratum_instance_t;
 
 /* Stratum_instances hashlist is stored by id, whereas disconnected_instances
  * is sorted by enonce1_64. */
@@ -1070,11 +1074,11 @@ static void drop_client(int64_t id)
 		ck_ulock(&instance_lock);
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
-		/* Only keep around one copy of the old client */
-		if (!old_client && client->enonce1_64)
+		/* Only keep around one copy of the old client in server mode */
+		if (!client->ckp->proxy && !old_client && client->enonce1_64)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		else // Keep around instance so we don't get a dereference
-			HASH_ADD(hh, dead_instances, enonce1_64, sizeof(uint64_t), client);
+			LL_PREPEND(dead_instances, client);
 		ck_dwilock(&instance_lock);
 	}
 	ck_uilock(&instance_lock);
