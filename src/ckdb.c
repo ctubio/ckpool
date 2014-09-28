@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.331"
+#define CKDB_VERSION DB_VERSION"-0.332"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -240,13 +240,14 @@ static LOADSTATUS dbstatus;
 typedef struct poolstatus {
 	int64_t workinfoid; // Last block
 	int32_t height;
+	int64_t reward;
 	double diffacc;
 	double diffinv; // Non-acc
 	double shareacc;
 	double shareinv; // Non-acc
 	double best_sdiff; // TODO (maybe)
 } POOLSTATUS;
-static POOLSTATUS pool = { 0, START_POOL_HEIGHT, 0, 0, 0, 0, 0 };
+static POOLSTATUS pool = { 0, START_POOL_HEIGHT, 0, 0, 0, 0, 0, 0 };
 /* TODO: when we know about orphans, the count reset to zero
  * will need to be undone - i.e. recalculate this data from
  * the memory tables - maybe ... */
@@ -4994,6 +4995,7 @@ static int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 	STRNCPY(row->bits, bits);
 	STRNCPY(row->ntime, ntime);
 	TXT_TO_BIGINT("reward", reward, row->reward);
+	pool.reward = row->reward;
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -5524,6 +5526,7 @@ static bool workinfo_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("reward", field, row->reward);
+		pool.reward = row->reward;
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -9795,6 +9798,13 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	DATA_WORKERS_NULL(workers, w_item);
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
+	snprintf(tmp, sizeof(tmp), "blockacc=%.1f%c",
+				   pool.diffacc, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "blockreward=%"PRId64"%c",
+				   pool.reward, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
 	rows = 0;
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
