@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.332"
+#define CKDB_VERSION DB_VERSION"-0.333"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -803,6 +803,7 @@ enum cmd_values {
 	CMD_AUTH,
 	CMD_ADDRAUTH,
 	CMD_ADDUSER,
+	CMD_HEARTBEAT,
 	CMD_NEWPASS,
 	CMD_CHKPASS,
 	CMD_USERSET,
@@ -10726,6 +10727,25 @@ static char *cmd_addrauth(PGconn *conn, char *cmd, char *id,
 	return cmd_addrauth_do(conn, cmd, id, by, code, inet, cd, igndup, trf_root);
 }
 
+/* TODO: This must decide the reply based on the reloading/startup status
+ * Reload data will be a simple pulse reply
+ * If workers have been loaded (db_auths_complete) then any worker diff
+ *  changes from the web, after that, will mean a diff change reply
+ */
+static char *cmd_heartbeat(__maybe_unused PGconn *conn, char *cmd, char *id,
+			   __maybe_unused tv_t *now, __maybe_unused char *by,
+			   __maybe_unused char *code, __maybe_unused char *inet,
+			   __maybe_unused tv_t *cd,
+			   __maybe_unused K_TREE *trf_root)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+
+	snprintf(reply, siz, "ok.pulse");
+	LOGDEBUG("%s.%s.%s", cmd, id, reply);
+	return strdup(reply);
+}
+
 static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
@@ -12137,6 +12157,7 @@ static struct CMDS {
 	{ CMD_SHARELOG,	STR_AGEWORKINFO, false,	true,	cmd_sharelog,	ACCESS_POOL },
 	{ CMD_AUTH,	"authorise",	false,	true,	cmd_auth,	ACCESS_POOL },
 	{ CMD_ADDRAUTH,	"addrauth",	false,	true,	cmd_addrauth,	ACCESS_POOL },
+	{ CMD_HEARTBEAT,"heartbeat",	false,	true,	cmd_heartbeat,	ACCESS_POOL },
 	{ CMD_ADDUSER,	"adduser",	false,	false,	cmd_adduser,	ACCESS_WEB },
 	{ CMD_NEWPASS,	"newpass",	false,	false,	cmd_newpass,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	false,	false,	cmd_chkpass,	ACCESS_WEB },
@@ -12998,6 +13019,7 @@ static void *socketer(__maybe_unused void *arg)
 					// Always process immediately:
 					case CMD_AUTH:
 					case CMD_ADDRAUTH:
+					case CMD_HEARTBEAT:
 						// First message from the pool
 						if (want_first) {
 							ck_wlock(&fpm_lock);
@@ -13264,6 +13286,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 				break;
 			case CMD_AUTH:
 			case CMD_ADDRAUTH:
+			case CMD_HEARTBEAT:
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
 			case CMD_BLOCK:
