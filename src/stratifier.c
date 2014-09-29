@@ -77,7 +77,11 @@ typedef struct pool_stats pool_stats_t;
 
 static pool_stats_t stats;
 
+/* Protects changes to pool stats */
 static pthread_mutex_t stats_lock;
+
+/* Serialises sends/receives to ckdb if possible */
+static pthread_mutex_t ckdb_lock;
 
 static uint64_t enonce1_64;
 
@@ -1525,7 +1529,15 @@ static int send_recv_auth(stratum_instance_t *client)
 		LOGWARNING("Failed to dump json in send_recv_auth");
 		return ret;
 	}
-	buf = ckdb_msg_call(ckp, json_msg);
+
+	/* We want responses from ckdb serialised and not interleaved with
+	 * other requests. Wait up to 3 seconds for exclusive access to ckdb
+	 * and if we don't receive it treat it as a delayed auth if possible */
+	if (likely(!mutex_timedlock(&ckdb_lock, 3))) {
+		buf = ckdb_msg_call(ckp, json_msg);
+		mutex_unlock(&ckdb_lock);
+	}
+
 	free(json_msg);
 	if (likely(buf)) {
 		char *secondaryuserid, *response = alloca(128);
@@ -2525,7 +2537,10 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 	char *buf = NULL;
 
 	while (!buf) {
+		mutex_lock(&ckdb_lock);
 		buf = ckdb_msg_call(ckp, msg);
+		mutex_unlock(&ckdb_lock);
+
 		if (unlikely(!buf)) {
 			if (!failed) {
 				failed = true;
@@ -2965,6 +2980,7 @@ int stratifier(proc_instance_t *pi)
 		ckp->serverurl = "127.0.0.1";
 	cklock_init(&instance_lock);
 
+	mutex_init(&ckdb_lock);
 	ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	srecvs = create_ckmsgq(ckp, "sreceiver", &srecv_process);
 	sshareq = create_ckmsgq(ckp, "sprocessor", &sshare_process);
