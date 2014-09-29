@@ -194,12 +194,23 @@ static ckmsgq_t *stxnq;		// Transaction requests
 
 static int64_t user_instance_id;
 
+struct user_instance;
+struct worker_instance;
+struct stratum_instance;
+
+typedef struct user_instance user_instance_t;
+typedef struct worker_instance worker_instance_t;
+typedef struct stratum_instance stratum_instance_t;
+
 struct user_instance {
 	UT_hash_handle hh;
 	char username[128];
 	int64_t id;
 	char *secondaryuserid;
 	bool btcaddress;
+
+	/* A linked list of all connected instances of this user */
+	stratum_instance_t *instances;
 
 	int workers;
 
@@ -210,18 +221,24 @@ struct user_instance {
 	tv_t last_share;
 };
 
-typedef struct user_instance user_instance_t;
-
 static user_instance_t *user_instances;
 
-typedef struct stratum_instance stratum_instance_t;
+/* Combined data from workers with the same workername */
+struct worker_instance {
+	double dsps1;
+	double dsps5;
+	double dsps60;
+	double dsps1440;
+	tv_t last_share;
+
+	int64_t mindiff; /* User chosen mindiff */
+};
 
 /* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
 	int64_t id;
 
-	/* For the dead instances linked list */
 	stratum_instance_t *next;
 	stratum_instance_t *prev;
 
@@ -250,6 +267,8 @@ struct stratum_instance {
 	bool notified_idle;
 
 	user_instance_t *user_instance;
+	worker_instance_t *worker_instance;
+
 	char *useragent;
 	char *workername;
 	int64_t user_id;
@@ -263,7 +282,6 @@ struct stratum_instance {
  * is sorted by enonce1_64. */
 static stratum_instance_t *stratum_instances;
 static stratum_instance_t *disconnected_instances;
-static stratum_instance_t *dead_instances;
 
 /* Protects both stratum and user instances */
 static cklock_t instance_lock;
@@ -1087,8 +1105,6 @@ static void drop_client(int64_t id)
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		else // Keep around instance so we don't get a dereference
-			LL_PREPEND(dead_instances, client);
 		ck_dwilock(&instance_lock);
 	}
 	ck_uilock(&instance_lock);
@@ -1454,10 +1470,12 @@ static bool test_address(ckpool_t *ckp, const char *address)
 
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. */
-static user_instance_t *authorise_user(ckpool_t *ckp, const char *workername)
+static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
+				      const char *workername)
 {
 	char *base_username = strdupa(workername), *username;
 	user_instance_t *instance;
+	stratum_instance_t *tmp;
 	bool new = false;
 	int len;
 
@@ -1468,7 +1486,7 @@ static user_instance_t *authorise_user(ckpool_t *ckp, const char *workername)
 	if (unlikely(len > 127))
 		username[127] = '\0';
 
-	ck_ilock(&instance_lock);
+	ck_wlock(&instance_lock);
 	HASH_FIND_STR(user_instances, username, instance);
 	if (!instance) {
 		/* New user instance. Secondary user id will be NULL */
@@ -1476,12 +1494,21 @@ static user_instance_t *authorise_user(ckpool_t *ckp, const char *workername)
 		strcpy(instance->username, username);
 		new = true;
 
-		ck_ulock(&instance_lock);
 		instance->id = user_instance_id++;
 		HASH_ADD_STR(user_instances, username, instance);
-		ck_dwilock(&instance_lock);
 	}
-	ck_uilock(&instance_lock);
+	DL_FOREACH(instance->instances, tmp) {
+		if (!safecmp(workername, tmp->workername)) {
+			client->worker_instance = tmp->worker_instance;
+			break;
+		}
+	}
+	/* Create one worker instance for combined data from workers of the
+	 * same name */
+	if (!client->worker_instance)
+		client->worker_instance = ckzalloc(sizeof(worker_instance_t));
+	DL_APPEND(instance->instances, client);
+	ck_wunlock(&instance_lock);
 
 	if (new && !ckp->proxy) {
 		/* Is this a btc address based username? */
@@ -1631,7 +1658,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Invalid character in username");
 		goto out;
 	}
-	user_instance = client->user_instance = authorise_user(client->ckp, buf);
+	user_instance = client->user_instance = generate_user(client->ckp, client, buf);
 	client->user_id = user_instance->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
@@ -1701,6 +1728,7 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid)
 {
+	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	user_instance_t *instance = client->user_instance;
 	int64_t next_blockid, optimal;
@@ -1732,6 +1760,13 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	decay_time(&client->dsps60, diff, tdiff, 3600);
 	decay_time(&client->dsps1440, diff, tdiff, 86400);
 	copy_tv(&client->last_share, &now_t);
+
+	tdiff = sane_tdiff(&now_t, &worker->last_share);
+	decay_time(&worker->dsps1, diff, tdiff, 60);
+	decay_time(&worker->dsps5, diff, tdiff, 300);
+	decay_time(&worker->dsps60, diff, tdiff, 3600);
+	decay_time(&worker->dsps1440, diff, tdiff, 86400);
+	copy_tv(&worker->last_share, &now_t);
 
 	tdiff = sane_tdiff(&now_t, &instance->last_share);
 	decay_time(&instance->dsps1, diff, tdiff, 60);
