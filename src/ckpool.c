@@ -1259,6 +1259,12 @@ int main(int argc, char **argv)
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make log directory %s", ckp.logdir);
 
+	/* Create the workers logdir */
+	sprintf(buf, "%s/workers", ckp.logdir);
+	ret = mkdir(buf, 0750);
+	if (ret && errno != EEXIST)
+		quit(1, "Failed to make workers log directory %s", buf);
+
 	/* Create the user logdir */
 	sprintf(buf, "%s/users", ckp.logdir);
 	ret = mkdir(buf, 0750);

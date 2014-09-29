@@ -228,6 +228,8 @@ static user_instance_t *user_instances;
 
 /* Combined data from workers with the same workername */
 struct worker_instance {
+	char *workername;
+
 	worker_instance_t *next;
 	worker_instance_t *prev;
 
@@ -1513,6 +1515,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	 * same name */
 	if (!client->worker_instance) {
 		client->worker_instance = ckzalloc(sizeof(worker_instance_t));
+		client->worker_instance->workername = strdup(workername);
 		DL_APPEND(instance->worker_instances, client->worker_instance);
 	}
 	DL_APPEND(instance->instances, client);
@@ -2910,6 +2913,32 @@ static void *statsupdate(void *arg)
 					decay_time(&worker->dsps60, 0, tdiff, 3600);
 					decay_time(&worker->dsps1440, 0, tdiff, 86400);
 				}
+				ghs = worker->dsps1 * nonces;
+				suffix_string(ghs, suffix1, 16, 0);
+				ghs = worker->dsps5 * nonces;
+				suffix_string(ghs, suffix5, 16, 0);
+				ghs = worker->dsps60 * nonces;
+				suffix_string(ghs, suffix60, 16, 0);
+				ghs = worker->dsps1440 * nonces;
+				suffix_string(ghs, suffix1440, 16, 0);
+
+				JSON_CPACK(val, "{ss,ss,ss,ss}",
+						"hashrate1m", suffix1,
+						"hashrate5m", suffix5,
+						"hashrate1hr", suffix60,
+						"hashrate1d", suffix1440);
+
+				snprintf(fname, 511, "%s/workers/%s", ckp->logdir, worker->workername);
+				fp = fopen(fname, "we");
+				if (unlikely(!fp)) {
+					LOGERR("Failed to fopen %s", fname);
+					continue;
+				}
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+				fprintf(fp, "%s\n", s);
+				dealloc(s);
+				json_decref(val);
+				fclose(fp);
 			}
 
 			/* Decay times per user */
