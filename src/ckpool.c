@@ -148,8 +148,8 @@ ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func)
 	return ckmsgq;
 }
 
-/* Generic function for adding messages to a ckmsgq linked list and signal the ckmsgq
- * parsing thread to wake up and process it. */
+/* Generic function for adding messages to a ckmsgq linked list and signal the
+ * ckmsgq parsing thread to wake up and process it. */
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 {
 	ckmsg_t *msg = ckalloc(sizeof(ckmsg_t));
@@ -160,6 +160,18 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 	DL_APPEND(ckmsgq->msgs, msg);
 	pthread_cond_signal(&ckmsgq->cond);
 	mutex_unlock(&ckmsgq->lock);
+}
+
+/* Return whether there are any messages queued in the ckmsgq linked list. */
+bool ckmsgq_empty(ckmsgq_t *ckmsgq)
+{
+	bool ret;
+
+	mutex_lock(&ckmsgq->lock);
+	ret = (ckmsgq->msgs->next == ckmsgq->msgs->prev);
+	mutex_unlock(&ckmsgq->lock);
+
+	return ret;
 }
 
 static void broadcast_proc(ckpool_t *ckp, const char *buf)
