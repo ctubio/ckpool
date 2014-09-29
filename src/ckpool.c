@@ -165,10 +165,11 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 /* Return whether there are any messages queued in the ckmsgq linked list. */
 bool ckmsgq_empty(ckmsgq_t *ckmsgq)
 {
-	bool ret;
+	bool ret = true;
 
 	mutex_lock(&ckmsgq->lock);
-	ret = (ckmsgq->msgs->next == ckmsgq->msgs->prev);
+	if (ckmsgq->msgs)
+		ret = (ckmsgq->msgs->next == ckmsgq->msgs->prev);
 	mutex_unlock(&ckmsgq->lock);
 
 	return ret;
