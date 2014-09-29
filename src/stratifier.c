@@ -212,6 +212,9 @@ struct user_instance {
 	/* A linked list of all connected instances of this user */
 	stratum_instance_t *instances;
 
+	/* A linked list of all connected workers of this user */
+	worker_instance_t *worker_instances;
+
 	int workers;
 
 	double dsps1; /* Diff shares per second, 1 minute rolling average */
@@ -225,6 +228,9 @@ static user_instance_t *user_instances;
 
 /* Combined data from workers with the same workername */
 struct worker_instance {
+	worker_instance_t *next;
+	worker_instance_t *prev;
+
 	double dsps1;
 	double dsps5;
 	double dsps60;
@@ -1505,8 +1511,10 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	}
 	/* Create one worker instance for combined data from workers of the
 	 * same name */
-	if (!client->worker_instance)
+	if (!client->worker_instance) {
 		client->worker_instance = ckzalloc(sizeof(worker_instance_t));
+		DL_APPEND(instance->worker_instances, client->worker_instance);
+	}
 	DL_APPEND(instance->instances, client);
 	ck_wunlock(&instance_lock);
 
@@ -2877,6 +2885,7 @@ static void *statsupdate(void *arg)
 			if (!client->authorised)
 				continue;
 
+			/* Decay times per connected instance */
 			if (now.tv_sec - client->last_share.tv_sec > 60) {
 				/* No shares for over a minute, decay to 0 */
 				decay_time(&client->dsps1, 0, tdiff, 60);
@@ -2890,10 +2899,21 @@ static void *statsupdate(void *arg)
 		}
 
 		HASH_ITER(hh, user_instances, instance, tmpuser) {
+			worker_instance_t *worker;
 			bool idle = false;
 
+			/* Decay times per worker */
+			DL_FOREACH(instance->worker_instances, worker) {
+				if (now.tv_sec - worker->last_share.tv_sec > 60) {
+					decay_time(&worker->dsps1, 0, tdiff, 60);
+					decay_time(&worker->dsps5, 0, tdiff, 300);
+					decay_time(&worker->dsps60, 0, tdiff, 3600);
+					decay_time(&worker->dsps1440, 0, tdiff, 86400);
+				}
+			}
+
+			/* Decay times per user */
 			if (now.tv_sec - instance->last_share.tv_sec > 60) {
-				/* No shares for over a minute, decay to 0 */
 				decay_time(&instance->dsps1, 0, tdiff, 60);
 				decay_time(&instance->dsps5, 0, tdiff, 300);
 				decay_time(&instance->dsps60, 0, tdiff, 3600);
