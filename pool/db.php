@@ -116,12 +116,12 @@ function homeInfo($user)
  else
  {
 	$ans = repDecode($rep);
-	if ($ans['lastblock'] == '?')
-	{
+//	if ($ans['lastblock'] == '?')
+//	{
 //		$ans['lastblock'] = 1401237522;
 //		$ans['lastblock'] = 1403819191;
-		$ans['lastblock'] = 1407113822;
-	}
+//		$ans['lastblock'] = 1407113822;
+//	}
  }
 
  return $ans;
