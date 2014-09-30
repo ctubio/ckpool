@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.334"
+#define CKDB_VERSION DB_VERSION"-0.335"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -12866,7 +12866,7 @@ static void *socketer(__maybe_unused void *arg)
 	K_ITEM *item;
 	size_t siz;
 	tv_t now, cd;
-	bool dup, want_first;
+	bool dup, want_first, show_dup;
 	int loglevel, oldloglevel;
 
 	pthread_detach(pthread_self());
@@ -12924,6 +12924,7 @@ static void *socketer(__maybe_unused void *arg)
 			 *    command arrived between two duplicate commands
 			 */
 			dup = false;
+			show_dup = true;
 			// These are ordered approximately most likely first
 			if (last_auth && strcmp(last_auth, buf) == 0) {
 				reply_last = reply_auth;
@@ -12955,6 +12956,7 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
 				dup = true;
+				show_dup = false;
 			}
 			if (dup) {
 				send_unix_msg(sockd, reply_last);
@@ -12965,7 +12967,10 @@ static void *socketer(__maybe_unused void *arg)
 				snprintf(reply, sizeof(reply), "%s%ld,%ld.%s",
 					 LOGDUP, now.tv_sec, now.tv_usec, duptype);
 				LOGQUE(reply);
-				LOGWARNING("Duplicate '%s' message received", duptype);
+				if (show_dup)
+					LOGWARNING("Duplicate '%s' message received", duptype);
+				else
+					LOGDEBUG("Duplicate '%s' message received", duptype);
 			} else {
 				LOGQUE(buf);
 				cmdnum = breakdown(&trf_root, &trf_store, buf, &which_cmds, cmd, id, &cd);
