@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.333"
+#define CKDB_VERSION DB_VERSION"-0.334"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -9829,6 +9829,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				K_TREE *userstats_workername_root = new_ktree();
 				K_TREE_CTX usw_ctx[1];
 				double w_hashrate5m, w_hashrate1hr;
+				double w_hashrate24hr;
 				int64_t w_elapsed;
 				tv_t w_lastshare;
 				double w_lastdiff, w_diffacc, w_diffinv;
@@ -9838,7 +9839,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				double w_sharesta, w_sharedup;
 				double w_sharehi, w_sharerej;
 
-				w_hashrate5m = w_hashrate1hr = 0.0;
+				w_hashrate5m = w_hashrate1hr =
+				w_hashrate24hr = 0.0;
 				w_elapsed = -1;
 				w_lastshare.tv_sec = 0;
 				w_lastdiff = w_diffacc = w_diffinv =
@@ -9886,6 +9888,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 							if (!find_in_ktree(userstats_workername_root, us_item, cmp_userstats_workername, usw_ctx)) {
 								w_hashrate5m += userstats->hashrate5m;
 								w_hashrate1hr += userstats->hashrate1hr;
+								w_hashrate24hr += userstats->hashrate24hr;
 								if (w_elapsed == -1 || w_elapsed > userstats->elapsed)
 									w_elapsed = userstats->elapsed;
 
@@ -9907,6 +9910,10 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 				double_to_buf(w_hashrate1hr, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "w_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(w_hashrate24hr, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "w_hashrate24hr:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
 				bigint_to_buf(w_elapsed, reply, sizeof(reply));
@@ -9983,7 +9990,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 rows, FLDSEP,
 		 "workername,difficultydefault,idlenotificationenabled,"
 		 "idlenotificationtime",
-		 stats ? ",w_hashrate5m,w_hashrate1hr,w_elapsed,w_lastshare,"
+		 stats ? ",w_hashrate5m,w_hashrate1hr,w_hashrate24hr,"
+		 "w_elapsed,w_lastshare,"
 		 "w_lastdiff,w_diffacc,w_diffinv,"
 		 "w_diffsta,w_diffdup,w_diffhi,w_diffrej,"
 		 "w_shareacc,w_shareinv,"
