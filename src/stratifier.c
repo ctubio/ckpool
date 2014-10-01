@@ -83,7 +83,12 @@ static pthread_mutex_t stats_lock;
 /* Serialises sends/receives to ckdb if possible */
 static pthread_mutex_t ckdb_lock;
 
-static uint64_t enonce1_64;
+static union {
+	uint64_t u64;
+	uint32_t u32;
+	uint16_t u16;
+	uint8_t u8;
+} enonce1u;
 
 struct workbase {
 	/* Hash table data */
@@ -1345,10 +1350,6 @@ out:
  * unused enonce1 value and reject clients instead if there is no space left */
 static bool new_enonce1(stratum_instance_t *client)
 {
-	void *enoncev = &enonce1_64;
-	uint32_t *enonce1_32 = enoncev;
-	uint16_t *enonce1_16 = enoncev;
-	uint8_t *enonce1_8 = enoncev;
 	bool ret = false;
 	workbase_t *wb;
 	int i;
@@ -1357,30 +1358,32 @@ static bool new_enonce1(stratum_instance_t *client)
 	wb = current_workbase;
 	switch(wb->enonce1varlen) {
 		case 8:
-			enonce1_64++;
+			enonce1u.u64++;
 			ret = true;
 			break;
 		case 4:
-			++(*enonce1_32);
+			enonce1u.u32++;
 			ret = true;
 			break;
 		case 2:
-			i = 0;
-			do {
-				++(*enonce1_16);
-				ret = enonce1_free(enonce1_64);
-			} while (++i < 65536 && !ret);
+			for (i = 0; i < 65536; i++) {
+				enonce1u.u16++;
+				ret = enonce1_free(enonce1u.u64);
+				if (ret)
+					break;
+			}
 			break;
 		case 1:
-			i = 0;
-			do {
-				++(*enonce1_8);
-				ret = enonce1_free(enonce1_64);
-			} while (++i < 256 && !ret);
+			for (i = 0; i < 256; i++) {
+				enonce1u.u8++;
+				ret = enonce1_free(enonce1u.u64);
+				if (ret)
+					break;
+			}
 			break;
 	}
 	if (ret)
-		client->enonce1_64 = enonce1_64;
+		client->enonce1_64 = enonce1u.u64;
 	if (wb->enonce1constlen)
 		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
 	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
