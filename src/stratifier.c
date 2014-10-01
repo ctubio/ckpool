@@ -983,11 +983,12 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id)
 	return instance;
 }
 
+/* Only supports a full ckpool instance sessionid with an 8 byte sessionid */
 static bool disconnected_sessionid_exists(const char *sessionid, int64_t id)
 {
-	bool connected_exists = false, ret = false;
 	stratum_instance_t *instance, *tmp;
 	uint64_t session64;
+	bool ret = false;
 
 	if (!sessionid)
 		goto out;
@@ -1002,12 +1003,9 @@ static bool disconnected_sessionid_exists(const char *sessionid, int64_t id)
 			continue;
 		if (instance->enonce1_64 == session64) {
 			/* Only allow one connected instance per enonce1 */
-			connected_exists = true;
-			break;
+			goto out_unlock;
 		}
 	}
-	if (connected_exists)
-		goto out_unlock;
 	instance = NULL;
 	HASH_FIND(hh, disconnected_instances, &session64, sizeof(uint64_t), instance);
 	if (instance)
