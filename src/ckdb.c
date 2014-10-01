@@ -49,7 +49,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.334"
+#define CKDB_VERSION DB_VERSION"-0.336"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -807,6 +807,7 @@ enum cmd_values {
 	CMD_NEWPASS,
 	CMD_CHKPASS,
 	CMD_USERSET,
+	CMD_WORKERSET,
 	CMD_POOLSTAT,
 	CMD_USERSTAT,
 	CMD_BLOCK,
@@ -3814,9 +3815,14 @@ unitem:
 	return ret;
 }
 
+/* The assumption is that the worker already exists in the DB
+ * and in the RAM tables and the item passed is already in the tree
+ * Since there is no change to the key, there's no tree reorg required
+ * check = false means just update it, ignore the passed char* vars */
 static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
-			   char *idlenotificationenabled, char *idlenotificationtime,
-			   char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root)
+			   char *idlenotificationenabled,
+			   char *idlenotificationtime, char *by, char *code,
+			   char *inet, tv_t *cd, K_TREE *trf_root, bool check)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -3834,41 +3840,48 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 
 	DATA_WORKERS(row, item);
 
-	if (difficultydefault && *difficultydefault) {
-		diffdef = atoi(difficultydefault);
-		if (diffdef < DIFFICULTYDEFAULT_MIN)
+	if (check) {
+		if (difficultydefault && *difficultydefault) {
+			diffdef = atoi(difficultydefault);
+			if (diffdef < DIFFICULTYDEFAULT_MIN)
+				diffdef = row->difficultydefault;
+			if (diffdef > DIFFICULTYDEFAULT_MAX)
+				diffdef = row->difficultydefault;
+		} else
 			diffdef = row->difficultydefault;
-		if (diffdef > DIFFICULTYDEFAULT_MAX)
-			diffdef = row->difficultydefault;
-	} else
-		diffdef = row->difficultydefault;
 
-	if (idlenotificationenabled && *idlenotificationenabled) {
-		if (tolower(*idlenotificationenabled) == IDLENOTIFICATIONENABLED[0])
-			idlenot = IDLENOTIFICATIONENABLED[0];
-		else
-			idlenot = IDLENOTIFICATIONDISABLED[0];
-	} else
-		idlenot = row->idlenotificationenabled[0];
+		if (idlenotificationenabled && *idlenotificationenabled) {
+			if (tolower(*idlenotificationenabled) == IDLENOTIFICATIONENABLED[0])
+				idlenot = IDLENOTIFICATIONENABLED[0];
+			else
+				idlenot = IDLENOTIFICATIONDISABLED[0];
+		} else
+			idlenot = row->idlenotificationenabled[0];
 
-	if (idlenotificationtime && *idlenotificationtime) {
-		nottime = atoi(idlenotificationtime);
-		if (nottime < IDLENOTIFICATIONTIME_MIN)
+		if (idlenotificationtime && *idlenotificationtime) {
+			nottime = atoi(idlenotificationtime);
+			if (nottime < IDLENOTIFICATIONTIME_MIN)
+				nottime = row->idlenotificationtime;
+			if (nottime > IDLENOTIFICATIONTIME_MAX)
+				nottime = row->idlenotificationtime;
+		} else
 			nottime = row->idlenotificationtime;
-		if (nottime > IDLENOTIFICATIONTIME_MAX)
-			nottime = row->idlenotificationtime;
-	} else
-		nottime = row->idlenotificationtime;
+
+		if (diffdef == row->difficultydefault &&
+		    idlenot == row->idlenotificationenabled[0] &&
+		    nottime == row->idlenotificationtime) {
+			ok = true;
+			goto early;
+		}
+
+		row->difficultydefault = diffdef;
+		row->idlenotificationenabled[0] = idlenot;
+		row->idlenotificationenabled[1] = '\0';
+		row->idlenotificationtime = nottime;
+	}
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
-
-	if (diffdef == row->difficultydefault &&
-	    idlenot == row->idlenotificationenabled[0] &&
-	    nottime == row->idlenotificationtime) {
-		ok = true;
-		goto early;
-	}
 
 	upd = "update workers set expirydate=$1 where workerid=$2 and expirydate=$3";
 	par = 0;
@@ -3905,11 +3918,6 @@ static bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 		"(workerid,userid,workername,difficultydefault,"
 		"idlenotificationenabled,idlenotificationtime"
 		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
-
-	row->difficultydefault = diffdef;
-	row->idlenotificationenabled[0] = idlenot;
-	row->idlenotificationenabled[1] = '\0';
-	row->idlenotificationtime = nottime;
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->workerid, NULL, 0);
@@ -3958,7 +3966,7 @@ static K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *worke
 		if (!confirm_sharesummary && update) {
 			workers_update(conn, item, diffdef, idlenotificationenabled,
 				       idlenotificationtime, by, code, inet, cd,
-					trf_root);
+				       trf_root, true);
 		}
 	} else {
 		if (confirm_sharesummary) {
@@ -9200,6 +9208,118 @@ struckout:
 	return strdup(reply);
 }
 
+static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
+			   char *by, char *code, char *inet,
+			   __maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_username, *i_workername, *i_diffdef, *u_item, *w_item;
+	char workername_buf[32]; // 'workername:' + digits
+	char diffdef_buf[32]; // 'difficultydefault:' + digits
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	WORKERS *workers;
+	USERS *users;
+	int32_t difficultydefault;
+	char *reason = NULL;
+	char *answer = NULL;
+	int workernum;
+	bool ok;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	if (!i_username) {
+		// For web this message is detailed enough
+		reason = "System error";
+		goto struckout;
+	}
+
+	K_RLOCK(users_free);
+	u_item = find_users(transfer_data(i_username));
+	K_RUNLOCK(users_free);
+
+	if (!u_item) {
+		reason = "Unknown user";
+		goto struckout;
+	} else {
+		DATA_USERS(users, u_item);
+
+		// Default answer if no problems
+		answer = strdup("updated");
+
+		// Loop through the list of workers and do any changes
+		for (workernum = 0; workernum < 9999; workernum++) {
+			snprintf(workername_buf, sizeof(workername_buf),
+				 "workername:%d", workernum);
+
+			i_workername = optional_name(trf_root, workername_buf,
+							1, NULL, reply, siz);
+			if (!i_workername)
+				break;
+
+			w_item = find_workers(users->userid,
+					      transfer_data(i_workername));
+			// Abort if any dont exist
+			if (!w_item) {
+				reason = "Unknown worker";
+				break;
+			}
+
+			DATA_WORKERS(workers, w_item);
+
+			snprintf(diffdef_buf, sizeof(diffdef_buf),
+				 "difficultydefault:%d", workernum);
+
+			i_diffdef = optional_name(trf_root, diffdef_buf,
+						    1, (char *)intpatt,
+						    reply, siz);
+
+			// Abort if any are invalid
+			if (*reply) {
+				reason = "Invalid diff";
+				break;
+			}
+
+			if (!i_diffdef)
+				continue;
+
+			difficultydefault = atoi(transfer_data(i_diffdef));
+			if (difficultydefault < DIFFICULTYDEFAULT_MIN)
+				difficultydefault = DIFFICULTYDEFAULT_MIN;
+			if (difficultydefault > DIFFICULTYDEFAULT_MAX)
+				difficultydefault = DIFFICULTYDEFAULT_MAX;
+
+			if (workers->difficultydefault != difficultydefault) {
+				/* This uses a seperate txn per update
+				    thus will update all up to a failure
+				   Since the web then re-gets the values,
+				    it will show what was updated */
+				workers->difficultydefault = difficultydefault;
+				ok = workers_update(conn, w_item, NULL, NULL,
+							  NULL, by, code, inet,
+							  now, trf_root, false);
+				if (!ok) {
+					reason = "DB error";
+					break;
+				}
+			}
+		}
+	}
+
+struckout:
+	if (reason) {
+		if (answer)
+			free(answer);
+		snprintf(reply, siz, "ERR.%s", reason);
+		LOGERR("%s.%s.%s", cmd, id, reply);
+		return strdup(reply);
+	}
+	snprintf(reply, siz, "ok.%s", answer);
+	LOGDEBUG("%s.%s", id, answer);
+	free(answer);
+	return strdup(reply);
+}
+
 static char *cmd_poolstats_do(PGconn *conn, char *cmd, char *id, char *by,
 			      char *code, char *inet, tv_t *cd, bool igndup,
 			      K_TREE *trf_root)
@@ -12170,6 +12290,7 @@ static struct CMDS {
 	{ CMD_NEWPASS,	"newpass",	false,	false,	cmd_newpass,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	false,	false,	cmd_chkpass,	ACCESS_WEB },
 	{ CMD_USERSET,	"usersettings",	false,	false,	cmd_userset,	ACCESS_WEB },
+	{ CMD_WORKERSET,"workerset",	false,	false,	cmd_workerset,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	false,	true,	cmd_poolstats,	ACCESS_POOL },
 	{ CMD_USERSTAT,	"userstats",	false,	true,	cmd_userstats,	ACCESS_POOL },
 	{ CMD_BLOCK,	"block",	false,	true,	cmd_blocks,	ACCESS_POOL },
@@ -12852,6 +12973,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *last_adduser = NULL, *reply_adduser = NULL;
 	char *last_newpass = NULL, *reply_newpass = NULL;
 	char *last_userset = NULL, *reply_userset = NULL;
+	char *last_workerset = NULL, *reply_workerset = NULL;
 	char *last_newid = NULL, *reply_newid = NULL;
 	char *last_setatts = NULL, *reply_setatts = NULL;
 	char *last_setopts = NULL, *reply_setopts = NULL;
@@ -12866,7 +12988,7 @@ static void *socketer(__maybe_unused void *arg)
 	K_ITEM *item;
 	size_t siz;
 	tv_t now, cd;
-	bool dup, want_first;
+	bool dup, want_first, show_dup;
 	int loglevel, oldloglevel;
 
 	pthread_detach(pthread_self());
@@ -12924,6 +13046,7 @@ static void *socketer(__maybe_unused void *arg)
 			 *    command arrived between two duplicate commands
 			 */
 			dup = false;
+			show_dup = true;
 			// These are ordered approximately most likely first
 			if (last_auth && strcmp(last_auth, buf) == 0) {
 				reply_last = reply_auth;
@@ -12946,6 +13069,9 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_userset && strcmp(last_userset, buf) == 0) {
 				reply_last = reply_userset;
 				dup = true;
+			} else if (last_workerset && strcmp(last_workerset, buf) == 0) {
+				reply_last = reply_workerset;
+				dup = true;
 			} else if (last_setatts && strcmp(last_setatts, buf) == 0) {
 				reply_last = reply_setatts;
 				dup = true;
@@ -12955,6 +13081,7 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
 				dup = true;
+				show_dup = false;
 			}
 			if (dup) {
 				send_unix_msg(sockd, reply_last);
@@ -12965,7 +13092,10 @@ static void *socketer(__maybe_unused void *arg)
 				snprintf(reply, sizeof(reply), "%s%ld,%ld.%s",
 					 LOGDUP, now.tv_sec, now.tv_usec, duptype);
 				LOGQUE(reply);
-				LOGWARNING("Duplicate '%s' message received", duptype);
+				if (show_dup)
+					LOGWARNING("Duplicate '%s' message received", duptype);
+				else
+					LOGDEBUG("Duplicate '%s' message received", duptype);
 			} else {
 				LOGQUE(buf);
 				cmdnum = breakdown(&trf_root, &trf_store, buf, &which_cmds, cmd, id, &cd);
@@ -13039,6 +13169,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_ADDUSER:
 					case CMD_NEWPASS:
 					case CMD_USERSET:
+					case CMD_WORKERSET:
 					case CMD_GETATTS:
 					case CMD_SETATTS:
 					case CMD_EXPATTS:
@@ -13076,6 +13207,9 @@ static void *socketer(__maybe_unused void *arg)
 								break;
 							case CMD_USERSET:
 								STORELASTREPLY(userset);
+								break;
+							case CMD_WORKERSET:
+								STORELASTREPLY(workerset);
 								break;
 							case CMD_NEWID:
 								STORELASTREPLY(newid);
@@ -13274,6 +13408,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_NEWPASS:
 			case CMD_CHKPASS:
 			case CMD_USERSET:
+			case CMD_WORKERSET:
 			case CMD_BLOCKLIST:
 			case CMD_BLOCKSTATUS:
 			case CMD_NEWID:
