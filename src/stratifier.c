@@ -973,7 +973,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id)
 	instance->diff = instance->old_diff = ckp->startdiff;
 	instance->ckp = ckp;
 	tv_time(&instance->ldc);
-	LOGINFO("Added instance %d", id);
+	LOGINFO("Added instance %ld", id);
 	HASH_ADD_I64(stratum_instances, id, instance);
 	return instance;
 }
@@ -1854,7 +1854,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 
 	client->ssdc = 0;
 
-	LOGINFO("Client %d biased dsps %.2f dsps %.2f drr %.2f adjust diff from %ld to: %ld ",
+	LOGINFO("Client %ld biased dsps %.2f dsps %.2f drr %.2f adjust diff from %ld to: %ld ",
 		client->id, dsps, client->dsps5, drr, client->diff, optimal);
 
 	copy_tv(&client->ldc, &now_t);
@@ -2168,25 +2168,25 @@ out_unlock:
 		suffix_string(wdiff, wdiffsuffix, 16, 0);
 		if (sdiff >= diff) {
 			if (new_share(hash, id)) {
-				LOGINFO("Accepted client %d share diff %.1f/%.0f/%s: %s",
+				LOGINFO("Accepted client %ld share diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 				result = true;
 			} else {
 				err = SE_DUPE;
 				json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
-				LOGINFO("Rejected client %d dupe diff %.1f/%.0f/%s: %s",
+				LOGINFO("Rejected client %ld dupe diff %.1f/%.0f/%s: %s",
 					client->id, sdiff, diff, wdiffsuffix, hexhash);
 				submit = false;
 			}
 		} else {
 			err = SE_HIGH_DIFF;
-			LOGINFO("Rejected client %d high diff %.1f/%.0f/%s: %s",
+			LOGINFO("Rejected client %ld high diff %.1f/%.0f/%s: %s",
 				client->id, sdiff, diff, wdiffsuffix, hexhash);
 			json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 			submit = false;
 		}
 	}  else
-		LOGINFO("Rejected client %d invalid share", client->id);
+		LOGINFO("Rejected client %ld invalid share", client->id);
 
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
@@ -2251,7 +2251,7 @@ out:
 				"createcode", __func__,
 				"createinet", ckp->serverurl);
 		ckdbq_add(ckp, ID_SHAREERR, val);
-		LOGINFO("Invalid share from client %d: %s", client->id, client->workername);
+		LOGINFO("Invalid share from client %ld: %s", client->id, client->workername);
 	}
 	free(fname);
 	return json_boolean(result);
@@ -2432,7 +2432,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 		HASH_DEL(stratum_instances, client);
 		ck_wunlock(&instance_lock);
 
-		LOGINFO("Adding passthrough client %d", client->id);
+		LOGINFO("Adding passthrough client %ld", client->id);
 		snprintf(buf, 255, "passthrough=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
 		free(client);
@@ -2451,7 +2451,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
-		LOGINFO("Dropping unauthorised client %d", client->id);
+		LOGINFO("Dropping unauthorised client %ld", client->id);
 		snprintf(buf, 255, "dropclient=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
 		return;
@@ -2603,11 +2603,11 @@ static void sshare_process(ckpool_t __maybe_unused *ckp, json_params_t *jp)
 	ck_runlock(&instance_lock);
 
 	if (unlikely(!client)) {
-		LOGINFO("Share processor failed to find client id %d in hashtable!", client_id);
+		LOGINFO("Share processor failed to find client id %ld in hashtable!", client_id);
 		goto out;
 	}
 	if (unlikely(!client->authorised)) {
-		LOGDEBUG("Client %d no longer authorised to submit shares", client_id);
+		LOGDEBUG("Client %ld no longer authorised to submit shares", client_id);
 		goto out;
 	}
 	json_msg = json_object();
