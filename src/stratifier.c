@@ -1756,9 +1756,8 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 		stats.unaccounted_rejects += diff;
 	mutex_unlock(&stats_lock);
 
-	/* Ignore successive rejects in count if they haven't submitted a valid
-	 * share yet. */
-	if (unlikely(!client->ssdc && !valid))
+	/* Count only accepted and stale rejects in diff calculation. */
+	if (!valid)
 		return;
 
 	tv_time(&now_t);
@@ -2153,7 +2152,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	invalid = false;
 out_submit:
-	if (wb->proxy && sdiff >= wdiff)
+	if (sdiff >= wdiff)
 		submit = true;
 out_unlock:
 	ck_runlock(&workbase_lock);
@@ -2189,12 +2188,12 @@ out_unlock:
 
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
-	if (submit) {
+	if (wb->proxy && submit) {
 		LOGINFO("Submitting share upstream: %s", hexhash);
 		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
 	}
 
-	add_submit(ckp, client, diff, result);
+	add_submit(ckp, client, diff, submit);
 
 	/* Now write to the pool's sharelog. */
 	val = json_object();
