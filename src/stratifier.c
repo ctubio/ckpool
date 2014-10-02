@@ -1838,6 +1838,8 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 			optimal = client->suggest_diff;
 	} else if (optimal < worker->mindiff)
 		optimal = worker->mindiff;
+	if (ckp->maxdiff && optimal > ckp->maxdiff)
+		optimal = ckp->maxdiff;
 	if (optimal > network_diff)
 		optimal = network_diff;
 	if (client->diff == optimal)

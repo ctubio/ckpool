@@ -150,6 +150,7 @@ struct ckpool_instance {
 	/* Difficulty settings */
 	int64_t mindiff; // Default 1
 	int64_t startdiff; // Default 42
+	int64_t maxdiff; // No default
 
 	/* Coinbase data */
 	char *btcaddress; // Address to mine to

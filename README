@@ -252,4 +252,7 @@ and 3334 in proxy mode.
 
 "startdiff" : Starting diff that new clients are given. Default 42
 
+"maxdiff" : Optional maximum diff that vardiff will clamp to where zero is no
+maximum.
+
 "logdir" : Which directory to store pool and client logs. Default "logs"
