@@ -204,7 +204,8 @@ retry:
 		/* We should have something to read if called since poll set
 		 * this fd's revents status so if there's nothing it means the
 		 * client has disconnected. */
-		LOGINFO("Client fd %d disconnected", client->fd);
+		LOGINFO("Client fd %d disconnected with ret %d errno %d: %s", client->fd,
+			ret, errno, strerror(errno));
 		invalidate_client(ckp, ci, client);
 		return;
 	}
