@@ -1740,7 +1740,8 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 	return tdiff;
 }
 
-static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid)
+static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid,
+		       bool submit)
 {
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
@@ -1757,7 +1758,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	mutex_unlock(&stats_lock);
 
 	/* Count only accepted and stale rejects in diff calculation. */
-	if (!valid)
+	if (!valid && !submit)
 		return;
 
 	tv_time(&now_t);
@@ -2193,7 +2194,7 @@ out_unlock:
 		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
 	}
 
-	add_submit(ckp, client, diff, submit);
+	add_submit(ckp, client, diff, result, submit);
 
 	/* Now write to the pool's sharelog. */
 	val = json_object();
