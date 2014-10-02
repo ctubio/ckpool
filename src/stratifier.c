@@ -2050,9 +2050,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char *fname = NULL, *s, *nonce2;
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
+	workbase_t *wb = NULL;
 	char idstring[20];
 	uint32_t ntime32;
-	workbase_t *wb;
 	uchar hash[32];
 	int64_t id;
 	json_t *val;
@@ -2188,7 +2188,7 @@ out_unlock:
 
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
-	if (wb->proxy && submit) {
+	if (wb && wb->proxy && submit) {
 		LOGINFO("Submitting share upstream: %s", hexhash);
 		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
 	}
