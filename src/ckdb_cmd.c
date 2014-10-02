@@ -9,7 +9,6 @@
 
 #include "ckdb.h"
 
-
 static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 			 char *code, char *inet, __maybe_unused tv_t *notcd,
 			 K_TREE *trf_root)
@@ -3292,7 +3291,12 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
  *	loglevel.ID
  *  sets the loglevel to atoi(ID)
  *  Without an ID, it just reports the current value
+ *
+ *  createdate = true
+ *   means that the data sent must contain a fld or json fld called createdate
  */
+
+//	  cmd_val	cmd_str		noid	createdate func		access
 struct CMDS ckdb_cmds[] = {
 	{ CMD_SHUTDOWN,	"shutdown",	true,	false,	NULL,		ACCESS_SYSTEM },
 	{ CMD_PING,	"ping",		true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
