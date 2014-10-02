@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.400"
+#define CKDB_VERSION DB_VERSION"-0.401"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -70,9 +70,6 @@
 
 #define TRUE_CHR 'Y'
 #define FALSE_CHR 'N'
-
-#define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
-#define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
 
 extern char *EMPTY;
 
@@ -1266,9 +1263,16 @@ extern cmp_t cmp_payments(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_optioncontrol(char *optionname, tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
+#define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
+extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);
+#define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
 extern cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS);
 extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workinfo(int64_t workinfoid);
+extern bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
+			 char *by, char *code, char *inet, tv_t *cd,
+			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
+			 int64_t *s_count, int64_t *s_diff);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
@@ -1430,6 +1434,7 @@ extern bool userstats_add(char *poolinstance, char *elapsed, char *username,
 			  bool eos, char *by, char *code, char *inet, tv_t *cd,
 			  K_TREE *trf_root);
 extern bool userstats_fill(PGconn *conn);
+extern bool check_db_version(PGconn *conn);
 
 // ***
 // *** ckdb_cmd.c
