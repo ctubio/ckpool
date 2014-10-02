@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.401"
+#define CKDB_VERSION DB_VERSION"-0.402"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1151,15 +1151,6 @@ extern K_STORE *workerstatus_store;
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void tick();
 extern PGconn *dbconnect();
-extern void zero_on_new_block();
-#define workerstatus_update(_auths, _shares, _userstats) \
-	_workerstatus_update(_auths, _shares, _userstats, WHERE_FFL_HERE)
-extern void _workerstatus_update(AUTHS *auths, SHARES *shares,
-				 USERSTATS *userstats, WHERE_FFL_ARGS);
-extern void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
-			   char *by, char *code, char *inet, tv_t *cd);
-extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
-extern bool userstats_starttimeband(USERSTATS *row, tv_t *statsdate);
 
 // ***
 // *** ckdb_data.c ***
@@ -1211,10 +1202,6 @@ extern char *_blob_to_buf(char *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 */
 extern char *_double_to_buf(double data, char *buf, size_t siz, WHERE_FFL_ARGS);
 
-// ***
-// *** klist/ktree search/compare fucntions ckdb_data.c ***
-// ***
-
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b);
@@ -1240,6 +1227,11 @@ extern K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 					 bool create, const char *file2,
 					 const char *func2, const int line2,
 					 WHERE_FFL_ARGS);
+extern void workerstatus_ready();
+#define workerstatus_update(_auths, _shares, _userstats) \
+	_workerstatus_update(_auths, _shares, _userstats, WHERE_FFL_HERE)
+extern void _workerstatus_update(AUTHS *auths, SHARES *shares,
+				 USERSTATS *userstats, WHERE_FFL_ARGS);
 extern cmp_t cmp_users(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_users(char *username);
@@ -1278,13 +1270,18 @@ extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
+extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
 extern K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t workinfoid);
+extern void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
+			   char *by, char *code, char *inet, tv_t *cd);
 extern void dsp_hash(char *hash, char *buf, size_t siz);
 extern void dsp_blocks(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash);
 extern K_ITEM *find_prev_blocks(int32_t height);
 extern const char *blocks_confirmed(char *confirmed);
+extern void zero_on_new_block();
+extern void set_block_share_counters();
 extern cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b);
@@ -1293,6 +1290,7 @@ extern cmp_t cmp_userstats(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_workername(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b);
+extern bool userstats_starttimeband(USERSTATS *row, tv_t *statsdate);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
