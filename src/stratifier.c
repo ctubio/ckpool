@@ -1103,7 +1103,7 @@ static void drop_client(int64_t id)
 
 	LOGINFO("Stratifier dropping client %ld", id);
 
-	ck_ilock(&instance_lock);
+	ck_wlock(&instance_lock);
 	client = __instance_by_id(id);
 	if (client) {
 		stratum_instance_t *old_client = NULL;
@@ -1113,15 +1113,13 @@ static void drop_client(int64_t id)
 			client->authorised = false;
 		}
 
-		ck_ulock(&instance_lock);
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		ck_dwilock(&instance_lock);
 	}
-	ck_uilock(&instance_lock);
+	ck_wunlock(&instance_lock);
 
 	if (dec)
 		dec_worker(client->user_instance);
@@ -2004,19 +2002,17 @@ static bool new_share(const uchar *hash, int64_t  wb_id)
 	share_t *share, *match = NULL;
 	bool ret = false;
 
-	ck_ilock(&share_lock);
+	ck_wlock(&share_lock);
 	HASH_FIND(hh, shares, hash, 32, match);
 	if (match)
 		goto out_unlock;
 	share = ckzalloc(sizeof(share_t));
 	memcpy(share->hash, hash, 32);
 	share->workbase_id = wb_id;
-	ck_ulock(&share_lock);
 	HASH_ADD(hh, shares, hash, 32, share);
-	ck_dwilock(&share_lock);
 	ret = true;
 out_unlock:
-	ck_uilock(&share_lock);
+	ck_wunlock(&share_lock);
 
 	return ret;
 }
@@ -2543,15 +2539,13 @@ static void srecv_process(ckpool_t *ckp, smsg_t *msg)
 	json_object_clear(val);
 
 	/* Parse the message here */
-	ck_ilock(&instance_lock);
+	ck_wlock(&instance_lock);
 	instance = __instance_by_id(msg->client_id);
 	if (!instance) {
 		/* client_id instance doesn't exist yet, create one */
-		ck_ulock(&instance_lock);
 		instance = __stratum_add_instance(ckp, msg->client_id);
-		ck_dwilock(&instance_lock);
 	}
-	ck_uilock(&instance_lock);
+	ck_wunlock(&instance_lock);
 
 	parse_instance_msg(msg);
 
