@@ -171,6 +171,12 @@ struct ckpool_instance {
 	server_instance_t *btcdbackup;
 };
 
+#ifdef USE_CKDB
+#define CKP_STANDALONE(CKP) ((CKP)->standalone == true)
+#else
+#define CKP_STANDALONE(CKP) (true)
+#endif
+
 ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
 bool ckmsgq_empty(ckmsgq_t *ckmsgq);

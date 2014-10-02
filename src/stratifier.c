@@ -539,7 +539,7 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 		fflush(stdout);
 	}
 
-	if (ckp->standalone)
+	if (CKP_STANDALONE(ckp))
 		return json_decref(val);
 
 	json_msg = ckdb_msg(ckp, val, idtype);
@@ -1683,7 +1683,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
 		  user_instance->username);
 	client->workername = strdup(buf);
-	if (client->ckp->standalone)
+	if (CKP_STANDALONE(client->ckp))
 		ret = true;
 	else {
 		*errnum = send_recv_auth(client);
@@ -2203,7 +2203,7 @@ out_unlock:
 	json_set_int(val, "workinfoid", id);
 	json_set_int(val, "clientid", client->id);
 	json_set_string(val, "enonce1", client->enonce1);
-	if (!ckp->standalone)
+	if (!CKP_STANDALONE(ckp))
 		json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
@@ -3197,7 +3197,7 @@ int stratifier(proc_instance_t *pi)
 	sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 	stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
-	if (!ckp->standalone)
+	if (!CKP_STANDALONE(ckp))
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
 
 	cklock_init(&workbase_lock);

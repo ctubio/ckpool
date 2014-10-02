@@ -1058,6 +1058,7 @@ static void *watchdog(void *arg)
 	return NULL;
 }
 
+#ifdef USE_CKDB
 static struct option long_options[] = {
 	{"standalone",	no_argument,		0,	'A'},
 	{"config",	required_argument,	0,	'c'},
@@ -1075,6 +1076,22 @@ static struct option long_options[] = {
 	{"sockdir",	required_argument,	0,	's'},
 	{0, 0, 0, 0}
 };
+#else
+static struct option long_options[] = {
+	{"config",	required_argument,	0,	'c'},
+	{"group",	required_argument,	0,	'g'},
+	{"handover",	no_argument,		0,	'H'},
+	{"help",	no_argument,		0,	'h'},
+	{"killold",	no_argument,		0,	'k'},
+	{"log-shares",	no_argument,		0,	'L'},
+	{"loglevel",	required_argument,	0,	'l'},
+	{"name",	required_argument,	0,	'n'},
+	{"passthrough",	no_argument,		0,	'P'},
+	{"proxy",	no_argument,		0,	'p'},
+	{"sockdir",	required_argument,	0,	's'},
+	{0, 0, 0, 0}
+};
+#endif
 
 int main(int argc, char **argv)
 {
@@ -1193,7 +1210,7 @@ int main(int argc, char **argv)
 	}
 	trail_slash(&ckp.socket_dir);
 
-	if (!ckp.standalone) {
+	if (!CKP_STANDALONE(&ckp)) {
 		if (!ckp.ckdb_name)
 			ckp.ckdb_name = "ckdb";
 		if (!ckp.ckdb_sockdir) {
