@@ -237,9 +237,10 @@ reparse:
 		return;
 	}
 	memcpy(msg, client->buf, buflen);
-	msg[buflen] = 0;
+	msg[buflen] = '\0';
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
+	client->buf[client->bufofs] = '\0';
 	if (!(val = json_loads(msg, 0, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
@@ -270,6 +271,8 @@ reparse:
 
 	if (client->bufofs)
 		goto reparse;
+	if (moredata)
+		goto retry;
 }
 
 /* Waits on fds ready to read on from the list stored in conn_instance and
