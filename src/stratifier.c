@@ -1748,6 +1748,14 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	int64_t next_blockid, optimal;
 	tv_t now_t;
 
+	mutex_lock(&stats_lock);
+	if (valid) {
+		stats.unaccounted_shares++;
+		stats.unaccounted_diff_shares += diff;
+	} else
+		stats.unaccounted_rejects += diff;
+	mutex_unlock(&stats_lock);
+
 	/* Ignore successive rejects in count if they haven't submitted a valid
 	 * share yet. */
 	if (unlikely(!client->ssdc && !valid))
@@ -1794,14 +1802,6 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	bdiff = sane_tdiff(&now_t, &client->first_share);
 	bias = time_bias(bdiff, 300);
 	tdiff = sane_tdiff(&now_t, &client->ldc);
-
-	mutex_lock(&stats_lock);
-	if (valid) {
-		stats.unaccounted_shares++;
-		stats.unaccounted_diff_shares += diff;
-	} else
-		stats.unaccounted_rejects += diff;
-	mutex_unlock(&stats_lock);
 
 	/* Check the difficulty every 240 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
