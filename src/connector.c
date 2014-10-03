@@ -387,7 +387,8 @@ void *sender(void *arg)
 		ret = wait_write_select(fd, 0);
 		if (ret < 1) {
 			if (ret < 0) {
-				LOGDEBUG("Discarding message sent to interrupted client");
+				LOGINFO("Client id %d fd %d interrupted", client->id, fd);
+				invalidate_client(ckp, ci, client);
 				free(sender_send->buf);
 				free(sender_send);
 				continue;
@@ -404,7 +405,7 @@ void *sender(void *arg)
 		while (sender_send->len) {
 			ret = send(fd, sender_send->buf + ofs, sender_send->len , 0);
 			if (unlikely(ret < 0)) {
-				LOGINFO("Client id %d disconnected", client->id);
+				LOGINFO("Client id %d fd %d disconnected", client->id, fd);
 				invalidate_client(ckp, ci, client);
 				break;
 			}
