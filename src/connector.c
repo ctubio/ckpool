@@ -286,6 +286,11 @@ retry:
 
 	ck_rlock(&ci->lock);
 	HASH_ITER(fdhh, fdclients, client, tmp) {
+		if (unlikely(client->fd == -1)) {
+			LOGWARNING("Client id %d is still in fdclients hashtable with invalidated fd!",
+				   client->id);
+			continue;
+		}
 		fds[nfds].fd = client->fd;
 		fds[nfds].events = POLLIN;
 		fds[nfds].revents = 0;
