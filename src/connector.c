@@ -187,22 +187,12 @@ static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
 	ckpool_t *ckp = ci->pi->ckp;
 	char msg[PAGESIZE], *eol;
-	int buflen, ret, flags;
-	bool moredata = false;
+	int buflen, ret;
 	json_t *val;
 
-retry:
 	buflen = PAGESIZE - client->bufofs;
-	if (moredata)
-		flags = MSG_DONTWAIT;
-	else
-		flags = 0;
-	ret = recv(client->fd, client->buf + client->bufofs, buflen, flags);
+	ret = recv(client->fd, client->buf + client->bufofs, buflen, 0);
 	if (ret < 1) {
-		/* Nothing else ready to be read */
-		if (!ret && flags)
-			return;
-
 		/* We should have something to read if called since poll set
 		 * this fd's revents status so if there's nothing it means the
 		 * client has disconnected. */
@@ -212,10 +202,6 @@ retry:
 		return;
 	}
 	client->bufofs += ret;
-	if (client->bufofs == PAGESIZE)
-		moredata = true;
-	else
-		moredata = false;
 reparse:
 	eol = memchr(client->buf, '\n', client->bufofs);
 	if (!eol) {
@@ -224,8 +210,6 @@ reparse:
 			invalidate_client(ckp, ci, client);
 			return;
 		}
-		if (moredata)
-			goto retry;
 		return;
 	}
 
@@ -271,8 +255,6 @@ reparse:
 
 	if (client->bufofs)
 		goto reparse;
-	if (moredata)
-		goto retry;
 }
 
 /* Waits on fds ready to read on from the list stored in conn_instance and
