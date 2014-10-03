@@ -2991,11 +2991,17 @@ static void *statsupdate(void *arg)
 				}
 				ghs = worker->dsps1 * nonces;
 				suffix_string(ghs, suffix1, 16, 0);
-				ghs = worker->dsps5 * nonces;
+
+				bias = time_bias(tdiff, 300);
+				ghs = worker->dsps5 * nonces / bias;
 				suffix_string(ghs, suffix5, 16, 0);
-				ghs = worker->dsps60 * nonces;
+
+				bias = time_bias(tdiff, 3600);
+				ghs = worker->dsps60 * nonces / bias;
 				suffix_string(ghs, suffix60, 16, 0);
-				ghs = worker->dsps1440 * nonces;
+
+				bias = time_bias(tdiff, 86400);
+				ghs = worker->dsps1440 * nonces / bias;
 				suffix_string(ghs, suffix1440, 16, 0);
 
 				JSON_CPACK(val, "{ss,ss,ss,ss}",
