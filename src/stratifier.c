@@ -2892,10 +2892,9 @@ static void *statsupdate(void *arg)
 		timersub(&now, &stats.start_time, &diff);
 		tdiff = diff.tv_sec + (double)diff.tv_usec / 1000000;
 
-		bias = time_bias(tdiff, 60);
-		ghs1 = stats.dsps1 * nonces / bias;
+		ghs1 = stats.dsps1 * nonces;
 		suffix_string(ghs1, suffix1, 16, 0);
-		sps1 = stats.sps1 / bias;
+		sps1 = stats.sps1;
 
 		bias = time_bias(tdiff, 300);
 		ghs5 = stats.dsps5 * nonces / bias;
@@ -3028,11 +3027,17 @@ static void *statsupdate(void *arg)
 			}
 			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
-			ghs = instance->dsps5 * nonces;
+
+			bias = time_bias(tdiff, 300);
+			ghs = instance->dsps5 * nonces / bias;
 			suffix_string(ghs, suffix5, 16, 0);
-			ghs = instance->dsps60 * nonces;
+
+			bias = time_bias(tdiff, 3600);
+			ghs = instance->dsps60 * nonces / bias;
 			suffix_string(ghs, suffix60, 16, 0);
-			ghs = instance->dsps1440 * nonces;
+
+			bias = time_bias(tdiff, 86400);
+			ghs = instance->dsps1440 * nonces / bias;
 			suffix_string(ghs, suffix1440, 16, 0);
 
 			JSON_CPACK(val, "{ss,ss,ss,ss,si}",
