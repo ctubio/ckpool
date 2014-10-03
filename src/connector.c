@@ -308,8 +308,9 @@ retry:
 
 		if (!client) {
 			/* Probably already removed */
-			LOGDEBUG("Failed to find client with polled fd %d in hashtable",
-				 fd);
+			LOGINFO("Failed to find client with polled fd %d in hashtable, closing",
+				fd);
+			close(fd);
 		} else
 			parse_client_msg(ci, client);
 
