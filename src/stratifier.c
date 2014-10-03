@@ -2874,8 +2874,8 @@ static void *statsupdate(void *arg)
 	sleep(1);
 
 	while (42) {
+		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias, bias5, bias60, bias1440;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
-		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
 		char suffix360[16], suffix1440[16];
 		user_instance_t *instance, *tmpuser;
 		stratum_instance_t *client, *tmp;
@@ -2896,27 +2896,27 @@ static void *statsupdate(void *arg)
 		suffix_string(ghs1, suffix1, 16, 0);
 		sps1 = stats.sps1;
 
-		bias = time_bias(tdiff, 300);
-		ghs5 = stats.dsps5 * nonces / bias;
+		bias5 = time_bias(tdiff, 300);
+		ghs5 = stats.dsps5 * nonces / bias5;
 		suffix_string(ghs5, suffix5, 16, 0);
-		sps5 = stats.sps5 / bias;
+		sps5 = stats.sps5 / bias5;
 
 		bias = time_bias(tdiff, 900);
 		ghs15 = stats.dsps15 * nonces / bias;
 		suffix_string(ghs15, suffix15, 16, 0);
 		sps15 = stats.sps15 / bias;
 
-		bias = time_bias(tdiff, 3600);
-		ghs60 = stats.dsps60 * nonces / bias;
+		bias60 = time_bias(tdiff, 3600);
+		ghs60 = stats.dsps60 * nonces / bias60;
 		suffix_string(ghs60, suffix60, 16, 0);
-		sps60 = stats.sps60 / bias;
+		sps60 = stats.sps60 / bias60;
 
 		bias = time_bias(tdiff, 21600);
 		ghs360 = stats.dsps360 * nonces / bias;
 		suffix_string(ghs360, suffix360, 16, 0);
 
-		bias = time_bias(tdiff, 86400);
-		ghs1440 = stats.dsps1440 * nonces / bias;
+		bias1440 = time_bias(tdiff, 86400);
+		ghs1440 = stats.dsps1440 * nonces / bias1440;
 		suffix_string(ghs1440, suffix1440, 16, 0);
 
 		snprintf(fname, 511, "%s/pool/pool.status", ckp->logdir);
@@ -2992,16 +2992,13 @@ static void *statsupdate(void *arg)
 				ghs = worker->dsps1 * nonces;
 				suffix_string(ghs, suffix1, 16, 0);
 
-				bias = time_bias(tdiff, 300);
-				ghs = worker->dsps5 * nonces / bias;
+				ghs = worker->dsps5 * nonces / bias5;
 				suffix_string(ghs, suffix5, 16, 0);
 
-				bias = time_bias(tdiff, 3600);
-				ghs = worker->dsps60 * nonces / bias;
+				ghs = worker->dsps60 * nonces / bias60;
 				suffix_string(ghs, suffix60, 16, 0);
 
-				bias = time_bias(tdiff, 86400);
-				ghs = worker->dsps1440 * nonces / bias;
+				ghs = worker->dsps1440 * nonces / bias1440;
 				suffix_string(ghs, suffix1440, 16, 0);
 
 				JSON_CPACK(val, "{ss,ss,ss,ss}",
@@ -3034,16 +3031,13 @@ static void *statsupdate(void *arg)
 			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
 
-			bias = time_bias(tdiff, 300);
-			ghs = instance->dsps5 * nonces / bias;
+			ghs = instance->dsps5 * nonces / bias5;
 			suffix_string(ghs, suffix5, 16, 0);
 
-			bias = time_bias(tdiff, 3600);
-			ghs = instance->dsps60 * nonces / bias;
+			ghs = instance->dsps60 * nonces / bias60;
 			suffix_string(ghs, suffix60, 16, 0);
 
-			bias = time_bias(tdiff, 86400);
-			ghs = instance->dsps1440 * nonces / bias;
+			ghs = instance->dsps1440 * nonces / bias1440;
 			suffix_string(ghs, suffix1440, 16, 0);
 
 			JSON_CPACK(val, "{ss,ss,ss,ss,si}",
