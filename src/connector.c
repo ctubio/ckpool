@@ -92,7 +92,7 @@ void *acceptor(void *arg)
 	conn_instance_t *ci = (conn_instance_t *)arg;
 	client_instance_t *client, *old_client;
 	socklen_t address_len;
-	int fd;
+	int fd, port;
 
 	rename_proc("acceptor");
 
@@ -115,10 +115,12 @@ retry:
 		case AF_INET:
 			inet4_in = (struct sockaddr_in *)&client->address;
 			inet_ntop(AF_INET, &inet4_in->sin_addr, client->address_name, INET6_ADDRSTRLEN);
+			port = htons(inet4_in->sin_port);
 			break;
 		case AF_INET6:
 			inet6_in = (struct sockaddr_in6 *)&client->address;
 			inet_ntop(AF_INET6, &inet6_in->sin6_addr, client->address_name, INET6_ADDRSTRLEN);
+			port = htons(inet6_in->sin6_port);
 			break;
 		default:
 			LOGWARNING("Unknown INET type for client %d on socket %d",
@@ -130,7 +132,7 @@ retry:
 
 	keep_sockalive(fd);
 
-	LOGINFO("Connected new client %d on socket %d from %s", ci->nfds, fd, client->address_name);
+	LOGINFO("Connected new client %d on socket %d from %s:%d", ci->nfds, fd, client->address_name, port);
 
 	client->fd = fd;
 
