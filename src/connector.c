@@ -186,12 +186,17 @@ static void send_client(conn_instance_t *ci, int64_t id, char *buf);
 static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
 	ckpool_t *ckp = ci->pi->ckp;
-	int buflen, ret, flags = 0;
 	char msg[PAGESIZE], *eol;
+	int buflen, ret, flags;
+	bool moredata = false;
 	json_t *val;
 
 retry:
 	buflen = PAGESIZE - client->bufofs;
+	if (moredata)
+		flags = MSG_DONTWAIT;
+	else
+		flags = 0;
 	ret = recv(client->fd, client->buf + client->bufofs, buflen, flags);
 	if (ret < 1) {
 		/* Nothing else ready to be read */
@@ -207,7 +212,10 @@ retry:
 		return;
 	}
 	client->bufofs += ret;
-	flags = MSG_DONTWAIT;
+	if (client->bufofs == PAGESIZE)
+		moredata = true;
+	else
+		moredata = false;
 reparse:
 	eol = memchr(client->buf, '\n', client->bufofs);
 	if (!eol) {
@@ -216,7 +224,9 @@ reparse:
 			invalidate_client(ckp, ci, client);
 			return;
 		}
-		goto retry;
+		if (moredata)
+			goto retry;
+		return;
 	}
 
 	/* Do something useful with this message now */
@@ -261,7 +271,8 @@ reparse:
 
 	if (client->bufofs)
 		goto reparse;
-	goto retry;
+	if (moredata)
+		goto retry;
 }
 
 /* Waits on fds ready to read on from the list stored in conn_instance and
