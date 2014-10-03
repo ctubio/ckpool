@@ -437,7 +437,8 @@ void _Close(int *fd)
 	if (*fd < 0)
 		return;
 	LOGDEBUG("Closing file handle %d", *fd);
-	close(*fd);
+	if (unlikely(close(*fd)))
+		LOGWARNING("Close of fd %d failed with errno %d:%s", *fd, errno, strerror(errno));
 	*fd = -1;
 }
 

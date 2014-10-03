@@ -155,6 +155,10 @@ static int drop_client(conn_instance_t *ci, client_instance_t *client)
 	ck_wlock(&ci->lock);
 	fd = client->fd;
 	if (fd != -1) {
+		const struct linger so_linger = { 1, 0 };
+
+		if (unlikely(setsockopt(client->fd, SOL_SOCKET, SO_LINGER, &so_linger, sizeof(so_linger))))
+			LOGWARNING("setsockopt failed with errno %d:%s", errno, strerror(errno));
 		Close(client->fd);
 		HASH_DEL(clients, client);
 		HASH_DELETE(fdhh, fdclients, client);
