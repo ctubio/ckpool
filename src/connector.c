@@ -169,11 +169,8 @@ static int drop_client(conn_instance_t *ci, client_instance_t *client)
 static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instance_t *client)
 {
 	char buf[256];
-	int fd;
 
-	fd = drop_client(ci, client);
-	if (fd == -1)
-		return;
+	drop_client(ci, client);
 	if (ckp->passthrough)
 		return;
 	sprintf(buf, "dropclient=%ld", client->id);
@@ -459,7 +456,8 @@ static void send_client(conn_instance_t *ci, int64_t id, char *buf)
 
 	if (unlikely(fd == -1)) {
 		if (client) {
-			LOGINFO("Client id %ld disconnected", id);
+			/* This shouldn't happen */
+			LOGWARNING("Client id %ld disconnected but fd already invalidated!", id);
 			invalidate_client(ci->pi->ckp, ci, client);
 		} else
 			LOGINFO("Connector failed to find client id %ld to send to", id);
