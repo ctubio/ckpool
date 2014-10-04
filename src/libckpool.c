@@ -418,6 +418,13 @@ void keep_sockalive(int fd)
 	setsockopt(fd, SOL_TCP, TCP_KEEPINTVL, &tcp_keepintvl, sizeof(tcp_keepintvl));
 }
 
+void nolinger_socket(int fd)
+{
+	const struct linger so_linger = { 1, 0 };
+
+	setsockopt(fd, SOL_SOCKET, SO_LINGER, &so_linger, sizeof(so_linger));
+}
+
 void noblock_socket(int fd)
 {
 	int flags = fcntl(fd, F_GETFL, 0);
