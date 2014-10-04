@@ -1443,6 +1443,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		if (!new_enonce1(client)) {
 			stratum_send_message(client, "Pool full of clients");
+			client->reject = 2;
 			return json_string("proxy full");
 		}
 		LOGINFO("Set new subscription %ld to new enonce1 %s", client->id,
