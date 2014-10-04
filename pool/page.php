@@ -164,10 +164,10 @@ function pgtop($dotop, $user, $douser)
 	if (isset($info['p_hashrate5m']))
 		$phr = $info['p_hashrate5m'];
 
-	if (isset($info['p_elapsed'])
-	and isset($info['p_hashrate1hr'])
-	and $info['p_elapsed'] > 3600)
-		$phr = $info['p_hashrate1hr'];
+//	if (isset($info['p_elapsed'])
+//	and isset($info['p_hashrate1hr'])
+//	and $info['p_elapsed'] > 3600)
+//		$phr = $info['p_hashrate1hr'];
 
 	if ($phr == '?')
 		$phr = '?THs';
