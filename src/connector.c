@@ -92,7 +92,7 @@ void *acceptor(void *arg)
 	conn_instance_t *ci = (conn_instance_t *)arg;
 	client_instance_t *client, *old_client;
 	socklen_t address_len;
-	int fd;
+	int fd, port;
 
 	rename_proc("acceptor");
 
@@ -115,22 +115,25 @@ retry:
 		case AF_INET:
 			inet4_in = (struct sockaddr_in *)&client->address;
 			inet_ntop(AF_INET, &inet4_in->sin_addr, client->address_name, INET6_ADDRSTRLEN);
+			port = htons(inet4_in->sin_port);
 			break;
 		case AF_INET6:
 			inet6_in = (struct sockaddr_in6 *)&client->address;
 			inet_ntop(AF_INET6, &inet6_in->sin6_addr, client->address_name, INET6_ADDRSTRLEN);
+			port = htons(inet6_in->sin6_port);
 			break;
 		default:
 			LOGWARNING("Unknown INET type for client %d on socket %d",
 				   ci->nfds, fd);
-			close(fd);
+			Close(fd);
 			free(client);
 			goto retry;
 	}
 
 	keep_sockalive(fd);
+	nolinger_socket(fd);
 
-	LOGINFO("Connected new client %d on socket %d from %s", ci->nfds, fd, client->address_name);
+	LOGINFO("Connected new client %d on socket %d from %s:%d", ci->nfds, fd, client->address_name, port);
 
 	client->fd = fd;
 
@@ -153,11 +156,10 @@ static int drop_client(conn_instance_t *ci, client_instance_t *client)
 	ck_wlock(&ci->lock);
 	fd = client->fd;
 	if (fd != -1) {
-		close(fd);
+		Close(client->fd);
 		HASH_DEL(clients, client);
 		HASH_DELETE(fdhh, fdclients, client);
 		LL_PREPEND(dead_clients, client);
-		client->fd = -1;
 	}
 	ck_wunlock(&ci->lock);
 
@@ -170,11 +172,8 @@ static int drop_client(conn_instance_t *ci, client_instance_t *client)
 static void invalidate_client(ckpool_t *ckp, conn_instance_t *ci, client_instance_t *client)
 {
 	char buf[256];
-	int fd;
 
-	fd = drop_client(ci, client);
-	if (fd == -1)
-		return;
+	drop_client(ci, client);
 	if (ckp->passthrough)
 		return;
 	sprintf(buf, "dropclient=%ld", client->id);
@@ -185,34 +184,37 @@ static void send_client(conn_instance_t *ci, int64_t id, char *buf);
 
 static void parse_client_msg(conn_instance_t *ci, client_instance_t *client)
 {
+	int buflen, ret, selfail = 0;
 	ckpool_t *ckp = ci->pi->ckp;
-	int buflen, ret, flags = 0;
 	char msg[PAGESIZE], *eol;
-	bool moredata = false;
 	json_t *val;
 
 retry:
-	buflen = PAGESIZE - client->bufofs;
-	if (moredata)
-		flags = MSG_DONTWAIT;
-	ret = recv(client->fd, client->buf + client->bufofs, buflen, flags);
+	/* Select should always return positive after poll unless we have
+	 * been disconnected. On retries, decide whether we should do further
+	 * reads based on select readiness and only fail if we get an error. */
+	ret = wait_read_select(client->fd, 0);
 	if (ret < 1) {
-		/* Nothing else ready to be read */
-		if (!ret && flags)
+		if (ret > selfail)
 			return;
-
+		LOGINFO("Client fd %d disconnected - select fail with bufofs %d ret %d errno %d %s",
+			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
+		invalidate_client(ckp, ci, client);
+		return;
+	}
+	selfail = -1;
+	buflen = PAGESIZE - client->bufofs;
+	ret = recv(client->fd, client->buf + client->bufofs, buflen, 0);
+	if (ret < 1) {
 		/* We should have something to read if called since poll set
 		 * this fd's revents status so if there's nothing it means the
 		 * client has disconnected. */
-		LOGINFO("Client fd %d disconnected", client->fd);
+		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
+			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, ci, client);
 		return;
 	}
 	client->bufofs += ret;
-	if (client->bufofs == PAGESIZE)
-		moredata = true;
-	else
-		moredata = false;
 reparse:
 	eol = memchr(client->buf, '\n', client->bufofs);
 	if (!eol) {
@@ -221,9 +223,7 @@ reparse:
 			invalidate_client(ckp, ci, client);
 			return;
 		}
-		if (moredata)
-			goto retry;
-		return;
+		goto retry;
 	}
 
 	/* Do something useful with this message now */
@@ -234,9 +234,10 @@ reparse:
 		return;
 	}
 	memcpy(msg, client->buf, buflen);
-	msg[buflen] = 0;
+	msg[buflen] = '\0';
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
+	client->buf[client->bufofs] = '\0';
 	if (!(val = json_loads(msg, 0, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
@@ -267,6 +268,7 @@ reparse:
 
 	if (client->bufofs)
 		goto reparse;
+	goto retry;
 }
 
 /* Waits on fds ready to read on from the list stored in conn_instance and
@@ -287,6 +289,11 @@ retry:
 
 	ck_rlock(&ci->lock);
 	HASH_ITER(fdhh, fdclients, client, tmp) {
+		if (unlikely(client->fd == -1)) {
+			LOGWARNING("Client id %d is still in fdclients hashtable with invalidated fd!",
+				   client->id);
+			continue;
+		}
 		fds[nfds].fd = client->fd;
 		fds[nfds].events = POLLIN;
 		fds[nfds].revents = 0;
@@ -298,7 +305,7 @@ retry:
 		cksleep_ms(100);
 		goto retry;
 	}
-	ret = poll(fds, nfds, 1000);
+	ret = poll(fds, nfds, 100);
 	if (unlikely(ret < 0)) {
 		LOGERR("Failed to poll in receiver");
 		goto out;
@@ -398,7 +405,8 @@ void *sender(void *arg)
 		ret = wait_write_select(fd, 0);
 		if (ret < 1) {
 			if (ret < 0) {
-				LOGDEBUG("Discarding message sent to interrupted client");
+				LOGINFO("Client id %d fd %d interrupted", client->id, fd);
+				invalidate_client(ckp, ci, client);
 				free(sender_send->buf);
 				free(sender_send);
 				continue;
@@ -415,7 +423,7 @@ void *sender(void *arg)
 		while (sender_send->len) {
 			ret = send(fd, sender_send->buf + ofs, sender_send->len , 0);
 			if (unlikely(ret < 0)) {
-				LOGINFO("Client id %d disconnected", client->id);
+				LOGINFO("Client id %d fd %d disconnected", client->id, fd);
 				invalidate_client(ckp, ci, client);
 				break;
 			}
@@ -456,7 +464,8 @@ static void send_client(conn_instance_t *ci, int64_t id, char *buf)
 
 	if (unlikely(fd == -1)) {
 		if (client) {
-			LOGINFO("Client id %ld disconnected", id);
+			/* This shouldn't happen */
+			LOGWARNING("Client id %ld disconnected but fd already invalidated!", id);
 			invalidate_client(ci->pi->ckp, ci, client);
 		} else
 			LOGINFO("Connector failed to find client id %ld to send to", id);
@@ -517,7 +526,7 @@ static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 	LOGWARNING("%s connector ready", ckp->name);
 
 retry:
-	close(sockd);
+	Close(sockd);
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
 		LOGEMERG("Failed to accept on connector socket, exiting");
@@ -621,7 +630,7 @@ retry:
 
 	goto retry;
 out:
-	close(sockd);
+	Close(sockd);
 	dealloc(buf);
 	return ret;
 }
@@ -684,7 +693,7 @@ int connector(proc_instance_t *pi)
 		} while (++tries < 25);
 		if (ret < 0) {
 			LOGERR("Connector failed to bind to socket for 2 minutes");
-			close(sockd);
+			Close(sockd);
 			goto out;
 		}
 	}
@@ -694,7 +703,7 @@ int connector(proc_instance_t *pi)
 	ret = listen(sockd, 10);
 	if (ret < 0) {
 		LOGERR("Connector failed to listen on socket");
-		close(sockd);
+		Close(sockd);
 		goto out;
 	}
 

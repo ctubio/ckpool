@@ -272,6 +272,7 @@ struct stratum_instance {
 	int ssdc; /* Shares since diff change */
 	tv_t first_share;
 	tv_t last_share;
+	time_t first_invalid; /* Time of first invalid in run of non stale rejects */
 	time_t start_time;
 
 	char address[INET6_ADDRSTRLEN];
@@ -279,6 +280,9 @@ struct stratum_instance {
 	bool authorised;
 	bool idle;
 	bool notified_idle;
+	int reject;	/* Indicator that this client is having a run of rejects
+			 * or other problem and should be dropped lazily if
+			 * this is set to 2 */
 
 	user_instance_t *user_instance;
 	worker_instance_t *worker_instance;
@@ -539,7 +543,7 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 		fflush(stdout);
 	}
 
-	if (ckp->standalone)
+	if (CKP_STANDALONE(ckp))
 		return json_decref(val);
 
 	json_msg = ckdb_msg(ckp, val, idtype);
@@ -1103,7 +1107,7 @@ static void drop_client(int64_t id)
 
 	LOGINFO("Stratifier dropping client %ld", id);
 
-	ck_ilock(&instance_lock);
+	ck_wlock(&instance_lock);
 	client = __instance_by_id(id);
 	if (client) {
 		stratum_instance_t *old_client = NULL;
@@ -1113,15 +1117,13 @@ static void drop_client(int64_t id)
 			client->authorised = false;
 		}
 
-		ck_ulock(&instance_lock);
 		HASH_DEL(stratum_instances, client);
 		HASH_FIND(hh, disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64)
 			HASH_ADD(hh, disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		ck_dwilock(&instance_lock);
 	}
-	ck_uilock(&instance_lock);
+	ck_wunlock(&instance_lock);
 
 	if (dec)
 		dec_worker(client->user_instance);
@@ -1240,18 +1242,18 @@ retry:
 	dealloc(buf);
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
-		close(sockd);
+		Close(sockd);
 		LOGWARNING("Failed to get message in stratum_loop");
 		goto retry;
 	}
 	if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Stratifier received ping request");
 		send_unix_msg(sockd, "pong");
-		close(sockd);
+		Close(sockd);
 		goto retry;
 	}
 
-	close(sockd);
+	Close(sockd);
 	LOGDEBUG("Stratifier received request: %s", buf);
 	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
@@ -1441,6 +1443,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		if (!new_enonce1(client)) {
 			stratum_send_message(client, "Pool full of clients");
+			client->reject = 2;
 			return json_string("proxy full");
 		}
 		LOGINFO("Set new subscription %ld to new enonce1 %s", client->id,
@@ -1683,7 +1686,7 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
 		  user_instance->username);
 	client->workername = strdup(buf);
-	if (client->ckp->standalone)
+	if (CKP_STANDALONE(client->ckp))
 		ret = true;
 	else {
 		*errnum = send_recv_auth(client);
@@ -1742,7 +1745,8 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 	return tdiff;
 }
 
-static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid)
+static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid,
+		       bool submit)
 {
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
@@ -1750,9 +1754,16 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	int64_t next_blockid, optimal;
 	tv_t now_t;
 
-	/* Ignore successive rejects in count if they haven't submitted a valid
-	 * share yet. */
-	if (unlikely(!client->ssdc && !valid))
+	mutex_lock(&stats_lock);
+	if (valid) {
+		stats.unaccounted_shares++;
+		stats.unaccounted_diff_shares += diff;
+	} else
+		stats.unaccounted_rejects += diff;
+	mutex_unlock(&stats_lock);
+
+	/* Count only accepted and stale rejects in diff calculation. */
+	if (!valid && !submit)
 		return;
 
 	tv_time(&now_t);
@@ -1797,14 +1808,6 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	bias = time_bias(bdiff, 300);
 	tdiff = sane_tdiff(&now_t, &client->ldc);
 
-	mutex_lock(&stats_lock);
-	if (valid) {
-		stats.unaccounted_shares++;
-		stats.unaccounted_diff_shares += diff;
-	} else
-		stats.unaccounted_rejects += diff;
-	mutex_unlock(&stats_lock);
-
 	/* Check the difficulty every 240 seconds or as many shares as we
 	 * should have had in that time, whichever comes first. */
 	if (client->ssdc < 72 && tdiff < 240)
@@ -1840,6 +1843,8 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 			optimal = client->suggest_diff;
 	} else if (optimal < worker->mindiff)
 		optimal = worker->mindiff;
+	if (ckp->maxdiff && optimal > ckp->maxdiff)
+		optimal = ckp->maxdiff;
 	if (optimal > network_diff)
 		optimal = network_diff;
 	if (client->diff == optimal)
@@ -2004,19 +2009,17 @@ static bool new_share(const uchar *hash, int64_t  wb_id)
 	share_t *share, *match = NULL;
 	bool ret = false;
 
-	ck_ilock(&share_lock);
+	ck_wlock(&share_lock);
 	HASH_FIND(hh, shares, hash, 32, match);
 	if (match)
 		goto out_unlock;
 	share = ckzalloc(sizeof(share_t));
 	memcpy(share->hash, hash, 32);
 	share->workbase_id = wb_id;
-	ck_ulock(&share_lock);
 	HASH_ADD(hh, shares, hash, 32, share);
-	ck_dwilock(&share_lock);
 	ret = true;
 out_unlock:
-	ck_uilock(&share_lock);
+	ck_wunlock(&share_lock);
 
 	return ret;
 }
@@ -2053,17 +2056,19 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char *fname = NULL, *s, *nonce2;
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
+	workbase_t *wb = NULL;
 	char idstring[20];
 	uint32_t ntime32;
-	workbase_t *wb;
 	uchar hash[32];
-	int64_t id;
+	time_t now_t;
 	json_t *val;
+	int64_t id;
 	ts_t now;
 	FILE *fp;
 	int len;
 
 	ts_realtime(&now);
+	now_t = now.tv_sec;
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
 	if (unlikely(!json_is_array(params_val))) {
@@ -2155,7 +2160,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	}
 	invalid = false;
 out_submit:
-	if (wb->proxy && sdiff >= wdiff)
+	if (sdiff >= wdiff)
 		submit = true;
 out_unlock:
 	ck_runlock(&workbase_lock);
@@ -2191,19 +2196,19 @@ out_unlock:
 
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
-	if (submit) {
+	if (wb && wb->proxy && submit) {
 		LOGINFO("Submitting share upstream: %s", hexhash);
 		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
 	}
 
-	add_submit(ckp, client, diff, result);
+	add_submit(ckp, client, diff, result, submit);
 
 	/* Now write to the pool's sharelog. */
 	val = json_object();
 	json_set_int(val, "workinfoid", id);
 	json_set_int(val, "clientid", client->id);
 	json_set_string(val, "enonce1", client->enonce1);
-	if (!ckp->standalone)
+	if (!CKP_STANDALONE(ckp))
 		json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
@@ -2237,6 +2242,26 @@ out_unlock:
 	}
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
+	if ((!result && !submit) || !share) {
+		/* Is this the first in a run of invalids? */
+		if (client->first_invalid < client->last_share.tv_sec || !client->first_invalid)
+			client->first_invalid = now_t;
+		else if (client->first_invalid && client->first_invalid < now_t - 120) {
+			LOGNOTICE("Client %d rejecting for 120s, disconnecting", client->id);
+			stratum_send_message(client, "Disconnecting for continuous invalid shares");
+			client->reject = 2;
+		} else if (client->first_invalid && client->first_invalid < now_t - 60) {
+			if (!client->reject) {
+				LOGINFO("Client %d rejecting for 60s, sending diff", client->id);
+				stratum_send_diff(client);
+				client->reject = 1;
+			}
+		}
+	} else {
+		client->first_invalid = 0;
+		client->reject = 0;
+	}
+
 	if (!share) {
 		JSON_CPACK(val, "{sI,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"clientid", client->id,
@@ -2403,6 +2428,13 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 		return;
 	}
 
+	if (unlikely(client->reject == 2)) {
+		LOGINFO("Dropping client %d tagged for lazy invalidation", client_id);
+		snprintf(buf, 255, "dropclient=%ld", client->id);
+		send_proc(client->ckp->connector, buf);
+		return;
+	}
+
 	/* Random broken clients send something not an integer as the id so we copy
 	 * the json item for id_val as is for the response. */
 	method = json_string_value(method_val);
@@ -2543,15 +2575,13 @@ static void srecv_process(ckpool_t *ckp, smsg_t *msg)
 	json_object_clear(val);
 
 	/* Parse the message here */
-	ck_ilock(&instance_lock);
+	ck_wlock(&instance_lock);
 	instance = __instance_by_id(msg->client_id);
 	if (!instance) {
 		/* client_id instance doesn't exist yet, create one */
-		ck_ulock(&instance_lock);
 		instance = __stratum_add_instance(ckp, msg->client_id);
-		ck_dwilock(&instance_lock);
 	}
-	ck_uilock(&instance_lock);
+	ck_wunlock(&instance_lock);
 
 	parse_instance_msg(msg);
 
@@ -2878,8 +2908,8 @@ static void *statsupdate(void *arg)
 	sleep(1);
 
 	while (42) {
+		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias, bias5, bias60, bias1440;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
-		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias;
 		char suffix360[16], suffix1440[16];
 		user_instance_t *instance, *tmpuser;
 		stratum_instance_t *client, *tmp;
@@ -2896,32 +2926,31 @@ static void *statsupdate(void *arg)
 		timersub(&now, &stats.start_time, &diff);
 		tdiff = diff.tv_sec + (double)diff.tv_usec / 1000000;
 
-		bias = time_bias(tdiff, 60);
-		ghs1 = stats.dsps1 * nonces / bias;
+		ghs1 = stats.dsps1 * nonces;
 		suffix_string(ghs1, suffix1, 16, 0);
-		sps1 = stats.sps1 / bias;
+		sps1 = stats.sps1;
 
-		bias = time_bias(tdiff, 300);
-		ghs5 = stats.dsps5 * nonces / bias;
+		bias5 = time_bias(tdiff, 300);
+		ghs5 = stats.dsps5 * nonces / bias5;
 		suffix_string(ghs5, suffix5, 16, 0);
-		sps5 = stats.sps5 / bias;
+		sps5 = stats.sps5 / bias5;
 
 		bias = time_bias(tdiff, 900);
 		ghs15 = stats.dsps15 * nonces / bias;
 		suffix_string(ghs15, suffix15, 16, 0);
 		sps15 = stats.sps15 / bias;
 
-		bias = time_bias(tdiff, 3600);
-		ghs60 = stats.dsps60 * nonces / bias;
+		bias60 = time_bias(tdiff, 3600);
+		ghs60 = stats.dsps60 * nonces / bias60;
 		suffix_string(ghs60, suffix60, 16, 0);
-		sps60 = stats.sps60 / bias;
+		sps60 = stats.sps60 / bias60;
 
 		bias = time_bias(tdiff, 21600);
 		ghs360 = stats.dsps360 * nonces / bias;
 		suffix_string(ghs360, suffix360, 16, 0);
 
-		bias = time_bias(tdiff, 86400);
-		ghs1440 = stats.dsps1440 * nonces / bias;
+		bias1440 = time_bias(tdiff, 86400);
+		ghs1440 = stats.dsps1440 * nonces / bias1440;
 		suffix_string(ghs1440, suffix1440, 16, 0);
 
 		snprintf(fname, 511, "%s/pool/pool.status", ckp->logdir);
@@ -2996,11 +3025,14 @@ static void *statsupdate(void *arg)
 				}
 				ghs = worker->dsps1 * nonces;
 				suffix_string(ghs, suffix1, 16, 0);
-				ghs = worker->dsps5 * nonces;
+
+				ghs = worker->dsps5 * nonces / bias5;
 				suffix_string(ghs, suffix5, 16, 0);
-				ghs = worker->dsps60 * nonces;
+
+				ghs = worker->dsps60 * nonces / bias60;
 				suffix_string(ghs, suffix60, 16, 0);
-				ghs = worker->dsps1440 * nonces;
+
+				ghs = worker->dsps1440 * nonces / bias1440;
 				suffix_string(ghs, suffix1440, 16, 0);
 
 				JSON_CPACK(val, "{ss,ss,ss,ss}",
@@ -3032,11 +3064,14 @@ static void *statsupdate(void *arg)
 			}
 			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
-			ghs = instance->dsps5 * nonces;
+
+			ghs = instance->dsps5 * nonces / bias5;
 			suffix_string(ghs, suffix5, 16, 0);
-			ghs = instance->dsps60 * nonces;
+
+			ghs = instance->dsps60 * nonces / bias60;
 			suffix_string(ghs, suffix60, 16, 0);
-			ghs = instance->dsps1440 * nonces;
+
+			ghs = instance->dsps1440 * nonces / bias1440;
 			suffix_string(ghs, suffix1440, 16, 0);
 
 			JSON_CPACK(val, "{ss,ss,ss,ss,si}",
@@ -3197,7 +3232,7 @@ int stratifier(proc_instance_t *pi)
 	sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 	stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
-	if (!ckp->standalone)
+	if (!CKP_STANDALONE(ckp))
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
 
 	cklock_init(&workbase_lock);

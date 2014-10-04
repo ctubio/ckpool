@@ -280,10 +280,10 @@ retry:
 			if (newfd > 0) {
 				LOGDEBUG("Sending new fd %d", newfd);
 				send_fd(newfd, sockd);
-				close(newfd);
+				Close(newfd);
 			} else
 				LOGWARNING("Failed to get_fd");
-			close(connfd);
+			Close(connfd);
 		} else
 			LOGWARNING("Failed to send_procmsg to connector");
 	} else if (cmdmatch(buf, "restart")) {
@@ -300,7 +300,7 @@ retry:
 		LOGINFO("Listener received unhandled message: %s", buf);
 		send_unix_msg(sockd, "unknown");
 	}
-	close(sockd);
+	Close(sockd);
 	goto retry;
 out:
 	dealloc(buf);
@@ -386,10 +386,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 out:
 	if (ret < 0) {
 		dealloc(cs->buf);
-		if (cs->fd > 0) {
-			close(cs->fd);
-			cs->fd = -1;
-		}
+		Close(cs->fd);
 	}
 	return ret;
 }
@@ -447,7 +444,7 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		ret = true;
-	close(sockd);
+	Close(sockd);
 out:
 	if (unlikely(!ret)) {
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
@@ -484,7 +481,7 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		buf = recv_unix_msg(sockd);
-	close(sockd);
+	Close(sockd);
 out:
 	if (unlikely(!buf))
 		LOGERR("Failure in send_recv_proc from %s %s:%d", file, func, line);
@@ -515,7 +512,7 @@ char *_send_recv_ckdb(const ckpool_t *ckp, const char *msg, const char *file, co
 		LOGWARNING("Failed to send %s to ckdb", msg);
 	else
 		buf = recv_unix_msg(sockd);
-	close(sockd);
+	Close(sockd);
 out:
 	if (unlikely(!buf))
 		LOGERR("Failure in send_recv_ckdb from %s %s:%d", file, func, line);
@@ -608,7 +605,7 @@ out_empty:
 		/* Assume that a failed request means the socket will be closed
 		 * and reopen it */
 		LOGWARNING("Reopening socket to %s:%s", cs->url, cs->port);
-		close(cs->fd);
+		Close(cs->fd);
 		cs->fd = connect_socket(cs->url, cs->port);
 	}
 out:
@@ -983,6 +980,7 @@ static void parse_config(ckpool_t *ckp)
 	json_get_string(&ckp->serverurl, json_conf, "serverurl");
 	json_get_int64(&ckp->mindiff, json_conf, "mindiff");
 	json_get_int64(&ckp->startdiff, json_conf, "startdiff");
+	json_get_int64(&ckp->maxdiff, json_conf, "maxdiff");
 	json_get_string(&ckp->logdir, json_conf, "logdir");
 	arr_val = json_object_get(json_conf, "proxy");
 	if (arr_val && json_is_array(arr_val)) {
@@ -1058,6 +1056,7 @@ static void *watchdog(void *arg)
 	return NULL;
 }
 
+#ifdef USE_CKDB
 static struct option long_options[] = {
 	{"standalone",	no_argument,		0,	'A'},
 	{"config",	required_argument,	0,	'c'},
@@ -1075,6 +1074,22 @@ static struct option long_options[] = {
 	{"sockdir",	required_argument,	0,	's'},
 	{0, 0, 0, 0}
 };
+#else
+static struct option long_options[] = {
+	{"config",	required_argument,	0,	'c'},
+	{"group",	required_argument,	0,	'g'},
+	{"handover",	no_argument,		0,	'H'},
+	{"help",	no_argument,		0,	'h'},
+	{"killold",	no_argument,		0,	'k'},
+	{"log-shares",	no_argument,		0,	'L'},
+	{"loglevel",	required_argument,	0,	'l'},
+	{"name",	required_argument,	0,	'n'},
+	{"passthrough",	no_argument,		0,	'P'},
+	{"proxy",	no_argument,		0,	'p'},
+	{"sockdir",	required_argument,	0,	's'},
+	{0, 0, 0, 0}
+};
+#endif
 
 int main(int argc, char **argv)
 {
@@ -1193,7 +1208,7 @@ int main(int argc, char **argv)
 	}
 	trail_slash(&ckp.socket_dir);
 
-	if (!ckp.standalone) {
+	if (!CKP_STANDALONE(&ckp)) {
 		if (!ckp.ckdb_name)
 			ckp.ckdb_name = "ckdb";
 		if (!ckp.ckdb_sockdir) {
@@ -1295,12 +1310,12 @@ int main(int argc, char **argv)
 		if (sockd > 0 && send_unix_msg(sockd, "getfd")) {
 			ckp.oldconnfd = get_fd(sockd);
 
-			close(sockd);
+			Close(sockd);
 			sockd = open_unix_client(ckp.main.us.path);
 			send_unix_msg(sockd, "shutdown");
 			if (ckp.oldconnfd > 0)
 				LOGWARNING("Inherited old socket with new file descriptor %d!", ckp.oldconnfd);
-			close(sockd);
+			Close(sockd);
 		}
 	}
 
