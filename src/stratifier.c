@@ -272,6 +272,7 @@ struct stratum_instance {
 	int ssdc; /* Shares since diff change */
 	tv_t first_share;
 	tv_t last_share;
+	time_t first_invalid; /* Time of first invalid in run of non stale rejects */
 	time_t start_time;
 
 	char address[INET6_ADDRSTRLEN];
@@ -279,6 +280,9 @@ struct stratum_instance {
 	bool authorised;
 	bool idle;
 	bool notified_idle;
+	int reject;	/* Indicator that this client is having a run of rejects
+			 * or other problem and should be dropped lazily if
+			 * this is set to 2 */
 
 	user_instance_t *user_instance;
 	worker_instance_t *worker_instance;
@@ -2055,13 +2059,15 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char idstring[20];
 	uint32_t ntime32;
 	uchar hash[32];
-	int64_t id;
+	time_t now_t;
 	json_t *val;
+	int64_t id;
 	ts_t now;
 	FILE *fp;
 	int len;
 
 	ts_realtime(&now);
+	now_t = now.tv_sec;
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
 	if (unlikely(!json_is_array(params_val))) {
@@ -2235,6 +2241,26 @@ out_unlock:
 	}
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
+	if ((!result && !submit) || !share) {
+		/* Is this the first in a run of invalids? */
+		if (client->first_invalid < client->last_share.tv_sec || !client->first_invalid)
+			client->first_invalid = now_t;
+		else if (client->first_invalid && client->first_invalid < now_t - 120) {
+			LOGNOTICE("Client %d rejecting for 120s, disconnecting", client->id);
+			stratum_send_message(client, "Disconnecting for continuous invalid shares");
+			client->reject = 2;
+		} else if (client->first_invalid && client->first_invalid < now_t - 60) {
+			if (!client->reject) {
+				LOGINFO("Client %d rejecting for 60s, sending diff", client->id);
+				stratum_send_diff(client);
+				client->reject = 1;
+			}
+		}
+	} else {
+		client->first_invalid = 0;
+		client->reject = 0;
+	}
+
 	if (!share) {
 		JSON_CPACK(val, "{sI,ss,ss,sI,ss,ss,so,si,ss,ss,ss,ss}",
 				"clientid", client->id,
@@ -2398,6 +2424,13 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 
 	if (unlikely(!client)) {
 		LOGINFO("Failed to find client id %ld in hashtable!", client_id);
+		return;
+	}
+
+	if (unlikely(client->reject == 2)) {
+		LOGINFO("Dropping client %d tagged for lazy invalidation", client_id);
+		snprintf(buf, 255, "dropclient=%ld", client->id);
+		send_proc(client->ckp->connector, buf);
 		return;
 	}
 
