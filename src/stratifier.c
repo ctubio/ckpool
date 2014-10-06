@@ -1588,20 +1588,32 @@ static int send_recv_auth(stratum_instance_t *client)
 
 	free(json_msg);
 	if (likely(buf)) {
-		char *secondaryuserid, response[PAGESIZE] = {};
+		char *cmd = NULL, *secondaryuserid = NULL;
+		char response[PAGESIZE] = {};
+		json_error_t err_val;
+		json_t *val = NULL;
 
 		LOGINFO("Got ckdb response: %s", buf);
 		sscanf(buf, "id.%*d.%s", response);
-		secondaryuserid = response;
-		strsep(&secondaryuserid, ".");
-		LOGINFO("User %s Worker %s got auth response: %s  suid: %s",
+		cmd = response;
+		strsep(&cmd, "=");
+		LOGINFO("User %s Worker %s got auth response: %s  cmd: %s",
 			user_instance->username, client->workername,
-			response, secondaryuserid);
-		if (!safecmp(response, "ok") && secondaryuserid) {
+			response, cmd);
+		val = json_loads(cmd, 0, &err_val);
+		if (unlikely(!val))
+			LOGWARNING("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
+		else
+			json_get_string(&secondaryuserid, val, "secondaryuserid");
+		if (!safecmp(response, "ok.auth") && secondaryuserid) {
 			if (!user_instance->secondaryuserid)
-				user_instance->secondaryuserid = strdup(secondaryuserid);
+				user_instance->secondaryuserid = secondaryuserid;
+			else
+				dealloc(secondaryuserid);
 			ret = 0;
 		}
+		if (likely(val))
+			json_decref(val);
 	} else {
 		ret = -1;
 		LOGWARNING("Got no auth response from ckdb :(");

@@ -851,7 +851,7 @@ static void sighandler(int sig)
 	exit(0);
 }
 
-static void json_get_string(char **store, json_t *val, const char *res)
+void json_get_string(char **store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
 	const char *buf;
