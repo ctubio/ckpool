@@ -2006,6 +2006,10 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		snprintf(tmp, sizeof(tmp), "workers=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
+		double_to_buf(poolstats->hashrate, reply, siz);
+		snprintf(tmp, sizeof(tmp), "p_hashrate=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
 		double_to_buf(poolstats->hashrate5m, reply, siz);
 		snprintf(tmp, sizeof(tmp), "p_hashrate5m=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
@@ -2014,13 +2018,24 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		snprintf(tmp, sizeof(tmp), "p_hashrate1hr=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
+		double_to_buf(poolstats->hashrate24hr, reply, siz);
+		snprintf(tmp, sizeof(tmp), "p_hashrate24hr=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
 		bigint_to_buf(poolstats->elapsed, reply, siz);
 		snprintf(tmp, sizeof(tmp), "p_elapsed=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
+
+		tvs_to_buf(&(poolstats->createdate), reply, siz);
+		snprintf(tmp, sizeof(tmp), "p_statsdate=%s%c", reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "users=?%cworkers=?%cp_hashrate5m=?%c"
-					   "p_hashrate1hr=?%cp_elapsed=?%c",
-					   FLDSEP, FLDSEP, FLDSEP, FLDSEP, FLDSEP);
+		snprintf(tmp, sizeof(tmp), "users=?%cworkers=?%cp_hashrate=?%c"
+					   "p_hashrate5m=?%cp_hashrate1hr=?%c"
+					   "p_hashrate24hr=?%cp_elapsed=?%c"
+					   "p_statsdate=?%c",
+					   FLDSEP, FLDSEP, FLDSEP, FLDSEP,
+					   FLDSEP, FLDSEP, FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
