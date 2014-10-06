@@ -2908,7 +2908,9 @@ static void *statsupdate(void *arg)
 	sleep(1);
 
 	while (42) {
-		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, tdiff, bias, bias5, bias60, bias1440;
+		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440;
+		double bias, bias5, bias60, bias1440;
+		double tdiff, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16];
 		user_instance_t *instance, *tmpuser;
@@ -2998,14 +3000,15 @@ static void *statsupdate(void *arg)
 			if (!client->authorised)
 				continue;
 
+			per_tdiff = tvdiff(&now, &client->last_share);
 			/* Decay times per connected instance */
-			if (now.tv_sec - client->last_share.tv_sec > 60) {
+			if (per_tdiff > 60) {
 				/* No shares for over a minute, decay to 0 */
-				decay_time(&client->dsps1, 0, tdiff, 60);
-				decay_time(&client->dsps5, 0, tdiff, 300);
-				decay_time(&client->dsps60, 0, tdiff, 3600);
-				decay_time(&client->dsps1440, 0, tdiff, 86400);
-				if (now.tv_sec - client->last_share.tv_sec > 600)
+				decay_time(&client->dsps1, 0, per_tdiff, 60);
+				decay_time(&client->dsps5, 0, per_tdiff, 300);
+				decay_time(&client->dsps60, 0, per_tdiff, 3600);
+				decay_time(&client->dsps1440, 0, per_tdiff, 86400);
+				if (per_tdiff > 600)
 					client->idle = true;
 				continue;
 			}
@@ -3017,11 +3020,12 @@ static void *statsupdate(void *arg)
 
 			/* Decay times per worker */
 			DL_FOREACH(instance->worker_instances, worker) {
-				if (now.tv_sec - worker->last_share.tv_sec > 60) {
-					decay_time(&worker->dsps1, 0, tdiff, 60);
-					decay_time(&worker->dsps5, 0, tdiff, 300);
-					decay_time(&worker->dsps60, 0, tdiff, 3600);
-					decay_time(&worker->dsps1440, 0, tdiff, 86400);
+				per_tdiff = tvdiff(&now, &worker->last_share);
+				if (per_tdiff > 60) {
+					decay_time(&worker->dsps1, 0, per_tdiff, 60);
+					decay_time(&worker->dsps5, 0, per_tdiff, 300);
+					decay_time(&worker->dsps60, 0, per_tdiff, 3600);
+					decay_time(&worker->dsps1440, 0, per_tdiff, 86400);
 				}
 				ghs = worker->dsps1 * nonces;
 				suffix_string(ghs, suffix1, 16, 0);
@@ -3055,11 +3059,12 @@ static void *statsupdate(void *arg)
 			}
 
 			/* Decay times per user */
-			if (now.tv_sec - instance->last_share.tv_sec > 60) {
-				decay_time(&instance->dsps1, 0, tdiff, 60);
-				decay_time(&instance->dsps5, 0, tdiff, 300);
-				decay_time(&instance->dsps60, 0, tdiff, 3600);
-				decay_time(&instance->dsps1440, 0, tdiff, 86400);
+			per_tdiff = tvdiff(&now, &instance->last_share);
+			if (per_tdiff > 60) {
+				decay_time(&instance->dsps1, 0, per_tdiff, 60);
+				decay_time(&instance->dsps5, 0, per_tdiff, 300);
+				decay_time(&instance->dsps60, 0, per_tdiff, 3600);
+				decay_time(&instance->dsps1440, 0, per_tdiff, 86400);
 				idle = true;
 			}
 			ghs = instance->dsps1 * nonces;
