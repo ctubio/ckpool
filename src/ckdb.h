@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.406"
+#define CKDB_VERSION DB_VERSION"-0.500"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1414,11 +1414,11 @@ extern bool miningpayouts_add(PGconn *conn, char *username, char *height,
 			      char *blockhash, char *amount, char *by,
 			      char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool miningpayouts_fill(PGconn *conn);
-extern char *auths_add(PGconn *conn, char *poolinstance, char *username,
+extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,
 			char *useragent, char *preauth, char *by, char *code,
 			char *inet, tv_t *cd, bool igndup, K_TREE *trf_root,
-			bool addressuser);
+			bool addressuser, USERS **users, WORKERS **workers);
 extern bool auths_fill(PGconn *conn);
 extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 				char *elapsed, char *users, char *workers,

@@ -3945,24 +3945,23 @@ bool miningpayouts_fill(PGconn *conn)
 	return ok;
 }
 
-char *auths_add(PGconn *conn, char *poolinstance, char *username,
+bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		char *workername, char *clientid, char *enonce1,
 		char *useragent, char *preauth, char *by, char *code,
 		char *inet, tv_t *cd, bool igndup, K_TREE *trf_root,
-		bool addressuser)
+		bool addressuser, USERS **users, WORKERS **workers)
 {
 	ExecStatusType rescode;
 	bool conned = false;
 	PGresult *res;
 	K_TREE_CTX ctx[1];
-	K_ITEM *a_item, *u_item;
+	K_ITEM *a_item, *u_item, *w_item;
 	char cd_buf[DATE_BUFSIZ];
-	USERS *users;
 	AUTHS *row;
 	char *ins;
-	char *secuserid = NULL;
 	char *params[8 + HISTORYDATECOUNT];
 	int n, par = 0;
+	bool ok = false;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -3987,14 +3986,20 @@ char *auths_add(PGconn *conn, char *poolinstance, char *username,
 		if (!u_item)
 			goto unitem;
 	}
-	DATA_USERS(users, u_item);
+	DATA_USERS(*users, u_item);
 
 	STRNCPY(row->poolinstance, poolinstance);
-	row->userid = users->userid;
+	row->userid = (*users)->userid;
 	// since update=false, a dup will be ok and do nothing when igndup=true
-	new_worker(conn, false, row->userid, workername, DIFFICULTYDEFAULT_DEF_STR,
-		   IDLENOTIFICATIONENABLED_DEF, IDLENOTIFICATIONTIME_DEF_STR,
-		   by, code, inet, cd, trf_root);
+	w_item = new_worker(conn, false, row->userid, workername,
+			    DIFFICULTYDEFAULT_DEF_STR,
+			    IDLENOTIFICATIONENABLED_DEF,
+			    IDLENOTIFICATIONTIME_DEF_STR,
+			    by, code, inet, cd, trf_root);
+	if (!w_item)
+		goto unitem;
+
+	DATA_WORKERS(*workers, w_item);
 	STRNCPY(row->workername, workername);
 	TXT_TO_INT("clientid", clientid, row->clientid);
 	STRNCPY(row->enonce1, enonce1);
@@ -4018,7 +4023,9 @@ char *auths_add(PGconn *conn, char *poolinstance, char *username,
 				__func__, poolinstance, workername, cd_buf);
 		}
 
-		return users->secondaryuserid;
+		/* Let them mine, that's what matters :)
+		 *  though this would normally only be during a reload */
+		return true;
 	}
 	K_WUNLOCK(auths_free);
 
@@ -4056,9 +4063,7 @@ char *auths_add(PGconn *conn, char *poolinstance, char *username,
 		PGLOGERR("Insert", rescode, conn);
 		goto unparam;
 	}
-
-	secuserid = users->secondaryuserid;
-
+	ok = true;
 unparam:
 	PQclear(res);
 	for (n = 0; n < par; n++)
@@ -4067,7 +4072,7 @@ unitem:
 	if (conned)
 		PQfinish(conn);
 	K_WLOCK(auths_free);
-	if (!secuserid)
+	if (!ok)
 		k_add_head(auths_free, a_item);
 	else {
 		auths_root = add_to_ktree(auths_root, a_item, cmp_auths);
@@ -4075,7 +4080,7 @@ unitem:
 	}
 	K_WUNLOCK(auths_free);
 
-	return secuserid;
+	return ok;
 }
 
 bool auths_fill(PGconn *conn)

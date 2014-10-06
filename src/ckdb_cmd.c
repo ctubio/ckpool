@@ -1735,7 +1735,9 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	size_t siz = sizeof(reply);
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth;
-	char *secuserid;
+	USERS *users = NULL;
+	WORKERS *workers = NULL;
+	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -1768,22 +1770,26 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!i_preauth)
 		i_preauth = &auth_preauth;
 
-	secuserid = auths_add(conn, transfer_data(i_poolinstance),
-				    transfer_data(i_username),
-				    transfer_data(i_workername),
-				    transfer_data(i_clientid),
-				    transfer_data(i_enonce1),
-				    transfer_data(i_useragent),
-				    transfer_data(i_preauth),
-				    by, code, inet, cd, igndup, trf_root, false);
+	ok = auths_add(conn, transfer_data(i_poolinstance),
+			     transfer_data(i_username),
+			     transfer_data(i_workername),
+			     transfer_data(i_clientid),
+			     transfer_data(i_enonce1),
+			     transfer_data(i_useragent),
+			     transfer_data(i_preauth),
+			     by, code, inet, cd, igndup, trf_root, false,
+			     &users, &workers);
 
-	if (!secuserid) {
+	if (!ok) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
 	}
 
-	LOGDEBUG("%s.ok.auth added for %s", id, secuserid);
-	snprintf(reply, siz, "ok.%s", secuserid);
+	snprintf(reply, siz,
+		 "ok.auth={\"secondaryuserid\":\"%s\","
+		 "\"difficultydefault\":%d}",
+		 users->secondaryuserid, workers->difficultydefault);
+	LOGDEBUG("%s.%s", id, reply);
 	return strdup(reply);
 }
 
@@ -1813,7 +1819,9 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	size_t siz = sizeof(reply);
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth;
-	char *secuserid;
+	USERS *users = NULL;
+	WORKERS *workers = NULL;
+	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -1846,22 +1854,26 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!i_preauth)
 		return strdup(reply);
 
-	secuserid = auths_add(conn, transfer_data(i_poolinstance),
-				    transfer_data(i_username),
-				    transfer_data(i_workername),
-				    transfer_data(i_clientid),
-				    transfer_data(i_enonce1),
-				    transfer_data(i_useragent),
-				    transfer_data(i_preauth),
-				    by, code, inet, cd, igndup, trf_root, true);
+	ok = auths_add(conn, transfer_data(i_poolinstance),
+			     transfer_data(i_username),
+			     transfer_data(i_workername),
+			     transfer_data(i_clientid),
+			     transfer_data(i_enonce1),
+			     transfer_data(i_useragent),
+			     transfer_data(i_preauth),
+			     by, code, inet, cd, igndup, trf_root, true,
+			     &users, &workers);
 
-	if (!secuserid) {
+	if (!ok) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
 	}
 
-	LOGDEBUG("%s.ok.auth added for %s", id, secuserid);
-	snprintf(reply, siz, "ok.%s", secuserid);
+	snprintf(reply, siz,
+		 "ok.addrauth={\"secondaryuserid\":\"%s\","
+		 "\"difficultydefault\":%d}",
+		 users->secondaryuserid, workers->difficultydefault);
+	LOGDEBUG("%s.%s", id, reply);
 	return strdup(reply);
 }
 
