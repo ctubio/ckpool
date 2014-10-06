@@ -52,7 +52,7 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_ITEM *i_username, *i_oldhash, *i_newhash, *u_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	bool ok = false;
+	bool ok = true;
 	char *oldhash;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
