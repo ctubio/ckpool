@@ -883,9 +883,10 @@ static void json_get_int64(int64_t *store, json_t *val, const char *res)
 		return;
 	}
 	*store = json_integer_value(entry);
+	LOGDEBUG("Json found entry %s: %ld", res, *store);
 }
 
-static void json_get_int(int *store, json_t *val, const char *res)
+void json_get_int(int *store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
 
@@ -898,6 +899,7 @@ static void json_get_int(int *store, json_t *val, const char *res)
 		return;
 	}
 	*store = json_integer_value(entry);
+	LOGDEBUG("Json found entry %s: %d", res, *store);
 }
 
 static void json_get_bool(bool *store, json_t *val, const char *res)
@@ -913,6 +915,7 @@ static void json_get_bool(bool *store, json_t *val, const char *res)
 		return;
 	}
 	*store = json_is_true(entry);
+	LOGDEBUG("Json found entry %s: %s", res, *store ? "true" : "false");
 }
 
 static void parse_btcds(ckpool_t *ckp, json_t *arr_val, int arr_size)

@@ -245,7 +245,7 @@ struct worker_instance {
 	double dsps1440;
 	tv_t last_share;
 
-	int64_t mindiff; /* User chosen mindiff */
+	int mindiff; /* User chosen mindiff */
 };
 
 /* Per client stratum instance == workers */
@@ -1588,6 +1588,7 @@ static int send_recv_auth(stratum_instance_t *client)
 
 	free(json_msg);
 	if (likely(buf)) {
+		worker_instance_t *worker = client->worker_instance;
 		char *cmd = NULL, *secondaryuserid = NULL;
 		char response[PAGESIZE] = {};
 		json_error_t err_val;
@@ -1603,8 +1604,11 @@ static int send_recv_auth(stratum_instance_t *client)
 		val = json_loads(cmd, 0, &err_val);
 		if (unlikely(!val))
 			LOGWARNING("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
-		else
+		else {
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
+			json_get_int(&worker->mindiff, val, "difficultydefault");
+			client->suggest_diff = worker->mindiff;
+		}
 		if (!safecmp(response, "ok.auth") && secondaryuserid) {
 			if (!user_instance->secondaryuserid)
 				user_instance->secondaryuserid = secondaryuserid;
@@ -2667,8 +2671,8 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
 	stratum_instance_t *client;
+	int mindiff, errnum = 0;
 	int64_t client_id;
-	int errnum = 0;
 
 	client_id = jp->client_id;
 
@@ -2698,6 +2702,18 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	json_object_set_nocheck(json_msg, "id", jp->id_val);
 	stratum_add_send(json_msg, client_id);
+
+	if (!json_is_string(result_val) || !client->suggest_diff)
+		goto out;
+
+	/* Update the client now if they have set a valid mindiff different
+	 * from the startdiff */
+	mindiff = MAX(ckp->mindiff, client->suggest_diff);
+	mindiff = MIN(ckp->startdiff, mindiff);
+	if (mindiff != client->diff) {
+		client->diff = mindiff;
+		stratum_send_diff(client);
+	}
 out:
 	discard_json_params(&jp);
 
