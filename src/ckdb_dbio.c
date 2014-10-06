@@ -1068,6 +1068,7 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 		conned = true;
 	}
 
+	bzero(row, sizeof(*row));
 	row->workerid = nextid(conn, "workerid", (int64_t)1, cd, by, code, inet);
 	if (row->workerid == 0)
 		goto unitem;
@@ -1076,10 +1077,13 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	STRNCPY(row->workername, workername);
 	if (difficultydefault && *difficultydefault) {
 		diffdef = atoi(difficultydefault);
-		if (diffdef < DIFFICULTYDEFAULT_MIN)
-			diffdef = DIFFICULTYDEFAULT_MIN;
-		if (diffdef > DIFFICULTYDEFAULT_MAX)
-			diffdef = DIFFICULTYDEFAULT_MAX;
+		// If out of the range, set it in the range
+		if (diffdef != DIFFICULTYDEFAULT_DEF) {
+			if (diffdef < DIFFICULTYDEFAULT_MIN)
+				diffdef = DIFFICULTYDEFAULT_MIN;
+			if (diffdef > DIFFICULTYDEFAULT_MAX)
+				diffdef = DIFFICULTYDEFAULT_MAX;
+		}
 		row->difficultydefault = diffdef;
 	} else
 		row->difficultydefault = DIFFICULTYDEFAULT_DEF;
@@ -1095,14 +1099,19 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 
 	if (idlenotificationtime && *idlenotificationtime) {
 		nottime = atoi(idlenotificationtime);
-		if (nottime < DIFFICULTYDEFAULT_MIN) {
-			row->idlenotificationenabled[0] = IDLENOTIFICATIONDISABLED[0];
-			nottime = DIFFICULTYDEFAULT_MIN;
-		} else if (nottime > IDLENOTIFICATIONTIME_MAX)
-			nottime = row->idlenotificationtime;
+		if (nottime != IDLENOTIFICATIONTIME_DEF) {
+			// If out of the range, set to default
+			if (nottime < IDLENOTIFICATIONTIME_MIN ||
+			    nottime > IDLENOTIFICATIONTIME_MAX)
+				nottime = IDLENOTIFICATIONTIME_DEF;
+		}
 		row->idlenotificationtime = nottime;
 	} else
 		row->idlenotificationtime = IDLENOTIFICATIONTIME_DEF;
+
+	// Default is disabled
+	if (row->idlenotificationtime == IDLENOTIFICATIONTIME_DEF)
+		row->idlenotificationenabled[0] = IDLENOTIFICATIONDISABLED[0];
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);

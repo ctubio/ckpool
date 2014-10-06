@@ -355,10 +355,12 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 				continue;
 
 			difficultydefault = atoi(transfer_data(i_diffdef));
-			if (difficultydefault < DIFFICULTYDEFAULT_MIN)
-				difficultydefault = DIFFICULTYDEFAULT_MIN;
-			if (difficultydefault > DIFFICULTYDEFAULT_MAX)
-				difficultydefault = DIFFICULTYDEFAULT_MAX;
+			if (difficultydefault != 0) {
+				if (difficultydefault < DIFFICULTYDEFAULT_MIN)
+					difficultydefault = DIFFICULTYDEFAULT_MIN;
+				if (difficultydefault > DIFFICULTYDEFAULT_MAX)
+					difficultydefault = DIFFICULTYDEFAULT_MAX;
+			}
 
 			if (workers->difficultydefault != difficultydefault) {
 				/* This uses a seperate txn per update
