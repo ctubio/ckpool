@@ -450,13 +450,13 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	ExecStatusType rescode;
 	bool conned = false;
 	PGresult *res;
-	K_ITEM *item;
-	USERS *row;
+	K_ITEM *item, *u_item;
+	USERS *row, *users;
 	char *ins;
 	char tohash[64];
 	uint64_t hash;
 	__maybe_unused uint64_t tmp;
-	bool ok = false;
+	bool dup, ok = false;
 	char *params[8 + HISTORYDATECOUNT];
 	int n, par = 0;
 
@@ -468,14 +468,30 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 
 	DATA_USERS(row, item);
 
+	STRNCPY(row->username, username);
+	username_trim(row);
+
+	dup = false;
+	K_RLOCK(users_free);
+	u_item = users_store->head;
+	while (u_item) {
+		DATA_USERS(users, u_item);
+		if (strcmp(row->usertrim, users->usertrim) == 0) {
+			dup = true;
+			break;
+		}
+		u_item = u_item->next;
+	}
+	K_RUNLOCK(users_free);
+
+	if (dup)
+		goto unitem;
+
 	row->userid = nextid(conn, "userid", (int64_t)(666 + (random() % 334)),
 				cd, by, code, inet);
 	if (row->userid == 0)
 		goto unitem;
 
-	// TODO: pre-check the username exists? (to save finding out via a DB error)
-
-	STRNCPY(row->username, username);
 	row->status[0] = '\0';
 	STRNCPY(row->emailaddress, emailaddress);
 
@@ -643,6 +659,8 @@ bool users_fill(PGconn *conn)
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
 			break;
+
+		username_trim(row);
 
 		users_root = add_to_ktree(users_root, item, cmp_users);
 		userid_root = add_to_ktree(userid_root, item, cmp_userid);

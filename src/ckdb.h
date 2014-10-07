@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.502"
+#define CKDB_VERSION DB_VERSION"-0.503"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -540,7 +540,8 @@ extern tv_t missing_secuser_max;
 typedef struct users {
 	int64_t userid;
 	char username[TXT_BIG+1];
-	// Anything in 'status' disables the account
+	char usertrim[TXT_BIG+1]; // Non DB field
+	// TODO: Anything in 'status' disables the account
 	char status[TXT_BIG+1];
 	char emailaddress[TXT_BIG+1];
 	tv_t joineddate;
@@ -1174,6 +1175,7 @@ extern PGconn *dbconnect();
 // ***
 
 extern char *safe_text(char *txt);
+extern void username_trim(USERS *users);
 
 extern void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz, WHERE_FFL_ARGS);
 
