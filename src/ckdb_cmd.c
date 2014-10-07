@@ -1803,7 +1803,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	}
 
 	snprintf(reply, siz,
-		 "ok.auth={\"secondaryuserid\":\"%s\","
+		 "ok.authorise={\"secondaryuserid\":\"%s\","
 		 "\"difficultydefault\":%d}",
 		 users->secondaryuserid, workers->difficultydefault);
 	LOGDEBUG("%s.%s", id, reply);
