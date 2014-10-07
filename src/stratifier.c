@@ -1603,7 +1603,7 @@ static int send_recv_auth(stratum_instance_t *client)
 			response, cmd);
 		val = json_loads(cmd, 0, &err_val);
 		if (unlikely(!val))
-			LOGWARNING("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
+			LOGINFO("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
 		else {
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
 			json_get_int(&worker->mindiff, val, "difficultydefault");
