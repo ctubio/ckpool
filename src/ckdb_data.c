@@ -40,6 +40,33 @@ char *safe_text(char *txt)
 	return ret;
 }
 
+#define TRIM_IGNORE(ch) ((ch) == '_' || (ch) == '.' || (ch) == '-' || isspace(ch))
+
+void username_trim(USERS *users)
+{
+	char *front, *trail;
+
+	front = users->username;
+	while (*front && TRIM_IGNORE(*front))
+		front++;
+
+	STRNCPY(users->usertrim, front);
+
+	front = users->usertrim;
+	trail = front + strlen(front) - 1;
+	while (trail >= front) {
+		if (TRIM_IGNORE(*trail))
+			*(trail--) = '\0';
+		else
+			break;
+	}
+
+	while (trail >= front) {
+		*trail = tolower(*trail);
+		trail--;
+	}
+}
+
 void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz, WHERE_FFL_ARGS)
 {
 	char *tmp;
