@@ -2397,8 +2397,9 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	HASH_FIND_STR(user_instances, username, instance);
 	ck_runlock(&instance_lock);
 
-	if (unlikely(!instance))
-		return LOGWARNING("Failed to find user %s in set_worker_mindiff", username);
+	/* They may just have not connected yet */
+	if (!instance)
+		return LOGINFO("Failed to find user %s in set_worker_mindiff", username);
 
 	/* Then find the matching worker instance */
 	ck_rlock(&instance_lock);
@@ -2410,8 +2411,9 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	}
 	ck_runlock(&instance_lock);
 
-	if (unlikely(!worker))
-		return LOGWARNING("Failed to find worker %s in set_worker_mindiff", workername);
+	/* They may just not be connected at the moment */
+	if (!worker)
+		return LOGINFO("Failed to find worker %s in set_worker_mindiff", workername);
 
 	if (mindiff < 1)
 		return LOGINFO("Worker %s requested invalid diff %ld", worker->workername, mindiff);
