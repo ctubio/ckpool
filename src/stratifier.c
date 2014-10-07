@@ -2732,7 +2732,6 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	/* Update the client now if they have set a valid mindiff different
 	 * from the startdiff */
 	mindiff = MAX(ckp->mindiff, client->suggest_diff);
-	mindiff = MAX(ckp->startdiff, mindiff);
 	if (mindiff != client->diff) {
 		client->diff = mindiff;
 		stratum_send_diff(client);
