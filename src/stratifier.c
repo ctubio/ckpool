@@ -2368,11 +2368,35 @@ static json_params_t *create_json_params(const int64_t client_id, const json_t *
 	return jp;
 }
 
-#if 0
-static void set_worker_mindiff(ckpool_t *ckp, worker_instance_t *worker, int64_t mindiff)
+static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
 {
+	worker_instance_t *worker = NULL, *tmp;
+	char *username = strdupa(workername);
+	user_instance_t *instance = NULL;
 	stratum_instance_t *client;
-	user_instance_t *instance;
+
+	strsep(&username, "._");
+
+	/* Find the user first */
+	ck_rlock(&instance_lock);
+	HASH_FIND_STR(user_instances, username, instance);
+	ck_runlock(&instance_lock);
+
+	if (unlikely(!instance))
+		return LOGWARNING("Failed to find user %s in set_worker_mindiff", username);
+
+	/* Then find the matching worker instance */
+	ck_rlock(&instance_lock);
+	DL_FOREACH(instance->worker_instances, tmp) {
+		if (!safecmp(workername, tmp->workername)) {
+			worker = tmp;
+			break;
+		}
+	}
+	ck_runlock(&instance_lock);
+
+	if (unlikely(!worker))
+		return LOGWARNING("Failed to find worker %s in set_worker_mindiff", workername);
 
 	if (mindiff < 1)
 		return LOGINFO("Worker %s requested invalid diff %ld", worker->workername, mindiff);
@@ -2381,7 +2405,6 @@ static void set_worker_mindiff(ckpool_t *ckp, worker_instance_t *worker, int64_t
 	if (mindiff == worker->mindiff)
 		return;
 	worker->mindiff = mindiff;
-	instance = worker->instance;
 
 	/* Iterate over all the workers from this user to find any with the
 	 * matching worker that are currently live and send them a new diff
@@ -2406,7 +2429,6 @@ static void set_worker_mindiff(ckpool_t *ckp, worker_instance_t *worker, int64_t
 	}
 	ck_runlock(&instance_lock);
 }
-#endif
 
 static void suggest_diff(stratum_instance_t *client, const char *method)
 {
@@ -2719,6 +2741,32 @@ out:
 
 }
 
+static void parse_ckdb_cmd(ckpool_t __maybe_unused *ckp, const char *cmd)
+{
+	json_t *val, *res_val, *arr_val;
+	json_error_t err_val;
+	size_t index;
+
+	val = json_loads(cmd, 0, &err_val);
+	if (unlikely(!val)) {
+		LOGWARNING("CKDB MSG %s JSON decode failed(%d): %s", cmd, err_val.line, err_val.text);
+		return;
+	}
+	res_val = json_object_get(val, "diffchange");
+	json_array_foreach(res_val, index, arr_val) {
+		char *workername;
+		int mindiff;
+
+		json_get_string(&workername, arr_val, "workername");
+		if (!workername)
+			continue;
+		json_get_int(&mindiff, arr_val, "difficultydefault");
+		set_worker_mindiff(ckp, workername, mindiff);
+		dealloc(workername);
+	}
+	json_decref(val);
+}
+
 static void ckdbq_process(ckpool_t *ckp, char *msg)
 {
 	static bool failed = false;
@@ -2748,9 +2796,17 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 		char response[PAGESIZE] = {};
 
 		sscanf(buf, "id.%*d.%s", response);
-		if (safecmp(response, "ok"))
-			LOGINFO("Got ckdb response: %s", buf);
-		else
+		if (safecmp(response, "ok")) {
+			char *cmd;
+
+			cmd = response;
+			strsep(&cmd, ".");
+			LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
+			if (!safecmp(cmd, "heartbeat=")) {
+				strsep(&cmd, "=");
+				parse_ckdb_cmd(ckp, cmd);
+			}
+		} else
 			LOGWARNING("Got failed ckdb response: %s", buf);
 		free(buf);
 	}
