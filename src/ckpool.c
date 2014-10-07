@@ -286,6 +286,14 @@ retry:
 			Close(connfd);
 		} else
 			LOGWARNING("Failed to send_procmsg to connector");
+	} else if (cmdmatch(buf, "accept")) {
+		LOGWARNING("Listener received accept message, accepting clients");
+		send_unix_msg(sockd, "accepting");
+		send_procmsg(ckp->connector, "accept");
+	} else if (cmdmatch(buf, "reject")) {
+		LOGWARNING("Listener received reject message, rejecting clients");
+		send_unix_msg(sockd, "rejecting");
+		send_procmsg(ckp->connector, "reject");
 	} else if (cmdmatch(buf, "restart")) {
 		LOGWARNING("Listener received restart message, attempting handover");
 		send_unix_msg(sockd, "restarting");
