@@ -2372,11 +2372,12 @@ static json_params_t *create_json_params(const int64_t client_id, const json_t *
 static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
 {
 	worker_instance_t *worker = NULL, *tmp;
-	char *username = strdupa(workername);
+	char *username = strdupa(workername), *ignore;
 	user_instance_t *instance = NULL;
 	stratum_instance_t *client;
 
-	strsep(&username, "._");
+	ignore = username;
+	strsep(&ignore, "._");
 
 	/* Find the user first */
 	ck_rlock(&instance_lock);
@@ -2797,7 +2798,7 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 			cmd = response;
 			strsep(&cmd, ".");
 			LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
-			if (cmdmatch("heartbeat=", cmd)) {
+			if (cmdmatch(cmd, "heartbeat=")) {
 				strsep(&cmd, "=");
 				parse_ckdb_cmd(ckp, cmd);
 			}
