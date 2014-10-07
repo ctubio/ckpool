@@ -488,6 +488,21 @@ extern K_STORE *workqueue_store;
 extern pthread_mutex_t wq_waitlock;
 extern pthread_cond_t wq_waitcond;
 
+// HEARTBEATQUEUE
+typedef struct heartbeatqueue {
+	char workername[TXT_BIG+1];
+	int32_t difficultydefault;
+	tv_t createdate;
+} HEARTBEATQUEUE;
+
+#define ALLOC_HEARTBEATQUEUE 128
+#define LIMIT_HEARTBEATQUEUE 0
+#define INIT_HEARTBEATQUEUE(_item) INIT_GENERIC(_item, heartbeatqueue)
+#define DATA_HEARTBEATQUEUE(_var, _item) DATA_GENERIC(_var, _item, heartbeatqueue, true)
+
+extern K_LIST *heartbeatqueue_free;
+extern K_STORE *heartbeatqueue_store;
+
 // TRANSFER
 #define NAME_SIZE 63
 #define VALUE_SIZE 1023

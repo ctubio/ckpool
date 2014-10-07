@@ -285,6 +285,10 @@ K_STORE *workqueue_store;
 pthread_mutex_t wq_waitlock;
 pthread_cond_t wq_waitcond;
 
+// HEARTBEATQUEUE
+K_LIST *heartbeatqueue_free;
+K_STORE *heartbeatqueue_store;
+
 // TRANSFER
 K_LIST *transfer_free;
 
@@ -860,6 +864,11 @@ static void alloc_storage()
 	workqueue_free = k_new_list("WorkQueue", sizeof(WORKQUEUE),
 					ALLOC_WORKQUEUE, LIMIT_WORKQUEUE, true);
 	workqueue_store = k_new_store(workqueue_free);
+
+	heartbeatqueue_free = k_new_list("HeartBeatQueue", sizeof(HEARTBEATQUEUE),
+					 ALLOC_HEARTBEATQUEUE,
+					 LIMIT_HEARTBEATQUEUE, true);
+	heartbeatqueue_store = k_new_store(heartbeatqueue_free);
 
 	transfer_free = k_new_list(Transfer, sizeof(TRANSFER),
 					ALLOC_TRANSFER, LIMIT_TRANSFER, true);
