@@ -2420,12 +2420,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 			continue;
 		if (mindiff == client->diff)
 			continue;
-		/* If we're going down in diff, do not allow the next diff to
-		 * be drastically lower than the current diff */
-		if (mindiff < client->diff * 2 / 3)
-			client->diff = client->diff * 2 / 3;
-		else
-			client->diff = mindiff;
+		client->diff = mindiff;
 		stratum_send_diff(client);
 	}
 	ck_runlock(&instance_lock);
