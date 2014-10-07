@@ -1138,6 +1138,17 @@ static void stratum_broadcast_message(const char *msg)
 	stratum_broadcast(json_msg);
 }
 
+/* Send a generic reconnect to all clients without parameters to make them
+ * reconnect to the same server. */
+static void reconnect_clients(void)
+{
+	json_t *json_msg;
+
+	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
+		   "params");
+	stratum_broadcast(json_msg);
+}
+
 static void block_solve(ckpool_t *ckp)
 {
 	char cdfield[64];
@@ -1281,6 +1292,8 @@ retry:
 		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
 		block_solve(ckp);
+	} else if (cmdmatch(buf, "reconnect")) {
+		reconnect_clients();
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {

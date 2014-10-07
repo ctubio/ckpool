@@ -288,12 +288,16 @@ retry:
 			LOGWARNING("Failed to send_procmsg to connector");
 	} else if (cmdmatch(buf, "accept")) {
 		LOGWARNING("Listener received accept message, accepting clients");
-		send_unix_msg(sockd, "accepting");
 		send_procmsg(ckp->connector, "accept");
+		send_unix_msg(sockd, "accepting");
 	} else if (cmdmatch(buf, "reject")) {
 		LOGWARNING("Listener received reject message, rejecting clients");
-		send_unix_msg(sockd, "rejecting");
 		send_procmsg(ckp->connector, "reject");
+		send_unix_msg(sockd, "rejecting");
+	} else if (cmdmatch(buf, "reconnect")) {
+		LOGWARNING("Listener received request to send reconnect to clients");
+		send_procmsg(ckp->stratifier, "reconnect");
+		send_unix_msg(sockd, "reconnecting");
 	} else if (cmdmatch(buf, "restart")) {
 		LOGWARNING("Listener received restart message, attempting handover");
 		send_unix_msg(sockd, "restarting");
