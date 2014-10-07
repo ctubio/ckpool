@@ -54,6 +54,10 @@ function _getsock($fun, $port, $unix=true)
 		}
 	}
  }
+ # Avoid getting locked up for long
+ $tmo = array('sec' => 1, 'usec' => 0);
+ socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, $tmo);
+ socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, $tmo);
  return $socket;
 }
 #
@@ -64,7 +68,7 @@ function getsock($fun)
 #
 function readsockline($fun, $socket)
 {
- $siz = socket_read($socket, 4);
+ $siz = socket_read($socket, 4, PHP_BINARY_READ);
  if ($siz === false)
  {
 	$sockerr = socket_strerror(socket_last_error());
@@ -74,29 +78,38 @@ function readsockline($fun, $socket)
  }
  if (strlen($siz) != 4)
  {
-	$msg = "$fun() readsockline() short read $siz vs ".strlen($siz);
+	$msg = "$fun() readsockline() short 4 read got ".strlen($siz);
 	error_log("CKPERR: $msg");
 	return false;
  }
  $len = ord($siz[0]) + ord($siz[1])*256 +
 	ord($siz[2])*65536 + ord($siz[3])*16777216;
- $line = socket_read($socket, $len);
- if ($line === false)
+ $ans = '';
+ $left = $len;
+ while ($left > 0)
  {
-	$sockerr = socket_strerror(socket_last_error());
-	$msg = "$fun() readsockline() failed";
-	error_log("CKPERR: $msg '$sockerr'");
-	return false;
- }
- else
-	if (strlen($line) != $len)
+	$line = socket_read($socket, $left, PHP_BINARY_READ);
+	if ($line === false)
 	{
-		$msg = "$fun() readsockline() incomplete ($len)";
-		error_log("CKPERR: $msg '$line'");
+		$sockerr = socket_strerror(socket_last_error());
+		$msg = "$fun() readsockline() failed";
+		error_log("CKPERR: $msg '$sockerr'");
 		return false;
 	}
-
- return $line;
+	$red = strlen($line);
+	if ($red == 0)
+	{
+		$msg = "$fun() readsockline() incomplete (".($len-$left)." vs $len)";
+		$sub = "'".substr($line, 0, 30)."'";
+		if (strlen($line) > 30)
+			$sub .= '...';
+		error_log("CKPERR: $msg $sub");
+		return false;
+	}
+	$left -= $red;
+	$ans .= $line;
+ }
+ return $ans;
 }
 #
 function dosend($fun, $socket, $msg)
@@ -115,7 +128,9 @@ function dosend($fun, $socket, $msg)
 
  $msg = $siz . $msg;
 
- $left = $len + 4;
+ $len += 4;
+ $left = $len;
+ $ret = false;
  while ($left > 0)
  {
 	$res = socket_write($socket, substr($msg, 0 - $left), $left);
@@ -126,8 +141,13 @@ function dosend($fun, $socket, $msg)
 		error_log("CKPERR: $msg '$sockerr'");
 		break;
 	}
-	else
-		$left -= $res;
+	if ($res == 0)
+	{
+		$msg = "$fun() sendsock() incomplete (".($len-$left)." vs $len)";
+		error_log("CKPERR: $msg");
+		break;
+	}
+	$left -= $res;
  }
  if ($left == 0)
 	$ret = true;
