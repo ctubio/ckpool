@@ -2726,7 +2726,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_nocheck(json_msg, "id", jp->id_val);
 	stratum_add_send(json_msg, client_id);
 
-	if (!json_is_string(result_val) || !client->suggest_diff)
+	if (!json_is_true(result_val) || !client->suggest_diff)
 		goto out;
 
 	/* Update the client now if they have set a valid mindiff different
