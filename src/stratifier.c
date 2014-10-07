@@ -2802,7 +2802,7 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 			cmd = response;
 			strsep(&cmd, ".");
 			LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
-			if (!safecmp(cmd, "heartbeat=")) {
+			if (cmdmatch("heartbeat=", cmd)) {
 				strsep(&cmd, "=");
 				parse_ckdb_cmd(ckp, cmd);
 			}
