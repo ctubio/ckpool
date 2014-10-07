@@ -91,7 +91,8 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 						    NULL,
 						    by, code, inet, now,
 						    trf_root);
-		}
+		} else
+			ok = false;
 	}
 
 	if (!ok) {
