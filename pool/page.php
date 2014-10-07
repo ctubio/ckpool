@@ -320,7 +320,7 @@ function pgtop($info, $dotop, $user, $douser)
 			$top .= "
 <span class=topwho>$who&nbsp;</span>
 <span class=topdes>Hash Rate:</span>
-<span class=topdat>$uhr$u1hr</span>";
+<span class=topdat>$uhr/$u1hr</span>";
 			$top .= makeForm('')."
 &nbsp;<input type=submit name=Logout value=Logout>
 </form>";
