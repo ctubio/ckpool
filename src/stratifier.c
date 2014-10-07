@@ -1609,7 +1609,8 @@ static int send_recv_auth(stratum_instance_t *client)
 			json_get_int(&worker->mindiff, val, "difficultydefault");
 			client->suggest_diff = worker->mindiff;
 		}
-		if (!safecmp(response, "ok.authorise") && secondaryuserid) {
+		if (secondaryuserid && (!safecmp(response, "ok.authorise") ||
+					!safecmp(response, "ok.addrauth"))) {
 			if (!user_instance->secondaryuserid)
 				user_instance->secondaryuserid = secondaryuserid;
 			else
