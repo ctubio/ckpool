@@ -46,7 +46,7 @@ function workmgtuser($data, $user, $err)
 	}
  }
  $pg .= '<tr><td colspan=2 class=dc><font size=-1><span class=st1>*</span>';
- $pg .= ' A value of 0, less than the pool default,<br>';
+ $pg .= ' A value of 0, less than the pool minimum,<br>';
  $pg .= 'or less than the pool calculated value for you,<br>';
  $pg .= 'will use the pool calculated value</font></td></tr>';
  $pg .= "</table><input type=hidden name=rows value=$count></form>\n";
