@@ -315,6 +315,8 @@ function pgtop($info, $dotop, $user, $douser)
 		}
 		else
 		{
+			if (substr($who, 0, 1) == '1' && strlen($who) > 12)
+				$who = substr($who, 0, 11) . '&#133;';
 			$top .= "
 <span class=topwho>$who&nbsp;</span>
 <span class=topdes>Hash Rate:</span>
