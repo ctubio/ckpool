@@ -280,7 +280,7 @@ void *receiver(void *arg)
 
 	/* First fd is reserved for the accepting socket */
 	fds[0].fd = ci->serverfd;
-retry:
+rebuild_fds:
 	update = false;
 	nfds = 1;
 
@@ -299,27 +299,35 @@ retry:
 	ck_runlock(&ci->lock);
 
 repoll:
-	fds[0].events = POLLIN;
-	fds[0].revents = 0;
-
 	while (!ci->accept)
-		sleep(1);
+		cksleep_ms(100);
 
 	ret = poll(fds, nfds, 1000);
-	if (unlikely(ret < 0)) {
+	if (unlikely(ret < 1)) {
 		LOGERR("Failed to poll in receiver");
 		goto out;
 	}
-	if (!ret) {
-		if (update)
-			goto retry;
-		goto repoll;
-	}
-	for (i = nfds - 1; i > 0; i--) {
-		int fd;
+
+	for (i = 0; i < nfds, ret > 0; i++) {
+		int fd, accepted;
 
 		if (!fds[i].revents)
 			continue;
+
+		/* Reset for the next poll pass */
+		fds[i].events = POLLIN;
+		fds[i].revents = 0;
+		--ret;
+
+		/* Is this the listening server socket? */
+		if (i == 0) {
+			accepted = accept_client(ci);
+			if (unlikely(accepted < 0))
+				goto out;
+			if (accepted)
+				update = true;
+			continue;
+		}
 
 		client = NULL;
 		fd = fds[i].fd;
@@ -335,19 +343,10 @@ repoll:
 			update = true;
 		} else
 			parse_client_msg(ci, client);
-
-		/* Reset for the next poll pass */
-		fds[i].events = POLLIN;
-		fds[i].revents = 0;
 	}
 
-	/* i should be zero now allowing us to examine the accepting socket */
-	if (fds[0].revents)
-		ret = accept_client(ci);
-	if (unlikely(ret < 0))
-		goto out;
-	if (ret > 0 || update)
-		goto retry;
+	if (update)
+		goto rebuild_fds;
 	goto repoll;
 out:
 	return NULL;
