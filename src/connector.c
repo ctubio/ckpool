@@ -303,7 +303,7 @@ repoll:
 		cksleep_ms(100);
 
 	ret = poll(fds, nfds, 1000);
-	if (unlikely(ret < 1)) {
+	if (unlikely(ret < 0)) {
 		LOGERR("Failed to poll in receiver");
 		goto out;
 	}
