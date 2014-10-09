@@ -280,6 +280,8 @@ void *receiver(void *arg)
 
 	/* First fd is reserved for the accepting socket */
 	fds[0].fd = ci->serverfd;
+	fds[0].events = POLLIN;
+	fds[0].revents = 0;
 rebuild_fds:
 	update = false;
 	nfds = 1;
@@ -308,7 +310,7 @@ repoll:
 		goto out;
 	}
 
-	for (i = 0; i < nfds || ret > 0; i++) {
+	for (i = 0; i < nfds && ret > 0; i++) {
 		int fd, accepted;
 
 		if (!fds[i].revents)
