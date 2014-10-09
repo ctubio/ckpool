@@ -308,7 +308,7 @@ repoll:
 		goto out;
 	}
 
-	for (i = 0; i < nfds, ret > 0; i++) {
+	for (i = 0; i < nfds || ret > 0; i++) {
 		int fd, accepted;
 
 		if (!fds[i].revents)
