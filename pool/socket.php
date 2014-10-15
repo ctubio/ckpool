@@ -78,7 +78,7 @@ function readsockline($fun, $socket)
 	$sle = socket_last_error();
 	$sockerr = socket_strerror($sle);
 	$msg = "$fun() readsockline() failed";
-	error_log("CKPERR: $msg '$sockerr'");
+	error_log("CKPERR: $msg ($sle) '$sockerr'");
 	return false;
  }
  if (strlen($siz) != 4)
