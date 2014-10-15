@@ -800,6 +800,35 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 				LOGERR("%s.%s", id, reply);
 				return strdup(reply);
 		}
+	} else if (strcasecmp(action, "confirm") == 0) {
+		// Confirm a new block that wasn't confirmed due to some bug
+		switch (blocks->confirmed[0]) {
+			case BLOCKS_NEW:
+				ok = blocks_add(conn, transfer_data(i_height),
+						      blocks->blockhash,
+						      BLOCKS_CONFIRM_STR,
+						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      by, code, inet, now, false, id,
+						      trf_root);
+				if (!ok) {
+					snprintf(reply, siz,
+						 "DBE.action '%s'",
+						 action);
+					LOGERR("%s.%s", id, reply);
+					return strdup(reply);
+				}
+				// TODO: reset the share counter?
+				break;
+			default:
+				snprintf(reply, siz,
+					 "ERR.invalid action '%.*s%s' for block state '%s'",
+					 CMD_SIZ, action,
+					 (strlen(action) > CMD_SIZ) ? "..." : "",
+					 blocks_confirmed(blocks->confirmed));
+				LOGERR("%s.%s", id, reply);
+				return strdup(reply);
+		}
 	} else {
 		snprintf(reply, siz, "ERR.unknown action '%s'",
 			 transfer_data(i_action));
