@@ -559,7 +559,9 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Invalid nonce2len %d in parse_subscribe", size);
 		goto out;
 	}
-	if (size < 4) {
+	if (size == 3)
+		LOGWARNING("Nonce2 length %d means proxied clients can't be >5TH each", size);
+	else if (size < 3) {
 		LOGWARNING("Nonce2 length %d too small to be able to proxy", size);
 		goto out;
 	}
