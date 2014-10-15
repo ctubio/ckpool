@@ -97,6 +97,12 @@ static int accept_client(conn_instance_t *ci)
 	address_len = sizeof(client->address);
 	fd = accept(ci->serverfd, &client->address, &address_len);
 	if (unlikely(fd < 0)) {
+		/* Handle these errors gracefully should we ever share this
+		 * socket */
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED || errno == EINTR) {
+			LOGERR("Recoverable error on accept in accept_client");
+			return 0;
+		}
 		LOGERR("Failed to accept on socket %d in acceptor", ci->serverfd);
 		dealloc(client);
 		return -1;
