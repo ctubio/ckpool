@@ -318,6 +318,12 @@ static share_t *shares;
 
 static cklock_t share_lock;
 
+/* Linked list of block solves, added to during submission, removed on
+ * accept/reject. It is likely we only ever have one solve on here but you
+ * never know... */
+static pthread_mutex_t block_lock;
+static ckmsg_t *block_solves;
+
 static int gen_priority;
 
 /* Priority levels for generator messages */
@@ -1149,48 +1155,96 @@ static void reconnect_clients(void)
 	stratum_broadcast(json_msg);
 }
 
-static void block_solve(ckpool_t *ckp)
+static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
+	ckmsg_t *block, *tmp, *found = NULL;
 	char cdfield[64];
+	int height = 0;
 	ts_t ts_now;
 	json_t *val;
 	char *msg;
 
+	update_base(ckp, GEN_PRIORITY);
+
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
-	ck_rlock(&workbase_lock);
-	ASPRINTF(&msg, "Block %d solved by %s!", current_workbase->height, ckp->name);
-	/* We send blank settings to ckdb with only the matching data from what we submitted
-	 * to say the block has been confirmed. */
-	JSON_CPACK(val, "{si,ss,sI,ss,ss,si,ss,ss,ss,sI,ss,ss,ss,ss}",
-			"height", current_workbase->height,
-			"confirmed", "1",
-			"workinfoid", current_workbase->id,
-			"username", "",
-			"workername", "",
-			"clientid", 0,
-			"enonce1", "",
-			"nonce2", "",
-			"nonce", "",
-			"reward", current_workbase->coinbasevalue,
-			"createdate", cdfield,
-			"createby", "code",
-			"createcode", __func__,
-			"createinet", ckp->serverurl);
-	ck_runlock(&workbase_lock);
+	mutex_lock(&block_lock);
+	DL_FOREACH_SAFE(block_solves, block, tmp) {
+		val = block->data;
+		char *solvehash;
 
-	update_base(ckp, GEN_PRIORITY);
+		json_get_string(&solvehash, val, "blockhash");
+		if (unlikely(!solvehash)) {
+			LOGERR("Failed to find blockhash in block_solve json!");
+			continue;
+		}
+		if (!strcmp(solvehash, blockhash)) {
+			dealloc(solvehash);
+			found = block;
+			DL_DELETE(block_solves, block);
+			break;
+		}
+		dealloc(solvehash);
+	}
+	mutex_unlock(&block_lock);
 
-	ck_rlock(&workbase_lock);
-	json_set_string(val, "blockhash", current_workbase->prevhash);
-	ck_runlock(&workbase_lock);
+	if (unlikely(!found)) {
+		LOGERR("Failed to find blockhash %s in block_solve!", blockhash);
+		return;
+	}
 
+	val = found->data;
+	json_set_string(val, "confirmed", "1");
+	json_set_string(val, "createdate", cdfield);
+	json_set_string(val, "createcode", __func__);
+	json_get_int(&height, val, "height");
 	ckdbq_add(ckp, ID_BLOCK, val);
+	free(found);
 
+	ASPRINTF(&msg, "Block %d solved by %s!", height, ckp->name);
 	stratum_broadcast_message(msg);
 	free(msg);
 
+	LOGWARNING("Solved and confirmed block %d", height);
+}
+
+static void block_reject(const char *blockhash)
+{
+	ckmsg_t *block, *tmp, *found = NULL;
+	int height = 0;
+	json_t *val;
+
+	mutex_lock(&block_lock);
+	DL_FOREACH_SAFE(block_solves, block, tmp) {
+		val = block->data;
+		char *solvehash;
+
+		json_get_string(&solvehash, val, "blockhash");
+		if (unlikely(!solvehash)) {
+			LOGERR("Failed to find blockhash in block_reject json!");
+			continue;
+		}
+		if (!strcmp(solvehash, blockhash)) {
+			dealloc(solvehash);
+			found = block;
+			DL_DELETE(block_solves, block);
+			break;
+		}
+		dealloc(solvehash);
+	}
+	mutex_unlock(&block_lock);
+
+	if (unlikely(!found)) {
+		LOGERR("Failed to find blockhash %s in block_reject!", blockhash);
+		return;
+	}
+	val = found->data;
+	json_get_int(&height, val, "height");
+	json_decref(val);
+	free(found);
+
+	LOGWARNING("Submitted, but rejected block %d", height);
 }
 
 /* Some upstream pools (like p2pool) don't update stratum often enough and
@@ -1291,7 +1345,9 @@ retry:
 	} else if (cmdmatch(buf, "dropall")) {
 		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
-		block_solve(ckp);
+		block_solve(ckp, buf + 6);
+	} else if (cmdmatch(buf, "noblock")) {
+		block_reject(buf + 8);
 	} else if (cmdmatch(buf, "reconnect")) {
 		reconnect_clients();
 	} else if (cmdmatch(buf, "loglevel")) {
@@ -1907,8 +1963,9 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 {
 	int transactions = wb->transactions + 1;
 	char hexcoinbase[1024], blockhash[68];
+	json_t *val = NULL, *val_copy;
 	char *gbt_block, varint[12];
-	json_t *val = NULL;
+	ckmsg_t *block_ckmsg;
 	char cdfield[64];
 	uchar swap[32];
 	ckpool_t *ckp;
@@ -1927,8 +1984,12 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
 	gbt_block = ckalloc(1024);
-	sprintf(gbt_block, "submitblock:");
-	__bin2hex(gbt_block + 12, data, 80);
+	flip_32(swap, hash);
+	__bin2hex(blockhash, swap, 32);
+
+	/* Message format: "submitblock:hash,data" */
+	sprintf(gbt_block, "submitblock:%s,", blockhash);
+	__bin2hex(gbt_block + 12 + 64 + 1, data, 80);
 	if (transactions < 0xfd) {
 		uint8_t val8 = transactions;
 
@@ -1953,8 +2014,6 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
 	free(gbt_block);
 
-	flip_32(swap, hash);
-	__bin2hex(blockhash, swap, 32);
 	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
 			"blockhash", blockhash,
@@ -1971,6 +2030,14 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", ckp->serverurl);
+	val_copy = json_deep_copy(val);
+	block_ckmsg = ckalloc(sizeof(ckmsg_t));
+	block_ckmsg->data = val_copy;
+
+	mutex_lock(&block_lock);
+	DL_APPEND(block_solves, block_ckmsg);
+	mutex_unlock(&block_lock);
+
 	ckdbq_add(ckp, ID_BLOCK, val);
 }
 
@@ -3343,6 +3410,7 @@ int stratifier(proc_instance_t *pi)
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	cklock_init(&share_lock);
+	mutex_init(&block_lock);
 
 	LOGWARNING("%s stratifier ready", ckp->name);
 

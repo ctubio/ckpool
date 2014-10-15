@@ -347,9 +347,14 @@ retry:
 			}
 		}
 	} else if (cmdmatch(buf, "submitblock:")) {
+		char blockmsg[80];
+		bool ret;
+
 		LOGNOTICE("Submitting block data!");
-		if (submit_block(cs, buf + 12))
-			send_proc(ckp->stratifier, "block");
+		ret = submit_block(cs, buf + 12 + 64 + 1);
+		memset(buf + 12 + 64, 0, 1);
+		sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
+		send_proc(ckp->stratifier, blockmsg);
 	} else if (cmdmatch(buf, "checkaddr:")) {
 		if (validate_address(cs, buf + 10))
 			send_unix_msg(sockd, "true");
