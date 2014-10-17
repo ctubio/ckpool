@@ -1645,14 +1645,45 @@ void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	}
 }
 
-// TODO: do this better ... :)
-void dsp_hash(char *hash, char *buf, size_t siz)
+void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
+	size_t len;
+	int i, j;
+
+	// code bug
+	if (siz < (SHA256SIZHEX + 1)) {
+		quitfrom(1, file, func, line,
+			 "%s() passed buf too small %d (%d)",
+			 __func__, (int)siz, SHA256SIZHEX+1);
+	}
+
+	len = strlen(hash);
+	// code bug - check this before calling
+	if (len != SHA256SIZHEX) {
+		quitfrom(1, file, func, line,
+			 "%s() invalid hash passed - size %d (%d)",
+			 __func__, (int)len, SHA256SIZHEX);
+	}
+
+	for (i = 0; i < SHA256SIZHEX; i++) {
+		j = SHA256SIZHEX - 8 - (i & 0xfff8) + (i % 8);
+		buf[i] = hash[j];
+	}
+	buf[SHA256SIZHEX] = '\0';
+}
+
+void _dsp_hash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS)
+{
+	char tmp[SHA256SIZHEX+1];
 	char *ptr;
 
-	ptr = hash + strlen(hash) - (siz - 1) - 8;
-	if (ptr < hash)
-		ptr = hash;
+	_dbhash2btchash(hash, tmp, sizeof(tmp), file, func, line);
+	ptr = tmp;
+	while (*ptr && *ptr == '0')
+		ptr++;
+	ptr -= 4;
+	if (ptr < tmp)
+		ptr = tmp;
 	STRNCPYSIZ(buf, ptr, siz);
 }
 
