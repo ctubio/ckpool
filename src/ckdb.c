@@ -3053,7 +3053,6 @@ static void check_restore_dir(char *name)
 }
 
 static struct option long_options[] = {
-	{ "dbprefix",		required_argument,	0,	'b' },
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
 	{ "help",		no_argument,		0,	'h' },
@@ -3102,7 +3101,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:hkl:n:O:p:P:r:R:s:S:t:T:u:U:vyY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:P:r:R:s:S:t:u:U:vyY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
