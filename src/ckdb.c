@@ -1630,7 +1630,8 @@ static void *summariser(__maybe_unused void *arg)
 	while (!everyone_die) {
 		sleep(5);
 		if (!everyone_die) {
-			check_blocks();
+			if (startup_complete)
+				check_blocks();
 			summarise_blocks();
 		}
 
