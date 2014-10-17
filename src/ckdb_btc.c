@@ -10,11 +10,11 @@
 
 #include "ckdb.h"
 
-//#include <curl/curl.h>
+#define BTCKEY ((const char *)"result")
 
 #define GETBLOCKHASHCMD "getblockhash"
 #define GETBLOCKHASH "{\"method\":\"" GETBLOCKHASHCMD "\",\"params\":[%d],\"id\":1}"
-#define GETBLOCKHASHKEY ((const char *)"result")
+#define GETBLOCKHASHKEY NULL
 
 #define GETBLOCKCMD "getblock"
 #define GETBLOCK "{\"method\":\"" GETBLOCKCMD "\",\"params\":[\"%s\"],\"id\":1}"
@@ -145,13 +145,12 @@ static char *_btc_io(__maybe_unused const char *cmd, char *json, WHERE_FFL_ARGS)
 	return res;
 }
 
-static char *single_decode_str(char *ans, const char *cmd, const char *key)
+static json_t *single_decode(char *ans, const char *cmd, const char *key)
 {
-	json_t *json_data, *json_ob;
+	json_t *json_data, *btc_ob, *json_ob = NULL;
 	json_error_t err_val;
-	const char *json_str;
 
-	if (ans) {
+	if (ans && *ans) {
 		json_data = json_loads(ans, JSON_DISABLE_EOF_CHECK, &err_val);
 		if (!json_data) {
 			char *text = safe_text(ans);
@@ -163,62 +162,76 @@ static char *single_decode_str(char *ans, const char *cmd, const char *key)
 				err_val.text, text);
 			free(text);
 		} else {
-			json_ob = json_object_get(json_data, key);
-			if (!json_ob) {
+			btc_ob = json_object_get(json_data, BTCKEY);
+			if (!btc_ob) {
 				char *text = safe_text(ans);
-				LOGERR("%s() Json %s reply missing key %s "
+				LOGERR("%s() Json %s reply missing main key %s "
 					"ans='%s'",
 					__func__, cmd, key, text);
 				free(text);
 			} else {
-				if (!json_is_string(json_ob)) {
-					char *text = safe_text(ans);
-					LOGERR("%s() Json %s key %s "
-						"not a string ans='%s'",
-						__func__, cmd, key, text);
-					free(text);
-				} else {
-					json_str = json_string_value(json_ob);
-					if (json_str)
-						return strdup(json_str);
-					else
-						return strdup(EMPTY);
+				if (key == NULL)
+					json_ob = btc_ob;
+				else {
+					json_ob = json_object_get(btc_ob, key);
+					if (!json_ob) {
+						char *text = safe_text(ans);
+						LOGERR("%s() Json %s reply missing "
+							"sub-key %s ans='%s'",
+							__func__, cmd, key, text);
+						free(text);
+					}
 				}
 			}
 		}
 	}
-	return NULL;
+	return json_ob;
+}
+
+static char *single_decode_str(char *ans, const char *cmd, const char *key)
+{
+	const char *json_str;
+	char *str = NULL;
+	json_t *json_ob;
+
+	json_ob = single_decode(ans, cmd, key);
+	if (json_ob) {
+		if (!json_is_string(json_ob)) {
+			char *text = safe_text(ans);
+			if (!key)
+				key = BTCKEY;
+			LOGERR("%s() Json %s key %s "
+				"not a string ans='%s'",
+				__func__, cmd, key, text);
+			free(text);
+		} else {
+			json_str = json_string_value(json_ob);
+			if (json_str)
+				str = strdup(json_str);
+		}
+	}
+	return str;
 }
 
 static int64_t single_decode_int(char *ans, const char *cmd, const char *key)
 {
-	json_t *json_data, *json_ob;
-	json_error_t err_val;
+	json_t *json_ob;
+	int64_t val = 0;
 
-	if (ans) {
-		json_data = json_loads(ans, JSON_DISABLE_EOF_CHECK, &err_val);
-		if (!json_data) {
+	json_ob = single_decode(ans, cmd, key);
+	if (json_ob) {
+		if (!json_is_integer(json_ob)) {
 			char *text = safe_text(ans);
-			LOGERR("%s() Json %s decode error "
-				"json_err=(%d:%d:%d)%s:%s ans='%s'",
-				__func__, cmd,
-				err_val.line, err_val.column,
-				err_val.position, err_val.source,
-				err_val.text, text);
+			if (!key)
+				key = BTCKEY;
+			LOGERR("%s() Json %s key %s "
+				"not an int ans='%s'",
+				__func__, cmd, key, text);
 			free(text);
-		} else {
-			json_ob = json_object_get(json_data, key);
-			if (!json_ob) {
-				char *text = safe_text(ans);
-				LOGERR("%s() Json %s reply missing key %s "
-					"ans='%s'",
-					__func__, cmd, key, text);
-				free(text);
-			} else
-				return (int64_t)json_integer_value(json_ob);
-		}
+		} else
+			val = (int64_t)json_integer_value(json_ob);
 	}
-	return 0;
+	return val;
 }
 
 static char *btc_blockhash(int32_t height)
@@ -234,14 +247,14 @@ static char *btc_blockhash(int32_t height)
 	return hash;
 }
 
-static __maybe_unused int32_t btc_confirms(int32_t height)
+static int32_t btc_confirms(char *hash)
 {
 	char buf[1024];
 	char *ans;
 	int32_t conf;
 
-	snprintf(buf, sizeof(buf), GETBLOCKHASH, height);
-	ans = btc_io(GETBLOCKHASHCMD, buf);
+	snprintf(buf, sizeof(buf), GETBLOCK, hash);
+	ans = btc_io(GETBLOCKCMD, buf);
 	conf = (int32_t)single_decode_int(ans, GETBLOCKCMD, GETBLOCKCONFKEY);
 	free(ans);
 	return conf;
@@ -251,7 +264,9 @@ static __maybe_unused int32_t btc_confirms(int32_t height)
 void btc_blockstatus(BLOCKS *blocks)
 {
 	char hash[TXT_BIG+1];
+	char height_str[32];
 	char *blockhash;
+	int32_t confirms;
 	size_t len;
 	tv_t now;
 	bool ok;
@@ -289,16 +304,14 @@ void btc_blockstatus(BLOCKS *blocks)
 		return;
 
 	if (strcmp(blockhash, hash) != 0) {
-		char height_tmp[32];
-
-		snprintf(height_tmp, sizeof(height_tmp), "%d", blocks->height);
+		snprintf(height_str, sizeof(height_str), "%d", blocks->height);
 		LOGERR("%s() flagging block %d(%s) as %s pool=%s btc=%s",
 			__func__,
-			blocks->height, height_tmp,
+			blocks->height, height_str,
 			blocks_confirmed(BLOCKS_ORPHAN_STR),
 			hash, blockhash);
 
-		ok = blocks_add(NULL, height_tmp,
+		ok = blocks_add(NULL, height_str,
 				      blocks->blockhash,
 				      BLOCKS_ORPHAN_STR,
 				      EMPTY, EMPTY, EMPTY, EMPTY,
@@ -312,5 +325,24 @@ void btc_blockstatus(BLOCKS *blocks)
 		return;
 	}
 
-	// confirms = btc_confirms(hash);
+	confirms = btc_confirms(hash);
+	if (confirms >= BLOCKS_42_VALUE) {
+		snprintf(height_str, sizeof(height_str), "%d", blocks->height);
+		LOGERR("%s() flagging block %d(%s) as %s confirms=%d(%d)",
+			__func__,
+			blocks->height, height_str,
+			blocks_confirmed(BLOCKS_42_STR),
+			confirms, BLOCKS_42_VALUE);
+
+		ok = blocks_add(NULL, height_str,
+				      blocks->blockhash,
+				      BLOCKS_42_STR,
+				      EMPTY, EMPTY, EMPTY, EMPTY,
+				      EMPTY, EMPTY, EMPTY, EMPTY,
+				      by_default, (char *)__func__, inet_default,
+				      &now, false, id_default, NULL);
+
+		if (!ok)
+			blocks->ignore = true;
+	}
 }
