@@ -1,9 +1,26 @@
 <?php
 #
-# See function sendsockreply($fun, $msg) at the end
+# See function sendsockreply($fun, $msg, $tmo) at the end
+#
+function socktmo($socket, $factor)
+{
+ # default timeout factor
+ if ($factor === false)
+	$factor = 1;
+
+ # on a slower server increase this base value
+ $tmo = 2;
+
+ $usetmo = $tmo * $factor;
+ $sec = floor($usetmo);
+ $usec = floor(($usetmo - $sec) * 1000000);
+ $tmoval = array('sec' => $sec, 'usec' => $use);
+ socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, $tmo);
+ socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, $tmo);
+}
 #
 # Note that $port in AF_UNIX should be the socket filename
-function _getsock($fun, $port, $unix=true)
+function _getsock($fun, $port, $tmo, $unix=true)
 {
  $socket = null;
  if ($unix === true)
@@ -57,17 +74,15 @@ function _getsock($fun, $port, $unix=true)
 	}
  }
  # Avoid getting locked up for long
- $tmo = array('sec' => 2, 'usec' => 0);
- socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, $tmo);
- socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, $tmo);
+ socktmo($socket, $tmo);
  # Enable timeout
  socket_set_block($socket);
  return $socket;
 }
 #
-function getsock($fun)
+function getsock($fun, $tmo)
 {
- return _getsock($fun, '/opt/ckdb/listener');
+ return _getsock($fun, '/opt/ckdb/listener', $tmo);
 }
 #
 function readsockline($fun, $socket)
@@ -161,10 +176,10 @@ function dosend($fun, $socket, $msg)
  return $ret;
 }
 #
-function sendsock($fun, $msg)
+function sendsock($fun, $msg, $tmo = false)
 {
  $ret = false;
- $socket = getsock($fun);
+ $socket = getsock($fun, $tmo);
  if ($socket !== false)
  {
 	$ret = dosend($fun, $socket, $msg);
@@ -178,10 +193,10 @@ function sendsock($fun, $msg)
 # and the data $msg to send to ckdb
 # and it returns $ret = false on error or $ret = the string reply
 #
-function sendsockreply($fun, $msg)
+function sendsockreply($fun, $msg, $tmo = false)
 {
  $ret = false;
- $socket = getsock($fun);
+ $socket = getsock($fun, $tmo);
  if ($socket !== false)
  {
 	$ret = dosend($fun, $socket, $msg);

@@ -240,8 +240,12 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				goto struckout;
 			}
 
-//			if (address && *address)
-//				TODO: validate it
+			if (address && *address) {
+				if (!btc_valid_address(address)) {
+					reason = "Invalid BTC address";
+					goto struckout;
+				}
+			}
 
 			if (email && *email) {
 				ok = users_pass_email(conn, u_item, NULL,

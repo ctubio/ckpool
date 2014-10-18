@@ -20,6 +20,10 @@
 #define GETBLOCK "{\"method\":\"" GETBLOCKCMD "\",\"params\":[\"%s\"],\"id\":1}"
 #define GETBLOCKCONFKEY ((const char *)"confirmations")
 
+#define VALIDADDRCMD "validateaddress"
+#define VALIDADDR "{\"method\":\"" VALIDADDRCMD "\",\"params\":[\"%s\"],\"id\":1}"
+#define VALIDADDRKEY ((const char *)"isvalid")
+
 static char *btc_data(char *json, size_t *len)
 {
 	size_t off;
@@ -234,6 +238,31 @@ static int64_t single_decode_int(char *ans, const char *cmd, const char *key)
 	return val;
 }
 
+static bool single_decode_bool(char *ans, const char *cmd, const char *key)
+{
+	json_t *json_ob;
+	int json_typ;
+	bool val = false;
+
+	json_ob = single_decode(ans, cmd, key);
+	if (json_ob) {
+		json_typ = json_typeof(json_ob);
+		if (json_typ != JSON_TRUE && json_typ != JSON_FALSE) {
+			char *text = safe_text(ans);
+			if (!key)
+				key = BTCKEY;
+			LOGERR("%s() Json %s key %s "
+				"not a bool ans='%s'",
+				__func__, cmd, key, text);
+			free(text);
+		} else {
+			if (json_typ == JSON_TRUE)
+				val = true;
+		}
+	}
+	return val;
+}
+
 static char *btc_blockhash(int32_t height)
 {
 	char buf[1024];
@@ -258,6 +287,19 @@ static int32_t btc_confirms(char *hash)
 	conf = (int32_t)single_decode_int(ans, GETBLOCKCMD, GETBLOCKCONFKEY);
 	free(ans);
 	return conf;
+}
+
+bool btc_valid_address(char *addr)
+{
+	char buf[1024];
+	char *ans;
+	bool valid;
+
+	snprintf(buf, sizeof(buf), VALIDADDR, addr);
+	ans = btc_io(VALIDADDRCMD, buf);
+	valid = single_decode_bool(ans, VALIDADDRCMD, VALIDADDRKEY);
+	free(ans);
+	return valid;
 }
 
 // Check for orphan or update confirm count
