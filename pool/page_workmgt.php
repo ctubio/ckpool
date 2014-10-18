@@ -30,7 +30,7 @@ function workmgtuser($data, $user, $err)
 		$pg .= "<tr class=$row>";
 
 		$wn = htmlspecialchars($ans['workername:'.$i]);
-		$wnv = sq($ans['workername:'.$i]);
+		$wnv = urlencode($ans['workername:'.$i]);
 		$pg .= '<td class=dl>';
 		$pg .= "<input type=hidden name='workername:$i' value='$wnv'>";
 		$pg .= $wn.'</td>';
@@ -67,7 +67,7 @@ function doworkmgt($data, $user)
 		$settings = array();
 		for ($i = 0; $i < $count; $i++)
 		{
-			$wn = getparam('workername:'.$i, false);
+			$wn = urldecode(getparam('workername:'.$i, false));
 			$md = getparam('difficultydefault:'.$i, false);
 			if (!nuem($wn) && !nuem($md))
 			{

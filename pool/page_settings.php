@@ -18,7 +18,7 @@ function settings($data, $user, $email, $addr, $err)
  $pg .= '<tr class=dc><td class=dr>';
  $pg .= 'EMail:';
  $pg .= '</td><td class=dl>';
- $pg .= "<input type=text name=email value='".sq($email)."' size=20>";
+ $pg .= "<input type=text name=email value='$email' size=20>";
  $pg .= '</td></tr>';
  $pg .= '<tr class=dc><td class=dr>';
  $pg .= 'Password:';
@@ -41,7 +41,7 @@ function settings($data, $user, $email, $addr, $err)
  $pg .= '<tr class=dc><td class=dr>';
  $pg .= 'BTC Address:';
  $pg .= '</td><td class=dl>';
- $pg .= "<input type=text name=baddr value='".sq($addr)."' size=42>";
+ $pg .= "<input type=text name=baddr value='$addr' size=42>";
  $pg .= '</td></tr>';
  $pg .= '<tr class=dc><td class=dr>';
  $pg .= 'Password:';
