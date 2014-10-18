@@ -259,7 +259,7 @@ function pgtop($info, $dotop, $user, $douser)
 			$u1hr = '';
 		else
 		{
-			$u1hr = dsprate($u1hr);
+			$u1hr = '/'.dsprate($u1hr);
 
 			if (substr($u1hr, -3) == substr($uhr, -3))
 				$uhr = substr($uhr, 0, -3);
@@ -325,7 +325,7 @@ function pgtop($info, $dotop, $user, $douser)
 			$top .= "
 <span class=topwho>".htmlspecialchars($who)."$extra&nbsp;</span>
 <span class=topdes>Hash Rate:</span>
-<span class=topdat>$uhr/$u1hr</span>";
+<span class=topdat>$uhr$u1hr</span>";
 			$top .= makeForm('')."
 &nbsp;<input type=submit name=Logout value=Logout>
 </form>";
