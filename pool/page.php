@@ -261,6 +261,7 @@ function pgtop($info, $dotop, $user, $douser)
 		{
 			$u1hr = '/'.dsprate($u1hr);
 
+			// Remove the first XHs if they are the same
 			if (substr($u1hr, -3) == substr($uhr, -3))
 				$uhr = substr($uhr, 0, -3);
 		}
