@@ -29,12 +29,13 @@ function workmgtuser($data, $user, $err)
 
 		$pg .= "<tr class=$row>";
 
-		$wn = $ans['workername:'.$i];
+		$wn = htmlspecialchars($ans['workername:'.$i]);
+		$wnv = sq($ans['workername:'.$i]);
 		$pg .= '<td class=dl>';
-		$pg .= "<input type=hidden name='workername:$i' value='$wn'>";
+		$pg .= "<input type=hidden name='workername:$i' value='$wnv'>";
 		$pg .= $wn.'</td>';
 
-		$md = $ans['difficultydefault:'.$i];
+		$md = intval($ans['difficultydefault:'.$i]);
 		$pg .= '<td class=dr>';
 		$pg .= "<input type=text size=6 name='difficultydefault:$i' value='$md'>";
 		$pg .= "<input type=submit name=OK value=OK>";
