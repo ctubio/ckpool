@@ -907,6 +907,7 @@ static void alloc_storage()
 					   LIMIT_PAYMENTADDRESSES, true);
 	paymentaddresses_store = k_new_store(paymentaddresses_free);
 	paymentaddresses_root = new_ktree();
+	paymentaddresses_free->dsp_func = dsp_paymentaddresses;
 
 	payments_free = k_new_list("Payments", sizeof(PAYMENTS),
 					ALLOC_PAYMENTS, LIMIT_PAYMENTS, true);

@@ -3275,7 +3275,11 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 
 	dsp_ktree(transfer_free, trf_root, transfer_data(i_file), NULL);
 
-	dsp_ktree(sharesummary_free, sharesummary_root, transfer_data(i_file), NULL);
+	dsp_ktree(paymentaddresses_free, paymentaddresses_root,
+		  transfer_data(i_file), NULL);
+
+	dsp_ktree(sharesummary_free, sharesummary_root,
+		  transfer_data(i_file), NULL);
 
 	dsp_ktree(userstats_free, userstats_root, transfer_data(i_file), NULL);
 

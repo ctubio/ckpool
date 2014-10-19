@@ -1006,6 +1006,25 @@ static K_ITEM *new_worker_find_user(PGconn *conn, bool update, char *username,
 }
 */
 
+void dsp_paymentaddresses(K_ITEM *item, FILE *stream)
+{
+	char expirydate_buf[DATE_BUFSIZ], createdate_buf[DATE_BUFSIZ];
+	PAYMENTADDRESSES *pa;
+
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		DATA_PAYMENTADDRESSES(pa, item);
+		tv_to_buf(&(pa->expirydate), expirydate_buf, sizeof(expirydate_buf));
+		tv_to_buf(&(pa->createdate), createdate_buf, sizeof(createdate_buf));
+		fprintf(stream, " id=%"PRId64" userid=%"PRId64" addr='%s' "
+				"ratio=%"PRId32" exp=%s cd=%s\n",
+				pa->paymentaddressid, pa->userid,
+				pa->payaddress, pa->payratio,
+				expirydate_buf, createdate_buf);
+	}
+}
+
 // order by userid asc,expirydate desc,payaddress asc
 cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b)
 {
@@ -1429,7 +1448,6 @@ void dsp_sharesummary(K_ITEM *item, FILE *stream)
 		fprintf(stream, "%s() called with (null) item\n", __func__);
 	else {
 		DATA_SHARESUMMARY(s, item);
-
 		tv_to_buf(&(s->createdate), createdate_buf, sizeof(createdate_buf));
 		fprintf(stream, " uid=%"PRId64" wn='%s' wid=%"PRId64" "
 				"da=%f ds=%f ss=%f c='%s' cd=%s\n",
@@ -1697,7 +1715,6 @@ void dsp_blocks(K_ITEM *item, FILE *stream)
 		fprintf(stream, "%s() called with (null) item\n", __func__);
 	else {
 		DATA_BLOCKS(b, item);
-
 		dsp_hash(b->blockhash, hash_dsp, sizeof(hash_dsp));
 		tv_to_buf(&(b->createdate), createdate_buf, sizeof(createdate_buf));
 		tv_to_buf(&(b->expirydate), expirydate_buf, sizeof(expirydate_buf));

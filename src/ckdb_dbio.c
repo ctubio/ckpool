@@ -1531,7 +1531,7 @@ unitem:
 	else {
 		// Remove from ram, old (unneeded) records
 		pa.userid = userid;
-		pa.expirydate.tv_sec = 0L;
+		pa.expirydate.tv_sec = DATE_S_EOT;
 		pa.payaddress[0] = '\0';
 		INIT_PAYMENTADDRESSES(&look);
 		look.data = (void *)(&pa);

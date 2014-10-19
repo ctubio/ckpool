@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.515"
+#define CKDB_VERSION DB_VERSION"-0.516"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1283,6 +1283,7 @@ extern K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *worke
 			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern K_ITEM *new_default_worker(PGconn *conn, bool update, int64_t userid, char *workername,
 				  char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+extern void dsp_paymentaddresses(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_paymentaddresses(int64_t userid);
 extern cmp_t cmp_payments(K_ITEM *a, K_ITEM *b);
