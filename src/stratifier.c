@@ -2231,10 +2231,13 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	wdiff = wb->diff;
 	strcpy(idstring, wb->idstring);
 	ASPRINTF(&fname, "%s.sharelog", wb->logdir);
-	/* Fix broken clients sending too many chars */
+	/* Fix broken clients sending too many chars. Nonce2 is part of the
+	 * read only json so use a temporary variable and modify it. */
 	len = wb->enonce2varlen * 2;
-	if ((int)strlen(nonce2) > len)
+	if ((int)strlen(nonce2) > len) {
+		nonce2 = strdupa(nonce2);
 		nonce2[len] = '\0';
+	}
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
 	bswap_256(sharehash, hash);
 	__bin2hex(hexhash, sharehash, 32);
