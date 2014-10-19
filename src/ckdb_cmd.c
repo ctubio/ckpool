@@ -240,8 +240,12 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				goto struckout;
 			}
 
-//			if (address && *address)
-//				TODO: validate it
+			if (address && *address) {
+				if (!btc_valid_address(address)) {
+					reason = "Invalid BTC address";
+					goto struckout;
+				}
+			}
 
 			if (email && *email) {
 				ok = users_pass_email(conn, u_item, NULL,
@@ -3271,7 +3275,11 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 
 	dsp_ktree(transfer_free, trf_root, transfer_data(i_file), NULL);
 
-	dsp_ktree(sharesummary_free, sharesummary_root, transfer_data(i_file), NULL);
+	dsp_ktree(paymentaddresses_free, paymentaddresses_root,
+		  transfer_data(i_file), NULL);
+
+	dsp_ktree(sharesummary_free, sharesummary_root,
+		  transfer_data(i_file), NULL);
 
 	dsp_ktree(userstats_free, userstats_root, transfer_data(i_file), NULL);
 
