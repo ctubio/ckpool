@@ -2512,13 +2512,18 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	ck_runlock(&instance_lock);
 }
 
-static void suggest_diff(stratum_instance_t *client, const char *method)
+/* Implement support for the diff in the params as well as the originally
+ * documented form of placing diff within the method. */
+static void suggest_diff(stratum_instance_t *client, const char *method, json_t *params_val)
 {
+	json_t *arr_val = json_array_get(params_val, 0);
 	int64_t sdiff;
 
 	if (unlikely(!client->authorised))
 		return LOGWARNING("Attempted to suggest diff on unauthorised client %ld", client->id);
-	if (sscanf(method, "mining.suggest_difficulty(%ld", &sdiff) != 1)
+	if (arr_val && json_is_integer(arr_val))
+		sdiff = json_integer_value(arr_val);
+	else if (sscanf(method, "mining.suggest_difficulty(%ld", &sdiff) != 1)
 		return LOGINFO("Failed to parse suggest_difficulty for client %ld", client->id);
 	if (sdiff == client->suggest_diff)
 		return;
@@ -2618,7 +2623,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	}
 
 	if (cmdmatch(method, "mining.suggest")) {
-		suggest_diff(client, method);
+		suggest_diff(client, method, params_val);
 		return;
 	}
 
