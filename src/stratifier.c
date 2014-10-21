@@ -801,7 +801,7 @@ static void drop_allclients(ckpool_t *ckp)
 	ck_wunlock(&instance_lock);
 }
 
-static bool update_subscribe(ckpool_t *ckp)
+static void update_subscribe(ckpool_t *ckp)
 {
 	json_t *val;
 	char *buf;
@@ -809,7 +809,8 @@ static bool update_subscribe(ckpool_t *ckp)
 	buf = send_recv_proc(ckp->generator, "getsubscribe");
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get subscribe from generator in update_notify");
-		return false;
+		drop_allclients(ckp);
+		return;
 	}
 	LOGDEBUG("Update subscribe: %s", buf);
 	val = json_loads(buf, 0, NULL);
@@ -834,8 +835,6 @@ static bool update_subscribe(ckpool_t *ckp)
 
 	json_decref(val);
 	drop_allclients(ckp);
-
-	return true;
 }
 
 static void update_diff(ckpool_t *ckp);
@@ -1327,8 +1326,7 @@ retry:
 		update_base(ckp, GEN_PRIORITY);
 	} else if (cmdmatch(buf, "subscribe")) {
 		/* Proxifier has a new subscription */
-		if (!update_subscribe(ckp))
-			goto out;
+		update_subscribe(ckp);
 	} else if (cmdmatch(buf, "notify")) {
 		/* Proxifier has a new notify ready */
 		update_notify(ckp);
