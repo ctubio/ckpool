@@ -2155,12 +2155,12 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char idstring[20];
 	uint32_t ntime32;
 	uchar hash[32];
+	int nlen, len;
 	time_t now_t;
 	json_t *val;
 	int64_t id;
 	ts_t now;
 	FILE *fp;
-	int len;
 
 	ts_realtime(&now);
 	now_t = now.tv_sec;
@@ -2232,8 +2232,15 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	/* Fix broken clients sending too many chars. Nonce2 is part of the
 	 * read only json so use a temporary variable and modify it. */
 	len = wb->enonce2varlen * 2;
-	if ((int)strlen(nonce2) > len) {
+	nlen = strlen(nonce2);
+	if (nlen > len) {
 		nonce2 = strdupa(nonce2);
+		nonce2[len] = '\0';
+	} else if (nlen < len) {
+		char *tmp = nonce2;
+
+		nonce2 = strdupa("0000000000000000");
+		memcpy(nonce2, tmp, nlen);
 		nonce2[len] = '\0';
 	}
 	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
@@ -2244,11 +2251,6 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		err = SE_STALE;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		goto out_submit;
-	}
-	if ((int)strlen(nonce2) < len) {
-		err = SE_INVALID_NONCE2;
-		*err_val = JSON_ERR(err);
-		goto out_unlock;
 	}
 	/* Ntime cannot be less, but allow forward ntime rolling up to max */
 	if (ntime32 < wb->ntime32 || ntime32 > wb->ntime32 + 7000) {
