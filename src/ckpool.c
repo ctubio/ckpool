@@ -296,7 +296,7 @@ retry:
 		send_unix_msg(sockd, "rejecting");
 	} else if (cmdmatch(buf, "reconnect")) {
 		LOGWARNING("Listener received request to send reconnect to clients");
-		send_procmsg(ckp->stratifier, "reconnect");
+		send_procmsg(ckp->stratifier, buf);
 		send_unix_msg(sockd, "reconnecting");
 	} else if (cmdmatch(buf, "restart")) {
 		LOGWARNING("Listener received restart message, attempting handover");

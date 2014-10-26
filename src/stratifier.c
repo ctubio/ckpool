@@ -1145,11 +1145,22 @@ static void stratum_broadcast_message(const char *msg)
 
 /* Send a generic reconnect to all clients without parameters to make them
  * reconnect to the same server. */
-static void reconnect_clients(void)
+static void reconnect_clients(const char *cmd)
 {
+	char *port = strdupa(cmd), *url = NULL;
 	json_t *json_msg;
 
-	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
+	strsep(&port, ":");
+	if (port)
+		url = strsep(&port, ",");
+	if (url && port) {
+		int port_no;
+
+		port_no = strtol(port, NULL, 10);
+		JSON_CPACK(json_msg, "{sosss[sii]}", "id", json_null(), "method", "client.reconnect",
+			"params", url, port_no, 0);
+	} else
+		JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
 	stratum_broadcast(json_msg);
 }
@@ -1347,7 +1358,7 @@ retry:
 	} else if (cmdmatch(buf, "noblock")) {
 		block_reject(buf + 8);
 	} else if (cmdmatch(buf, "reconnect")) {
-		reconnect_clients();
+		reconnect_clients(buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {
