@@ -997,6 +997,7 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int64(&ckp->startdiff, json_conf, "startdiff");
 	json_get_int64(&ckp->maxdiff, json_conf, "maxdiff");
 	json_get_string(&ckp->logdir, json_conf, "logdir");
+	json_get_int(&ckp->maxclients, json_conf, "maxclients");
 	arr_val = json_object_get(json_conf, "proxy");
 	if (arr_val && json_is_array(arr_val)) {
 		int arr_size = json_array_size(arr_val);

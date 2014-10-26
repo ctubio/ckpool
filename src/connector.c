@@ -90,8 +90,18 @@ static pthread_cond_t sender_cond;
 static int accept_client(conn_instance_t *ci)
 {
 	client_instance_t *client, *old_client;
+	ckpool_t *ckp = ci->pi->ckp;
+	int fd, port, no_clients;
 	socklen_t address_len;
-	int fd, port;
+
+	ck_rlock(&ci->lock);
+	no_clients = HASH_COUNT(clients);
+	ck_runlock(&ci->lock);
+
+	if (ckp->maxclients && no_clients >= ckp->maxclients) {
+		LOGWARNING("Server full with %d clients", no_clients);
+		return 0;
+	}
 
 	client = ckzalloc(sizeof(client_instance_t));
 	address_len = sizeof(client->address);
