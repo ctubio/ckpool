@@ -815,6 +815,10 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 	bool retval = false;
 	int ret, ern;
 
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Attempting to send unix message to invalidated sockd %d", sockd);
+		goto out;
+	}
 	if (unlikely(!buf)) {
 		LOGWARNING("Null message sent to send_unix_msg");
 		goto out;
