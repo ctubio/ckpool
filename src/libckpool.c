@@ -756,8 +756,8 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 		goto out;
 	}
 	msglen = le32toh(msglen);
-	if (unlikely(msglen < 1)) {
-		LOGWARNING("Invalid message length zero sent to recv_unix_msg");
+	if (unlikely(msglen < 1 || msglen > 0x80000000)) {
+		LOGWARNING("Invalid message length %u sent to recv_unix_msg", msglen);
 		goto out;
 	}
 	ret = wait_read_select(sockd, 5);
@@ -768,7 +768,7 @@ char *_recv_unix_msg(int sockd, const char *file, const char *func, const int li
 	buf = ckzalloc(msglen + 1);
 	ret = read_length(sockd, buf, msglen);
 	if (unlikely(ret < (int)msglen)) {
-		LOGERR("Failed to read %d bytes in recv_unix_msg", msglen);
+		LOGERR("Failed to read %u bytes in recv_unix_msg", msglen);
 		dealloc(buf);
 	}
 out:
