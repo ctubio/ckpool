@@ -709,7 +709,6 @@ out:
 int wait_read_select(int sockd, int timeout)
 {
 	struct pollfd sfd;
-	int ret;
 
 	sfd.fd = sockd;
 	sfd.events = POLLIN;
@@ -783,7 +782,6 @@ out:
 int wait_write_select(int sockd, int timeout)
 {
 	struct pollfd sfd;
-	int ret;
 
 	sfd.fd = sockd;
 	sfd.events = POLLOUT;
