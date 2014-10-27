@@ -49,7 +49,6 @@ struct proc_instance {
 	char *sockname;
 	int pid;
 	int (*process)(proc_instance_t *);
-	pthread_mutex_t lock;
 };
 
 struct connsock {

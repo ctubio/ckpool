@@ -447,26 +447,21 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
 		goto out;
 	}
-
-	mutex_lock(&pi->lock);
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
 		LOGWARNING("Failed to open socket %s", path);
-		goto out_unlock;
+		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, msg)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		ret = true;
 	Close(sockd);
-out_unlock:
-	mutex_unlock(&pi->lock);
 out:
 	if (unlikely(!ret)) {
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
-
 	return ret;
 }
 
@@ -1023,7 +1018,6 @@ static proc_instance_t *prepare_child(ckpool_t *ckp, int (*process)(), char *nam
 	pi->processname = name;
 	pi->sockname = pi->processname;
 	pi->process = process;
-	mutex_init(&pi->lock);
 	create_process_unixsock(pi);
 	return pi;
 }
