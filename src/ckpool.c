@@ -489,20 +489,16 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
 		goto out;
 	}
-
-	mutex_lock(&pi->lock);
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
 		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
-		goto out_unlock;
+		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, msg)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		buf = recv_unix_msg(sockd);
 	Close(sockd);
-out_unlock:
-	mutex_unlock(&pi->lock);
 out:
 	if (unlikely(!buf))
 		LOGERR("Failure in send_recv_proc from %s %s:%d", file, func, line);
