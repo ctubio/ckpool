@@ -2743,7 +2743,8 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 	}
 
 	// During startup, don't save 'new' sharesummaries, to reduce DB I/O
-	if (!startup_complete && row->complete[0] == SUMMARY_NEW)
+	// ... and also during normal processing
+	if (row->complete[0] == SUMMARY_NEW)
 		goto startupskip;
 
 	if (conn == NULL && !confirm_sharesummary) {
