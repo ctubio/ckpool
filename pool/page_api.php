@@ -61,6 +61,8 @@ function show_api($page, $menu, $name, $user)
 				if ($i == 0)
 					$zeflds .= "$fld,";
 			}
+	$rep .= fldEncode($ans, 'arn', false);
+	$rep .= fldEncode($ans, 'arp', false);
 	$rep .= fldEncode(array(), 'flds', false);
 	$rep .= substr($zeflds, 0, -1);
  }
@@ -68,7 +70,7 @@ function show_api($page, $menu, $name, $user)
 	echo $rep;
  else
  {
-	$j = preg_replace("/([^=]+)=([^$fld_sep]+)$fld_sep/", '"$1":"$2",', $rep.$fld_sep);
+	$j = preg_replace("/([^=]+)=([^$fld_sep]*)$fld_sep/", '"$1":"$2",', $rep.$fld_sep);
 	echo '{'.substr($j, 0, -1).'}';
  }
  exit(0);
