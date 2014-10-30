@@ -293,12 +293,13 @@ void *receiver(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
 	client_instance_t *client, *tmp;
-	struct pollfd fds[65536];
-	int ret, nfds, i;
+	int ret, nfds, i, maxfds = 1;
+	struct pollfd *fds;
 	bool update;
 
 	rename_proc("creceiver");
 
+	fds = ckalloc(sizeof(struct pollfd));
 	/* First fd is reserved for the accepting socket */
 	fds[0].fd = ci->serverfd;
 	fds[0].events = POLLIN;
@@ -313,6 +314,14 @@ rebuild_fds:
 			LOGWARNING("Client id %d is still in fdclients hashtable with invalidated fd!",
 				   client->id);
 			continue;
+		}
+		if (nfds >= maxfds) {
+			maxfds = nfds + 1;
+			fds = realloc(fds, sizeof(struct pollfd) * maxfds);
+			if (unlikely(!fds)) {
+				LOGEMERG("FATAL: Failed to realloc fds in receiver!");
+				goto out;
+			}
 		}
 		fds[nfds].fd = client->fd;
 		fds[nfds].events = POLLIN;
@@ -372,6 +381,7 @@ repoll:
 		goto rebuild_fds;
 	goto repoll;
 out:
+	free(fds);
 	return NULL;
 }
 
