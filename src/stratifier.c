@@ -1667,7 +1667,9 @@ static void read_userstats(ckpool_t *ckp, user_instance_t *instance)
 	instance->dsps60 = dsps_from_key(val, "hashrate1hr");
 	instance->dsps1440 = dsps_from_key(val, "hashrate1d");
 	instance->dsps10080 = dsps_from_key(val, "hashrate7d");
-	LOGINFO("Successfully read user %s stats", instance->username);
+	LOGINFO("Successfully read user %s stats %f %f %f %f %f", instance->username,
+		instance->dsps1, instance->dsps5, instance->dsps60, instance->dsps1440,
+		instance->dsps10080);
 	json_decref(val);
 }
 
@@ -1700,7 +1702,8 @@ static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
 	worker->dsps5 = dsps_from_key(val, "hashrate5m");
 	worker->dsps60 = dsps_from_key(val, "hashrate1d");
 	worker->dsps1440 = dsps_from_key(val, "hashrate1d");
-	LOGINFO("Successfully read worker %s stats", worker->workername);
+	LOGINFO("Successfully read worker %s stats %f %f %f %f", worker->workername,
+		worker->dsps1, worker->dsps5, worker->dsps60, worker->dsps1440);
 	json_decref(val);
 }
 
