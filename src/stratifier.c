@@ -2541,10 +2541,7 @@ static void suggest_diff(stratum_instance_t *client, const char *method, json_t 
 	client->suggest_diff = sdiff;
 	if (client->diff == sdiff)
 		return;
-	if (sdiff < client->diff * 2 / 3)
-		client->diff = client->diff * 2 / 3;
-	else
-		client->diff = sdiff;
+	client->diff = sdiff;
 	stratum_send_diff(client);
 }
 
