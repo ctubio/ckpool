@@ -82,8 +82,6 @@ static sender_send_t *delayed_sends;
 static pthread_mutex_t sender_lock;
 static pthread_cond_t sender_cond;
 
-static void parse_client_msg(conn_instance_t *ci, client_instance_t *client);
-
 /* Accepts incoming connections on the server socket and generates client
  * instances */
 static int accept_client(conn_instance_t *ci, int epfd)

@@ -802,12 +802,12 @@ static void *do_update(void *arg)
 
 	stratum_broadcast_update(new_block);
 	ret = true;
-	LOGINFO("Broadcasted updated stratum base");
+	LOGINFO("Broadcast updated stratum base");
 out:
 	/* Send a ping to miners if we fail to get a base to keep them
 	 * connected while bitcoind recovers(?) */
 	if (!ret) {
-		LOGWARNING("Broadcasted ping due to failed stratum base update");
+		LOGWARNING("Broadcast ping due to failed stratum base update");
 		broadcast_ping();
 	}
 	free(ur->pth);
