@@ -71,6 +71,7 @@ struct pool_stats {
 	double dsps60;
 	double dsps360;
 	double dsps1440;
+	double dsps10080;
 };
 
 typedef struct pool_stats pool_stats_t;
@@ -173,6 +174,7 @@ static int64_t blockchange_id;
 static char lasthash[68], lastswaphash[68];
 
 struct json_params {
+	json_t *method;
 	json_t *params;
 	json_t *id_val;
 	int64_t client_id;
@@ -226,6 +228,7 @@ struct user_instance {
 	double dsps5; /* ... 5 minute ... */
 	double dsps60;/* etc */
 	double dsps1440;
+	double dsps10080;
 	tv_t last_share;
 };
 
@@ -268,6 +271,7 @@ struct stratum_instance {
 	double dsps5; /* ... 5 minute ... */
 	double dsps60;/* etc */
 	double dsps1440;
+	double dsps10080;
 	tv_t ldc; /* Last diff change */
 	int ssdc; /* Shares since diff change */
 	tv_t first_share;
@@ -720,24 +724,39 @@ static void send_generator(ckpool_t *ckp, const char *msg, int prio)
 		gen_priority = 0;
 }
 
+struct update_req {
+	pthread_t *pth;
+	ckpool_t *ckp;
+	int prio;
+};
+
+static void broadcast_ping(void);
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
-static void update_base(ckpool_t *ckp, int prio)
+static void *do_update(void *arg)
 {
+	struct update_req *ur = (struct update_req *)arg;
+	ckpool_t *ckp = ur->ckp;
 	bool new_block = false;
+	int prio = ur->prio;
+	bool ret = false;
 	workbase_t *wb;
 	json_t *val;
 	char *buf;
 
+	pthread_detach(pthread_self());
+	rename_proc("updater");
+
 	buf = send_recv_generator(ckp, "getbase", prio);
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get base from generator in update_base");
-		return;
+		goto out;
 	}
 	if (unlikely(cmdmatch(buf, "failed"))) {
 		LOGWARNING("Generator returned failure in update_base");
-		return;
+		goto out;
 	}
 
 	wb = ckzalloc(sizeof(workbase_t));
@@ -782,6 +801,29 @@ static void update_base(ckpool_t *ckp, int prio)
 	add_base(ckp, wb, &new_block);
 
 	stratum_broadcast_update(new_block);
+	ret = true;
+	LOGINFO("Broadcast updated stratum base");
+out:
+	/* Send a ping to miners if we fail to get a base to keep them
+	 * connected while bitcoind recovers(?) */
+	if (!ret) {
+		LOGWARNING("Broadcast ping due to failed stratum base update");
+		broadcast_ping();
+	}
+	free(ur->pth);
+	free(ur);
+	return NULL;
+}
+
+static void update_base(ckpool_t *ckp, int prio)
+{
+	struct update_req *ur = ckalloc(sizeof(struct update_req));
+	pthread_t *pth = ckalloc(sizeof(pthread_t));
+
+	ur->pth = pth;
+	ur->ckp = ckp;
+	ur->prio = prio;
+	create_pthread(pth, do_update, ur);
 }
 
 static void drop_allclients(ckpool_t *ckp)
@@ -1068,13 +1110,13 @@ static void stratum_broadcast(json_t *val)
 	if (!bulk_send)
 		return;
 
-	mutex_lock(&ssends->lock);
+	mutex_lock(ssends->lock);
 	if (ssends->msgs)
 		DL_CONCAT(ssends->msgs, bulk_send);
 	else
 		ssends->msgs = bulk_send;
-	pthread_cond_signal(&ssends->cond);
-	mutex_unlock(&ssends->lock);
+	pthread_cond_signal(ssends->cond);
+	mutex_unlock(ssends->lock);
 }
 
 static void stratum_add_send(json_t *val, int64_t client_id)
@@ -1561,6 +1603,114 @@ static bool test_address(ckpool_t *ckp, const char *address)
 	return ret;
 }
 
+static const double nonces = 4294967296;
+
+static double dsps_from_key(json_t *val, const char *key)
+{
+	char *string, *endptr;
+	double ret = 0;
+
+	json_get_string(&string, val, key);
+	if (!string)
+		return ret;
+	ret = strtod(string, &endptr) / nonces;
+	if (endptr) {
+		switch (endptr[0]) {
+			case 'E':
+				ret *= (double)1000;
+			case 'P':
+				ret *= (double)1000;
+			case 'T':
+				ret *= (double)1000;
+			case 'G':
+				ret *= (double)1000;
+			case 'M':
+				ret *= (double)1000;
+			case 'K':
+				ret *= (double)1000;
+			default:
+				break;
+		}
+	}
+	free(string);
+	return ret;
+}
+
+static void read_userstats(ckpool_t *ckp, user_instance_t *instance)
+{
+	char s[512];
+	json_t *val;
+	FILE *fp;
+	int ret;
+
+	snprintf(s, 511, "%s/users/%s", ckp->logdir, instance->username);
+	fp = fopen(s, "re");
+	if (!fp) {
+		LOGINFO("User %s does not have a logfile to read", instance->username);
+		return;
+	}
+	memset(s, 0, 512);
+	ret = fread(s, 1, 511, fp);
+	fclose(fp);
+	if (ret < 1) {
+		LOGINFO("Failed to read user %s logfile", instance->username);
+		return;
+	}
+	val = json_loads(s, 0, NULL);
+	if (!val) {
+		LOGINFO("Failed to json decode user %s logfile: %s", instance->username, s);
+		return;
+	}
+
+	tv_time(&instance->last_share);
+	instance->dsps1 = dsps_from_key(val, "hashrate1m");
+	instance->dsps5 = dsps_from_key(val, "hashrate5m");
+	instance->dsps60 = dsps_from_key(val, "hashrate1hr");
+	instance->dsps1440 = dsps_from_key(val, "hashrate1d");
+	instance->dsps10080 = dsps_from_key(val, "hashrate7d");
+	LOGINFO("Successfully read user %s stats %f %f %f %f %f", instance->username,
+		instance->dsps1, instance->dsps5, instance->dsps60, instance->dsps1440,
+		instance->dsps10080);
+	json_decref(val);
+}
+
+static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
+{
+	char s[512];
+	json_t *val;
+	FILE *fp;
+	int ret;
+
+	snprintf(s, 511, "%s/workers/%s", ckp->logdir, worker->workername);
+	fp = fopen(s, "re");
+	if (!fp) {
+		LOGINFO("Worker %s does not have a logfile to read", worker->workername);
+		return;
+	}
+	memset(s, 0, 512);
+	ret = fread(s, 1, 511, fp);
+	fclose(fp);
+	if (ret < 1) {
+		LOGINFO("Failed to read worker %s logfile", worker->workername);
+		return;
+	}
+	val = json_loads(s, 0, NULL);
+	if (!val) {
+		LOGINFO("Failed to json decode worker %s logfile: %s", worker->workername, s);
+		return;
+	}
+
+	tv_time(&worker->last_share);
+	worker->dsps1 = dsps_from_key(val, "hashrate1m");
+	worker->dsps5 = dsps_from_key(val, "hashrate5m");
+	worker->dsps60 = dsps_from_key(val, "hashrate1d");
+	worker->dsps1440 = dsps_from_key(val, "hashrate1d");
+	LOGINFO("Successfully read worker %s stats %f %f %f %f", worker->workername,
+		worker->dsps1, worker->dsps5, worker->dsps60, worker->dsps1440);
+	json_decref(val);
+}
+
+
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. */
 static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
@@ -1589,6 +1739,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 
 		instance->id = user_instance_id++;
 		HASH_ADD_STR(user_instances, username, instance);
+		read_userstats(ckp, instance);
 	}
 	DL_FOREACH(instance->instances, tmp) {
 		if (!safecmp(workername, tmp->workername)) {
@@ -1603,6 +1754,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		client->worker_instance->workername = strdup(workername);
 		client->worker_instance->instance = instance;
 		DL_APPEND(instance->worker_instances, client->worker_instance);
+		read_workerstats(ckp, client->worker_instance);
 	}
 	DL_APPEND(instance->instances, client);
 	ck_wunlock(&instance_lock);
@@ -1881,6 +2033,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	decay_time(&client->dsps5, diff, tdiff, 300);
 	decay_time(&client->dsps60, diff, tdiff, 3600);
 	decay_time(&client->dsps1440, diff, tdiff, 86400);
+	decay_time(&client->dsps10080, diff, tdiff, 604800);
 	copy_tv(&client->last_share, &now_t);
 
 	tdiff = sane_tdiff(&now_t, &worker->last_share);
@@ -1895,6 +2048,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	decay_time(&instance->dsps5, diff, tdiff, 300);
 	decay_time(&instance->dsps60, diff, tdiff, 3600);
 	decay_time(&instance->dsps1440, diff, tdiff, 86400);
+	decay_time(&instance->dsps10080, diff, tdiff, 604800);
 	copy_tv(&instance->last_share, &now_t);
 	client->idle = false;
 
@@ -2452,10 +2606,13 @@ static void update_client(stratum_instance_t *client, const int64_t client_id)
 	stratum_send_diff(client);
 }
 
-static json_params_t *create_json_params(const int64_t client_id, const json_t *params, const json_t *id_val, const char *address)
+static json_params_t
+*create_json_params(const int64_t client_id, json_t *method, const json_t *params,
+		    const json_t *id_val, const char *address)
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
 
+	jp->method = json_copy(method);
 	jp->params = json_deep_copy(params);
 	jp->id_val = json_deep_copy(id_val);
 	jp->client_id = client_id;
@@ -2541,8 +2698,8 @@ static void suggest_diff(stratum_instance_t *client, const char *method, json_t 
 	client->suggest_diff = sdiff;
 	if (client->diff == sdiff)
 		return;
-	if (sdiff < client->diff * 2 / 3)
-		client->diff = client->diff * 2 / 3;
+	if (sdiff < client->ckp->mindiff)
+		client->diff = client->ckp->mindiff;
 	else
 		client->diff = sdiff;
 	stratum_send_diff(client);
@@ -2609,7 +2766,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	}
 
 	if (cmdmatch(method, "mining.auth") && client->subscribed) {
-		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
 
 		ckmsgq_add(sauthq, jp);
 		return;
@@ -2627,7 +2784,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 	}
 
 	if (cmdmatch(method, "mining.submit")) {
-		json_params_t *jp = create_json_params(client_id, params_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
 
 		ckmsgq_add(sshareq, jp);
 		return;
@@ -2640,7 +2797,7 @@ static void parse_method(const int64_t client_id, json_t *id_val, json_t *method
 
 	/* Covers both get_transactions and get_txnhashes */
 	if (cmdmatch(method, "mining.get")) {
-		json_params_t *jp = create_json_params(client_id, method_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
 
 		ckmsgq_add(stxnq, jp);
 		return;
@@ -2751,6 +2908,7 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 
 static void discard_json_params(json_params_t **jp)
 {
+	json_decref((*jp)->method);
 	json_decref((*jp)->params);
 	json_decref((*jp)->id_val);
 	free(*jp);
@@ -2939,7 +3097,8 @@ static json_t *txnhashes_by_jobid(int64_t id)
 
 static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 {
-	const char *msg = json_string_value(jp->params);
+	const char *msg = json_string_value(jp->method),
+		*params = json_string_value(json_array_get(jp->params, 0));
 	stratum_instance_t *client;
 	json_t *val, *hashes;
 	int64_t job_id = 0;
@@ -2956,8 +3115,12 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 
 		/* We don't actually send the transactions as that would use
 		 * up huge bandwidth, so we just return the number of
-		 * transactions :) */
-		sscanf(msg, "mining.get_transactions(%lx", &job_id);
+		 * transactions :) . Support both forms of encoding the
+		 * request in method name and as a parameter. */
+		if (params && strlen(params) > 0)
+			sscanf(params, "%lx", &job_id);
+		else
+			sscanf(msg, "mining.get_transactions(%lx", &job_id);
 		txns = transactions_by_jobid(job_id);
 		if (txns != -1) {
 			json_set_int(val, "result", txns);
@@ -2989,7 +3152,11 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 		goto out_send;
 	}
 	client->last_txns = now_t;
-	sscanf(msg, "mining.get_txnhashes(%lx", &job_id);
+	if (!params || !strlen(params)) {
+		json_set_string(val, "error", "Invalid params");
+		goto out_send;
+	}
+	sscanf(params, "%lx", &job_id);
 	hashes = txnhashes_by_jobid(job_id);
 	if (hashes) {
 		json_object_set_new_nocheck(val, "result", hashes);
@@ -3001,8 +3168,6 @@ out_send:
 out:
 	discard_json_params(&jp);
 }
-
-static const double nonces = 4294967296;
 
 /* Called every 20 seconds, we send the updated stats to ckdb of those users
  * who have gone 10 minutes between updates. This ends up staggering stats to
@@ -3089,11 +3254,11 @@ static void *statsupdate(void *arg)
 	sleep(1);
 
 	while (42) {
-		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440;
+		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080;
 		double bias, bias5, bias60, bias1440;
 		double tdiff, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
-		char suffix360[16], suffix1440[16];
+		char suffix360[16], suffix1440[16], suffix10080[16];
 		user_instance_t *instance, *tmpuser;
 		stratum_instance_t *client, *tmp;
 		double sps1, sps5, sps15, sps60;
@@ -3136,6 +3301,10 @@ static void *statsupdate(void *arg)
 		ghs1440 = stats.dsps1440 * nonces / bias1440;
 		suffix_string(ghs1440, suffix1440, 16, 0);
 
+		bias = time_bias(tdiff, 604800);
+		ghs10080 = stats.dsps10080 * nonces / bias;
+		suffix_string(ghs10080, suffix10080, 16, 0);
+
 		snprintf(fname, 511, "%s/pool/pool.status", ckp->logdir);
 		fp = fopen(fname, "we");
 		if (unlikely(!fp))
@@ -3151,13 +3320,14 @@ static void *statsupdate(void *arg)
 		fprintf(fp, "%s\n", s);
 		dealloc(s);
 
-		JSON_CPACK(val, "{ss,ss,ss,ss,ss,ss}",
+		JSON_CPACK(val, "{ss,ss,ss,ss,ss,ss,ss}",
 				"hashrate1m", suffix1,
 				"hashrate5m", suffix5,
 				"hashrate15m", suffix15,
 				"hashrate1hr", suffix60,
 				"hashrate6hr", suffix360,
-				"hashrate1d", suffix1440);
+				"hashrate1d", suffix1440,
+				"hashrate7d", suffix10080);
 		s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
@@ -3189,6 +3359,7 @@ static void *statsupdate(void *arg)
 				decay_time(&client->dsps5, 0, per_tdiff, 300);
 				decay_time(&client->dsps60, 0, per_tdiff, 3600);
 				decay_time(&client->dsps1440, 0, per_tdiff, 86400);
+				decay_time(&client->dsps10080, 0, per_tdiff, 604800);
 				if (per_tdiff > 600)
 					client->idle = true;
 				continue;
@@ -3211,13 +3382,13 @@ static void *statsupdate(void *arg)
 				ghs = worker->dsps1 * nonces;
 				suffix_string(ghs, suffix1, 16, 0);
 
-				ghs = worker->dsps5 * nonces / bias5;
+				ghs = worker->dsps5 * nonces;
 				suffix_string(ghs, suffix5, 16, 0);
 
-				ghs = worker->dsps60 * nonces / bias60;
+				ghs = worker->dsps60 * nonces;
 				suffix_string(ghs, suffix60, 16, 0);
 
-				ghs = worker->dsps1440 * nonces / bias1440;
+				ghs = worker->dsps1440 * nonces;
 				suffix_string(ghs, suffix1440, 16, 0);
 
 				JSON_CPACK(val, "{ss,ss,ss,ss}",
@@ -3246,25 +3417,30 @@ static void *statsupdate(void *arg)
 				decay_time(&instance->dsps5, 0, per_tdiff, 300);
 				decay_time(&instance->dsps60, 0, per_tdiff, 3600);
 				decay_time(&instance->dsps1440, 0, per_tdiff, 86400);
+				decay_time(&instance->dsps10080, 0, per_tdiff, 604800);
 				idle = true;
 			}
 			ghs = instance->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
 
-			ghs = instance->dsps5 * nonces / bias5;
+			ghs = instance->dsps5 * nonces;
 			suffix_string(ghs, suffix5, 16, 0);
 
-			ghs = instance->dsps60 * nonces / bias60;
+			ghs = instance->dsps60 * nonces;
 			suffix_string(ghs, suffix60, 16, 0);
 
-			ghs = instance->dsps1440 * nonces / bias1440;
+			ghs = instance->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
 
-			JSON_CPACK(val, "{ss,ss,ss,ss,si}",
+			ghs = instance->dsps10080 * nonces;
+			suffix_string(ghs, suffix10080, 16, 0);
+
+			JSON_CPACK(val, "{ss,ss,ss,ss,ss,si}",
 					"hashrate1m", suffix1,
 					"hashrate5m", suffix5,
 					"hashrate1hr", suffix60,
 					"hashrate1d", suffix1440,
+					"hashrate7d", suffix10080,
 					"workers", instance->workers);
 
 			snprintf(fname, 511, "%s/users/%s", ckp->logdir, instance->username);
@@ -3323,6 +3499,7 @@ static void *statsupdate(void *arg)
 			decay_time(&stats.dsps60, stats.unaccounted_diff_shares, 20, 3600);
 			decay_time(&stats.dsps360, stats.unaccounted_diff_shares, 20, 21600);
 			decay_time(&stats.dsps1440, stats.unaccounted_diff_shares, 20, 86400);
+			decay_time(&stats.dsps10080, stats.unaccounted_diff_shares, 20, 604800);
 
 			stats.unaccounted_shares =
 			stats.unaccounted_diff_shares =
@@ -3370,7 +3547,7 @@ int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
 	ckpool_t *ckp = pi->ckp;
-	int ret = 1;
+	int ret = 1, threads;
 	char *buf;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
@@ -3414,7 +3591,9 @@ int stratifier(proc_instance_t *pi)
 	mutex_init(&ckdb_lock);
 	ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	srecvs = create_ckmsgq(ckp, "sreceiver", &srecv_process);
-	sshareq = create_ckmsgq(ckp, "sprocessor", &sshare_process);
+	/* Create half as many share processing threads as there are CPUs */
+	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
+	sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
 	sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 	stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
