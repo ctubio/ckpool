@@ -30,6 +30,8 @@ struct connector_instance {
 	int serverfd;
 	int nfds;
 	bool accept;
+	pthread_t pth_sender;
+	pthread_t pth_receiver;
 };
 
 typedef struct connector_instance conn_instance_t;
@@ -546,6 +548,17 @@ static int connector_loop(proc_instance_t *pi, conn_instance_t *ci)
 	LOGWARNING("%s connector ready", ckp->name);
 
 retry:
+	if (unlikely(!pthread_tryjoin_np(ci->pth_sender, NULL))) {
+		LOGEMERG("Connector sender thread shutdown, exiting");
+		ret = 1;
+		goto out;
+	}
+	if (unlikely(!pthread_tryjoin_np(ci->pth_receiver, NULL))) {
+		LOGEMERG("Connector receiver thread shutdown, exiting");
+		ret = 1;
+		goto out;
+	}
+
 	Close(sockd);
 	sockd = accept(us->sockd, NULL, NULL);
 	if (sockd < 0) {
@@ -657,7 +670,6 @@ out:
 
 int connector(proc_instance_t *pi)
 {
-	pthread_t pth_sender, pth_receiver;
 	char *url = NULL, *port = NULL;
 	ckpool_t *ckp = pi->ckp;
 	int sockd, ret = 0;
@@ -734,8 +746,8 @@ int connector(proc_instance_t *pi)
 	ci.nfds = 0;
 	mutex_init(&sender_lock);
 	cond_init(&sender_cond);
-	create_pthread(&pth_sender, sender, &ci);
-	create_pthread(&pth_receiver, receiver, &ci);
+	create_pthread(&ci.pth_sender, sender, &ci);
+	create_pthread(&ci.pth_receiver, receiver, &ci);
 
 	ret = connector_loop(pi, &ci);
 out:
