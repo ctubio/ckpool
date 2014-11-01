@@ -296,8 +296,7 @@ reparse:
 void *receiver(void *arg)
 {
 	conn_instance_t *ci = (conn_instance_t *)arg;
-	struct epoll_event *events, event;
-	client_instance_t *client;
+	struct epoll_event event;
 	bool maxconn = true;
 	int ret, epfd;
 
@@ -310,51 +309,51 @@ void *receiver(void *arg)
 	}
 	event.data.fd = ci->serverfd;
 	event.events = EPOLLIN;
-	events = ckalloc(sizeof(struct epoll_event));
 	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, ci->serverfd, &event);
 	if (ret < 0) {
 		LOGEMERG("FATAL: Failed to add epfd %d to epoll_ctl", epfd);
-		goto out;
+		return NULL;
 	}
-repoll:
-	while (!ci->accept)
-		cksleep_ms(100);
-	ret = epoll_wait(epfd, events, 1, 1000);
-	if (unlikely(ret == -1)) {
-		LOGEMERG("FATAL: Failed to epoll_wait in receiver");
-		goto out;
-	}
-	if (unlikely(!ret)) {
-		if (unlikely(maxconn)) {
-			/* When we first start we listen to as many connections as
-			 * possible. Once we stop receiving connections we drop the
-			 * listen to the minimum to effectively ratelimit how fast we
-			 * can receive connections. */
-			LOGDEBUG("Dropping listen backlog to 0");
-			maxconn = false;
-			listen(ci->serverfd, 0);
+
+	while (42) {
+		client_instance_t *client;
+
+		while (unlikely(!ci->accept))
+			cksleep_ms(100);
+		ret = epoll_wait(epfd, &event, 1, 1000);
+		if (unlikely(ret == -1)) {
+			LOGEMERG("FATAL: Failed to epoll_wait in receiver");
+			break;
 		}
-		goto repoll;
-	}
-	if (events->data.fd == ci->serverfd) {
-		ret = accept_client(ci, epfd);
-		if (unlikely(ret < 0)) {
-			LOGEMERG("FATAL: Failed to accept_client in receiver");
-			goto out;
+		if (unlikely(!ret)) {
+			if (unlikely(maxconn)) {
+				/* When we first start we listen to as many connections as
+				* possible. Once we stop receiving connections we drop the
+				* listen to the minimum to effectively ratelimit how fast we
+				* can receive connections. */
+				LOGDEBUG("Dropping listen backlog to 0");
+				maxconn = false;
+				listen(ci->serverfd, 0);
+			}
+			continue;
 		}
-		goto repoll;
+		if (event.data.fd == ci->serverfd) {
+			ret = accept_client(ci, epfd);
+			if (unlikely(ret < 0)) {
+				LOGEMERG("FATAL: Failed to accept_client in receiver");
+				break;
+			}
+			continue;
+		}
+		client = event.data.ptr;
+		if ((event.events & EPOLLERR) || (event.events & EPOLLHUP)) {
+			/* Client disconnected */
+			LOGDEBUG("Client fd %d HUP in epoll", client->fd);
+			invalidate_client(ci->pi->ckp, ci, client);
+			continue;
+		}
+		parse_client_msg(ci, client);
 	}
-	client = events->data.ptr;
-	if ((events->events & EPOLLERR) || (events->events & EPOLLHUP)) {
-		/* Client disconnected */
-		LOGDEBUG("Client fd %d HUP in epoll", client->fd);
-		invalidate_client(ci->pi->ckp, ci, client);
-		goto repoll;
-	}
-	parse_client_msg(ci, client);
-	goto repoll;
-out:
-	free(events);
 	return NULL;
 }
 
