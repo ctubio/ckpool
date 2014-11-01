@@ -1110,13 +1110,13 @@ static void stratum_broadcast(json_t *val)
 	if (!bulk_send)
 		return;
 
-	mutex_lock(&ssends->lock);
+	mutex_lock(ssends->lock);
 	if (ssends->msgs)
 		DL_CONCAT(ssends->msgs, bulk_send);
 	else
 		ssends->msgs = bulk_send;
-	pthread_cond_signal(&ssends->cond);
-	mutex_unlock(&ssends->lock);
+	pthread_cond_signal(ssends->cond);
+	mutex_unlock(ssends->lock);
 }
 
 static void stratum_add_send(json_t *val, int64_t client_id)
