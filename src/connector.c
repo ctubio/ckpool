@@ -159,8 +159,6 @@ static int accept_client(conn_instance_t *ci, int epfd)
 	ci->nfds++;
 	ck_wunlock(&ci->lock);
 
-	parse_client_msg(ci, client);
-
 	return 1;
 }
 
