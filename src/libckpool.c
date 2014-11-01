@@ -970,7 +970,6 @@ int _get_fd(int sockd, const char *file, const char *func, const int line)
 		goto out;
 	}
 out:
-	Close(sockd);
 	cm = (int *)CMSG_DATA(cmptr);
 	newfd = *cm;
 	free(cmptr);
