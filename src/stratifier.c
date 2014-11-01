@@ -3547,7 +3547,7 @@ int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
 	ckpool_t *ckp = pi->ckp;
-	int ret = 1;
+	int ret = 1, threads;
 	char *buf;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
@@ -3591,7 +3591,9 @@ int stratifier(proc_instance_t *pi)
 	mutex_init(&ckdb_lock);
 	ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	srecvs = create_ckmsgq(ckp, "sreceiver", &srecv_process);
-	sshareq = create_ckmsgq(ckp, "sprocessor", &sshare_process);
+	/* Create half as many share processing threads as there are CPUs */
+	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
+	sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
 	sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 	stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
