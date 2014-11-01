@@ -1067,15 +1067,6 @@ out:
 	return ret;
 }
 
-static void stratum_add_recvd(json_t *val)
-{
-	smsg_t *msg;
-
-	msg = ckzalloc(sizeof(smsg_t));
-	msg->json_msg = val;
-	ckmsgq_add(srecvs, msg);
-}
-
 /* For creating a list of sends without locking that can then be concatenated
  * to the stratum_sends list. Minimises locking and avoids taking recursive
  * locks. */
@@ -1404,12 +1395,9 @@ retry:
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else {
-		json_t *val = json_loads(buf, 0, NULL);
-
-		if (!val) {
-			LOGWARNING("Received unrecognised message: %s", buf);
-		}  else
-			stratum_add_recvd(val);
+		/* The srecv_process frees the buf heap ram */
+		ckmsgq_add(srecvs, buf);
+		buf = NULL;
 	}
 	goto retry;
 
@@ -2833,21 +2821,25 @@ out:
 	free(msg);
 }
 
-static void srecv_process(ckpool_t *ckp, smsg_t *msg)
+static void srecv_process(ckpool_t *ckp, char *buf)
 {
 	stratum_instance_t *instance;
+	smsg_t *msg;
 	json_t *val;
 
+	val = json_loads(buf, 0, NULL);
+	if (unlikely(!val)) {
+		LOGWARNING("Received unrecognised non-json message: %s", buf);
+		goto out;
+	}
+	msg = ckzalloc(sizeof(smsg_t));
+	msg->json_msg = val;
 	val = json_object_get(msg->json_msg, "client_id");
 	if (unlikely(!val)) {
-		char *s;
-
-		s = json_dumps(msg->json_msg, 0);
-		LOGWARNING("Failed to extract client_id from connector json smsg %s", s);
-		free(s);
+		LOGWARNING("Failed to extract client_id from connector json smsg %s", buf);
 		json_decref(msg->json_msg);
 		free(msg);
-		return;
+		goto out;
 	}
 
 	msg->client_id = json_integer_value(val);
@@ -2855,14 +2847,10 @@ static void srecv_process(ckpool_t *ckp, smsg_t *msg)
 
 	val = json_object_get(msg->json_msg, "address");
 	if (unlikely(!val)) {
-		char *s;
-
-		s = json_dumps(msg->json_msg, 0);
-		LOGWARNING("Failed to extract address from connector json smsg %s", s);
-		free(s);
+		LOGWARNING("Failed to extract address from connector json smsg %s", buf);
 		json_decref(msg->json_msg);
 		free(msg);
-		return;
+		goto out;
 	}
 	strcpy(msg->address, json_string_value(val));
 	json_object_clear(val);
@@ -2877,7 +2865,8 @@ static void srecv_process(ckpool_t *ckp, smsg_t *msg)
 	ck_wunlock(&instance_lock);
 
 	parse_instance_msg(msg);
-
+out:
+	free(buf);
 }
 
 static void discard_stratum_msg(smsg_t **msg)
