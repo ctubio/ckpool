@@ -1297,9 +1297,9 @@ static void broadcast_ping(void)
 {
 	json_t *json_msg;
 
-	JSON_CPACK(json_msg, "{s:[],s:o,s:s}",
+	JSON_CPACK(json_msg, "{s:[],s:i,s:s}",
 		   "params",
-		   "id", json_null(),
+		   "id", 42,
 		   "method", "mining.ping");
 
 	stratum_broadcast(json_msg);
@@ -2803,6 +2803,15 @@ static void parse_instance_msg(smsg_t *msg)
 
 	method = json_object_get(val, "method");
 	if (unlikely(!method)) {
+		json_t *res_val = json_object_get(val, "result");
+
+		/* Is this a spurious result or ping response? */
+		if (res_val) {
+			const char *result = json_string_value(res_val);
+
+			LOGDEBUG("Received spurious response %s", result ? result : "");
+			goto out;
+		}
 		send_json_err(client_id, id_val, "-3:method not found");
 		goto out;
 	}
