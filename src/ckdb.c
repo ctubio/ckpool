@@ -1017,6 +1017,11 @@ static bool setup_data()
 	if (!getdata2() || everyone_die)
 		return false;
 
+	if (dbload_workinfoid_start != -1) {
+		LOGWARNING("WARNING: dbload starting at workinfoid %"PRId64,
+			   dbload_workinfoid_start);
+	}
+
 	if (!getdata3() || everyone_die)
 		return false;
 
@@ -3106,6 +3111,7 @@ static struct option long_options[] = {
 	{ "dbuser",		required_argument,	0,	'u' },
 	{ "btc-user",		required_argument,	0,	'U' },
 	{ "version",		no_argument,		0,	'v' },
+	{ "workinfoid",		required_argument,	0,	'w' },
 	{ "confirm",		no_argument,		0,	'y' },
 	{ "confirmrange",	required_argument,	0,	'Y' },
 	{ 0, 0, 0, 0 }
@@ -3138,7 +3144,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:P:r:R:s:S:t:u:U:vyY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:hkl:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
@@ -3224,6 +3230,18 @@ int main(int argc, char **argv)
 				break;
 			case 'v':
 				exit(0);
+			case 'w':
+				// Don't use this :)
+				{
+					int64_t start = atoll(optarg);
+					if (start < 0) {
+						quit(1, "Invalid workinfoid start"
+						     " %"PRId64" - must be >= 0",
+						     start);
+					}
+					dbload_workinfoid_start = start;
+				}
+				break;
 			case 'y':
 				confirm_sharesummary = true;
 				break;
