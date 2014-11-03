@@ -2240,7 +2240,7 @@ bool workinfo_fill(PGconn *conn)
 	PGresult *res;
 	K_ITEM *item;
 	WORKINFO *row;
-	char *params[1];
+	char *params[3];
 	int n, i, par = 0;
 	char *field;
 	char *sel;
@@ -2257,8 +2257,10 @@ bool workinfo_fill(PGconn *conn)
 		"workinfoid,poolinstance,merklehash,prevhash,"
 		"coinbase1,coinbase2,version,bits,ntime,reward"
 		HISTORYDATECONTROL
-		" from workinfo where expirydate=$1";
+		" from workinfo where workinfoid>=$1 and workinfoid<=$2 and expirydate=$3";
 	par = 0;
+	params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
+	params[par++] = bigint_to_buf(dbload_workinfoid_finish, NULL, 0);
 	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
 	PARCHK(par, params);
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
@@ -2915,8 +2917,9 @@ bool sharesummary_fill(PGconn *conn)
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
-	int n, i;
+	int n, i, par = 0;
 	SHARESUMMARY *row;
+	char *params[2];
 	char *field;
 	char *sel;
 	int fields = 19;
@@ -2931,8 +2934,12 @@ bool sharesummary_fill(PGconn *conn)
 		"sharecount,errorcount,firstshare,lastshare,"
 		"lastdiffacc,complete"
 		MODIFYDATECONTROL
-		" from sharesummary";
-	res = PQexec(conn, sel, CKPQ_READ);
+		" from sharesummary where workinfoid>=$1 and workinfoid<=$2";
+	par = 0;
+	params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
+	params[par++] = bigint_to_buf(dbload_workinfoid_finish, NULL, 0);
+	PARCHK(par, params);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Select", rescode, conn);

@@ -257,6 +257,11 @@ static tv_t confirm_finish;
 
 static tv_t reload_timestamp;
 
+/* Allow overriding the workinfoid range used in the db load of
+ * workinfo and sharesummary */
+int64_t dbload_workinfoid_start = -1;
+int64_t dbload_workinfoid_finish = MAXID;
+
 // DB users,workers,auth load is complete
 bool db_auths_complete = false;
 // DB load is complete
@@ -678,13 +683,24 @@ matane:
 	return ok;
 }
 
+/* Load blocks first to allow data range settings to know
+ * the blocks info for setting limits for tables in getdata3()
+ */
 static bool getdata2()
+{
+	PGconn *conn = dbconnect();
+	bool ok = blocks_fill(conn);
+
+	PQfinish(conn);
+
+	return ok;
+}
+
+static bool getdata3()
 {
 	PGconn *conn = dbconnect();
 	bool ok = true;
 
-	if (!(ok = blocks_fill(conn)) || everyone_die)
-		goto sukamudai;
 	if (!confirm_sharesummary) {
 		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
 			goto sukamudai;
@@ -999,6 +1015,9 @@ static bool setup_data()
 	cksem_post(&socketer_sem);
 
 	if (!getdata2() || everyone_die)
+		return false;
+
+	if (!getdata3() || everyone_die)
 		return false;
 
 	db_load_complete = true;
@@ -2834,8 +2853,17 @@ static void confirm_reload()
 				   __func__, workinfo->workinfoid);
 		}
 	} else {
-		start.tv_sec = start.tv_usec = 0;
-		LOGWARNING("%s() no start workinfo found ... using time 0", __func__);
+		if (confirm_first_workinfoid == 0) {
+			start.tv_sec = start.tv_usec = 0;
+			LOGWARNING("%s() no start workinfo found ... "
+				   "using time 0", __func__);
+		} else {
+			// Abort, otherwise reload will reload all log files
+			LOGERR("%s(): Start workinfoid doesn't exist, "
+			       "use 0 to mean from the beginning of time",
+			       __func__);
+			return;
+		}
 	}
 
 	/* Find the workinfo after confirm_last_workinfoid-1
@@ -2995,6 +3023,8 @@ static void confirm_summaries()
 					return;
 				}
 				free(range);
+				dbload_workinfoid_start = confirm_range_start - 1;
+				dbload_workinfoid_finish = confirm_range_finish + 1;
 				break;
 			case 'w':
 				confirm_range_start = atoll(confirm_range+1);
@@ -3023,6 +3053,11 @@ static void confirm_summaries()
 
 	if (!getdata2()) {
 		LOGEMERG("%s() ABORTING from getdata2()", __func__);
+		return;
+	}
+
+	if (!getdata3()) {
+		LOGEMERG("%s() ABORTING from getdata3()", __func__);
 		return;
 	}
 
