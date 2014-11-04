@@ -2146,7 +2146,9 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	K_WLOCK(workinfo_free);
 	if (find_in_ktree(workinfo_root, item, cmp_workinfo, ctx)) {
 		free(row->transactiontree);
+		row->transactiontree = NULL;
 		free(row->merklehash);
+		row->merklehash = NULL;
 		workinfoid = row->workinfoid;
 		k_add_head(workinfo_free, item);
 		K_WUNLOCK(workinfo_free);
@@ -2209,7 +2211,9 @@ unparam:
 	K_WLOCK(workinfo_free);
 	if (workinfoid == -1) {
 		free(row->transactiontree);
+		row->transactiontree = NULL;
 		free(row->merklehash);
+		row->merklehash = NULL;
 		k_add_head(workinfo_free, item);
 	} else {
 		if (row->transactiontree && *(row->transactiontree)) {
