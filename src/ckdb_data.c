@@ -1040,6 +1040,7 @@ cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
+// Only one for now ...
 K_ITEM *find_paymentaddresses(int64_t userid)
 {
 	PAYMENTADDRESSES paymentaddresses, *pa;

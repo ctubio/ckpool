@@ -1424,7 +1424,9 @@ bool workers_fill(PGconn *conn)
 	return ok;
 }
 
-// Whatever the current paymentaddresses are, replace them with this one
+/* Whatever the current paymentaddresses are, replace them with this one
+ * Code allows for zero, one or more current payment address
+ *  even though there currently can only be zero or one */
 K_ITEM *paymentaddresses_set(PGconn *conn, int64_t userid, char *payaddress,
 				char *by, char *code, char *inet, tv_t *cd,
 				K_TREE *trf_root)
@@ -1529,12 +1531,13 @@ unitem:
 	if (!ok)
 		k_add_head(paymentaddresses_free, item);
 	else {
-		// Remove from ram, old (unneeded) records
+		// Change the expiry on all the old ones
 		pa.userid = userid;
 		pa.expirydate.tv_sec = DATE_S_EOT;
 		pa.payaddress[0] = '\0';
 		INIT_PAYMENTADDRESSES(&look);
 		look.data = (void *)(&pa);
+		// Tree order is expirydate desc
 		old = find_after_in_ktree(paymentaddresses_root, &look,
 					  cmp_paymentaddresses, ctx);
 		while (old) {
@@ -1543,9 +1546,15 @@ unitem:
 			if (thispa->userid != userid)
 				break;
 			old = next_in_ktree(ctx);
-			paymentaddresses_root = remove_from_ktree(paymentaddresses_root, this,
-								  cmp_paymentaddresses, ctx2);
-			k_add_head(paymentaddresses_free, this);
+			/* Tree remove+add below doesn't matter since
+			 * this test will avoid reprocessing */
+			if (CURRENT(&(thispa->expirydate))) {
+				paymentaddresses_root = remove_from_ktree(paymentaddresses_root, this,
+									  cmp_paymentaddresses, ctx2);
+				copy_tv(&(thispa->expirydate), cd);
+				paymentaddresses_root = add_to_ktree(paymentaddresses_root, this,
+								     cmp_paymentaddresses);
+			}
 		}
 		paymentaddresses_root = add_to_ktree(paymentaddresses_root, item,
 						     cmp_paymentaddresses);
@@ -1565,8 +1574,7 @@ bool paymentaddresses_fill(PGconn *conn)
 	PGresult *res;
 	K_ITEM *item;
 	PAYMENTADDRESSES *row;
-	char *params[1];
-	int n, i, par = 0;
+	int n, i;
 	char *field;
 	char *sel;
 	int fields = 4;
@@ -1577,11 +1585,8 @@ bool paymentaddresses_fill(PGconn *conn)
 	sel = "select "
 		"paymentaddressid,userid,payaddress,payratio"
 		HISTORYDATECONTROL
-		" from paymentaddresses where expirydate=$1";
-	par = 0;
-	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
-	PARCHK(par, params);
-	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
+		" from paymentaddresses";
+	res = PQexec(conn, sel, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Select", rescode, conn);
