@@ -2266,11 +2266,13 @@ bool workinfo_fill(PGconn *conn)
 		"workinfoid,poolinstance,merklehash,prevhash,"
 		"coinbase1,coinbase2,version,bits,ntime,reward"
 		HISTORYDATECONTROL
-		" from workinfo where workinfoid>=$1 and workinfoid<=$2 and expirydate=$3";
+		" from workinfo where expirydate=$1 and"
+		" ((workinfoid>=$2 and workinfoid<=$3) or"
+		"  workinfoid in (select workinfoid from blocks) )";
 	par = 0;
+	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
 	params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
 	params[par++] = bigint_to_buf(dbload_workinfoid_finish, NULL, 0);
-	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
 	PARCHK(par, params);
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
 	rescode = PQresultStatus(res);
