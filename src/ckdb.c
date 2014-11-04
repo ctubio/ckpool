@@ -1765,6 +1765,8 @@ static void summarise_userstats()
 
 static void *summariser(__maybe_unused void *arg)
 {
+	int i;
+
 	pthread_detach(pthread_self());
 
 	rename_proc("db_summariser");
@@ -1773,19 +1775,35 @@ static void *summariser(__maybe_unused void *arg)
 		cksleep_ms(42);
 
 	while (!everyone_die) {
-		sleep(5);
-		if (!everyone_die) {
+		for (i = 0; i < 5; i++) {
+			if (!everyone_die)
+				sleep(1);
+		}
+		if (everyone_die)
+			break;
+		else {
 			if (startup_complete)
 				check_blocks();
-			summarise_blocks();
+			if (!everyone_die)
+				summarise_blocks();
 		}
 
-		sleep(4);
-		if (!everyone_die)
+		for (i = 0; i < 4; i++) {
+			if (!everyone_die)
+				sleep(1);
+		}
+		if (everyone_die)
+			break;
+		else
 			summarise_poolstats();
 
-		sleep(4);
-		if (!everyone_die)
+		for (i = 0; i < 4; i++) {
+			if (!everyone_die)
+				sleep(1);
+		}
+		if (everyone_die)
+			break;
+		else
 			summarise_userstats();
 	}
 
