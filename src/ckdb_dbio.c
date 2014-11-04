@@ -310,7 +310,6 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 {
 	ExecStatusType rescode;
 	bool conned = false;
-	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *item;
 	USERS *row, *users;
@@ -428,8 +427,8 @@ unparam:
 	if (!ok)
 		k_add_head(users_free, item);
 	else {
-		users_root = remove_from_ktree(users_root, u_item, cmp_users, ctx);
-		userid_root = remove_from_ktree(userid_root, u_item, cmp_userid, ctx);
+		users_root = remove_from_ktree(users_root, u_item, cmp_users);
+		userid_root = remove_from_ktree(userid_root, u_item, cmp_userid);
 		copy_tv(&(users->expirydate), cd);
 		users_root = add_to_ktree(users_root, u_item, cmp_users);
 		userid_root = add_to_ktree(userid_root, u_item, cmp_userid);
@@ -684,7 +683,6 @@ bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun)
 {
 	ExecStatusType rescode;
 	bool conned = false;
-	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *old_item;
 	USERATTS *old_useratts, *useratts;
@@ -789,7 +787,7 @@ unparam:
 	if (ok) {
 		// Update it
 		if (old_item) {
-			useratts_root = remove_from_ktree(useratts_root, old_item, cmp_useratts, ctx);
+			useratts_root = remove_from_ktree(useratts_root, old_item, cmp_useratts);
 			copy_tv(&(old_useratts->expirydate), cd);
 			useratts_root = add_to_ktree(useratts_root, old_item, cmp_useratts);
 		}
@@ -879,7 +877,6 @@ bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd)
 {
 	ExecStatusType rescode;
 	bool conned = false;
-	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *item;
 	USERATTS *useratts;
@@ -934,7 +931,7 @@ unparam:
 
 	K_WLOCK(useratts_free);
 	if (ok && item) {
-		useratts_root = remove_from_ktree(useratts_root, item, cmp_useratts, ctx);
+		useratts_root = remove_from_ktree(useratts_root, item, cmp_useratts);
 		copy_tv(&(useratts->expirydate), cd);
 		useratts_root = add_to_ktree(useratts_root, item, cmp_useratts);
 	}
@@ -1434,7 +1431,7 @@ K_ITEM *paymentaddresses_set(PGconn *conn, int64_t userid, char *payaddress,
 	ExecStatusType rescode;
 	bool conned = false;
 	PGresult *res;
-	K_TREE_CTX ctx[1], ctx2[1];
+	K_TREE_CTX ctx[1];
 	K_ITEM *item, *old, *this, look;
 	PAYMENTADDRESSES *row, pa, *thispa;
 	char *upd, *ins;
@@ -1550,7 +1547,7 @@ unitem:
 			 * this test will avoid reprocessing */
 			if (CURRENT(&(thispa->expirydate))) {
 				paymentaddresses_root = remove_from_ktree(paymentaddresses_root, this,
-									  cmp_paymentaddresses, ctx2);
+									  cmp_paymentaddresses);
 				copy_tv(&(thispa->expirydate), cd);
 				paymentaddresses_root = add_to_ktree(paymentaddresses_root, this,
 								     cmp_paymentaddresses);
@@ -1938,7 +1935,7 @@ nostart:
 		// Discard it
 		if (old_item) {
 			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
-							       cmp_optioncontrol, ctx);
+							       cmp_optioncontrol);
 			k_add_head(optioncontrol_free, old_item);
 		}
 		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
@@ -3136,7 +3133,6 @@ bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 	ExecStatusType rescode;
 	bool conned = false;
 	PGresult *res = NULL;
-	K_TREE_CTX ctx[1];
 	K_ITEM *b_item, *old_b_item;
 	BLOCKS *row, *oldblocks;
 	char hash_dsp[16+1];
@@ -3261,7 +3257,7 @@ unparam:
 		k_add_head(blocks_free, b_item);
 	else {
 		if (update_old) {
-			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks, ctx);
+			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks);
 			copy_tv(&(oldblocks->expirydate), cd);
 			blocks_root = add_to_ktree(blocks_root, old_b_item, cmp_blocks);
 		}
@@ -3283,7 +3279,6 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	ExecStatusType rescode;
 	bool conned = false;
 	PGresult *res = NULL;
-	K_TREE_CTX ctx[1];
 	K_ITEM *b_item, *u_item, *old_b_item;
 	char cd_buf[DATE_BUFSIZ];
 	char hash_dsp[16+1];
@@ -3564,7 +3559,7 @@ flail:
 		k_add_head(blocks_free, b_item);
 	else {
 		if (update_old) {
-			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks, ctx);
+			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks);
 			copy_tv(&(oldblocks->expirydate), cd);
 			blocks_root = add_to_ktree(blocks_root, old_b_item, cmp_blocks);
 		}

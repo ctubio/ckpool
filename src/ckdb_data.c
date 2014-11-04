@@ -1239,7 +1239,7 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		  int64_t *s_count, int64_t *s_diff)
 {
 	K_ITEM *wi_item, ss_look, *ss_item, s_look, *s_item, *tmp_item;
-	K_TREE_CTX ss_ctx[1], s_ctx[1], tmp_ctx[1];
+	K_TREE_CTX ss_ctx[1], s_ctx[1];
 	char cd_buf[DATE_BUFSIZ];
 	int64_t ss_tot, ss_already, ss_failed, shares_tot, shares_dumped;
 	SHARESUMMARY looksharesummary, *sharesummary;
@@ -1353,7 +1353,7 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 
 			shares_tot++;
 			tmp_item = next_in_ktree(s_ctx);
-			shares_root = remove_from_ktree(shares_root, s_item, cmp_shares, tmp_ctx);
+			shares_root = remove_from_ktree(shares_root, s_item, cmp_shares);
 			k_unlink_item(shares_store, s_item);
 			if (reloading && skipupdate)
 				shares_dumped++;

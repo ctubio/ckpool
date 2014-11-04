@@ -494,12 +494,12 @@ void logmsg(int loglevel, const char *fmt, ...)
 
 	now_t = time(NULL);
 	localtime_r(&now_t, &tm);
-	minoff = timezone / 60;
+	minoff = tm.tm_gmtoff / 60;
 	if (minoff < 0) {
-		tzch = '+';
+		tzch = '-';
 		minoff *= -1;
 	} else
-		tzch = '-';
+		tzch = '+';
 	hroff = minoff / 60;
 	if (minoff % 60) {
 		snprintf(tzinfo, sizeof(tzinfo),
@@ -1606,7 +1606,7 @@ static void summarise_poolstats()
 // TODO: consider limiting how much/how long this processes each time
 static void summarise_userstats()
 {
-	K_TREE_CTX ctx[1], ctx2[1];
+	K_TREE_CTX ctx[1];
 	K_ITEM *first, *last, *new, *next, *tmp;
 	USERSTATS *userstats, *us_first, *us_last, *us_next;
 	double statrange, factor;
@@ -1675,9 +1675,9 @@ static void summarise_userstats()
 		DATA_USERSTATS(userstats, new);
 		memcpy(userstats, us_first, sizeof(USERSTATS));
 
-		userstats_root = remove_from_ktree(userstats_root, first, cmp_userstats, ctx2);
+		userstats_root = remove_from_ktree(userstats_root, first, cmp_userstats);
 		userstats_statsdate_root = remove_from_ktree(userstats_statsdate_root, first,
-							     cmp_userstats_statsdate, ctx2);
+							     cmp_userstats_statsdate);
 		k_unlink_item(userstats_store, first);
 		k_add_head(userstats_summ, first);
 
@@ -1702,9 +1702,9 @@ static void summarise_userstats()
 					userstats->elapsed = us_next->elapsed;
 				userstats->summarycount += us_next->summarycount;
 
-				userstats_root = remove_from_ktree(userstats_root, next, cmp_userstats, ctx2);
+				userstats_root = remove_from_ktree(userstats_root, next, cmp_userstats);
 				userstats_statsdate_root = remove_from_ktree(userstats_statsdate_root, next,
-									     cmp_userstats_statsdate, ctx2);
+									     cmp_userstats_statsdate);
 				k_unlink_item(userstats_store, next);
 				k_add_head(userstats_summ, next);
 			}
