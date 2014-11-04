@@ -150,10 +150,10 @@
  *	and a warning is displayed if there were any matching shares
  */
 
-bool socketer_release;
-bool summariser_release;
-bool logger_release;
-bool listener_release;
+static bool socketer_using_data;
+static bool summariser_using_data;
+static bool logger_using_data;
+static bool listener_using_data;
 
 char *EMPTY = "";
 
@@ -1024,6 +1024,16 @@ static void free_sharesummary_data(K_ITEM *item)
 	SET_MODIFYINET(sharesummary_free, sharesummary->modifyinet, EMPTY);
 }
 
+static void free_optioncontrol_data(K_ITEM *item)
+{
+	OPTIONCONTROL *optioncontrol;
+
+	DATA_OPTIONCONTROL(optioncontrol, item);
+	if (optioncontrol->optionvalue)
+		free(optioncontrol->optionvalue);
+}
+
+
 #define FREE_TREE(_tree) \
 	if (_tree ## _root) \
 		_tree ## _root = free_ktree(_tree ## _root, NULL) \
@@ -1104,7 +1114,25 @@ static void dealloc_storage()
 	FREE_ALL(payments);
 	FREE_ALL(paymentaddresses);
 	FREE_ALL(workers);
-	FREE_ALL(optioncontrol);
+
+	FREE_TREE(optioncontrol);
+	if (optioncontrol_store) {
+		item = optioncontrol_store->head;
+		while (item) {
+			free_optioncontrol_data(item);
+			item = item->next;
+		}
+		FREE_STORE(optioncontrol);
+	}
+	if (optioncontrol_free) {
+		item = optioncontrol_free->head;
+		while (item) {
+			free_optioncontrol_data(item);
+			item = item->next;
+		}
+		FREE_LIST(optioncontrol);
+	}
+
 	FREE_ALL(useratts);
 
 	FREE_TREE(userid);
@@ -1774,6 +1802,8 @@ static void *summariser(__maybe_unused void *arg)
 	while (!everyone_die && !db_load_complete)
 		cksleep_ms(42);
 
+	summariser_using_data = true;
+
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
 			if (!everyone_die)
@@ -1807,7 +1837,7 @@ static void *summariser(__maybe_unused void *arg)
 			summarise_userstats();
 	}
 
-	summariser_release = true;
+	summariser_using_data = false;
 
 	return NULL;
 }
@@ -1823,6 +1853,8 @@ static void *logger(__maybe_unused void *arg)
 
 	snprintf(buf, sizeof(buf), "db%s_logger", dbcode);
 	rename_proc(buf);
+
+	logger_using_data = true;
 
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstart.%ld,%ld",
@@ -1866,7 +1898,7 @@ static void *logger(__maybe_unused void *arg)
 	}
 	K_WUNLOCK(logqueue_free);
 
-	logger_release = true;
+	logger_using_data = false;
 
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstop.%ld,%ld",
@@ -1922,6 +1954,8 @@ static void *socketer(__maybe_unused void *arg)
 
 	while (!everyone_die && !db_auths_complete)
 		cksem_mswait(&socketer_sem, 420);
+
+	socketer_using_data = true;
 
 	want_first = true;
 	while (!everyone_die) {
@@ -2272,7 +2306,7 @@ static void *socketer(__maybe_unused void *arg)
 		}
 	}
 
-	socketer_release = true;
+	socketer_using_data = false;
 
 	if (buf)
 		dealloc(buf);
@@ -2620,6 +2654,8 @@ static void *listener(void *arg)
 
 	rename_proc("db_listener");
 
+	listener_using_data = true;
+
 	if (!setup_data()) {
 		if (!everyone_die) {
 			LOGEMERG("ABORTING");
@@ -2675,7 +2711,7 @@ static void *listener(void *arg)
 		}
 	}
 
-	listener_release = true;
+	listener_using_data = false;
 
 	if (conn)
 		PQfinish(conn);
@@ -3474,7 +3510,6 @@ int main(int argc, char **argv)
 		// TODO: add a system lock to stop running 2 at once?
 		confirm_summaries();
 		everyone_die = true;
-		socketer_release = summariser_release = listener_release = true;
 	} else {
 		ckp.main.sockname = strdup("listener");
 		write_namepid(&ckp.main);
@@ -3496,8 +3531,8 @@ int main(int argc, char **argv)
 	char *msg = NULL;
 
 	trigger = start = time(NULL);
-	while (!socketer_release || !summariser_release ||
-		!logger_release || !listener_release) {
+	while (socketer_using_data || summariser_using_data ||
+		logger_using_data || listener_using_data) {
 		msg = NULL;
 		curr = time(NULL);
 		if (curr - start > 4) {
@@ -3511,10 +3546,10 @@ int main(int argc, char **argv)
 			trigger = curr;
 			printf("%s %ds due to%s%s%s%s\n",
 				msg, (int)(curr - start),
-				socketer_release ? EMPTY : " socketer",
-				summariser_release ? EMPTY : " summariser",
-				logger_release ? EMPTY : " logger",
-				listener_release ? EMPTY : " listener");
+				socketer_using_data ? " socketer" : EMPTY,
+				summariser_using_data ? " summariser" : EMPTY,
+				logger_using_data ? " logger" : EMPTY,
+				listener_using_data ? " listener" : EMPTY);
 			fflush(stdout);
 		}
 		sleep(1);
