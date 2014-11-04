@@ -15,12 +15,50 @@
 
 #include "libckpool.h"
 
+void mkstamp(char *stamp, size_t siz)
+{
+	long minoff, hroff;
+	char tzinfo[16];
+	time_t now_t;
+	struct tm tm;
+	char tzch;
+
+	now_t = time(NULL);
+	localtime_r(&now_t, &tm);
+	minoff = tm.tm_gmtoff / 60;
+	if (minoff < 0) {
+		tzch = '-';
+		minoff *= -1;
+	} else
+		tzch = '+';
+	hroff = minoff / 60;
+	if (minoff % 60) {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld:%02ld",
+			 tzch, hroff, minoff % 60);
+	} else {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld",
+			 tzch, hroff);
+	}
+	snprintf(stamp, siz,
+			"[%d-%02d-%02d %02d:%02d:%02d%s]",
+			tm.tm_year + 1900,
+			tm.tm_mon + 1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec,
+			tzinfo);
+}
+
 int main(int argc, char **argv)
 {
 	char *name = NULL, *socket_dir = NULL, *buf = NULL;
-	bool proxy = false;
 	int tmo1 = RECV_UNIX_TIMEOUT1;
 	int tmo2 = RECV_UNIX_TIMEOUT2;
+	bool proxy = false;
+	char stamp[128];
 	int c;
 
 	while ((c = getopt(argc, argv, "n:s:pt:T:")) != -1) {
@@ -72,7 +110,8 @@ int main(int argc, char **argv)
 			continue;
 		}
 		buf[len - 1] = '\0'; // Strip /n
-		LOGDEBUG("Got message: %s", buf);
+		mkstamp(stamp, sizeof(stamp));
+		LOGDEBUG("%s Got message: %s", stamp, buf);
 
 		sockd = open_unix_client(socket_dir);
 		if (sockd < 0) {
@@ -90,7 +129,8 @@ int main(int argc, char **argv)
 			LOGERR("Received empty message");
 			continue;
 		}
-		LOGNOTICE("Received response: %s", buf);
+		mkstamp(stamp, sizeof(stamp));
+		LOGNOTICE("%s Received response: %s", stamp, buf);
 	}
 
 	dealloc(buf);
