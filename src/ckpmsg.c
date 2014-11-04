@@ -19,9 +19,11 @@ int main(int argc, char **argv)
 {
 	char *name = NULL, *socket_dir = NULL, *buf = NULL;
 	bool proxy = false;
+	int tmo1 = RECV_UNIX_TIMEOUT1;
+	int tmo2 = RECV_UNIX_TIMEOUT2;
 	int c;
 
-	while ((c = getopt(argc, argv, "n:s:p")) != -1) {
+	while ((c = getopt(argc, argv, "n:s:pt:T:")) != -1) {
 		switch(c) {
 			case 'n':
 				name = strdup(optarg);
@@ -31,6 +33,12 @@ int main(int argc, char **argv)
 				break;
 			case 'p':
 				proxy = true;
+				break;
+			case 't':
+				tmo1 = atoi(optarg);
+				break;
+			case 'T':
+				tmo2 = atoi(optarg);
 				break;
 		}
 	}
@@ -76,7 +84,7 @@ int main(int argc, char **argv)
 			break;
 		}
 		dealloc(buf);
-		buf = recv_unix_msg(sockd);
+		buf = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
 		close(sockd);
 		if (!buf) {
 			LOGERR("Received empty message");
