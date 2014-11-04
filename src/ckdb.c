@@ -3473,6 +3473,8 @@ int main(int argc, char **argv)
 	if (confirm_sharesummary) {
 		// TODO: add a system lock to stop running 2 at once?
 		confirm_summaries();
+		everyone_die = true;
+		socketer_release = summariser_release = listener_release = true;
 	} else {
 		ckp.main.sockname = strdup("listener");
 		write_namepid(&ckp.main);
@@ -3488,37 +3490,37 @@ int main(int argc, char **argv)
 
 		/* Shutdown from here if the listener is sent a shutdown message */
 		join_pthread(ckp.pth_listener);
-
-		time_t start, trigger, now;
-		char *msg = NULL;
-
-		trigger = start = time(NULL);
-		while (!socketer_release || !summariser_release ||
-			!logger_release || !listener_release) {
-			msg = NULL;
-			now = time(NULL);
-			if (now - start > 4) {
-				if (now - trigger > 4) {
-					msg = "Shutdown initial delay";
-				} else if (now - trigger > 2) {
-					msg = "Shutdown delay";
-				}
-			}
-			if (msg) {
-				trigger = now;
-				printf("%s %ds due to%s%s%s%s\n",
-					msg, (int)(now - start),
-					socketer_release ? EMPTY : " socketer",
-					summariser_release ? EMPTY : " summariser",
-					logger_release ? EMPTY : " logger",
-					listener_release ? EMPTY : " listener");
-				fflush(stdout);
-			}
-			sleep(1);
-		}
-
-		dealloc_storage();
 	}
+
+	time_t start, trigger, curr;
+	char *msg = NULL;
+
+	trigger = start = time(NULL);
+	while (!socketer_release || !summariser_release ||
+		!logger_release || !listener_release) {
+		msg = NULL;
+		curr = time(NULL);
+		if (curr - start > 4) {
+			if (curr - trigger > 4) {
+				msg = "Shutdown initial delay";
+			} else if (curr - trigger > 2) {
+				msg = "Shutdown delay";
+			}
+		}
+		if (msg) {
+			trigger = curr;
+			printf("%s %ds due to%s%s%s%s\n",
+				msg, (int)(curr - start),
+				socketer_release ? EMPTY : " socketer",
+				summariser_release ? EMPTY : " summariser",
+				logger_release ? EMPTY : " logger",
+				listener_release ? EMPTY : " listener");
+			fflush(stdout);
+		}
+		sleep(1);
+	}
+
+	dealloc_storage();
 
 	clean_up(&ckp);
 
