@@ -4788,6 +4788,268 @@ bool userstats_fill(PGconn *conn)
 	return ok;
 }
 
+bool markersummary_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	MARKERSUMMARY *row;
+	char *field;
+	char *sel;
+	int fields = 18;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: limit how far back
+	sel = "select "
+		"markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
+		"diffrej,shareacc,sharesta,sharedup,sharehi,sharerej,"
+		"sharecount,errorcount,firstshare,lastshare,"
+		"lastdiffacc"
+		MODIFYDATECONTROL
+		" from markersummary";
+	res = PQexec(conn, sel, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + MODIFYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + MODIFYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(markersummary_free);
+		DATA_MARKERSUMMARY(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "markerid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("markerid", field, row->markerid);
+
+		PQ_GET_FLD(res, i, "userid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userid", field, row->userid);
+
+		PQ_GET_FLD(res, i, "workername", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("workername", field, row->workername);
+
+		PQ_GET_FLD(res, i, "diffacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffacc", field, row->diffacc);
+
+		PQ_GET_FLD(res, i, "diffsta", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffsta", field, row->diffsta);
+
+		PQ_GET_FLD(res, i, "diffdup", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffdup", field, row->diffdup);
+
+		PQ_GET_FLD(res, i, "diffhi", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffhi", field, row->diffhi);
+
+		PQ_GET_FLD(res, i, "diffrej", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffrej", field, row->diffrej);
+
+		PQ_GET_FLD(res, i, "shareacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("shareacc", field, row->shareacc);
+
+		PQ_GET_FLD(res, i, "sharesta", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharesta", field, row->sharesta);
+
+		PQ_GET_FLD(res, i, "sharedup", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharedup", field, row->sharedup);
+
+		PQ_GET_FLD(res, i, "sharehi", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharehi", field, row->sharehi);
+
+		PQ_GET_FLD(res, i, "sharerej", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharerej", field, row->sharerej);
+
+		PQ_GET_FLD(res, i, "sharecount", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("sharecount", field, row->sharecount);
+
+		PQ_GET_FLD(res, i, "errorcount", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("errorcount", field, row->errorcount);
+
+		PQ_GET_FLD(res, i, "firstshare", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("firstshare", field, row->firstshare);
+
+		PQ_GET_FLD(res, i, "lastshare", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("lastshare", field, row->lastshare);
+
+		PQ_GET_FLD(res, i, "lastdiffacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("lastdiffacc", field, row->lastdiffacc);
+
+		MODIFYDATEFLDPOINTERS(markersummary_free, res, i, row, ok);
+		if (!ok)
+			break;
+
+		markersummary_root = add_to_ktree(markersummary_root, item, cmp_markersummary);
+		k_add_head(markersummary_store, item);
+
+		tick();
+	}
+	if (!ok)
+		k_add_head(markersummary_free, item);
+
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d markersummary records", __func__, n);
+	}
+
+	return ok;
+}
+
+bool workmarkers_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	WORKMARKERS *row;
+	char *field;
+	char *sel;
+	int fields = 6;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: limit how far back
+	sel = "select "
+		"markerid,poolinstance,workinfoidend,workinfoidstart,"
+		"description,status"
+		HISTORYDATECONTROL
+		" from workmarkers";
+	res = PQexec(conn, sel, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(workmarkers_free);
+		DATA_WORKMARKERS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "markerid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("markerid", field, row->markerid);
+
+		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "workinfoidend", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoidend", field, row->workinfoidend);
+
+		PQ_GET_FLD(res, i, "workinfoidstart", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoidstart", field, row->workinfoidstart);
+
+		PQ_GET_FLD(res, i, "description", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("description", field, row->description);
+
+		PQ_GET_FLD(res, i, "status", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("status", field, row->status);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		workmarkers_root = add_to_ktree(workmarkers_root, item, cmp_workmarkers);
+		k_add_head(workmarkers_store, item);
+
+		tick();
+	}
+	if (!ok)
+		k_add_head(workmarkers_free, item);
+
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d workmarkers records", __func__, n);
+	}
+
+	return ok;
+}
+
 bool check_db_version(PGconn *conn)
 {
 	ExecStatusType rescode;

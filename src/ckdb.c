@@ -435,6 +435,16 @@ K_TREE *workerstatus_root;
 K_LIST *workerstatus_free;
 K_STORE *workerstatus_store;
 
+// MARKERSUMMARY
+K_TREE *markersummary_root;
+K_LIST *markersummary_free;
+K_STORE *markersummary_store;
+
+// WORKMARKERS
+K_TREE *workmarkers_root;
+K_LIST *workmarkers_free;
+K_STORE *workmarkers_store;
+
 static char logname[512];
 static char *dbcode;
 
@@ -713,6 +723,10 @@ static bool getdata3()
 			goto sukamudai;
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
+		goto sukamudai;
+	if (!(ok = workmarkers_fill(conn)) || everyone_die)
+		goto sukamudai;
+	if (!(ok = markersummary_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!(ok = sharesummary_fill(conn)) || everyone_die)
 		goto sukamudai;
@@ -998,6 +1012,16 @@ static void alloc_storage()
 					ALLOC_WORKERSTATUS, LIMIT_WORKERSTATUS, true);
 	workerstatus_store = k_new_store(workerstatus_free);
 	workerstatus_root = new_ktree();
+
+	markersummary_free = k_new_list("MarkerSummary", sizeof(MARKERSUMMARY),
+					ALLOC_MARKERSUMMARY, LIMIT_MARKERSUMMARY, true);
+	markersummary_store = k_new_store(markersummary_free);
+	markersummary_root = new_ktree();
+
+	workmarkers_free = k_new_list("WorkMarkers", sizeof(WORKMARKERS),
+					ALLOC_WORKMARKERS, LIMIT_WORKMARKERS, true);
+	workmarkers_store = k_new_store(workmarkers_free);
+	workmarkers_root = new_ktree();
 }
 
 static void free_workinfo_data(K_ITEM *item)
@@ -1033,6 +1057,31 @@ static void free_optioncontrol_data(K_ITEM *item)
 		free(optioncontrol->optionvalue);
 }
 
+static void free_markersummary_data(K_ITEM *item)
+{
+	MARKERSUMMARY *markersummary;
+
+	DATA_MARKERSUMMARY(markersummary, item);
+	if (markersummary->workername)
+		free(markersummary->workername);
+	SET_CREATEBY(markersummary_free, markersummary->createby, EMPTY);
+	SET_CREATECODE(markersummary_free, markersummary->createcode, EMPTY);
+	SET_CREATEINET(markersummary_free, markersummary->createinet, EMPTY);
+	SET_MODIFYBY(markersummary_free, markersummary->modifyby, EMPTY);
+	SET_MODIFYCODE(markersummary_free, markersummary->modifycode, EMPTY);
+	SET_MODIFYINET(markersummary_free, markersummary->modifyinet, EMPTY);
+}
+
+static void free_workmarkers_data(K_ITEM *item)
+{
+	WORKMARKERS *workmarkers;
+
+	DATA_WORKMARKERS(workmarkers, item);
+	if (workmarkers->poolinstance)
+		free(workmarkers->poolinstance);
+	if (workmarkers->description)
+		free(workmarkers->description);
+}
 
 #define FREE_TREE(_tree) \
 	if (_tree ## _root) \
@@ -1046,15 +1095,42 @@ static void free_optioncontrol_data(K_ITEM *item)
 	if (_list ## _free) \
 		_list ## _free = k_free_list(_list ## _free) \
 
-#define FREE_ALL(_list) FREE_TREE(_list); FREE_STORE(_list); FREE_LIST(_list)
+#define FREE_STORE_DATA(_list) \
+	if (_list ## _store) { \
+		K_ITEM *_item = _list ## _store->head; \
+		while (_item) { \
+			free_ ## _list ## _data(_item); \
+			_item = _item->next; \
+		} \
+		_list ## _store = k_free_store(_list ## _store); \
+	}
+
+#define FREE_LIST_DATA(_list) \
+	if (_list ## _free) { \
+		K_ITEM *_item = _list ## _free->head; \
+		while (_item) { \
+			free_ ## _list ## _data(_item); \
+			_item = _item->next; \
+		} \
+		_list ## _free = k_free_list(_list ## _free); \
+	}
 
 #define FREE_LISTS(_list) FREE_STORE(_list); FREE_LIST(_list)
 
+#define FREE_ALL(_list) FREE_TREE(_list); FREE_LISTS(_list)
+
 static void dealloc_storage()
 {
-	K_ITEM *item;
-
 	FREE_LISTS(logqueue);
+
+	FREE_TREE(workmarkers);
+	FREE_STORE_DATA(workmarkers);
+	FREE_LIST_DATA(workmarkers);
+
+	FREE_TREE(markersummary);
+	FREE_STORE_DATA(markersummary);
+	FREE_LIST_DATA(markersummary);
+
 	FREE_ALL(workerstatus);
 
 	FREE_TREE(userstats_workerstatus);
@@ -1071,44 +1147,16 @@ static void dealloc_storage()
 
 	FREE_TREE(sharesummary_workinfoid);
 	FREE_TREE(sharesummary);
-	if (sharesummary_store) {
-		item = sharesummary_store->head;
-		while (item) {
-			free_sharesummary_data(item);
-			item = item->next;
-		}
-		FREE_STORE(sharesummary);
-	}
-	if (sharesummary_free) {
-		item = sharesummary_free->head;
-		while (item) {
-			free_sharesummary_data(item);
-			item = item->next;
-		}
-		FREE_LIST(sharesummary);
-	}
+	FREE_STORE_DATA(sharesummary);
+	FREE_LIST_DATA(sharesummary);
 
 	FREE_ALL(shareerrors);
 	FREE_ALL(shares);
 
 	FREE_TREE(workinfo_height);
 	FREE_TREE(workinfo);
-	if (workinfo_store) {
-		item = workinfo_store->head;
-		while (item) {
-			free_workinfo_data(item);
-			item = item->next;
-		}
-		FREE_STORE(workinfo);
-	}
-	if (workinfo_free) {
-		item = workinfo_free->head;
-		while (item) {
-			free_workinfo_data(item);
-			item = item->next;
-		}
-		FREE_LIST(workinfo);
-	}
+	FREE_STORE_DATA(workinfo);
+	FREE_LIST_DATA(workinfo);
 
 	FREE_LISTS(idcontrol);
 	FREE_ALL(payments);
@@ -1116,22 +1164,8 @@ static void dealloc_storage()
 	FREE_ALL(workers);
 
 	FREE_TREE(optioncontrol);
-	if (optioncontrol_store) {
-		item = optioncontrol_store->head;
-		while (item) {
-			free_optioncontrol_data(item);
-			item = item->next;
-		}
-		FREE_STORE(optioncontrol);
-	}
-	if (optioncontrol_free) {
-		item = optioncontrol_free->head;
-		while (item) {
-			free_optioncontrol_data(item);
-			item = item->next;
-		}
-		FREE_LIST(optioncontrol);
-	}
+	FREE_STORE_DATA(optioncontrol);
+	FREE_LIST_DATA(optioncontrol);
 
 	FREE_ALL(useratts);
 

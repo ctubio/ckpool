@@ -173,6 +173,8 @@ void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t s
 				quithere(1, "Field %s (%d) OOM" WHERE_FFL,
 						nam, (int)strlen(fld), WHERE_FFL_PASS);
 			}
+			// free() allows NULL
+			free(*((char **)data));
 			*((char **)data) = tmp;
 			break;
 		case TYPE_DOUBLE:
@@ -2071,3 +2073,34 @@ bool userstats_starttimeband(USERSTATS *row, tv_t *statsdate)
 	}
 	return true;
 }
+
+// order by markerid asc,userid asc,workername asc
+cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b)
+{
+	MARKERSUMMARY *ma, *mb;
+	DATA_MARKERSUMMARY(ma, a);
+	DATA_MARKERSUMMARY(mb, b);
+	cmp_t c = CMP_BIGINT(ma->markerid, mb->markerid);
+	if (c == 0) {
+		c = CMP_BIGINT(ma->userid, mb->userid);
+		if (c == 0)
+			c = CMP_STR(ma->workername, mb->workername);
+	}
+	return c;
+}
+
+// order by markerid asc,workinfoidend asc,expirydate desc
+cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b)
+{
+	WORKMARKERS *wa, *wb;
+	DATA_WORKMARKERS(wa, a);
+	DATA_WORKMARKERS(wb, b);
+	cmp_t c = CMP_BIGINT(wa->markerid, wb->markerid);
+	if (c == 0) {
+		c = CMP_BIGINT(wa->workinfoidend, wb->workinfoidend);
+		if (c == 0)
+			c = CMP_TV(wb->expirydate, wa->expirydate);
+	}
+	return c;
+}
+

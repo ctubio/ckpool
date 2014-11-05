@@ -3341,6 +3341,8 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(shares, 1, 1);
 	USEINFO(shareerrors, 1, 1);
 	USEINFO(sharesummary, 1, 2);
+	USEINFO(workmarkers, 1, 1);
+	USEINFO(markersummary, 1, 1);
 	USEINFO(blocks, 1, 1);
 	USEINFO(miningpayouts, 1, 1);
 	USEINFO(auths, 1, 1);
