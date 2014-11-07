@@ -1745,5 +1745,6 @@ int generator(proc_instance_t *pi)
 	else
 		ret = server_mode(ckp, pi);
 
+	dealloc(ckp->data);
 	return process_exit(ckp, pi, ret);
 }
