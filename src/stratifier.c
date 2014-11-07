@@ -252,6 +252,7 @@ struct worker_instance {
 	int mindiff; /* User chosen mindiff */
 
 	bool idle;
+	bool notified_idle;
 };
 
 /* Per client stratum instance == workers */
@@ -286,7 +287,6 @@ struct stratum_instance {
 	bool subscribed;
 	bool authorised;
 	bool idle;
-	bool notified_idle;
 	int reject;	/* Indicator that this client is having a run of rejects
 			 * or other problem and should be dropped lazily if
 			 * this is set to 2 */
@@ -344,7 +344,7 @@ static int gen_priority;
 #define ID_SHARES 3
 #define ID_SHAREERR 4
 #define ID_POOLSTATS 5
-#define ID_USERSTATS 6
+#define ID_WORKERSTATS 6
 #define ID_BLOCK 7
 #define ID_ADDRAUTH 8
 #define ID_HEARTBEAT 9
@@ -356,7 +356,7 @@ static const char *ckdb_ids[] = {
 	"shares",
 	"shareerror",
 	"poolstats",
-	"userstats",
+	"workerstats",
 	"block",
 	"addrauth",
 	"heartbeat"
@@ -3177,12 +3177,11 @@ out:
 /* Called every 20 seconds, we send the updated stats to ckdb of those users
  * who have gone 10 minutes between updates. This ends up staggering stats to
  * avoid floods of stat data coming at once. */
-static void update_userstats(ckpool_t *ckp)
+static void update_workerstats(ckpool_t *ckp)
 {
-	stratum_instance_t *client, *tmp;
+	user_instance_t *user, *tmp;
 	char cdfield[64];
 	time_t now_t;
-	json_t *val;
 	ts_t ts_now;
 
 	if (++stats.userstats_cycle > 0x1f)
@@ -3193,47 +3192,47 @@ static void update_userstats(ckpool_t *ckp)
 	now_t = ts_now.tv_sec;
 
 	ck_rlock(&instance_lock);
-	HASH_ITER(hh, stratum_instances, client, tmp) {
-		double ghs1, ghs5, ghs60, ghs1440;
+	HASH_ITER(hh, user_instances, user, tmp) {
+		worker_instance_t *worker;
 		uint8_t cycle_mask;
-		int elapsed;
 
-		if (!client->authorised)
-			continue;
-
-		/* Send one lot of stats once the client is idle if they have submitted
-		 * no shares in the last 10 minutes with the idle bool set. */
-		if (client->idle && client->notified_idle)
-			continue;
-		/* Select clients using a mask to return each user's stats once
+		/* Select users using a mask to return each user's stats once
 		 * every ~10 minutes */
-		cycle_mask = client->user_id & 0x1f;
+		cycle_mask = user->id & 0x1f;
 		if (cycle_mask != stats.userstats_cycle)
 			continue;
+		DL_FOREACH(user->worker_instances, worker) {
+			double ghs1, ghs5, ghs60, ghs1440;
+			int elapsed;
+			json_t *val;
 
-		elapsed = now_t - client->start_time;
-		ghs1 = client->dsps1 * nonces;
-		ghs5 = client->dsps5 * nonces;
-		ghs60 = client->dsps60 * nonces;
-		ghs1440 = client->dsps1440 * nonces;
-		JSON_CPACK(val, "{ss,sI,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
-				"poolinstance", ckp->name,
-				"instanceid", client->id,
-				"elapsed", elapsed,
-				"username", client->user_instance->username,
-				"workername", client->workername,
-				"hashrate", ghs1,
-				"hashrate5m", ghs5,
-				"hashrate1hr", ghs60,
-				"hashrate24hr", ghs1440,
-				"idle", client->idle,
-				"createdate", cdfield,
-				"createby", "code",
-				"createcode", __func__,
-				"createinet", ckp->serverurl);
-		client->notified_idle = client->idle;
-		ckdbq_add(ckp, ID_USERSTATS, val);
-		val = NULL;
+			/* Send one lot of stats once the worker is idle if
+			 * they have submitted no shares in the last 10 minutes
+			 * with the idle bool set. */
+			if (worker->idle && worker->notified_idle)
+				continue;
+			elapsed = now_t - worker->start_time;
+			ghs1 = worker->dsps1 * nonces;
+			ghs5 = worker->dsps5 * nonces;
+			ghs60 = worker->dsps60 * nonces;
+			ghs1440 = worker->dsps1440 * nonces;
+			JSON_CPACK(val, "{ss,si,ss,ss,sf,sf,sf,sf,sb,ss,ss,ss,ss}",
+					"poolinstance", ckp->name,
+					"elapsed", elapsed,
+					"username", user->username,
+					"workername", worker->workername,
+					"hashrate", ghs1,
+					"hashrate5m", ghs5,
+					"hashrate1hr", ghs60,
+					"hashrate24hr", ghs1440,
+					"idle", worker->idle,
+					"createdate", cdfield,
+					"createby", "code",
+					"createcode", __func__,
+					"createinet", ckp->serverurl);
+			worker->notified_idle = worker->idle;
+			ckdbq_add(ckp, ID_WORKERSTATS, val);
+		}
 	}
 	ck_runlock(&instance_lock);
 }
@@ -3478,7 +3477,7 @@ static void *statsupdate(void *arg)
 		for (i = 0; i < 3; i++) {
 			cksleep_ms_r(&stats.last_update, 20000);
 			cksleep_prepare_r(&stats.last_update);
-			update_userstats(ckp);
+			update_workerstats(ckp);
 
 			mutex_lock(&stats_lock);
 			stats.accounted_shares += stats.unaccounted_shares;
