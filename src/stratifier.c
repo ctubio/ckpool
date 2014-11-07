@@ -1760,7 +1760,8 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 
 		instance->id = sdata->user_instance_id++;
 		HASH_ADD_STR(sdata->user_instances, username, instance);
-		read_userstats(ckp, instance);
+		if (CKP_STANDALONE(ckp))
+			read_userstats(ckp, instance);
 	}
 	DL_FOREACH(instance->instances, tmp) {
 		if (!safecmp(workername, tmp->workername)) {
@@ -1776,7 +1777,8 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		worker->workername = strdup(workername);
 		worker->instance = instance;
 		DL_APPEND(instance->worker_instances, worker);
-		read_workerstats(ckp, worker);
+		if (CKP_STANDALONE(ckp))
+			read_workerstats(ckp, worker);
 		worker->start_time = time(NULL);
 		client->worker_instance = worker;
 	}
@@ -3293,7 +3295,7 @@ static void *statsupdate(void *arg)
 
 	while (42) {
 		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080;
-		double bias, bias5, bias60, bias1440;
+		double bias;
 		double tdiff, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
@@ -3316,30 +3318,30 @@ static void *statsupdate(void *arg)
 		suffix_string(ghs1, suffix1, 16, 0);
 		sps1 = stats->sps1;
 
-		bias5 = time_bias(tdiff, 300);
-		ghs5 = stats->dsps5 * nonces / bias5;
+		bias = !CKP_STANDALONE(ckp) ? 1.0 : time_bias(tdiff, 300);
+		ghs5 = stats->dsps5 * nonces / bias;
+		sps5 = stats->sps5 / bias;
 		suffix_string(ghs5, suffix5, 16, 0);
-		sps5 = stats->sps5 / bias5;
 
-		bias = time_bias(tdiff, 900);
+		bias = !CKP_STANDALONE(ckp) ? 1.0 : time_bias(tdiff, 900);
 		ghs15 = stats->dsps15 * nonces / bias;
 		suffix_string(ghs15, suffix15, 16, 0);
 		sps15 = stats->sps15 / bias;
 
-		bias60 = time_bias(tdiff, 3600);
-		ghs60 = stats->dsps60 * nonces / bias60;
+		bias = !CKP_STANDALONE(ckp) ? 1.0 : time_bias(tdiff, 3600);
+		ghs60 = stats->dsps60 * nonces / bias;
+		sps60 = stats->sps60 / bias;
 		suffix_string(ghs60, suffix60, 16, 0);
-		sps60 = stats->sps60 / bias60;
 
-		bias = time_bias(tdiff, 21600);
+		bias = !CKP_STANDALONE(ckp) ? 1.0 : time_bias(tdiff, 21600);
 		ghs360 = stats->dsps360 * nonces / bias;
 		suffix_string(ghs360, suffix360, 16, 0);
 
-		bias1440 = time_bias(tdiff, 86400);
-		ghs1440 = stats->dsps1440 * nonces / bias1440;
+		bias = !CKP_STANDALONE(ckp) ? 1.0 : time_bias(tdiff, 86400);
+		ghs1440 = stats->dsps1440 * nonces / bias;
 		suffix_string(ghs1440, suffix1440, 16, 0);
 
-		bias = time_bias(tdiff, 604800);
+		bias = !CKP_STANDALONE(ckp) ? 1.0 : time_bias(tdiff, 604800);
 		ghs10080 = stats->dsps10080 * nonces / bias;
 		suffix_string(ghs10080, suffix10080, 16, 0);
 
