@@ -705,6 +705,8 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
 	} else
 		set = false;
 	buf = send_recv_proc(ckp->generator, msg);
+	if (unlikely(!buf))
+		buf = strdup("failed");
 	if (set)
 		sdata->gen_priority = 0;
 
@@ -712,7 +714,8 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
 }
 
 /* Conditionally send_recv a message only if it's equal or higher priority than
- * any currently being serviced. */
+ * any currently being serviced. NULL is returned if the request is not
+ * processed for priority reasons, "failed" for an actual failure. */
 static char *send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
 {
 	sdata_t *sdata = ckp->data;
@@ -766,7 +769,7 @@ static void *do_update(void *arg)
 
 	buf = send_recv_generator(ckp, "getbase", prio);
 	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get base from generator in update_base");
+		LOGNOTICE("Get base in update_base delayed due to higher priority request");
 		goto out;
 	}
 	if (unlikely(cmdmatch(buf, "failed"))) {
@@ -777,7 +780,6 @@ static void *do_update(void *arg)
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
 	val = json_loads(buf, 0, NULL);
-	dealloc(buf);
 
 	json_strcpy(wb->target, val, "target");
 	json_dblcpy(&wb->diff, val, "diff");
@@ -821,10 +823,11 @@ static void *do_update(void *arg)
 out:
 	/* Send a ping to miners if we fail to get a base to keep them
 	 * connected while bitcoind recovers(?) */
-	if (!ret) {
-		LOGWARNING("Broadcast ping due to failed stratum base update");
+	if (unlikely(!ret)) {
+		LOGINFO("Broadcast ping due to failed stratum base update");
 		broadcast_ping(sdata);
 	}
+	dealloc(buf);
 	free(ur->pth);
 	free(ur);
 	return NULL;
