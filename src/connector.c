@@ -748,8 +748,8 @@ int connector(proc_instance_t *pi)
 	cdata->client_id = 1;
 	mutex_init(&cdata->sender_lock);
 	cond_init(&cdata->sender_cond);
-	create_pthread(&cdata->pth_sender, sender, &cdata);
-	create_pthread(&cdata->pth_receiver, receiver, &cdata);
+	create_pthread(&cdata->pth_sender, sender, cdata);
+	create_pthread(&cdata->pth_receiver, receiver, cdata);
 
 	ret = connector_loop(pi, cdata);
 out:
