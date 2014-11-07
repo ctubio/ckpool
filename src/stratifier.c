@@ -3173,9 +3173,9 @@ out:
 static void update_userstats(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
-	json_t *val = NULL;
 	char cdfield[64];
 	time_t now_t;
+	json_t *val;
 	ts_t ts_now;
 
 	if (++stats.userstats_cycle > 0x1f)
@@ -3204,11 +3204,6 @@ static void update_userstats(ckpool_t *ckp)
 		if (cycle_mask != stats.userstats_cycle)
 			continue;
 
-		if (val) {
-			json_set_bool(val,"eos", false);
-			ckdbq_add(ckp, ID_USERSTATS, val);
-			val = NULL;
-		}
 		elapsed = now_t - client->start_time;
 		ghs1 = client->dsps1 * nonces;
 		ghs5 = client->dsps5 * nonces;
@@ -3230,12 +3225,8 @@ static void update_userstats(ckpool_t *ckp)
 				"createcode", __func__,
 				"createinet", ckp->serverurl);
 		client->notified_idle = client->idle;
-	}
-	/* Mark the last userstats sent on this pass of stats with an end of
-	 * stats marker. */
-	if (val) {
-		json_set_bool(val,"eos", true);
 		ckdbq_add(ckp, ID_USERSTATS, val);
+		val = NULL;
 	}
 	ck_runlock(&instance_lock);
 }
