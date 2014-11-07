@@ -247,8 +247,11 @@ struct worker_instance {
 	double dsps60;
 	double dsps1440;
 	tv_t last_share;
+	time_t start_time;
 
 	int mindiff; /* User chosen mindiff */
+
+	bool idle;
 };
 
 /* Per client stratum instance == workers */
@@ -1738,11 +1741,14 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	/* Create one worker instance for combined data from workers of the
 	 * same name */
 	if (!client->worker_instance) {
-		client->worker_instance = ckzalloc(sizeof(worker_instance_t));
-		client->worker_instance->workername = strdup(workername);
-		client->worker_instance->instance = instance;
-		DL_APPEND(instance->worker_instances, client->worker_instance);
-		read_workerstats(ckp, client->worker_instance);
+		worker_instance_t *worker = ckzalloc(sizeof(worker_instance_t));
+
+		worker->workername = strdup(workername);
+		worker->instance = instance;
+		DL_APPEND(instance->worker_instances, worker);
+		read_workerstats(ckp, worker);
+		worker->start_time = time(NULL);
+		client->worker_instance = worker;
 	}
 	DL_APPEND(instance->instances, client);
 	ck_wunlock(&instance_lock);
@@ -2030,6 +2036,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	decay_time(&worker->dsps60, diff, tdiff, 3600);
 	decay_time(&worker->dsps1440, diff, tdiff, 86400);
 	copy_tv(&worker->last_share, &now_t);
+	worker->idle = false;
 
 	tdiff = sane_tdiff(&now_t, &instance->last_share);
 	decay_time(&instance->dsps1, diff, tdiff, 60);
@@ -3367,6 +3374,7 @@ static void *statsupdate(void *arg)
 					decay_time(&worker->dsps5, 0, per_tdiff, 300);
 					decay_time(&worker->dsps60, 0, per_tdiff, 3600);
 					decay_time(&worker->dsps1440, 0, per_tdiff, 86400);
+					worker->idle = true;
 				}
 				ghs = worker->dsps1 * nonces;
 				suffix_string(ghs, suffix1, 16, 0);
