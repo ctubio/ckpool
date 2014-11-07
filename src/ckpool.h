@@ -172,6 +172,9 @@ struct ckpool_instance {
 	char **proxyauth;
 	char **proxypass;
 	server_instance_t *btcdbackup;
+
+	/* Private data for each process */
+	void *data;
 };
 
 #ifdef USE_CKDB
