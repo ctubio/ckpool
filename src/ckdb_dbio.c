@@ -2393,7 +2393,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		char *nonce, char *diff, char *sdiff, char *secondaryuserid,
 		char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
+	K_ITEM *s_item, *u_item, *wi_item, *w_item, *wm_item, *ss_item;
 	char cd_buf[DATE_BUFSIZ];
 	SHARESUMMARY *sharesummary;
 	SHARES *shares;
@@ -2451,6 +2451,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	wi_item = find_workinfo(shares->workinfoid);
 	if (!wi_item) {
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
+		// TODO: store it for a few workinfoid changes
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %.19s no workinfo! Share discarded!",
 			__func__, shares->workinfoid, workername,
 			cd->tv_sec, cd->tv_usec, cd_buf);
@@ -2463,6 +2464,14 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		goto unitem;
 
 	if (reloading && !confirm_sharesummary) {
+		// We only need to know if the workmarker is ready
+		wm_item = find_workmarkers(shares->workinfoid);
+		if (wm_item) {
+			K_WLOCK(shares_free);
+			k_add_head(shares_free, s_item);
+			K_WUNLOCK(shares_free);
+			return true;
+		}
 		ss_item = find_sharesummary(shares->userid, shares->workername, shares->workinfoid);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -2506,7 +2515,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 			char *error, char *secondaryuserid, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
+	K_ITEM *s_item, *u_item, *wi_item, *w_item, *wm_item, *ss_item;
 	char cd_buf[DATE_BUFSIZ];
 	SHARESUMMARY *sharesummary;
 	SHAREERRORS *shareerrors;
@@ -2572,6 +2581,14 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 		goto unitem;
 
 	if (reloading && !confirm_sharesummary) {
+		// We only need to know if the workmarker is ready
+		wm_item = find_workmarkers(shareerrors->workinfoid);
+		if (wm_item) {
+			K_WLOCK(shareerrors_free);
+			k_add_head(shareerrors_free, s_item);
+			K_WUNLOCK(shareerrors_free);
+			return true;
+		}
 		ss_item = find_sharesummary(shareerrors->userid, shareerrors->workername, shareerrors->workinfoid);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -2615,8 +2632,9 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 {
 	ExecStatusType rescode;
 	PGresult *res = NULL;
+	WORKMARKERS *wm;
 	SHARESUMMARY *row;
-	K_ITEM *item;
+	K_ITEM *item, *wm_item;
 	char *ins, *upd;
 	bool ok = false, new;
 	char *params[19 + MODIFYDATECOUNT];
@@ -2663,6 +2681,23 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 			workername = e_row->workername;
 			workinfoid = e_row->workinfoid;
 			sharecreatedate = &(e_row->createdate);
+		}
+
+		K_RLOCK(workmarkers_free);
+		wm_item = find_workmarkers(workinfoid);
+		K_RUNLOCK(workmarkers_free);
+		if (wm_item) {
+			char *tmp;
+			DATA_WORKMARKERS(wm, wm_item);
+			LOGERR("%s(): attempt to update sharesummary "
+			       "with %s %"PRId64"/%"PRId64"/%s createdate %s"
+			       " but ready workmarkers %"PRId64" exists",
+				__func__, s_row ? "shares" : "shareerrors",
+				workinfoid, userid, workername,
+				(tmp = ctv_to_buf(sharecreatedate, NULL, 0)),
+				wm->markerid);
+			free(tmp);
+			return false;
 		}
 
 		K_RLOCK(sharesummary_free);
@@ -3082,7 +3117,7 @@ bool sharesummary_fill(PGconn *conn)
 		sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root, item, cmp_sharesummary_workinfoid);
 		k_add_head(sharesummary_store, item);
 
-		// A share summary is currently only shares in a single workinfo, at all 3 levels n,a,y
+		// A share summary is shares in a single workinfo, at all 3 levels n,a,y
 		if (tolower(row->complete[0]) == SUMMARY_NEW) {
 			if (dbstatus.oldest_sharesummary_firstshare_n.tv_sec == 0 ||
 			    !tv_newer(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare))) {
@@ -4933,6 +4968,7 @@ bool markersummary_fill(PGconn *conn)
 			break;
 
 		markersummary_root = add_to_ktree(markersummary_root, item, cmp_markersummary);
+		markersummary_userid_root = add_to_ktree(markersummary_userid_root, item, cmp_markersummary_userid);
 		k_add_head(markersummary_store, item);
 
 		tick();
@@ -5033,6 +5069,8 @@ bool workmarkers_fill(PGconn *conn)
 			break;
 
 		workmarkers_root = add_to_ktree(workmarkers_root, item, cmp_workmarkers);
+		workmarkers_workinfoid_root = add_to_ktree(workmarkers_workinfoid_root,
+							   item, cmp_workmarkers_workinfoid);
 		k_add_head(workmarkers_store, item);
 
 		tick();

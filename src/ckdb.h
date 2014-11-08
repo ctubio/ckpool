@@ -51,8 +51,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.9.3"
-#define CKDB_VERSION DB_VERSION"-0.610"
+#define DB_VERSION "0.9.4"
+#define CKDB_VERSION DB_VERSION"-0.630"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1294,6 +1294,7 @@ typedef struct markersummary {
 #define DATA_MARKERSUMMARY_NULL(_var, _item) DATA_GENERIC(_var, _item, markersummary, false)
 
 extern K_TREE *markersummary_root;
+extern K_TREE *markersummary_userid_root;
 extern K_LIST *markersummary_free;
 extern K_STORE *markersummary_store;
 
@@ -1315,10 +1316,12 @@ typedef struct workmarkers {
 #define DATA_WORKMARKERS_NULL(_var, _item) DATA_GENERIC(_var, _item, workmarkers, false)
 
 extern K_TREE *workmarkers_root;
+extern K_TREE *workmarkers_workinfoid_root;
 extern K_LIST *workmarkers_free;
 extern K_STORE *workmarkers_store;
 
 #define MARKER_COMPLETE 'x'
+#define WMREADY(_status) (tolower(_status[0]) == MARKER_COMPLETE)
 
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnow(tv_t *now);
@@ -1472,8 +1475,18 @@ extern cmp_t cmp_userstats_workername(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b);
 extern bool userstats_starttimeband(USERSTATS *row, tv_t *statsdate);
+extern void dsp_markersummary(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_markersummary_userid(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_markersummary(int64_t workinfoid, int64_t userid,
+				  char *workername);
+extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
+					 K_TREE_CTX *ctx);
+extern void dsp_workmarkers(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_workmarkers(int64_t workinfoid);
+extern K_ITEM *find_workmarkerid(int64_t markerid);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c

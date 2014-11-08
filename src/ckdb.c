@@ -40,8 +40,8 @@
  *  This error would be very rare and also not an issue
  * To avoid this, we start the ckpool message queue after loading
  *  the users, auths, idcontrol and workers DB tables, before loading the
- *  much larger sharesummary, workinfo, userstats and poolstats DB tables
- *  so that ckdb is effectively ready for messages almost immediately
+ *  much larger DB tables so that ckdb is effectively ready for messages
+ *  almost immediately
  * The first ckpool message also allows us to know where ckpool is up to
  *  in the CCLs and thus where to stop processing the CCLs to stay in
  *  sync with ckpool
@@ -121,7 +121,7 @@
  *  Tables that are/will be written straight to the DB, so are OK:
  *	users, useraccounts, paymentaddresses, payments,
  *	accountadjustment, optioncontrol, miningpayouts,
- *	eventlog
+ *	eventlog, workmarkers, markersummary
  *
  * The code deals with the issue of 'now' when reloading by:
  *  createdate is considered 'now' for all data during a reload and is
@@ -148,6 +148,8 @@
  *  3) ageworkinfo records are also handled by the shares date
  *	while processing, any records already aged are not updated
  *	and a warning is displayed if there were any matching shares
+ *	Any ageworkinfos that match a workmarker are ignored with an error
+ *	message
  */
 
 static bool socketer_using_data;
@@ -437,11 +439,13 @@ K_STORE *workerstatus_store;
 
 // MARKERSUMMARY
 K_TREE *markersummary_root;
+K_TREE *markersummary_userid_root;
 K_LIST *markersummary_free;
 K_STORE *markersummary_store;
 
 // WORKMARKERS
 K_TREE *workmarkers_root;
+K_TREE *workmarkers_workinfoid_root;
 K_LIST *workmarkers_free;
 K_STORE *workmarkers_store;
 
@@ -1017,11 +1021,15 @@ static void alloc_storage()
 					ALLOC_MARKERSUMMARY, LIMIT_MARKERSUMMARY, true);
 	markersummary_store = k_new_store(markersummary_free);
 	markersummary_root = new_ktree();
+	markersummary_userid_root = new_ktree();
+	markersummary_free->dsp_func = dsp_markersummary;
 
 	workmarkers_free = k_new_list("WorkMarkers", sizeof(WORKMARKERS),
 					ALLOC_WORKMARKERS, LIMIT_WORKMARKERS, true);
 	workmarkers_store = k_new_store(workmarkers_free);
 	workmarkers_root = new_ktree();
+	workmarkers_workinfoid_root = new_ktree();
+	workmarkers_free->dsp_func = dsp_workmarkers;
 }
 
 static void free_workinfo_data(K_ITEM *item)
@@ -1123,10 +1131,12 @@ static void dealloc_storage()
 {
 	FREE_LISTS(logqueue);
 
+	FREE_TREE(workmarkers_workinfoid);
 	FREE_TREE(workmarkers);
 	FREE_STORE_DATA(workmarkers);
 	FREE_LIST_DATA(workmarkers);
 
+	FREE_TREE(markersummary_userid);
 	FREE_TREE(markersummary);
 	FREE_STORE_DATA(markersummary);
 	FREE_LIST_DATA(markersummary);
@@ -1499,15 +1509,18 @@ static void check_blocks()
 static void summarise_blocks()
 {
 	K_ITEM *b_item, *b_prev, *wi_item, ss_look, *ss_item;
-	K_TREE_CTX ctx[1], ss_ctx[1];
+	K_ITEM wm_look, *wm_item, ms_look, *ms_item;
+	K_TREE_CTX ctx[1], ss_ctx[1], ms_ctx[1];
 	double diffacc, diffinv, shareacc, shareinv;
 	tv_t now, elapsed_start, elapsed_finish;
 	int64_t elapsed, wi_start, wi_finish;
 	BLOCKS *blocks, *prev_blocks;
 	WORKINFO *prev_workinfo;
 	SHARESUMMARY looksharesummary, *sharesummary;
+	WORKMARKERS lookworkmarkers, *workmarkers;
+	MARKERSUMMARY lookmarkersummary, *markersummary;
+	bool has_ss = false, has_ms = false, ok;
 	int32_t hi, prev_hi;
-	bool ok;
 
 	setnow(&now);
 
@@ -1576,26 +1589,24 @@ static void summarise_blocks()
 	looksharesummary.workername[0] = '\0';
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
+
+	// For now, just lock all 3
 	K_RLOCK(sharesummary_free);
+	K_RLOCK(workmarkers_free);
+	K_RLOCK(markersummary_free);
+
 	ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
 					cmp_sharesummary_workinfoid, ss_ctx);
-
-	if (!ss_item) {
-		K_RUNLOCK(sharesummary_free);
-		// This will repeat each call here until fixed ...
-		LOGERR("%s() block %d, prev %d no sharesummaries "
-			"on or before %"PRId64,
-			__func__, blocks->height,
-			prev_hi, wi_finish);
-		return;
-	}
-	DATA_SHARESUMMARY(sharesummary, ss_item);
+	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	while (ss_item && sharesummary->workinfoid > wi_start) {
 		if (sharesummary->complete[0] == SUMMARY_NEW) {
 			// Not aged yet
+			K_RUNLOCK(markersummary_free);
+			K_RUNLOCK(workmarkers_free);
 			K_RUNLOCK(sharesummary_free);
 			return;
 		}
+		has_ss = true;
 		if (elapsed_start.tv_sec == 0 ||
 		    !tv_newer(&elapsed_start, &(sharesummary->firstshare))) {
 			copy_tv(&elapsed_start, &(sharesummary->firstshare));
@@ -1613,7 +1624,76 @@ static void summarise_blocks()
 		ss_item = prev_in_ktree(ss_ctx);
 		DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	}
+
+	// Add in the workmarkers...markersummaries
+	lookworkmarkers.expirydate.tv_sec = default_expiry.tv_sec;
+	lookworkmarkers.expirydate.tv_usec = default_expiry.tv_usec;
+	lookworkmarkers.workinfoidend = wi_finish+1;
+	INIT_WORKMARKERS(&wm_look);
+	wm_look.data = (void *)(&lookworkmarkers);
+	wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
+				       cmp_workmarkers_workinfoid, ctx);
+	DATA_WORKMARKERS_NULL(workmarkers, wm_item);
+	while (wm_item &&
+	       CURRENT(&(workmarkers->expirydate)) &&
+	       workmarkers->workinfoidend > wi_start) {
+
+		if (workmarkers->workinfoidstart < wi_start) {
+			LOGEMERG("%s() workmarkers %"PRId64"/%s/%"PRId64
+				 "/%"PRId64"/%s/%s crosses block "
+				 "%"PRId32"/%"PRId64" boundary",
+				 __func__, workmarkers->markerid,
+				 workmarkers->poolinstance,
+				 workmarkers->workinfoidstart,
+				 workmarkers->workinfoidend,
+				 workmarkers->description,
+				 workmarkers->status, hi, wi_finish);
+		}
+		if (WMREADY(workmarkers->status)) {
+			lookmarkersummary.markerid = workmarkers->markerid;
+			lookmarkersummary.userid = MAXID;
+			lookmarkersummary.workername[0] = '\0';
+			INIT_MARKERSUMMARY(&ms_look);
+			ms_look.data = (void *)(&lookmarkersummary);
+			ms_item = find_before_in_ktree(markersummary_root, &ms_look,
+						       cmp_markersummary, ms_ctx);
+			DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
+			while (ms_item && markersummary->markerid == workmarkers->markerid) {
+				has_ms = true;
+				if (elapsed_start.tv_sec == 0 ||
+				    !tv_newer(&elapsed_start, &(markersummary->firstshare))) {
+					copy_tv(&elapsed_start, &(markersummary->firstshare));
+				}
+				if (tv_newer(&elapsed_finish, &(markersummary->lastshare)))
+					copy_tv(&elapsed_finish, &(markersummary->lastshare));
+
+				diffacc += markersummary->diffacc;
+				diffinv += markersummary->diffsta + markersummary->diffdup +
+					   markersummary->diffhi + markersummary-> diffrej;
+				shareacc += markersummary->shareacc;
+				shareinv += markersummary->sharesta + markersummary->sharedup +
+					    markersummary->sharehi + markersummary-> sharerej;
+
+				ms_item = prev_in_ktree(ms_ctx);
+				DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
+			}
+		}
+		wm_item = prev_in_ktree(ctx);
+		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
+	}
+
+	K_RUNLOCK(markersummary_free);
+	K_RUNLOCK(workmarkers_free);
 	K_RUNLOCK(sharesummary_free);
+
+	if (!has_ss && !has_ms) {
+		// This will repeat each call here until fixed ...
+		LOGERR("%s() block %d, after block %d, no sharesummaries "
+			"or markersummaries after %"PRId64" up to %"PRId64,
+			__func__, blocks->height,
+			prev_hi, wi_start, wi_finish);
+		return;
+	}
 
 	elapsed = (int64_t)(tvdiff(&elapsed_finish, &elapsed_start) + 0.5);
 	ok = blocks_stats(NULL, blocks->height, blocks->blockhash,
@@ -3184,6 +3264,7 @@ static void confirm_reload()
 			  true, false);
 }
 
+// TODO: handle workmarkers/markersummaries
 static void confirm_summaries()
 {
 	pthread_t log_pt;

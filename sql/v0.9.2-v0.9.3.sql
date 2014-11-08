@@ -68,5 +68,4 @@ CREATE TABLE markersummary ( -- sum of sharesummary for a workinfo range
     PRIMARY KEY (markerid, userid, workername)
 );
 
-
 END transaction;

@@ -247,7 +247,7 @@ CREATE TABLE sharesummary ( -- per workinfo for each user+worker
     modifyby character varying(64) NOT NULL,
     modifycode character varying(128) NOT NULL,
     modifyinet character varying(128) NOT NULL,
-    PRIMARY KEY (userid, workername, workinfoid)
+    PRIMARY KEY (workinfoid, userid, workername)
 );
 
 
@@ -417,4 +417,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'0.9.3');
+insert into version (vlock,version) values (1,'0.9.4');
