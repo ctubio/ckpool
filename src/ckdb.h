@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.4"
-#define CKDB_VERSION DB_VERSION"-0.630"
+#define CKDB_VERSION DB_VERSION"-0.631"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -605,7 +605,7 @@ typedef struct transfer {
 
 #define ALLOC_TRANSFER 64
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 64
+#define CULL_TRANSFER 1024
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
