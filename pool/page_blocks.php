@@ -4,8 +4,8 @@ function pctcolour($pct)
 {
  if ($pct == 100)
  {
-	$fg = '#fff';
-	$bg = '#000';
+	$fg = 'white';
+	$bg = 'black';
  }
 
  if ($pct < 100)
@@ -17,9 +17,9 @@ function pctcolour($pct)
 		$grn = 255;
 
 	if ($grn > 190)
-		$fg = '#00f';
+		$fg = 'blue';
 	else
-		$fg = '#fff';
+		$fg = 'white';
 	$bg = sprintf("#00%02x00", $grn);
  }
 
@@ -31,7 +31,7 @@ function pctcolour($pct)
 	if ($red > 255)
 		$red = 255;
 
-	$fg = '#fff';
+	$fg = 'white';
 	$bg = sprintf("#%02x0000", $red);
  }
 
