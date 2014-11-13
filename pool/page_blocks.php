@@ -44,12 +44,16 @@ function doblocks($data, $user)
 
  $pg = '<h1>Blocks</h1>';
 
- $ans = getBlocks($user);
+ if ($user === null)
+	$ans = getBlocks('Anon');
+ else
+	$ans = getBlocks($user);
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
  $pg .= "<td class=dl>Height</td>";
- $pg .= "<td class=dl>Who</td>";
+ if ($user !== null)
+	$pg .= "<td class=dl>Who</td>";
  $pg .= "<td class=dr>Reward</td>";
  $pg .= "<td class=dc>When</td>";
  $pg .= "<td class=dr>Status</td>";
@@ -119,7 +123,8 @@ function doblocks($data, $user)
 
 		$pg .= "<tr class=$row>";
 		$pg .= "<td class=dl$ex>$hifld</td>";
-		$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
+		if ($user !== null)
+			$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
 		$pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
 		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate:'.$i]).'</td>';
 		$pg .= "<td class=dr$ex>".$stat.'</td>';
@@ -141,7 +146,10 @@ function doblocks($data, $user)
 	$bg = " bgcolor=$bg";
 
 	$pg .= "<tr class=$row>";
-	$pg .= "<td class=dl colspan=6></td>";
+	if ($user === null)
+		$pg .= "<td class=dl colspan=5></td>";
+	else
+		$pg .= "<td class=dl colspan=6></td>";
 	$pg .= "<td class=dr$bg>".$bpct.'</td>';
 	$pg .= "</tr>\n";
  }
