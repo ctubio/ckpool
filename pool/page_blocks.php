@@ -59,10 +59,12 @@ function doblocks($data, $user)
  $pg .= "<td class=dr>Status</td>";
  $pg .= "<td class=dr>Diff</td>";
  $pg .= "<td class=dr>%</td>";
+ $pg .= "<td class=dr>CDF</td>";
  $pg .= "</tr>\n";
  $blktot = 0;
  $nettot = 0;
  $i = 0;
+ $orph = false;
  if ($ans['STATUS'] == 'ok')
  {
 	$count = $ans['rows'];
@@ -79,7 +81,10 @@ function doblocks($data, $user)
 		$ex = '';
 		$stat = $ans['status:'.$i];
 		if ($stat == 'Orphan')
+		{
 			$ex = 's';
+			$orph = true;
+		}
 		if ($stat == '1-Confirm')
 		{
 			if (isset($data['info']['lastheight']))
@@ -114,11 +119,15 @@ function doblocks($data, $user)
 			$blktot += $diffacc;
 			if ($stat != 'Orphan')
 				$nettot += $netdiff;
+
+			$cdfv = 1 - exp(-1 * $diffacc / $netdiff);
+			$cdf = number_format($cdfv, 2);
 		}
 		else
 		{
 			$bg = '';
 			$bpct = '?';
+			$cdf = '?';
 		}
 
 		$pg .= "<tr class=$row>";
@@ -130,6 +139,7 @@ function doblocks($data, $user)
 		$pg .= "<td class=dr$ex>".$stat.'</td>';
 		$pg .= "<td class=dr>$stara$acc</td>";
 		$pg .= "<td class=dr$bg>$bpct</td>";
+		$pg .= "<td class=dr>$cdf</td>";
 		$pg .= "</tr>\n";
 	}
  }
@@ -146,12 +156,26 @@ function doblocks($data, $user)
 	$bg = " bgcolor=$bg";
 
 	$pg .= "<tr class=$row>";
+	$pg .= '<td class=dr>Total:</td>';
+	$pg .= '<td class=dl colspan=';
 	if ($user === null)
-		$pg .= "<td class=dl colspan=5></td>";
+		$pg .= '4';
 	else
-		$pg .= "<td class=dl colspan=6></td>";
+		$pg .= '5';
+	$pg .= '></td>';
 	$pg .= "<td class=dr$bg>".$bpct.'</td>';
-	$pg .= "</tr>\n";
+	$pg .= "<td></td></tr>\n";
+	if ($orph === true)
+	{
+		$pg .= '<tr><td colspan=';
+		if ($user === null)
+			$pg .= '7';
+		else
+			$pg .= '8';
+		$pg .= ' class=dc><font size=-1><span class=st1>*</span>';
+		$pg .= '% total is adjusted to include orphans correctly';
+		$pg .= '</font></td></tr>';
+	}
  }
  $pg .= "</table>\n";
 
