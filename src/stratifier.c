@@ -1231,7 +1231,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		else {
 			if (client->user_instance)
 				DL_DELETE(client->user_instance->instances, client);
-			DL_APPEND(sdata->dead_instances, client);
+			LL_PREPEND(sdata->dead_instances, client);
 		}
 	}
 	ck_wunlock(&sdata->instance_lock);
@@ -1249,7 +1249,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding instance %ld", client->id);
-			DL_DELETE(sdata->dead_instances, client);
+			LL_DELETE(sdata->dead_instances, client);
 			free(client->workername);
 			free(client->useragent);
 			free(client);
