@@ -2393,7 +2393,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		char *nonce, char *diff, char *sdiff, char *secondaryuserid,
 		char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
+	K_ITEM *s_item, *u_item, *wi_item, *w_item, *wm_item, *ss_item;
 	char cd_buf[DATE_BUFSIZ];
 	SHARESUMMARY *sharesummary;
 	SHARES *shares;
@@ -2451,6 +2451,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	wi_item = find_workinfo(shares->workinfoid);
 	if (!wi_item) {
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
+		// TODO: store it for a few workinfoid changes
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %.19s no workinfo! Share discarded!",
 			__func__, shares->workinfoid, workername,
 			cd->tv_sec, cd->tv_usec, cd_buf);
@@ -2463,6 +2464,14 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		goto unitem;
 
 	if (reloading && !confirm_sharesummary) {
+		// We only need to know if the workmarker is ready
+		wm_item = find_workmarkers(shares->workinfoid);
+		if (wm_item) {
+			K_WLOCK(shares_free);
+			k_add_head(shares_free, s_item);
+			K_WUNLOCK(shares_free);
+			return true;
+		}
 		ss_item = find_sharesummary(shares->userid, shares->workername, shares->workinfoid);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -2506,7 +2515,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 			char *error, char *secondaryuserid, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *s_item, *u_item, *wi_item, *w_item, *ss_item;
+	K_ITEM *s_item, *u_item, *wi_item, *w_item, *wm_item, *ss_item;
 	char cd_buf[DATE_BUFSIZ];
 	SHARESUMMARY *sharesummary;
 	SHAREERRORS *shareerrors;
@@ -2572,6 +2581,14 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 		goto unitem;
 
 	if (reloading && !confirm_sharesummary) {
+		// We only need to know if the workmarker is ready
+		wm_item = find_workmarkers(shareerrors->workinfoid);
+		if (wm_item) {
+			K_WLOCK(shareerrors_free);
+			k_add_head(shareerrors_free, s_item);
+			K_WUNLOCK(shareerrors_free);
+			return true;
+		}
 		ss_item = find_sharesummary(shareerrors->userid, shareerrors->workername, shareerrors->workinfoid);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -2615,8 +2632,9 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 {
 	ExecStatusType rescode;
 	PGresult *res = NULL;
+	WORKMARKERS *wm;
 	SHARESUMMARY *row;
-	K_ITEM *item;
+	K_ITEM *item, *wm_item;
 	char *ins, *upd;
 	bool ok = false, new;
 	char *params[19 + MODIFYDATECOUNT];
@@ -2663,6 +2681,23 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 			workername = e_row->workername;
 			workinfoid = e_row->workinfoid;
 			sharecreatedate = &(e_row->createdate);
+		}
+
+		K_RLOCK(workmarkers_free);
+		wm_item = find_workmarkers(workinfoid);
+		K_RUNLOCK(workmarkers_free);
+		if (wm_item) {
+			char *tmp;
+			DATA_WORKMARKERS(wm, wm_item);
+			LOGERR("%s(): attempt to update sharesummary "
+			       "with %s %"PRId64"/%"PRId64"/%s createdate %s"
+			       " but ready workmarkers %"PRId64" exists",
+				__func__, s_row ? "shares" : "shareerrors",
+				workinfoid, userid, workername,
+				(tmp = ctv_to_buf(sharecreatedate, NULL, 0)),
+				wm->markerid);
+			free(tmp);
+			return false;
 		}
 
 		K_RLOCK(sharesummary_free);
@@ -3082,7 +3117,7 @@ bool sharesummary_fill(PGconn *conn)
 		sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root, item, cmp_sharesummary_workinfoid);
 		k_add_head(sharesummary_store, item);
 
-		// A share summary is currently only shares in a single workinfo, at all 3 levels n,a,y
+		// A share summary is shares in a single workinfo, at all 3 levels n,a,y
 		if (tolower(row->complete[0]) == SUMMARY_NEW) {
 			if (dbstatus.oldest_sharesummary_firstshare_n.tv_sec == 0 ||
 			    !tv_newer(&(dbstatus.oldest_sharesummary_firstshare_n), &(row->firstshare))) {
@@ -4783,6 +4818,271 @@ bool userstats_fill(PGconn *conn)
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
 		LOGWARNING("%s(): loaded %d userstats records", __func__, n);
+	}
+
+	return ok;
+}
+
+bool markersummary_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	MARKERSUMMARY *row;
+	char *field;
+	char *sel;
+	int fields = 18;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: limit how far back
+	sel = "select "
+		"markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
+		"diffrej,shareacc,sharesta,sharedup,sharehi,sharerej,"
+		"sharecount,errorcount,firstshare,lastshare,"
+		"lastdiffacc"
+		MODIFYDATECONTROL
+		" from markersummary";
+	res = PQexec(conn, sel, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + MODIFYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + MODIFYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(markersummary_free);
+		DATA_MARKERSUMMARY(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "markerid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("markerid", field, row->markerid);
+
+		PQ_GET_FLD(res, i, "userid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userid", field, row->userid);
+
+		PQ_GET_FLD(res, i, "workername", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("workername", field, row->workername);
+
+		PQ_GET_FLD(res, i, "diffacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffacc", field, row->diffacc);
+
+		PQ_GET_FLD(res, i, "diffsta", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffsta", field, row->diffsta);
+
+		PQ_GET_FLD(res, i, "diffdup", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffdup", field, row->diffdup);
+
+		PQ_GET_FLD(res, i, "diffhi", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffhi", field, row->diffhi);
+
+		PQ_GET_FLD(res, i, "diffrej", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("diffrej", field, row->diffrej);
+
+		PQ_GET_FLD(res, i, "shareacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("shareacc", field, row->shareacc);
+
+		PQ_GET_FLD(res, i, "sharesta", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharesta", field, row->sharesta);
+
+		PQ_GET_FLD(res, i, "sharedup", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharedup", field, row->sharedup);
+
+		PQ_GET_FLD(res, i, "sharehi", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharehi", field, row->sharehi);
+
+		PQ_GET_FLD(res, i, "sharerej", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("sharerej", field, row->sharerej);
+
+		PQ_GET_FLD(res, i, "sharecount", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("sharecount", field, row->sharecount);
+
+		PQ_GET_FLD(res, i, "errorcount", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("errorcount", field, row->errorcount);
+
+		PQ_GET_FLD(res, i, "firstshare", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("firstshare", field, row->firstshare);
+
+		PQ_GET_FLD(res, i, "lastshare", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("lastshare", field, row->lastshare);
+
+		PQ_GET_FLD(res, i, "lastdiffacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_DOUBLE("lastdiffacc", field, row->lastdiffacc);
+
+		MODIFYDATEFLDPOINTERS(markersummary_free, res, i, row, ok);
+		if (!ok)
+			break;
+
+		markersummary_root = add_to_ktree(markersummary_root, item, cmp_markersummary);
+		markersummary_userid_root = add_to_ktree(markersummary_userid_root, item, cmp_markersummary_userid);
+		k_add_head(markersummary_store, item);
+
+		tick();
+	}
+	if (!ok)
+		k_add_head(markersummary_free, item);
+
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d markersummary records", __func__, n);
+	}
+
+	return ok;
+}
+
+bool workmarkers_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	WORKMARKERS *row;
+	char *field;
+	char *sel;
+	int fields = 6;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: limit how far back
+	sel = "select "
+		"markerid,poolinstance,workinfoidend,workinfoidstart,"
+		"description,status"
+		HISTORYDATECONTROL
+		" from workmarkers";
+	res = PQexec(conn, sel, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(workmarkers_free);
+		DATA_WORKMARKERS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "markerid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("markerid", field, row->markerid);
+
+		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "workinfoidend", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoidend", field, row->workinfoidend);
+
+		PQ_GET_FLD(res, i, "workinfoidstart", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoidstart", field, row->workinfoidstart);
+
+		PQ_GET_FLD(res, i, "description", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("description", field, row->description);
+
+		PQ_GET_FLD(res, i, "status", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("status", field, row->status);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		workmarkers_root = add_to_ktree(workmarkers_root, item, cmp_workmarkers);
+		workmarkers_workinfoid_root = add_to_ktree(workmarkers_workinfoid_root,
+							   item, cmp_workmarkers_workinfoid);
+		k_add_head(workmarkers_store, item);
+
+		tick();
+	}
+	if (!ok)
+		k_add_head(workmarkers_free, item);
+
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d workmarkers records", __func__, n);
 	}
 
 	return ok;

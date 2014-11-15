@@ -2920,10 +2920,12 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
     up to the createdate of the last share
    The user average hashrate would be:
 	diffacc_user * 2^32 / pplns_elapsed
-   PPLNS fraction of the block would be:
+   PPLNS fraction of the payout would be:
 	diffacc_user / diffacc_total
 */
 
+/* TODO: redesign to include workmarkers
+ * ... before next payout that extends into a markersummary ... */
 static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
@@ -3283,7 +3285,14 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 	dsp_ktree(sharesummary_free, sharesummary_root,
 		  transfer_data(i_file), NULL);
 
-	dsp_ktree(userstats_free, userstats_root, transfer_data(i_file), NULL);
+	dsp_ktree(userstats_free, userstats_root,
+		  transfer_data(i_file), NULL);
+
+	dsp_ktree(markersummary_free, markersummary_root,
+		  transfer_data(i_file), NULL);
+
+	dsp_ktree(workmarkers_free, workmarkers_root,
+		  transfer_data(i_file), NULL);
 
 	LOGDEBUG("%s.ok.dsp.file='%s'", id, transfer_data(i_file));
 	return strdup("ok.dsp");
@@ -3341,6 +3350,8 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(shares, 1, 1);
 	USEINFO(shareerrors, 1, 1);
 	USEINFO(sharesummary, 1, 2);
+	USEINFO(workmarkers, 1, 2);
+	USEINFO(markersummary, 1, 2);
 	USEINFO(blocks, 1, 1);
 	USEINFO(miningpayouts, 1, 1);
 	USEINFO(auths, 1, 1);

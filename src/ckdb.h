@@ -51,8 +51,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.9.2"
-#define CKDB_VERSION DB_VERSION"-0.602"
+#define DB_VERSION "0.9.4"
+#define CKDB_VERSION DB_VERSION"-0.631"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -185,6 +185,9 @@ enum data_type {
 	TYPE_BLOB,
 	TYPE_DOUBLE
 };
+
+// BLOB does what PTR needs
+#define TXT_TO_PTR TXT_TO_BLOB
 
 #define TXT_TO_STR(__nam, __fld, __data) txt_to_str(__nam, __fld, (__data), sizeof(__data))
 #define TXT_TO_BIGINT(__nam, __fld, __data) txt_to_bigint(__nam, __fld, &(__data), sizeof(__data))
@@ -602,7 +605,7 @@ typedef struct transfer {
 
 #define ALLOC_TRANSFER 64
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 64
+#define CULL_TRANSFER 1024
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
@@ -1261,6 +1264,65 @@ extern K_TREE *workerstatus_root;
 extern K_LIST *workerstatus_free;
 extern K_STORE *workerstatus_store;
 
+// MARKERSUMMARY
+typedef struct markersummary {
+	int64_t markerid;
+	int64_t userid;
+	char *workername;
+	double diffacc;
+	double diffsta;
+	double diffdup;
+	double diffhi;
+	double diffrej;
+	double shareacc;
+	double sharesta;
+	double sharedup;
+	double sharehi;
+	double sharerej;
+	int64_t sharecount;
+	int64_t errorcount;
+	tv_t firstshare;
+	tv_t lastshare;
+	double lastdiffacc;
+	MODIFYDATECONTROLPOINTERS;
+} MARKERSUMMARY;
+
+#define ALLOC_MARKERSUMMARY 1000
+#define LIMIT_MARKERSUMMARY 0
+#define INIT_MARKERSUMMARY(_item) INIT_GENERIC(_item, markersummary)
+#define DATA_MARKERSUMMARY(_var, _item) DATA_GENERIC(_var, _item, markersummary, true)
+#define DATA_MARKERSUMMARY_NULL(_var, _item) DATA_GENERIC(_var, _item, markersummary, false)
+
+extern K_TREE *markersummary_root;
+extern K_TREE *markersummary_userid_root;
+extern K_LIST *markersummary_free;
+extern K_STORE *markersummary_store;
+
+// WORKMARKERS
+typedef struct workmarkers {
+	int64_t markerid;
+	char *poolinstance;
+	int64_t workinfoidend;
+	int64_t workinfoidstart;
+	char *description;
+	char status[TXT_FLAG+1];
+	HISTORYDATECONTROLFIELDS;
+} WORKMARKERS;
+
+#define ALLOC_WORKMARKERS 100
+#define LIMIT_WORKMARKERS 0
+#define INIT_WORKMARKERS(_item) INIT_GENERIC(_item, workmarkers)
+#define DATA_WORKMARKERS(_var, _item) DATA_GENERIC(_var, _item, workmarkers, true)
+#define DATA_WORKMARKERS_NULL(_var, _item) DATA_GENERIC(_var, _item, workmarkers, false)
+
+extern K_TREE *workmarkers_root;
+extern K_TREE *workmarkers_workinfoid_root;
+extern K_LIST *workmarkers_free;
+extern K_STORE *workmarkers_store;
+
+#define MARKER_COMPLETE 'x'
+#define WMREADY(_status) (tolower(_status[0]) == MARKER_COMPLETE)
+
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnow(tv_t *now);
 extern void tick();
@@ -1413,6 +1475,18 @@ extern cmp_t cmp_userstats_workername(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_statsdate(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userstats_workerstatus(K_ITEM *a, K_ITEM *b);
 extern bool userstats_starttimeband(USERSTATS *row, tv_t *statsdate);
+extern void dsp_markersummary(K_ITEM *item, FILE *stream);
+extern cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_markersummary_userid(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_markersummary(int64_t workinfoid, int64_t userid,
+				  char *workername);
+extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
+					 K_TREE_CTX *ctx);
+extern void dsp_workmarkers(K_ITEM *item, FILE *stream);
+extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_workmarkers(int64_t workinfoid);
+extern K_ITEM *find_workmarkerid(int64_t markerid);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
@@ -1554,6 +1628,8 @@ extern bool userstats_add(char *poolinstance, char *elapsed, char *username,
 			  bool eos, char *by, char *code, char *inet, tv_t *cd,
 			  K_TREE *trf_root);
 extern bool userstats_fill(PGconn *conn);
+extern bool markersummary_fill(PGconn *conn);
+extern bool workmarkers_fill(PGconn *conn);
 extern bool check_db_version(PGconn *conn);
 
 // ***
