@@ -410,9 +410,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len = ser_number(wb->coinb1bin + ofs, now.tv_nsec);
 	ofs += len;
 
-	/* Leave enonce1/2varlen constant at 8 bytes for bitcoind sources */
-	wb->enonce1varlen = 8;
-	wb->enonce2varlen = 8;
+	wb->enonce1varlen = wb->enonce2varlen = ckp->noncelength;
 	wb->coinb1bin[ofs++] = wb->enonce1varlen + wb->enonce2varlen;
 
 	wb->coinb1len = ofs;
@@ -1568,10 +1566,14 @@ static bool new_enonce1(stratum_instance_t *client)
 			sdata->enonce1u.u64++;
 			ret = true;
 			break;
+		case 7:
+		case 6:
+		case 5:
 		case 4:
 			sdata->enonce1u.u32++;
 			ret = true;
 			break;
+		case 3:
 		case 2:
 			for (i = 0; i < 65536; i++) {
 				sdata->enonce1u.u16++;
@@ -1588,6 +1590,8 @@ static bool new_enonce1(stratum_instance_t *client)
 					break;
 			}
 			break;
+		default:
+			quit(0, "Invalid enonce1varlen %d", wb->enonce1varlen);
 	}
 	if (ret)
 		client->enonce1_64 = sdata->enonce1u.u64;
