@@ -3670,6 +3670,7 @@ int stratifier(proc_instance_t *pi)
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
 	ckpool_t *ckp = pi->ckp;
 	int ret = 1, threads;
+	int64_t randomiser;
 	sdata_t *sdata;
 	char *buf;
 
@@ -3702,10 +3703,12 @@ int stratifier(proc_instance_t *pi)
 		}
 	}
 
+	randomiser = ((int64_t)time(NULL)) << 32;
 	/* Set the initial id to time as high bits so as to not send the same
 	 * id on restarts */
 	if (!ckp->proxy)
-		sdata->blockchange_id = sdata->workbase_id = ((int64_t)time(NULL)) << 32;
+		sdata->blockchange_id = sdata->workbase_id = randomiser;
+	sdata->enonce1u.u64 = htobe64(randomiser);
 
 	dealloc(buf);
 
