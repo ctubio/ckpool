@@ -410,7 +410,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len = ser_number(wb->coinb1bin + ofs, now.tv_nsec);
 	ofs += len;
 
-	wb->enonce1varlen = wb->enonce2varlen = ckp->noncelength;
+	wb->enonce1varlen = ckp->nonce1length;
+	wb->enonce2varlen = ckp->nonce2length;
 	wb->coinb1bin[ofs++] = wb->enonce1varlen + wb->enonce2varlen;
 
 	wb->coinb1len = ofs;

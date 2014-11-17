@@ -148,7 +148,8 @@ struct ckpool_instance {
 	char **btcdpass;
 	bool *btcdnotify;
 	int blockpoll; // How frequently in ms to poll bitcoind for block updates
-	int noncelength; // Extranonce1 length
+	int nonce1length; // Extranonce1 length
+	int nonce2length; // Extranonce2 length
 
 	/* Difficulty settings */
 	int64_t mindiff; // Default 1
