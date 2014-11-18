@@ -4055,6 +4055,10 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 	}
 	DATA_USERS(*users, u_item);
 
+	// Any status content means disallow mining
+	if ((*users)->status[0])
+		goto unitem;
+
 	STRNCPY(row->poolinstance, poolinstance);
 	row->userid = (*users)->userid;
 	// since update=false, a dup will be ok and do nothing when igndup=true
