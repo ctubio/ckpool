@@ -174,8 +174,12 @@ const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.
 const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 const char *intpatt = "^[0-9][0-9]*$";
 const char *hashpatt = "^[A-Fa-f0-9]*$";
-// TODO: bitcoind will check it properly
-const char *addrpatt = "^[A-Za-z0-9]*$";
+/* BTC addresses start with '1' (one) or '3' (three),
+ *  exclude: capital 'I' (eye), capital 'O' (oh),
+ *  lowercase 'l' (elle) and '0' (zero)
+ *  and with a simple test must be ADDR_MIN_LEN to ADDR_MAX_LEN (ckdb.h)
+ * bitcoind is used to fully validate them when required */
+const char *addrpatt = "^[13][A-HJ-NP-Za-km-z1-9]*$";
 
 // So the records below have the same 'name' as the klist
 const char Transfer[] = "Transfer";

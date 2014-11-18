@@ -15,7 +15,7 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	K_ITEM *i_username, *i_emailaddress, *i_passwordhash, *u_item;
+	K_ITEM *i_username, *i_emailaddress, *i_passwordhash, *u_item = NULL;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -23,18 +23,30 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 	if (!i_username)
 		return strdup(reply);
 
-	i_emailaddress = require_name(trf_root, "emailaddress", 7, (char *)mailpatt, reply, siz);
-	if (!i_emailaddress)
-		return strdup(reply);
+	/* If a username added from the web site looks like an address
+	 *  then disallow it - a false positive is not an issue
+	 * Allowing it will create a security issue - someone could create
+	 *  an account with someone else's, as yet unused, payout address
+	 *  and redirect the payout to another payout address.
+	 *  ... and the person who owns the payout address can't check that
+	 *  in advance, they'll just find out with their first payout not
+	 *  arriving at their payout address */
+	if (!like_address(transfer_data(i_username))) {
+		i_emailaddress = require_name(trf_root, "emailaddress", 7,
+					      (char *)mailpatt, reply, siz);
+		if (!i_emailaddress)
+			return strdup(reply);
 
-	i_passwordhash = require_name(trf_root, "passwordhash", 64, (char *)hashpatt, reply, siz);
-	if (!i_passwordhash)
-		return strdup(reply);
+		i_passwordhash = require_name(trf_root, "passwordhash", 64,
+					      (char *)hashpatt, reply, siz);
+		if (!i_passwordhash)
+			return strdup(reply);
 
-	u_item = users_add(conn, transfer_data(i_username),
-				 transfer_data(i_emailaddress),
-				 transfer_data(i_passwordhash),
-				 by, code, inet, now, trf_root);
+		u_item = users_add(conn, transfer_data(i_username),
+					 transfer_data(i_emailaddress),
+					 transfer_data(i_passwordhash),
+					 by, code, inet, now, trf_root);
+	}
 
 	if (!u_item) {
 		LOGERR("%s() %s.failed.DBE", __func__, id);
@@ -223,7 +235,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				email = NULL;
 			}
 			i_address = optional_name(trf_root, "address",
-						  27, (char *)addrpatt,
+						  ADDR_MIN_LEN,
+						  (char *)addrpatt,
 						  reply, siz);
 			if (i_address)
 				address = transfer_data(i_address);

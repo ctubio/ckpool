@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.4"
-#define CKDB_VERSION DB_VERSION"-0.631"
+#define CKDB_VERSION DB_VERSION"-0.640"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -79,6 +79,14 @@ extern const char *idpatt;
 extern const char *intpatt;
 extern const char *hashpatt;
 extern const char *addrpatt;
+
+/* If a trimmed username is like an address but this many or more characters,
+ * disallow it */
+#define ADDR_USER_CHECK 16
+
+// BTC address size
+#define ADDR_MIN_LEN 26
+#define ADDR_MAX_LEN 34
 
 typedef struct loadstatus {
 	tv_t oldest_sharesummary_firstshare_n;
@@ -1334,6 +1342,7 @@ extern PGconn *dbconnect();
 
 extern char *safe_text(char *txt);
 extern void username_trim(USERS *users);
+extern bool like_address(char *username);
 
 extern void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz, WHERE_FFL_ARGS);
 
