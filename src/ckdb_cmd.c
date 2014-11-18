@@ -2925,6 +2925,9 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
      (also summarising diffacc per user)
     then keep stepping back until we complete the current begin_workinfoid
      (also summarising diffacc per user)
+   While we are still below diff_want
+    find each workmarker and add on the full set of worksummary
+     diffacc shares (also summarising diffacc per user)
    This will give us the total number of diff1 shares (diffacc_total)
     to use for the payment calculations
    The value of diff_want defaults to the block's network difficulty
@@ -2938,16 +2941,18 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
 	diffacc_user * 2^32 / pplns_elapsed
    PPLNS fraction of the payout would be:
 	diffacc_user / diffacc_total
+
+   N.B. 'begin' means the oldest back in time and 'end' means the newest
+	'end' should usually be the info of the found block with the pplns
+	data going back in time to 'begin'
 */
 
-/* TODO: doesn't work if there are no sharesummaries,
- *	 i.e. only markersummaries */
 static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
 			  __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
-	char reply[1024], tmp[1024], *buf;
+	char reply[1024], tmp[1024], *buf, *block_extra, *share_status = EMPTY;
 	size_t siz = sizeof(reply);
 	K_ITEM *i_height, *i_difftimes, *i_diffadd, *i_allowaged;
 	K_ITEM b_look, ss_look, *b_item, *w_item, *ss_item;
@@ -2964,7 +2969,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_STORE *mu_store;
 	USERS *users;
 	int32_t height;
-	int64_t workinfoid, end_workinfoid;
+	int64_t workinfoid, end_workinfoid = 0;
 	int64_t begin_workinfoid;
 	int64_t share_count;
 	char tv_buf[DATE_BUFSIZ];
@@ -3015,15 +3020,27 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	DATA_BLOCKS_NULL(blocks, b_item);
 	while (b_item && blocks->height == height) {
-		if (blocks->confirmed[0] == BLOCKS_CONFIRM)
+		// Allow any state, but report it
+		if (CURRENT(&(blocks->expirydate)))
 			break;
 		b_item = prev_in_ktree(ctx);
 		DATA_BLOCKS_NULL(blocks, b_item);
 	}
 	K_RUNLOCK(blocks_free);
 	if (!b_item || blocks->height != height) {
-		snprintf(reply, siz, "ERR.unconfirmed block %d", height);
+		snprintf(reply, siz, "ERR.no current block %d", height);
 		return strdup(reply);
+	}
+	switch (blocks->confirmed[0]) {
+		case BLOCKS_NEW:
+			block_extra = "Can't be paid out yet";
+			break;
+		case BLOCKS_ORPHAN:
+			block_extra = "Can't be paid out";
+			break;
+		default:
+			block_extra = EMPTY;
+			break;
 	}
 	workinfoid = blocks->workinfoid;
 	copy_tv(&block_tv, &(blocks->createdate));
@@ -3050,6 +3067,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	share_count = 0;
 	total = 0;
 
+	mu_store = k_new_store(miningpayouts_free);
+	mu_root = new_ktree();
+
 	looksharesummary.workinfoid = workinfoid;
 	looksharesummary.userid = MAXID;
 	looksharesummary.workername[0] = '\0';
@@ -3060,21 +3080,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RLOCK(markersummary_free);
 	ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
 					cmp_sharesummary_workinfoid, ctx);
-	if (!ss_item) {
-		K_RUNLOCK(markersummary_free);
-		K_RUNLOCK(workmarkers_free);
-		K_RUNLOCK(sharesummary_free);
-		snprintf(reply, siz,
-			 "ERR.no shares found with or before "
-			 "workinfo %"PRId64,
-			 workinfoid);
-		return strdup(reply);
-	}
-	DATA_SHARESUMMARY(sharesummary, ss_item);
-
-	mu_store = k_new_store(miningpayouts_free);
-	mu_root = new_ktree();
-	end_workinfoid = sharesummary->workinfoid;
+	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
+	if (ss_item)
+		end_workinfoid = sharesummary->workinfoid;
 	/* add up all sharesummaries until >= diff_want
 	 * also record the latest lastshare - that will be the end pplns time
 	 *  which will be >= block_tv */
@@ -3086,14 +3094,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				if (allow_aged)
 					break;
 			default:
-				K_RUNLOCK(markersummary_free);
-				K_RUNLOCK(workmarkers_free);
-				K_RUNLOCK(sharesummary_free);
-				snprintf(reply, siz,
-					 "ERR.sharesummary1 not ready in "
-					 "workinfo %"PRId64,
-					 sharesummary->workinfoid);
-				goto shazbot;
+				share_status = "Not ready1";
 		}
 		share_count += sharesummary->sharecount;
 		total += (int64_t)(sharesummary->diffacc);
@@ -3116,14 +3117,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				if (allow_aged)
 					break;
 			default:
-				K_RUNLOCK(markersummary_free);
-				K_RUNLOCK(workmarkers_free);
-				K_RUNLOCK(sharesummary_free);
-				snprintf(reply, siz,
-					 "ERR.sharesummary2 not ready in "
-					 "workinfo %"PRId64,
-					 sharesummary->workinfoid);
-				goto shazbot;
+				if (share_status == EMPTY)
+					share_status = "Not ready2";
+				else
+					share_status = "Not ready1+2";
 		}
 		share_count++;
 		total += (int64_t)(sharesummary->diffacc);
@@ -3142,14 +3139,14 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		lookworkmarkers.workinfoidend = begin_workinfoid;
 		INIT_WORKMARKERS(&wm_look);
 		wm_look.data = (void *)(&lookworkmarkers);
-		wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
-					       cmp_workmarkers_workinfoid, wm_ctx);
+		wm_item = find_before_in_ktree(workmarkers_root, &wm_look,
+					       cmp_workmarkers, wm_ctx);
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 		while (total < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
 			if (WMREADY(workmarkers->status)) {
 				lookmarkersummary.markerid = workmarkers->markerid;
 				lookmarkersummary.userid = MAXID;
-				lookmarkersummary.workername[0] = '\0';
+				lookmarkersummary.workername = EMPTY;
 				INIT_MARKERSUMMARY(&ms_look);
 				ms_look.data = (void *)(&lookmarkersummary);
 				ms_item = find_before_in_ktree(markersummary_root, &ms_look,
@@ -3157,6 +3154,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
 				// add the whole markerid
 				while (ms_item && markersummary->markerid == workmarkers->markerid) {
+					if (end_workinfoid == 0)
+						end_workinfoid = workmarkers->workinfoidend;
 					share_count += markersummary->sharecount;
 					total += (int64_t)(markersummary->diffacc);
 					begin_workinfoid = workmarkers->workinfoidstart;
@@ -3173,7 +3172,6 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 		}
 	}
-
 	K_RUNLOCK(markersummary_free);
 	K_RUNLOCK(workmarkers_free);
 	K_RUNLOCK(sharesummary_free);
@@ -3209,6 +3207,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "block_hash=%s%c", blocks->blockhash, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "block_reward=%"PRId64"%c", blocks->reward, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "block_status=%s%c",
+				   blocks_confirmed(blocks->confirmed), FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "block_extra=%s%c", block_extra, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "share_status=%s%c", share_status, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "workername=%s%c", blocks->workername, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);

@@ -1656,7 +1656,7 @@ static void summarise_blocks()
 		if (WMREADY(workmarkers->status)) {
 			lookmarkersummary.markerid = workmarkers->markerid;
 			lookmarkersummary.userid = MAXID;
-			lookmarkersummary.workername[0] = '\0';
+			lookmarkersummary.workername = EMPTY;
 			INIT_MARKERSUMMARY(&ms_look);
 			ms_look.data = (void *)(&lookmarkersummary);
 			ms_item = find_before_in_ktree(markersummary_root, &ms_look,
