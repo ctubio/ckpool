@@ -97,12 +97,13 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RUNLOCK(users_free);
 
 		if (u_item) {
-			ok = users_pass_email(NULL, u_item,
-						    oldhash,
-						    transfer_data(i_newhash),
-						    NULL,
-						    by, code, inet, now,
-						    trf_root);
+			ok = users_update(NULL, u_item,
+						oldhash,
+						transfer_data(i_newhash),
+						NULL,
+						by, code, inet, now,
+						trf_root,
+						NULL);
 		} else
 			ok = false;
 	}
@@ -261,10 +262,12 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			}
 
 			if (email && *email) {
-				ok = users_pass_email(conn, u_item, NULL,
-							    NULL, email,
-							    by, code, inet,
-							    now, trf_root);
+				ok = users_update(conn, u_item,
+							NULL, NULL,
+							email,
+							by, code, inet, now,
+							trf_root,
+							NULL);
 				if (!ok) {
 					reason = "email error";
 					goto struckout;
@@ -3392,6 +3395,69 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+// TODO: add to heartbeat to disable the miner if active and status != ""
+static char *cmd_userstatus(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
+			  char *code, char *inet, __maybe_unused tv_t *cd,
+			  K_TREE *trf_root)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	K_ITEM *i_username, *i_userid, *i_status, *u_item;
+	int64_t userid;
+	char *status;
+	USERS *users;
+	bool ok;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = optional_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_userid = optional_name(trf_root, "userid", 1, (char *)intpatt, reply, siz);
+	// Either username or userid
+	if (!i_username && !i_userid) {
+		snprintf(reply, siz, "failed.invalid/missing userinfo");
+		LOGERR("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
+	// A zero length status re-enables it
+	i_status = require_name(trf_root, "status", 0, NULL, reply, siz);
+	if (!i_status)
+		return strdup(reply);
+	status = transfer_data(i_status);
+
+	K_RLOCK(users_free);
+	if (i_username)
+		u_item = find_users(transfer_data(i_username));
+	else {
+		TXT_TO_BIGINT("userid", transfer_data(i_userid), userid);
+		u_item = find_userid(userid);
+	}
+	K_RUNLOCK(users_free);
+
+	if (!u_item)
+		ok = false;
+	else {
+		ok = users_update(conn, u_item,
+					NULL, NULL,
+					NULL,
+					by, code, inet, now,
+					trf_root,
+					status);
+	}
+
+	if (!ok) {
+		LOGERR("%s() %s.failed.DBE", __func__, id);
+		return strdup("failed.DBE");
+	}
+	DATA_USERS(users, u_item);
+	snprintf(reply, siz, "ok.updated %"PRId64" %s status %s",
+			     users->userid,
+			     users->username,
+			     status[0] ? "disabled" : "enabled");
+	LOGWARNING("%s.%s", id, reply);
+	return strdup(reply);
+}
+
 // TODO: limit access by having seperate sockets for each
 #define ACCESS_POOL	"p"
 #define ACCESS_SYSTEM	"s"
@@ -3492,7 +3558,8 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_GETOPTS,	"getopts",	false,	false,	cmd_getopts,	ACCESS_WEB },
 	{ CMD_SETOPTS,	"setopts",	false,	false,	cmd_setopts,	ACCESS_WEB },
 	{ CMD_DSP,	"dsp",		false,	false,	cmd_dsp,	ACCESS_SYSTEM },
-	{ CMD_STATS,	"stats",	true,	false,	cmd_stats,	ACCESS_SYSTEM },
-	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	ACCESS_SYSTEM },
+	{ CMD_STATS,	"stats",	true,	false,	cmd_stats,	ACCESS_SYSTEM ACCESS_WEB },
+	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	ACCESS_SYSTEM ACCESS_WEB },
+	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_END,	NULL,		false,	false,	NULL,		NULL }
 };

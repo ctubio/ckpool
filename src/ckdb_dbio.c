@@ -304,9 +304,10 @@ cleanup:
 	return lastid;
 }
 
-bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
-			char *newhash, char *email, char *by, char *code,
-			char *inet, tv_t *cd, K_TREE *trf_root)
+// status was added to the end so type checking intercepts new mistakes
+bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
+		  char *newhash, char *email, char *by, char *code,
+		  char *inet, tv_t *cd, K_TREE *trf_root, char *status)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -315,7 +316,7 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	USERS *row, *users;
 	char *upd, *ins;
 	bool ok = false;
-	char *params[5 + HISTORYDATECOUNT];
+	char *params[6 + HISTORYDATECOUNT];
 	bool hash;
 	int n, par = 0;
 
@@ -337,14 +338,18 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 
 	DATA_USERS(row, item);
 	memcpy(row, users, sizeof(*row));
-	// Update one, leave the other
+
+	// Update each one supplied
 	if (hash) {
 		// New salt each password change
 		make_salt(row);
 		password_hash(row->username, newhash, row->salt,
 			      row->passwordhash, sizeof(row->passwordhash));
-	} else
+	}
+	if (email)
 		STRNCPY(row->emailaddress, email);
+	if (status)
+		STRNCPY(row->status, status);
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -384,21 +389,22 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	par = 0;
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
 	params[par++] = tv_to_buf(cd, NULL, 0);
-	// Copy them both in - one will be new and one will be old
+	// Copy them all in - at least one will be new
+	params[par++] = str_to_buf(row->status, NULL, 0);
 	params[par++] = str_to_buf(row->emailaddress, NULL, 0);
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
 	// New salt for each password change (or recopy old)
 	params[par++] = str_to_buf(row->salt, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
-	PARCHKVAL(par, 5 + HISTORYDATECOUNT, params); // 10 as per ins
+	PARCHKVAL(par, 6 + HISTORYDATECOUNT, params); // 11 as per ins
 
 	ins = "insert into users "
 		"(userid,username,status,emailaddress,joineddate,"
 		"passwordhash,secondaryuserid,salt"
 		HISTORYDATECONTROL ") select "
-		"userid,username,status,$3,joineddate,"
-		"$4,secondaryuserid,$5,"
-		"$6,$7,$8,$9,$10 from users where "
+		"userid,username,$3,$4,joineddate,"
+		"$5,secondaryuserid,$6,"
+		"$7,$8,$9,$10,$11 from users where "
 		"userid=$1 and expirydate=$2";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);

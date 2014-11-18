@@ -2052,6 +2052,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *last_newid = NULL, *reply_newid = NULL;
 	char *last_setatts = NULL, *reply_setatts = NULL;
 	char *last_setopts = NULL, *reply_setopts = NULL;
+	char *last_userstatus = NULL, *reply_userstatus = NULL;
 	char *last_web = NULL, *reply_web = NULL;
 	char *reply_last, duptype[CMD_SIZ+1];
 	enum cmd_values cmdnum;
@@ -2155,6 +2156,9 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_setopts && strcmp(last_setopts, buf) == 0) {
 				reply_last = reply_setopts;
 				dup = true;
+			} else if (last_userstatus && strcmp(last_userstatus, buf) == 0) {
+				reply_last = reply_userstatus;
+				dup = true;
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
 				dup = true;
@@ -2255,6 +2259,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_BLOCKLIST:
 					case CMD_NEWID:
 					case CMD_STATS:
+					case CMD_USERSTATUS:
 						ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
 										 by_default,
 										 (char *)__func__,
@@ -2296,6 +2301,9 @@ static void *socketer(__maybe_unused void *arg)
 								break;
 							case CMD_SETOPTS:
 								STORELASTREPLY(setopts);
+								break;
+							case CMD_USERSTATUS:
+								STORELASTREPLY(userstatus);
 								break;
 							// The rest
 							default:
@@ -2503,6 +2511,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_DSP:
 			case CMD_STATS:
 			case CMD_PPLNS:
+			case CMD_USERSTATUS:
 				LOGERR("%s() Message line %"PRIu64" '%s' - invalid - ignored",
 					__func__, count, cmd);
 				break;
