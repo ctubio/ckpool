@@ -2940,8 +2940,8 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
 	diffacc_user / diffacc_total
 */
 
-/* TODO: redesign to include workmarkers
- * ... before next payout that extends into a markersummary ... */
+/* TODO: doesn't work if there are no sharesummaries,
+ *	 i.e. only markersummaries */
 static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
@@ -2951,8 +2951,11 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t siz = sizeof(reply);
 	K_ITEM *i_height, *i_difftimes, *i_diffadd, *i_allowaged;
 	K_ITEM b_look, ss_look, *b_item, *w_item, *ss_item;
+	K_ITEM wm_look, *wm_item, ms_look, *ms_item;
 	K_ITEM *mu_item, *wb_item, *u_item;
 	SHARESUMMARY looksharesummary, *sharesummary;
+	WORKMARKERS lookworkmarkers, *workmarkers;
+	MARKERSUMMARY lookmarkersummary, *markersummary;
 	MININGPAYOUTS *miningpayouts;
 	WORKINFO *workinfo;
 	TRANSFER *transfer;
@@ -2966,7 +2969,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int64_t share_count;
 	char tv_buf[DATE_BUFSIZ];
 	tv_t cd, begin_tv, block_tv, end_tv;
-	K_TREE_CTX ctx[1];
+	K_TREE_CTX ctx[1], wm_ctx[1], ms_ctx[1];
 	double ndiff, total, elapsed;
 	double diff_times = 1.0;
 	double diff_add = 0.0;
@@ -3053,9 +3056,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 	K_RLOCK(sharesummary_free);
+	K_RLOCK(workmarkers_free);
+	K_RLOCK(markersummary_free);
 	ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
 					cmp_sharesummary_workinfoid, ctx);
 	if (!ss_item) {
+		K_RUNLOCK(markersummary_free);
+		K_RUNLOCK(workmarkers_free);
 		K_RUNLOCK(sharesummary_free);
 		snprintf(reply, siz,
 			 "ERR.no shares found with or before "
@@ -3071,7 +3078,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	/* add up all sharesummaries until >= diff_want
 	 * also record the latest lastshare - that will be the end pplns time
 	 *  which will be >= block_tv */
-	while (ss_item && total < diff_want) {
+	while (total < diff_want && ss_item) {
 		switch (sharesummary->complete[0]) {
 			case SUMMARY_CONFIRM:
 				break;
@@ -3079,6 +3086,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				if (allow_aged)
 					break;
 			default:
+				K_RUNLOCK(markersummary_free);
+				K_RUNLOCK(workmarkers_free);
 				K_RUNLOCK(sharesummary_free);
 				snprintf(reply, siz,
 					 "ERR.sharesummary1 not ready in "
@@ -3086,7 +3095,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 sharesummary->workinfoid);
 				goto shazbot;
 		}
-		share_count++;
+		share_count += sharesummary->sharecount;
 		total += (int64_t)(sharesummary->diffacc);
 		begin_workinfoid = sharesummary->workinfoid;
 		if (tv_newer(&end_tv, &(sharesummary->lastshare)))
@@ -3107,6 +3116,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				if (allow_aged)
 					break;
 			default:
+				K_RUNLOCK(markersummary_free);
+				K_RUNLOCK(workmarkers_free);
 				K_RUNLOCK(sharesummary_free);
 				snprintf(reply, siz,
 					 "ERR.sharesummary2 not ready in "
@@ -3122,6 +3133,49 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		ss_item = prev_in_ktree(ctx);
 		DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	}
+
+	/* If we haven't met or exceeded the required N,
+	 * move on to the markersummaries */
+	if (total < diff_want) {
+		lookworkmarkers.expirydate.tv_sec = default_expiry.tv_sec;
+		lookworkmarkers.expirydate.tv_usec = default_expiry.tv_usec;
+		lookworkmarkers.workinfoidend = begin_workinfoid;
+		INIT_WORKMARKERS(&wm_look);
+		wm_look.data = (void *)(&lookworkmarkers);
+		wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
+					       cmp_workmarkers_workinfoid, wm_ctx);
+		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
+		while (total < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
+			if (WMREADY(workmarkers->status)) {
+				lookmarkersummary.markerid = workmarkers->markerid;
+				lookmarkersummary.userid = MAXID;
+				lookmarkersummary.workername[0] = '\0';
+				INIT_MARKERSUMMARY(&ms_look);
+				ms_look.data = (void *)(&lookmarkersummary);
+				ms_item = find_before_in_ktree(markersummary_root, &ms_look,
+							       cmp_markersummary, ms_ctx);
+				DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
+				// add the whole markerid
+				while (ms_item && markersummary->markerid == workmarkers->markerid) {
+					share_count += markersummary->sharecount;
+					total += (int64_t)(markersummary->diffacc);
+					begin_workinfoid = workmarkers->workinfoidstart;
+					if (tv_newer(&end_tv, &(markersummary->lastshare)))
+						copy_tv(&end_tv, &(markersummary->lastshare));
+					mu_root = upd_add_mu(mu_root, mu_store,
+							     markersummary->userid,
+							     (int64_t)(markersummary->diffacc));
+					ms_item = prev_in_ktree(ms_ctx);
+					DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
+				}
+			}
+			wm_item = prev_in_ktree(wm_ctx);
+			DATA_WORKMARKERS_NULL(workmarkers, wm_item);
+		}
+	}
+
+	K_RUNLOCK(markersummary_free);
+	K_RUNLOCK(workmarkers_free);
 	K_RUNLOCK(sharesummary_free);
 
 	if (total == 0.0) {
