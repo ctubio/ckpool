@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.4"
-#define CKDB_VERSION DB_VERSION"-0.640"
+#define CKDB_VERSION DB_VERSION"-0.641"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -611,7 +611,8 @@ typedef struct transfer {
 	char *mvalue;
 } TRANSFER;
 
-#define ALLOC_TRANSFER 64
+// Suggest malloc use MMAP - 1913 = largest under 2MB
+#define ALLOC_TRANSFER 1913
 #define LIMIT_TRANSFER 0
 #define CULL_TRANSFER 1024
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
