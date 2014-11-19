@@ -711,6 +711,8 @@ int wait_read_select(int sockd, int timeout)
 {
 	struct pollfd sfd;
 
+	if (unlikely(sockd < 0))
+		return -1;
 	sfd.fd = sockd;
 	sfd.events = POLLIN;
 	sfd.revents = 0;
@@ -784,6 +786,8 @@ int wait_write_select(int sockd, int timeout)
 {
 	struct pollfd sfd;
 
+	if (unlikely(sockd < 0))
+		return -1;
 	sfd.fd = sockd;
 	sfd.events = POLLOUT;
 	sfd.revents = 0;
