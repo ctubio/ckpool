@@ -67,6 +67,55 @@ void username_trim(USERS *users)
 	}
 }
 
+/* Is the trimmed username like an address?
+ * False positive is OK (i.e. 'like')
+ * Before checking, it is trimmed to avoid web display confusion
+ * Length check is done before trimming - this may give a false
+ *  positive on any username with lots of trim characters ... which is OK */
+bool like_address(char *username)
+{
+	char *tmp, *front, *trail;
+	size_t len;
+	regex_t re;
+	int ret;
+
+	len = strlen(username);
+	if (len < ADDR_USER_CHECK)
+		return false;
+
+	tmp = strdup(username);
+	front = tmp;
+	while (*front && TRIM_IGNORE(*front))
+		front++;
+
+	trail = front + strlen(front) - 1;
+	while (trail >= front) {
+		if (TRIM_IGNORE(*trail))
+			*(trail--) = '\0';
+		else
+			break;
+	}
+
+	if (regcomp(&re, addrpatt, REG_NOSUB) != 0) {
+		LOGEMERG("%s(): failed to compile addrpatt '%s'",
+			 __func__, addrpatt);
+		free(tmp);
+		// This will disable adding any new usernames ...
+		return true;
+	}
+
+	ret = regexec(&re, front, (size_t)0, NULL, 0);
+	regfree(&re);
+
+	if (ret == 0) {
+		free(tmp);
+		return true;
+	}
+
+	free(tmp);
+	return false;
+}
+
 void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz, WHERE_FFL_ARGS)
 {
 	char *tmp;

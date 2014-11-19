@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.4"
-#define CKDB_VERSION DB_VERSION"-0.631"
+#define CKDB_VERSION DB_VERSION"-0.645"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -79,6 +79,14 @@ extern const char *idpatt;
 extern const char *intpatt;
 extern const char *hashpatt;
 extern const char *addrpatt;
+
+/* If a trimmed username is like an address but this many or more characters,
+ * disallow it */
+#define ADDR_USER_CHECK 16
+
+// BTC address size
+#define ADDR_MIN_LEN 26
+#define ADDR_MAX_LEN 34
 
 typedef struct loadstatus {
 	tv_t oldest_sharesummary_firstshare_n;
@@ -295,6 +303,7 @@ enum cmd_values {
 	CMD_DSP,
 	CMD_STATS,
 	CMD_PPLNS,
+	CMD_USERSTATUS,
 	CMD_END
 };
 
@@ -603,7 +612,8 @@ typedef struct transfer {
 	char *mvalue;
 } TRANSFER;
 
-#define ALLOC_TRANSFER 64
+// Suggest malloc use MMAP - 1913 = largest under 2MB
+#define ALLOC_TRANSFER 1913
 #define LIMIT_TRANSFER 0
 #define CULL_TRANSFER 1024
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
@@ -632,7 +642,7 @@ typedef struct users {
 	int64_t userid;
 	char username[TXT_BIG+1];
 	char usertrim[TXT_BIG+1]; // Non DB field
-	// TODO: Anything in 'status' disables the account
+	// Anything in 'status' fails mining authentication
 	char status[TXT_BIG+1];
 	char emailaddress[TXT_BIG+1];
 	tv_t joineddate;
@@ -1334,6 +1344,7 @@ extern PGconn *dbconnect();
 
 extern char *safe_text(char *txt);
 extern void username_trim(USERS *users);
+extern bool like_address(char *username);
 
 extern void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz, WHERE_FFL_ARGS);
 
@@ -1534,9 +1545,9 @@ extern char *pqerrmsg(PGconn *conn);
 
 extern int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 			tv_t *cd, char *by, char *code, char *inet);
-extern bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
-			     char *newhash, char *email, char *by, char *code,
-			     char *inet, tv_t *cd, K_TREE *trf_root);
+extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
+			 char *newhash, char *email, char *by, char *code,
+			 char *inet, tv_t *cd, K_TREE *trf_root, char *status);
 extern K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 			char *passwordhash, char *by, char *code, char *inet,
 			tv_t *cd, K_TREE *trf_root);

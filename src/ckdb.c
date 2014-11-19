@@ -174,8 +174,12 @@ const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.
 const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 const char *intpatt = "^[0-9][0-9]*$";
 const char *hashpatt = "^[A-Fa-f0-9]*$";
-// TODO: bitcoind will check it properly
-const char *addrpatt = "^[A-Za-z0-9]*$";
+/* BTC addresses start with '1' (one) or '3' (three),
+ *  exclude: capital 'I' (eye), capital 'O' (oh),
+ *  lowercase 'l' (elle) and '0' (zero)
+ *  and with a simple test must be ADDR_MIN_LEN to ADDR_MAX_LEN (ckdb.h)
+ * bitcoind is used to fully validate them when required */
+const char *addrpatt = "^[13][A-HJ-NP-Za-km-z1-9]*$";
 
 // So the records below have the same 'name' as the klist
 const char Transfer[] = "Transfer";
@@ -1652,7 +1656,7 @@ static void summarise_blocks()
 		if (WMREADY(workmarkers->status)) {
 			lookmarkersummary.markerid = workmarkers->markerid;
 			lookmarkersummary.userid = MAXID;
-			lookmarkersummary.workername[0] = '\0';
+			lookmarkersummary.workername = EMPTY;
 			INIT_MARKERSUMMARY(&ms_look);
 			ms_look.data = (void *)(&lookmarkersummary);
 			ms_item = find_before_in_ktree(markersummary_root, &ms_look,
@@ -2048,6 +2052,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *last_newid = NULL, *reply_newid = NULL;
 	char *last_setatts = NULL, *reply_setatts = NULL;
 	char *last_setopts = NULL, *reply_setopts = NULL;
+	char *last_userstatus = NULL, *reply_userstatus = NULL;
 	char *last_web = NULL, *reply_web = NULL;
 	char *reply_last, duptype[CMD_SIZ+1];
 	enum cmd_values cmdnum;
@@ -2151,6 +2156,9 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_setopts && strcmp(last_setopts, buf) == 0) {
 				reply_last = reply_setopts;
 				dup = true;
+			} else if (last_userstatus && strcmp(last_userstatus, buf) == 0) {
+				reply_last = reply_userstatus;
+				dup = true;
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
 				dup = true;
@@ -2251,6 +2259,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_BLOCKLIST:
 					case CMD_NEWID:
 					case CMD_STATS:
+					case CMD_USERSTATUS:
 						ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
 										 by_default,
 										 (char *)__func__,
@@ -2292,6 +2301,9 @@ static void *socketer(__maybe_unused void *arg)
 								break;
 							case CMD_SETOPTS:
 								STORELASTREPLY(setopts);
+								break;
+							case CMD_USERSTATUS:
+								STORELASTREPLY(userstatus);
 								break;
 							// The rest
 							default:
@@ -2499,6 +2511,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_DSP:
 			case CMD_STATS:
 			case CMD_PPLNS:
+			case CMD_USERSTATUS:
 				LOGERR("%s() Message line %"PRIu64" '%s' - invalid - ignored",
 					__func__, count, cmd);
 				break;
