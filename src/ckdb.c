@@ -1057,6 +1057,11 @@ static void free_sharesummary_data(K_ITEM *item)
 	SHARESUMMARY *sharesummary;
 
 	DATA_SHARESUMMARY(sharesummary, item);
+	if (sharesummary->workername) {
+		LIST_MEM_SUB(sharesummary_free, sharesummary->workername);
+		free(sharesummary->workername);
+		sharesummary->workername = NULL;
+	}
 	SET_CREATEBY(sharesummary_free, sharesummary->createby, EMPTY);
 	SET_CREATECODE(sharesummary_free, sharesummary->createcode, EMPTY);
 	SET_CREATEINET(sharesummary_free, sharesummary->createinet, EMPTY);
@@ -1595,7 +1600,7 @@ static void summarise_blocks()
 	// Add up the sharesummaries, abort if any SUMMARY_NEW
 	looksharesummary.workinfoid = wi_finish;
 	looksharesummary.userid = MAXID;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 
@@ -2872,7 +2877,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 
 	looksharesummary.workinfoid = confirm_first_workinfoid;
 	looksharesummary.userid = -1;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&look);
 	look.data = (void *)(&looksharesummary);
 

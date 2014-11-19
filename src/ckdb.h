@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.5"
-#define CKDB_VERSION DB_VERSION"-0.647"
+#define CKDB_VERSION DB_VERSION"-0.648"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -347,15 +347,26 @@ enum cmd_values {
 // The size strdup will allocate multiples of
 #define MEMBASE 4
 
+#define LIST_MEM_ADD(_list, _fld) do { \
+		size_t __siz; \
+		__siz = strlen(_fld) + 1; \
+		if (__siz % MEMBASE) \
+			__siz += MEMBASE - (__siz % MEMBASE); \
+		_list->ram += (int)__siz; \
+	} while (0)
+
+#define LIST_MEM_SUB(_list, _fld) do { \
+		size_t __siz; \
+		__siz = strlen(_fld) + 1; \
+		if (__siz % MEMBASE) \
+			__siz += MEMBASE - (__siz % MEMBASE); \
+		_list->ram -= (int)__siz; \
+	} while (0)
+
 #define SET_POINTER(_list, _fld, _val, _def) do { \
-		size_t _siz; \
 		if ((_fld) && ((_fld) != EMPTY) && ((_fld) != (_def))) { \
-			if (_list) { \
-				_siz = strlen(_fld) + 1; \
-				if (_siz % MEMBASE) \
-					_siz += MEMBASE - (_siz % MEMBASE); \
-				_list->ram -= (int)_siz; \
-			} \
+			if (_list) \
+				LIST_MEM_SUB(_list, _fld); \
 			free(_fld); \
 		} \
 		if (!(_val) || !(*(_val))) \
@@ -364,12 +375,8 @@ enum cmd_values {
 			if (((_val) == (_def)) || (strcmp(_val, _def) == 0)) \
 				(_fld) = (_def); \
 			else { \
-				if (_list) { \
-					_siz = strlen(_val) + 1; \
-					if (_siz % MEMBASE) \
-						_siz += MEMBASE - (_siz % MEMBASE); \
-					_list->ram += (int)_siz; \
-				} \
+				if (_list) \
+					LIST_MEM_ADD(_list, _val); \
 				_fld = strdup(_val); \
 				if (!(_fld)) \
 					quithere(1, "malloc OOM"); \
@@ -936,7 +943,7 @@ extern K_STORE *shareerrors_store;
 // SHARESUMMARY
 typedef struct sharesummary {
 	int64_t userid;
-	char workername[TXT_BIG+1];
+	char *workername;
 	int64_t workinfoid;
 	double diffacc;
 	double diffsta;

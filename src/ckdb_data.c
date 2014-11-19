@@ -710,7 +710,7 @@ void workerstatus_ready()
 
 		// The last one
 		looksharesummary.userid = workerstatus->userid;
-		STRNCPY(looksharesummary.workername, workerstatus->workername);
+		looksharesummary.workername = workerstatus->workername;
 		looksharesummary.workinfoid = MAXID;
 		ss_look.data = (void *)(&looksharesummary);
 		K_RLOCK(sharesummary_free);
@@ -1376,7 +1376,7 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	// Find the first matching sharesummary
 	looksharesummary.workinfoid = workinfoid;
 	looksharesummary.userid = -1;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 
 	ok = true;
 	ss_tot = ss_already = ss_failed = shares_tot = shares_dumped = 0;
@@ -1607,7 +1607,7 @@ K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t workinfoid)
 	K_ITEM look;
 
 	sharesummary.userid = userid;
-	STRNCPY(sharesummary.workername, workername);
+	sharesummary.workername = workername;
 	sharesummary.workinfoid = workinfoid;
 
 	INIT_SHARESUMMARY(&look);
@@ -1643,7 +1643,7 @@ void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	// Find the oldest 'unaged' sharesummary < workinfoid and >= prev_found
 	looksharesummary.workinfoid = prev_found;
 	looksharesummary.userid = -1;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&look);
 	look.data = (void *)(&looksharesummary);
 
@@ -1956,8 +1956,7 @@ void set_block_share_counters()
 		if (sharesummary->workinfoid <= pool.workinfoid) {
 			// Skip back to the next worker
 			looksharesummary.userid = sharesummary->userid;
-			STRNCPY(looksharesummary.workername,
-				sharesummary->workername);
+			looksharesummary.workername = sharesummary->workername;
 			looksharesummary.workinfoid = -1;
 			ss_look.data = (void *)(&looksharesummary);
 			ss_item = find_before_in_ktree(sharesummary_root, &ss_look,

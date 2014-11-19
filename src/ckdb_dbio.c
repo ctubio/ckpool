@@ -2719,7 +2719,8 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 			K_WUNLOCK(sharesummary_free);
 			DATA_SHARESUMMARY(row, item);
 			row->userid = userid;
-			STRNCPY(row->workername, workername);
+			row->workername = strdup(workername);
+			LIST_MEM_ADD(sharesummary_free, row->workername);
 			row->workinfoid = workinfoid;
 			zero_sharesummary(row, sharecreatedate, diff);
 			row->inserted = false;
@@ -2948,15 +2949,15 @@ late:
 		PQfinish(conn);
 
 	// We keep the new item no matter what 'ok' is, since it will be inserted later
-	K_WLOCK(sharesummary_free);
 	if (new) {
+		K_WLOCK(sharesummary_free);
 		sharesummary_root = add_to_ktree(sharesummary_root, item, cmp_sharesummary);
 		sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root,
 							    item,
 							    cmp_sharesummary_workinfoid);
 		k_add_head(sharesummary_store, item);
+		K_WUNLOCK(sharesummary_free);
 	}
-	K_WUNLOCK(sharesummary_free);
 
 	return ok;
 }
@@ -3010,6 +3011,7 @@ bool sharesummary_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(sharesummary_free);
 		DATA_SHARESUMMARY(row, item);
+		row->workername = NULL;
 
 		if (everyone_die) {
 			ok = false;
@@ -3026,7 +3028,8 @@ bool sharesummary_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "workername", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_STR("workername", field, row->workername);
+		row->workername = strdup(field);
+		LIST_MEM_ADD(sharesummary_free, row->workername);
 
 		PQ_GET_FLD(res, i, "workinfoid", field, ok);
 		if (!ok)
@@ -3153,8 +3156,15 @@ bool sharesummary_fill(PGconn *conn)
 
 		tick();
 	}
-	if (!ok)
+	if (!ok) {
+		DATA_SHARESUMMARY(row, item);
+		if (row->workername) {
+			LIST_MEM_SUB(sharesummary_free, row->workername);
+			free(row->workername);
+			row->workername = NULL;
+		}
 		k_add_head(sharesummary_free, item);
+	}
 
 	PQclear(res);
 

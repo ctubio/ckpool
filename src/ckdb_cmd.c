@@ -3076,7 +3076,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	looksharesummary.workinfoid = workinfoid;
 	looksharesummary.userid = MAXID;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 	K_RLOCK(sharesummary_free);
