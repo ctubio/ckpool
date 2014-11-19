@@ -193,6 +193,7 @@ bool ckmsgq_empty(ckmsgq_t *ckmsgq);
 ckpool_t *global_ckp;
 
 bool ping_main(ckpool_t *ckp);
+void empty_buffer(connsock_t *cs);
 int read_socket_line(connsock_t *cs, int timeout);
 bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
