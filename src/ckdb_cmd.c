@@ -2971,7 +2971,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int32_t height;
 	int64_t workinfoid, end_workinfoid = 0;
 	int64_t begin_workinfoid;
-	int64_t share_count;
+	int64_t total_share_count, acc_share_count;
+	int64_t ss_count, wm_count, ms_count;
 	char tv_buf[DATE_BUFSIZ];
 	tv_t cd, begin_tv, block_tv, end_tv;
 	K_TREE_CTX ctx[1], wm_ctx[1], ms_ctx[1];
@@ -3044,6 +3045,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	workinfoid = blocks->workinfoid;
 	copy_tv(&block_tv, &(blocks->createdate));
+	/* Last share should be the share that found it and match the createdate,
+	 * or not long after it for shares accepted until the workinfo switch */
 	copy_tv(&end_tv, &(blocks->createdate));
 
 	w_item = find_workinfo(workinfoid);
@@ -3064,8 +3067,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	begin_workinfoid = 0;
-	share_count = 0;
+	total_share_count = acc_share_count = 0;
 	total = 0;
+	ss_count = wm_count = ms_count = 0;
 
 	mu_store = k_new_store(miningpayouts_free);
 	mu_root = new_ktree();
@@ -3096,7 +3100,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			default:
 				share_status = "Not ready1";
 		}
-		share_count += sharesummary->sharecount;
+		ss_count++;
+		total_share_count += sharesummary->sharecount;
+		acc_share_count += sharesummary->shareacc;
 		total += (int64_t)(sharesummary->diffacc);
 		begin_workinfoid = sharesummary->workinfoid;
 		if (tv_newer(&end_tv, &(sharesummary->lastshare)))
@@ -3122,7 +3128,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				else
 					share_status = "Not ready1+2";
 		}
-		share_count++;
+		ss_count++;
+		total_share_count += sharesummary->sharecount;
+		acc_share_count += sharesummary->shareacc;
 		total += (int64_t)(sharesummary->diffacc);
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     sharesummary->userid,
@@ -3144,6 +3152,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 		while (total < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
 			if (WMREADY(workmarkers->status)) {
+				wm_count++;
 				lookmarkersummary.markerid = workmarkers->markerid;
 				lookmarkersummary.userid = MAXID;
 				lookmarkersummary.workername = EMPTY;
@@ -3156,7 +3165,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				while (ms_item && markersummary->markerid == workmarkers->markerid) {
 					if (end_workinfoid == 0)
 						end_workinfoid = workmarkers->workinfoidend;
-					share_count += markersummary->sharecount;
+					ms_count++;
+					total_share_count += markersummary->sharecount;
+					acc_share_count += markersummary->shareacc;
 					total += (int64_t)(markersummary->diffacc);
 					begin_workinfoid = workmarkers->workinfoidstart;
 					if (tv_newer(&end_tv, &(markersummary->lastshare)))
@@ -3308,7 +3319,17 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "diff_want=%f%c", diff_want, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "share_count=%"PRId64, share_count);
+	snprintf(tmp, sizeof(tmp), "acc_share_count=%"PRId64"%c",
+				   acc_share_count, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "total_share_count=%"PRId64"%c",
+				   total_share_count, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "ss_count=%"PRId64"%c", ss_count, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "wm_count=%"PRId64"%c", wm_count, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "ms_count=%"PRId64, ms_count);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	mu_root = free_ktree(mu_root, NULL);

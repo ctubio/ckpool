@@ -179,7 +179,11 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 			'Network Difficulty' => 'block_ndiff',
 			'PPLNS Factor' => 'diff_times',
 			'PPLNS Added' => 'diff_add',
-			'Share Count' => 'share_count');
+			'Accepted Share Count' => 'acc_share_count',
+			'Total Share Count' => 'total_share_count',
+			'ShareSummary Count' => 'ss_count',
+			'WorkMarkers Count' => 'wm_count',
+			'MarkerSummary Count' => 'ms_count');
 
 	$pg = '<br><a href=https://blockchain.info/block-height/';
 	$pg .= $ans['block'].'>Blockchain '.$ans['block']."</a><br>\n";
