@@ -69,8 +69,9 @@ function check()
 			'API' => 'api'
 	),
 	'Help' => array(
-		'Help' => 'help',
-		'Payouts' => 'payout'
+		'Payouts' => 'payout',
+		'Workers ' => 'workers',
+		'Blocks' => 'blocks'
 	)
  );
  tryLogInOut();
