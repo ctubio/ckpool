@@ -728,6 +728,8 @@ int read_length(int sockd, void *buf, int len)
 		LOGWARNING("Invalid read length of %d requested in read_length", len);
 		return -1;
 	}
+	if (unlikely(sockd < 0))
+		return -1;
 	while (len) {
 		ret = recv(sockd, buf + ofs, len, MSG_WAITALL);
 		if (unlikely(ret < 1))
@@ -803,6 +805,8 @@ int write_length(int sockd, const void *buf, int len)
 		LOGWARNING("Invalid write length of %d requested in write_length", len);
 		return -1;
 	}
+	if (unlikely(sockd < 0))
+		return -1;
 	while (len) {
 		ret = write(sockd, buf + ofs, len);
 		if (unlikely(ret < 0))
