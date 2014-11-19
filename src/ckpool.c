@@ -367,11 +367,11 @@ void empty_buffer(connsock_t *cs)
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, int timeout)
 {
+	int fd = cs->fd, ret = -1;
 	char *eom = NULL;
 	size_t buflen;
-	int ret = -1;
 
-	if (unlikely(cs->fd < 0))
+	if (unlikely(fd < 0))
 		goto out;
 
 	if (unlikely(!cs->buf))
@@ -388,7 +388,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 
-		ret = wait_read_select(cs->fd, eom ? 0 : timeout);
+		ret = wait_read_select(fd, eom ? 0 : timeout);
 		if (eom && !ret)
 			break;
 		if (ret < 1) {
@@ -398,7 +398,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 				LOGERR("Select failed in read_socket_line");
 			goto out;
 		}
-		ret = recv(cs->fd, readbuf, PAGESIZE - 4, 0);
+		ret = recv(fd, readbuf, PAGESIZE - 4, 0);
 		if (ret < 1) {
 			LOGERR("Failed to recv in read_socket_line");
 			ret = -1;
@@ -423,6 +423,7 @@ int read_socket_line(connsock_t *cs, int timeout)
 	*eom = '\0';
 out:
 	if (ret < 0) {
+		empty_buffer(cs);
 		dealloc(cs->buf);
 		Close(cs->fd);
 	}
