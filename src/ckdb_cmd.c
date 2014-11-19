@@ -3139,8 +3139,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		lookworkmarkers.workinfoidend = begin_workinfoid;
 		INIT_WORKMARKERS(&wm_look);
 		wm_look.data = (void *)(&lookworkmarkers);
-		wm_item = find_before_in_ktree(workmarkers_root, &wm_look,
-					       cmp_workmarkers, wm_ctx);
+		wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
+					       cmp_workmarkers_workinfoid, wm_ctx);
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 		while (total < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
 			if (WMREADY(workmarkers->status)) {
