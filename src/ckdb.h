@@ -51,7 +51,7 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "0.9.4"
+#define DB_VERSION "0.9.5"
 #define CKDB_VERSION DB_VERSION"-0.646"
 
 #define WHERE_FFL " - from %s %s() line %d"
@@ -1332,6 +1332,58 @@ extern K_STORE *workmarkers_store;
 
 #define MARKER_COMPLETE 'x'
 #define WMREADY(_status) (tolower(_status[0]) == MARKER_COMPLETE)
+
+// MARKS
+// TODO: implement
+typedef struct marks {
+	char *poolinstance;
+	int64_t workinfoid;
+	char *description;
+	char marktype[TXT_FLAG+1];
+	char status[TXT_FLAG+1];
+	HISTORYDATECONTROLFIELDS;
+} MARKS;
+
+/* Marks:
+ *  marktype is one of:
+ *   b - block end
+ *   p - pplns begin
+ *   s - shift begin (not yet used)
+ *   e - shift end (not yet used)
+ *  description should one one of
+ *   b - Block NNN stt
+ *   p - Payout NNN fin (where NNN is the block number of the payout)
+ *   s/e - to be decided
+ *
+ * WorkMarkers are from a begin workinfoid to an end workinfoid
+ *  the "-1" and "+1" below mean adding to or subtracting from
+ *  the workinfoid number
+ *
+ * Until we start using shifts:
+ *  WorkMarkers can be created up to ending in the largest 'p' "-1"
+ *  WorkMarkers will always be the smallest of:
+ *   Block NNN-1 "+1" to Block NNN
+ *   Block NNN "+1" to Payout MMM "-1"
+ *   Payout MMM to Block NNN
+ *   Payout MMM-1 to Payout MMM "-1"
+ * Thus to generate the WorkMarkers from the Marks:
+ *  Find the last 'p' with no matching workinfoidbegin
+ *  Then determine each previous WorkMarker based on each previous
+ *  mark, using the above rules and stop when we find one that already exists
+ */
+
+#define ALLOC_MARKS 1000
+#define LIMIT_MARKS 0
+#define INIT_MARKS(_item) INIT_GENERIC(_item, marks)
+#define DATA_MARKS(_var, _item) DATA_GENERIC(_var, _item, marks, true)
+#define DATA_MARKS_NULL(_var, _item) DATA_GENERIC(_var, _item, marks, false)
+
+extern K_TREE *marks_root;
+extern K_LIST *marks_free;
+extern K_STORE *marks_store;
+
+#define MARK_READY 'x'
+#define MREADY(_status) (tolower(_status[0]) == MARK_READY)
 
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnow(tv_t *now);

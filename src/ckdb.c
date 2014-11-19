@@ -453,6 +453,11 @@ K_TREE *workmarkers_workinfoid_root;
 K_LIST *workmarkers_free;
 K_STORE *workmarkers_store;
 
+// MARKS
+K_TREE *marks_root;
+K_LIST *marks_free;
+K_STORE *marks_store;
+
 static char logname[512];
 static char *dbcode;
 
