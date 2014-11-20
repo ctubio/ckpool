@@ -272,6 +272,8 @@ static tv_t reload_timestamp;
  * workinfo and sharesummary */
 int64_t dbload_workinfoid_start = -1;
 int64_t dbload_workinfoid_finish = MAXID;
+// Only restrict sharesummary, not workinfo
+bool dbload_only_sharesummary = false;
 
 // DB users,workers,auth load is complete
 bool db_auths_complete = false;
@@ -1235,6 +1237,8 @@ static bool setup_data()
 	if (dbload_workinfoid_start != -1) {
 		LOGWARNING("WARNING: dbload starting at workinfoid %"PRId64,
 			   dbload_workinfoid_start);
+		if (dbload_only_sharesummary)
+			LOGWARNING("NOTICE: dbload only restricting sharesummary");
 	}
 
 	if (!getdata3() || everyone_die)
@@ -3567,7 +3571,15 @@ int main(int argc, char **argv)
 			case 'w':
 				// Don't use this :)
 				{
-					int64_t start = atoll(optarg);
+					char *ptr = optarg;
+					int64_t start;
+
+					if (*ptr == 's') {
+						dbload_only_sharesummary = true;
+						ptr++;
+					}
+
+					start = atoll(ptr);
 					if (start < 0) {
 						quit(1, "Invalid workinfoid start"
 						     " %"PRId64" - must be >= 0",

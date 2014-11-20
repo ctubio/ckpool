@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.5"
-#define CKDB_VERSION DB_VERSION"-0.650"
+#define CKDB_VERSION DB_VERSION"-0.651"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -240,6 +240,8 @@ extern int64_t confirm_last_workinfoid;
  * workinfo and sharesummary */
 extern int64_t dbload_workinfoid_start;
 extern int64_t dbload_workinfoid_finish;
+// Only restrict sharesummary, not workinfo
+extern bool dbload_only_sharesummary;
 
 // DB users,workers,auth load is complete
 extern bool db_auths_complete;

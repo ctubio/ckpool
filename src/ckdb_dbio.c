@@ -2274,7 +2274,10 @@ bool workinfo_fill(PGconn *conn)
 		"  workinfoid in (select workinfoid from blocks) )";
 	par = 0;
 	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
-	params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
+	if (dbload_only_sharesummary)
+		params[par++] = bigint_to_buf(-1, NULL, 0);
+	else
+		params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
 	params[par++] = bigint_to_buf(dbload_workinfoid_finish, NULL, 0);
 	PARCHK(par, params);
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
