@@ -890,23 +890,27 @@ static void sighandler(int sig)
 	exit(0);
 }
 
-void json_get_string(char **store, json_t *val, const char *res)
+bool json_get_string(char **store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
+	bool ret = false;
 	const char *buf;
 
 	*store = NULL;
 	if (!entry || json_is_null(entry)) {
 		LOGDEBUG("Json did not find entry %s", res);
-		return;
+		goto out;
 	}
 	if (!json_is_string(entry)) {
 		LOGWARNING("Json entry %s is not a string", res);
-		return;
+		goto out;
 	}
 	buf = json_string_value(entry);
 	LOGDEBUG("Json found entry %s: %s", res, buf);
 	*store = strdup(buf);
+	ret = true;
+out:
+	return ret;
 }
 
 static void json_get_int64(int64_t *store, json_t *val, const char *res)
@@ -925,36 +929,44 @@ static void json_get_int64(int64_t *store, json_t *val, const char *res)
 	LOGDEBUG("Json found entry %s: %ld", res, *store);
 }
 
-void json_get_int(int *store, json_t *val, const char *res)
+bool json_get_int(int *store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
+	bool ret = false;
 
 	if (!entry) {
 		LOGDEBUG("Json did not find entry %s", res);
-		return;
+		goto out;
 	}
 	if (!json_is_integer(entry)) {
 		LOGWARNING("Json entry %s is not an integer", res);
-		return;
+		goto out;
 	}
 	*store = json_integer_value(entry);
 	LOGDEBUG("Json found entry %s: %d", res, *store);
+	ret = true;
+out:
+	return ret;
 }
 
-static void json_get_bool(bool *store, json_t *val, const char *res)
+static bool json_get_bool(bool *store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
+	bool ret = false;
 
 	if (!entry) {
 		LOGDEBUG("Json did not find entry %s", res);
-		return;
+		goto out;
 	}
 	if (!json_is_boolean(entry)) {
 		LOGWARNING("Json entry %s is not a boolean", res);
-		return;
+		goto out;
 	}
 	*store = json_is_true(entry);
 	LOGDEBUG("Json found entry %s: %s", res, *store ? "true" : "false");
+	ret = true;
+out:
+	return ret;
 }
 
 static void parse_btcds(ckpool_t *ckp, json_t *arr_val, int arr_size)
