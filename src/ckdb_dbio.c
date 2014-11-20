@@ -5108,6 +5108,100 @@ bool workmarkers_fill(PGconn *conn)
 	return ok;
 }
 
+bool marks_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	MARKS *row;
+	char *field;
+	char *sel;
+	int fields = 5;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: limit how far back
+	sel = "select "
+		"poolinstance,workinfoid,description,marktype,status"
+		HISTORYDATECONTROL
+		" from marks";
+	res = PQexec(conn, sel, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(marks_free);
+		DATA_MARKS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "workinfoid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
+
+		PQ_GET_FLD(res, i, "description", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("description", field, row->description);
+
+		PQ_GET_FLD(res, i, "marktype", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("marktype", field, row->marktype);
+
+		PQ_GET_FLD(res, i, "status", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("status", field, row->status);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		marks_root = add_to_ktree(marks_root, item, cmp_marks);
+		k_add_head(marks_store, item);
+
+		tick();
+	}
+	if (!ok)
+		k_add_head(marks_free, item);
+
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d marks records", __func__, n);
+	}
+
+	return ok;
+}
+
 bool check_db_version(PGconn *conn)
 {
 	ExecStatusType rescode;

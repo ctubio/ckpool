@@ -2434,3 +2434,16 @@ K_ITEM *find_workmarkerid(int64_t markerid)
 	return wm_item;
 }
 
+// order by expirydate asc,workinfoid asc
+// TODO: add poolinstance
+cmp_t cmp_marks(K_ITEM *a, K_ITEM *b)
+{
+	MARKS *ma, *mb;
+	DATA_MARKS(ma, a);
+	DATA_MARKS(mb, b);
+	cmp_t c = CMP_TV(ma->expirydate, mb->expirydate);
+	if (c == 0)
+		c = CMP_BIGINT(ma->workinfoid, mb->workinfoid);
+	return c;
+}
+

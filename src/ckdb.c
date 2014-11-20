@@ -737,6 +737,8 @@ static bool getdata3()
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
 		goto sukamudai;
+	if (!(ok = marks_fill(conn)) || everyone_die)
+		goto sukamudai;
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!(ok = markersummary_fill(conn)) || everyone_die)
@@ -1039,6 +1041,11 @@ static void alloc_storage()
 	workmarkers_root = new_ktree();
 	workmarkers_workinfoid_root = new_ktree();
 	workmarkers_free->dsp_func = dsp_workmarkers;
+
+	marks_free = k_new_list("Marks", sizeof(MARKS),
+				ALLOC_MARKS, LIMIT_MARKS, true);
+	marks_store = k_new_store(workmarkers_free);
+	marks_root = new_ktree();
 }
 
 static void free_workinfo_data(K_ITEM *item)
@@ -1144,6 +1151,8 @@ static void free_workmarkers_data(K_ITEM *item)
 static void dealloc_storage()
 {
 	FREE_LISTS(logqueue);
+
+	FREE_ALL(marks);
 
 	FREE_TREE(workmarkers_workinfoid);
 	FREE_TREE(workmarkers);

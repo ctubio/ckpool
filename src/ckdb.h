@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.5"
-#define CKDB_VERSION DB_VERSION"-0.649"
+#define CKDB_VERSION DB_VERSION"-0.650"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1557,6 +1557,7 @@ extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workmarkers(int64_t workinfoid);
 extern K_ITEM *find_workmarkerid(int64_t markerid);
+extern cmp_t cmp_marks(K_ITEM *a, K_ITEM *b);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
@@ -1700,6 +1701,7 @@ extern bool userstats_add(char *poolinstance, char *elapsed, char *username,
 extern bool userstats_fill(PGconn *conn);
 extern bool markersummary_fill(PGconn *conn);
 extern bool workmarkers_fill(PGconn *conn);
+extern bool marks_fill(PGconn *conn);
 extern bool check_db_version(PGconn *conn);
 
 // ***
