@@ -2976,7 +2976,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tv_buf[DATE_BUFSIZ];
 	tv_t cd, begin_tv, block_tv, end_tv;
 	K_TREE_CTX ctx[1], wm_ctx[1], ms_ctx[1];
-	double ndiff, total, elapsed;
+	double ndiff, total_diff, elapsed;
 	double diff_times = 1.0;
 	double diff_add = 0.0;
 	double diff_want;
@@ -3007,6 +3007,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			allow_aged = true;
 	}
 
+	block_tv.tv_sec = block_tv.tv_usec = 0L;
 	cd.tv_sec = cd.tv_usec = 0L;
 	lookblocks.height = height + 1;
 	lookblocks.blockhash[0] = '\0';
@@ -3021,6 +3022,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	DATA_BLOCKS_NULL(blocks, b_item);
 	while (b_item && blocks->height == height) {
+		if (blocks->confirmed[0] == BLOCKS_NEW) {
+			copy_tv(&block_tv, &(blocks->createdate));
+			copy_tv(&end_tv, &(blocks->createdate));
+		}
 		// Allow any state, but report it
 		if (CURRENT(&(blocks->expirydate)))
 			break;
@@ -3029,7 +3034,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	K_RUNLOCK(blocks_free);
 	if (!b_item || blocks->height != height) {
-		snprintf(reply, siz, "ERR.no current block %d", height);
+		snprintf(reply, siz, "ERR.no CURRENT block %d", height);
+		return strdup(reply);
+	}
+	if (block_tv.tv_sec == 0) {
+		snprintf(reply, siz, "ERR.block %d missing '%s' record",
+				     height,
+				     blocks_confirmed(BLOCKS_NEW_STR));
 		return strdup(reply);
 	}
 	switch (blocks->confirmed[0]) {
@@ -3044,11 +3055,6 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			break;
 	}
 	workinfoid = blocks->workinfoid;
-	copy_tv(&block_tv, &(blocks->createdate));
-	/* Last share should be the share that found it and match the createdate,
-	 * or not long after it for shares accepted until the workinfo switch */
-	copy_tv(&end_tv, &(blocks->createdate));
-
 	w_item = find_workinfo(workinfoid);
 	if (!w_item) {
 		snprintf(reply, siz, "ERR.missing workinfo %"PRId64, workinfoid);
@@ -3068,7 +3074,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	begin_workinfoid = 0;
 	total_share_count = acc_share_count = 0;
-	total = 0;
+	total_diff = 0;
 	ss_count = wm_count = ms_count = 0;
 
 	mu_store = k_new_store(miningpayouts_free);
@@ -3090,7 +3096,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	/* add up all sharesummaries until >= diff_want
 	 * also record the latest lastshare - that will be the end pplns time
 	 *  which will be >= block_tv */
-	while (total < diff_want && ss_item) {
+	while (total_diff < diff_want && ss_item) {
 		switch (sharesummary->complete[0]) {
 			case SUMMARY_CONFIRM:
 				break;
@@ -3103,7 +3109,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		ss_count++;
 		total_share_count += sharesummary->sharecount;
 		acc_share_count += sharesummary->shareacc;
-		total += (int64_t)(sharesummary->diffacc);
+		total_diff += (int64_t)(sharesummary->diffacc);
 		begin_workinfoid = sharesummary->workinfoid;
 		if (tv_newer(&end_tv, &(sharesummary->lastshare)))
 			copy_tv(&end_tv, &(sharesummary->lastshare));
@@ -3131,7 +3137,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		ss_count++;
 		total_share_count += sharesummary->sharecount;
 		acc_share_count += sharesummary->shareacc;
-		total += (int64_t)(sharesummary->diffacc);
+		total_diff += (int64_t)(sharesummary->diffacc);
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     sharesummary->userid,
 				     (int64_t)(sharesummary->diffacc));
@@ -3141,7 +3147,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	/* If we haven't met or exceeded the required N,
 	 * move on to the markersummaries */
-	if (total < diff_want) {
+	if (total_diff < diff_want) {
 		lookworkmarkers.expirydate.tv_sec = default_expiry.tv_sec;
 		lookworkmarkers.expirydate.tv_usec = default_expiry.tv_usec;
 		lookworkmarkers.workinfoidend = begin_workinfoid;
@@ -3150,7 +3156,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
 					       cmp_workmarkers_workinfoid, wm_ctx);
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
-		while (total < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
+		while (total_diff < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
 			if (WMREADY(workmarkers->status)) {
 				wm_count++;
 				lookmarkersummary.markerid = workmarkers->markerid;
@@ -3168,7 +3174,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 					ms_count++;
 					total_share_count += markersummary->sharecount;
 					acc_share_count += markersummary->shareacc;
-					total += (int64_t)(markersummary->diffacc);
+					total_diff += (int64_t)(markersummary->diffacc);
 					begin_workinfoid = workmarkers->workinfoidstart;
 					if (tv_newer(&end_tv, &(markersummary->lastshare)))
 						copy_tv(&end_tv, &(markersummary->lastshare));
@@ -3187,7 +3193,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RUNLOCK(workmarkers_free);
 	K_RUNLOCK(sharesummary_free);
 
-	if (total == 0.0) {
+	if (total_diff == 0.0) {
 		snprintf(reply, siz,
 			 "ERR.total share diff 0 before workinfo %"PRId64,
 			 workinfoid);
@@ -3236,7 +3242,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "end_workinfoid=%"PRId64"%c", end_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "diffacc_total=%.0f%c", total, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "diffacc_total=%.0f%c", total_diff, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "pplns_elapsed=%f%c", elapsed, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
