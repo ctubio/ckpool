@@ -40,6 +40,9 @@ struct client_instance {
 	struct sockaddr address;
 	char address_name[INET6_ADDRSTRLEN];
 
+	/* Which serverurl is this instance connected to */
+	int server;
+
 	char buf[PAGESIZE];
 	int bufofs;
 
@@ -115,12 +118,12 @@ static void dec_instance_ref(cdata_t *cdata, client_instance_t *client)
 
 /* Accepts incoming connections on the server socket and generates client
  * instances */
-static int accept_client(cdata_t *cdata, const int epfd, const int sockd)
+static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 {
+	int fd, port, no_clients, sockd;
 	ckpool_t *ckp = cdata->ckp;
 	client_instance_t *client;
 	struct epoll_event event;
-	int fd, port, no_clients;
 	socklen_t address_len;
 
 	ck_rlock(&cdata->lock);
@@ -132,7 +135,9 @@ static int accept_client(cdata_t *cdata, const int epfd, const int sockd)
 		return 0;
 	}
 
+	sockd = cdata->serverfd[server];
 	client = ckzalloc(sizeof(client_instance_t));
+	client->server = server;
 	address_len = sizeof(client->address);
 	fd = accept(sockd, &client->address, &address_len);
 	if (unlikely(fd < 0)) {
@@ -333,6 +338,7 @@ reparse:
 		} else
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 		json_object_set_new_nocheck(val, "address", json_string(client->address_name));
+		json_object_set_new_nocheck(val, "server", json_integer(client->server));
 		s = json_dumps(val, 0);
 		if (ckp->passthrough)
 			send_proc(ckp->generator, s);
@@ -400,7 +406,7 @@ void *receiver(void *arg)
 			continue;
 		}
 		if (event.data.u64 < (uint64_t)cdata->serverfds) {
-			ret = accept_client(cdata, epfd, (int)cdata->serverfd[event.data.u64]);
+			ret = accept_client(cdata, epfd, event.data.u64);
 			if (unlikely(ret < 0)) {
 				LOGEMERG("FATAL: Failed to accept_client in receiver");
 				break;

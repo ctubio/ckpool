@@ -247,6 +247,7 @@ struct stratum_instance {
 	char *useragent;
 	char *workername;
 	int64_t user_id;
+	int server; /* Which server is this instance bound to */
 
 	ckpool_t *ckp;
 
@@ -1082,16 +1083,17 @@ static void dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance)
 }
 
 /* Enter with write instance_lock held */
-static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id)
+static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int server)
 {
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 	sdata_t *sdata = ckp->data;
 
 	instance->id = id;
+	instance->server = server;
 	instance->diff = instance->old_diff = ckp->startdiff;
 	instance->ckp = ckp;
 	tv_time(&instance->ldc);
-	LOGINFO("Added instance %ld", id);
+	LOGINFO("Stratifier added instance %ld server %d", id, server);
 	HASH_ADD_I64(sdata->stratum_instances, id, instance);
 	return instance;
 }
@@ -2966,6 +2968,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	sdata_t *sdata = ckp->data;
 	smsg_t *msg;
 	json_t *val;
+	int server;
 
 	val = json_loads(buf, 0, NULL);
 	if (unlikely(!val)) {
@@ -2995,11 +2998,21 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	strcpy(msg->address, json_string_value(val));
 	json_object_clear(val);
 
+	val = json_object_get(msg->json_msg, "server");
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to extract server from connector json smsg %s", buf);
+		json_decref(msg->json_msg);
+		free(msg);
+		goto out;
+	}
+	server = json_integer_value(val);
+	json_object_clear(val);
+
 	/* Parse the message here */
 	ck_wlock(&sdata->instance_lock);
 	/* client_id instance doesn't exist yet, create one */
 	if (!__instance_by_id(sdata, msg->client_id))
-		__stratum_add_instance(ckp, msg->client_id);
+		__stratum_add_instance(ckp, msg->client_id, server);
 	ck_wunlock(&sdata->instance_lock);
 
 	parse_instance_msg(sdata, msg);
