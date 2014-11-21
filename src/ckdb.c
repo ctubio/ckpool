@@ -174,8 +174,12 @@ const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.
 const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 const char *intpatt = "^[0-9][0-9]*$";
 const char *hashpatt = "^[A-Fa-f0-9]*$";
-// TODO: bitcoind will check it properly
-const char *addrpatt = "^[A-Za-z0-9]*$";
+/* BTC addresses start with '1' (one) or '3' (three),
+ *  exclude: capital 'I' (eye), capital 'O' (oh),
+ *  lowercase 'l' (elle) and '0' (zero)
+ *  and with a simple test must be ADDR_MIN_LEN to ADDR_MAX_LEN (ckdb.h)
+ * bitcoind is used to fully validate them when required */
+const char *addrpatt = "^[13][A-HJ-NP-Za-km-z1-9]*$";
 
 // So the records below have the same 'name' as the klist
 const char Transfer[] = "Transfer";
@@ -268,6 +272,8 @@ static tv_t reload_timestamp;
  * workinfo and sharesummary */
 int64_t dbload_workinfoid_start = -1;
 int64_t dbload_workinfoid_finish = MAXID;
+// Only restrict sharesummary, not workinfo
+bool dbload_only_sharesummary = false;
 
 // DB users,workers,auth load is complete
 bool db_auths_complete = false;
@@ -448,6 +454,11 @@ K_TREE *workmarkers_root;
 K_TREE *workmarkers_workinfoid_root;
 K_LIST *workmarkers_free;
 K_STORE *workmarkers_store;
+
+// MARKS
+K_TREE *marks_root;
+K_LIST *marks_free;
+K_STORE *marks_store;
 
 static char logname[512];
 static char *dbcode;
@@ -727,6 +738,8 @@ static bool getdata3()
 			goto sukamudai;
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
+		goto sukamudai;
+	if (!(ok = marks_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
@@ -1030,6 +1043,11 @@ static void alloc_storage()
 	workmarkers_root = new_ktree();
 	workmarkers_workinfoid_root = new_ktree();
 	workmarkers_free->dsp_func = dsp_workmarkers;
+
+	marks_free = k_new_list("Marks", sizeof(MARKS),
+				ALLOC_MARKS, LIMIT_MARKS, true);
+	marks_store = k_new_store(workmarkers_free);
+	marks_root = new_ktree();
 }
 
 static void free_workinfo_data(K_ITEM *item)
@@ -1048,6 +1066,11 @@ static void free_sharesummary_data(K_ITEM *item)
 	SHARESUMMARY *sharesummary;
 
 	DATA_SHARESUMMARY(sharesummary, item);
+	if (sharesummary->workername) {
+		LIST_MEM_SUB(sharesummary_free, sharesummary->workername);
+		free(sharesummary->workername);
+		sharesummary->workername = NULL;
+	}
 	SET_CREATEBY(sharesummary_free, sharesummary->createby, EMPTY);
 	SET_CREATECODE(sharesummary_free, sharesummary->createcode, EMPTY);
 	SET_CREATEINET(sharesummary_free, sharesummary->createinet, EMPTY);
@@ -1131,6 +1154,8 @@ static void dealloc_storage()
 {
 	FREE_LISTS(logqueue);
 
+	FREE_ALL(marks);
+
 	FREE_TREE(workmarkers_workinfoid);
 	FREE_TREE(workmarkers);
 	FREE_STORE_DATA(workmarkers);
@@ -1212,6 +1237,8 @@ static bool setup_data()
 	if (dbload_workinfoid_start != -1) {
 		LOGWARNING("WARNING: dbload starting at workinfoid %"PRId64,
 			   dbload_workinfoid_start);
+		if (dbload_only_sharesummary)
+			LOGWARNING("NOTICE: dbload only restricting sharesummary");
 	}
 
 	if (!getdata3() || everyone_die)
@@ -1586,7 +1613,7 @@ static void summarise_blocks()
 	// Add up the sharesummaries, abort if any SUMMARY_NEW
 	looksharesummary.workinfoid = wi_finish;
 	looksharesummary.userid = MAXID;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 
@@ -1652,7 +1679,7 @@ static void summarise_blocks()
 		if (WMREADY(workmarkers->status)) {
 			lookmarkersummary.markerid = workmarkers->markerid;
 			lookmarkersummary.userid = MAXID;
-			lookmarkersummary.workername[0] = '\0';
+			lookmarkersummary.workername = EMPTY;
 			INIT_MARKERSUMMARY(&ms_look);
 			ms_look.data = (void *)(&lookmarkersummary);
 			ms_item = find_before_in_ktree(markersummary_root, &ms_look,
@@ -2048,6 +2075,7 @@ static void *socketer(__maybe_unused void *arg)
 	char *last_newid = NULL, *reply_newid = NULL;
 	char *last_setatts = NULL, *reply_setatts = NULL;
 	char *last_setopts = NULL, *reply_setopts = NULL;
+	char *last_userstatus = NULL, *reply_userstatus = NULL;
 	char *last_web = NULL, *reply_web = NULL;
 	char *reply_last, duptype[CMD_SIZ+1];
 	enum cmd_values cmdnum;
@@ -2151,6 +2179,9 @@ static void *socketer(__maybe_unused void *arg)
 			} else if (last_setopts && strcmp(last_setopts, buf) == 0) {
 				reply_last = reply_setopts;
 				dup = true;
+			} else if (last_userstatus && strcmp(last_userstatus, buf) == 0) {
+				reply_last = reply_userstatus;
+				dup = true;
 			} else if (last_web && strcmp(last_web, buf) == 0) {
 				reply_last = reply_web;
 				dup = true;
@@ -2251,6 +2282,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_BLOCKLIST:
 					case CMD_NEWID:
 					case CMD_STATS:
+					case CMD_USERSTATUS:
 						ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
 										 by_default,
 										 (char *)__func__,
@@ -2292,6 +2324,9 @@ static void *socketer(__maybe_unused void *arg)
 								break;
 							case CMD_SETOPTS:
 								STORELASTREPLY(setopts);
+								break;
+							case CMD_USERSTATUS:
+								STORELASTREPLY(userstatus);
 								break;
 							// The rest
 							default:
@@ -2499,6 +2534,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_DSP:
 			case CMD_STATS:
 			case CMD_PPLNS:
+			case CMD_USERSTATUS:
 				LOGERR("%s() Message line %"PRIu64" '%s' - invalid - ignored",
 					__func__, count, cmd);
 				break;
@@ -2854,7 +2890,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 
 	looksharesummary.workinfoid = confirm_first_workinfoid;
 	looksharesummary.userid = -1;
-	looksharesummary.workername[0] = '\0';
+	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&look);
 	look.data = (void *)(&looksharesummary);
 
@@ -3535,7 +3571,15 @@ int main(int argc, char **argv)
 			case 'w':
 				// Don't use this :)
 				{
-					int64_t start = atoll(optarg);
+					char *ptr = optarg;
+					int64_t start;
+
+					if (*ptr == 's') {
+						dbload_only_sharesummary = true;
+						ptr++;
+					}
+
+					start = atoll(ptr);
 					if (start < 0) {
 						quit(1, "Invalid workinfoid start"
 						     " %"PRId64" - must be >= 0",

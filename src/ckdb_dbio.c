@@ -304,9 +304,10 @@ cleanup:
 	return lastid;
 }
 
-bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
-			char *newhash, char *email, char *by, char *code,
-			char *inet, tv_t *cd, K_TREE *trf_root)
+// status was added to the end so type checking intercepts new mistakes
+bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
+		  char *newhash, char *email, char *by, char *code,
+		  char *inet, tv_t *cd, K_TREE *trf_root, char *status)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -315,7 +316,7 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	USERS *row, *users;
 	char *upd, *ins;
 	bool ok = false;
-	char *params[5 + HISTORYDATECOUNT];
+	char *params[6 + HISTORYDATECOUNT];
 	bool hash;
 	int n, par = 0;
 
@@ -337,14 +338,18 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 
 	DATA_USERS(row, item);
 	memcpy(row, users, sizeof(*row));
-	// Update one, leave the other
+
+	// Update each one supplied
 	if (hash) {
 		// New salt each password change
 		make_salt(row);
 		password_hash(row->username, newhash, row->salt,
 			      row->passwordhash, sizeof(row->passwordhash));
-	} else
+	}
+	if (email)
 		STRNCPY(row->emailaddress, email);
+	if (status)
+		STRNCPY(row->status, status);
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -384,21 +389,22 @@ bool users_pass_email(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	par = 0;
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
 	params[par++] = tv_to_buf(cd, NULL, 0);
-	// Copy them both in - one will be new and one will be old
+	// Copy them all in - at least one will be new
+	params[par++] = str_to_buf(row->status, NULL, 0);
 	params[par++] = str_to_buf(row->emailaddress, NULL, 0);
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
 	// New salt for each password change (or recopy old)
 	params[par++] = str_to_buf(row->salt, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
-	PARCHKVAL(par, 5 + HISTORYDATECOUNT, params); // 10 as per ins
+	PARCHKVAL(par, 6 + HISTORYDATECOUNT, params); // 11 as per ins
 
 	ins = "insert into users "
 		"(userid,username,status,emailaddress,joineddate,"
 		"passwordhash,secondaryuserid,salt"
 		HISTORYDATECONTROL ") select "
-		"userid,username,status,$3,joineddate,"
-		"$4,secondaryuserid,$5,"
-		"$6,$7,$8,$9,$10 from users where "
+		"userid,username,$3,$4,joineddate,"
+		"$5,secondaryuserid,$6,"
+		"$7,$8,$9,$10,$11 from users where "
 		"userid=$1 and expirydate=$2";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -2268,7 +2274,10 @@ bool workinfo_fill(PGconn *conn)
 		"  workinfoid in (select workinfoid from blocks) )";
 	par = 0;
 	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
-	params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
+	if (dbload_only_sharesummary)
+		params[par++] = bigint_to_buf(-1, NULL, 0);
+	else
+		params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
 	params[par++] = bigint_to_buf(dbload_workinfoid_finish, NULL, 0);
 	PARCHK(par, params);
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
@@ -2713,7 +2722,8 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 			K_WUNLOCK(sharesummary_free);
 			DATA_SHARESUMMARY(row, item);
 			row->userid = userid;
-			STRNCPY(row->workername, workername);
+			row->workername = strdup(workername);
+			LIST_MEM_ADD(sharesummary_free, row->workername);
 			row->workinfoid = workinfoid;
 			zero_sharesummary(row, sharecreatedate, diff);
 			row->inserted = false;
@@ -2942,15 +2952,15 @@ late:
 		PQfinish(conn);
 
 	// We keep the new item no matter what 'ok' is, since it will be inserted later
-	K_WLOCK(sharesummary_free);
 	if (new) {
+		K_WLOCK(sharesummary_free);
 		sharesummary_root = add_to_ktree(sharesummary_root, item, cmp_sharesummary);
 		sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root,
 							    item,
 							    cmp_sharesummary_workinfoid);
 		k_add_head(sharesummary_store, item);
+		K_WUNLOCK(sharesummary_free);
 	}
-	K_WUNLOCK(sharesummary_free);
 
 	return ok;
 }
@@ -3004,6 +3014,7 @@ bool sharesummary_fill(PGconn *conn)
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(sharesummary_free);
 		DATA_SHARESUMMARY(row, item);
+		row->workername = NULL;
 
 		if (everyone_die) {
 			ok = false;
@@ -3020,7 +3031,8 @@ bool sharesummary_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "workername", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_STR("workername", field, row->workername);
+		row->workername = strdup(field);
+		LIST_MEM_ADD(sharesummary_free, row->workername);
 
 		PQ_GET_FLD(res, i, "workinfoid", field, ok);
 		if (!ok)
@@ -3147,8 +3159,15 @@ bool sharesummary_fill(PGconn *conn)
 
 		tick();
 	}
-	if (!ok)
+	if (!ok) {
+		DATA_SHARESUMMARY(row, item);
+		if (row->workername) {
+			LIST_MEM_SUB(sharesummary_free, row->workername);
+			free(row->workername);
+			row->workername = NULL;
+		}
 		k_add_head(sharesummary_free, item);
+	}
 
 	PQclear(res);
 
@@ -4054,6 +4073,10 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			goto unitem;
 	}
 	DATA_USERS(*users, u_item);
+
+	// Any status content means disallow mining
+	if ((*users)->status[0])
+		goto unitem;
 
 	STRNCPY(row->poolinstance, poolinstance);
 	row->userid = (*users)->userid;
@@ -5083,6 +5106,100 @@ bool workmarkers_fill(PGconn *conn)
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
 		LOGWARNING("%s(): loaded %d workmarkers records", __func__, n);
+	}
+
+	return ok;
+}
+
+bool marks_fill(PGconn *conn)
+{
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	MARKS *row;
+	char *field;
+	char *sel;
+	int fields = 5;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	// TODO: limit how far back
+	sel = "select "
+		"poolinstance,workinfoid,description,marktype,status"
+		HISTORYDATECONTROL
+		" from marks";
+	res = PQexec(conn, sel, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + HISTORYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + HISTORYDATECOUNT, n);
+		PQclear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(marks_free);
+		DATA_MARKS(row, item);
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("poolinstance", field, row->poolinstance);
+
+		PQ_GET_FLD(res, i, "workinfoid", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
+
+		PQ_GET_FLD(res, i, "description", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("description", field, row->description);
+
+		PQ_GET_FLD(res, i, "marktype", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("marktype", field, row->marktype);
+
+		PQ_GET_FLD(res, i, "status", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("status", field, row->status);
+
+		HISTORYDATEFLDS(res, i, row, ok);
+		if (!ok)
+			break;
+
+		marks_root = add_to_ktree(marks_root, item, cmp_marks);
+		k_add_head(marks_store, item);
+
+		tick();
+	}
+	if (!ok)
+		k_add_head(marks_free, item);
+
+	PQclear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		LOGWARNING("%s(): loaded %d marks records", __func__, n);
 	}
 
 	return ok;
