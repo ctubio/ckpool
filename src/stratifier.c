@@ -2306,7 +2306,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", ckp->serverurl[0]);
+			"createinet", ckp->serverurl[client->server]);
 	val_copy = json_deep_copy(val);
 	block_ckmsg = ckalloc(sizeof(ckmsg_t));
 	block_ckmsg->data = val_copy;
@@ -2606,7 +2606,7 @@ out_unlock:
 	json_set_string(val, "createdate", cdfield);
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
-	json_set_string(val, "createinet", ckp->serverurl[0]);
+	json_set_string(val, "createinet", ckp->serverurl[client->server]);
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", user_instance->username);
 
@@ -2658,7 +2658,7 @@ out:
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", ckp->serverurl[0]);
+				"createinet", ckp->serverurl[client->server]);
 		ckdbq_add(ckp, ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %ld: %s", client->id, client->workername);
 	}
