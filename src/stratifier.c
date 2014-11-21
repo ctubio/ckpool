@@ -3353,7 +3353,7 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 					"createdate", cdfield,
 					"createby", "code",
 					"createcode", __func__,
-					"createinet", ckp->serverurl);
+					"createinet", ckp->serverurl[0]);
 			worker->notified_idle = worker->idle;
 			ckdbq_add(ckp, ID_WORKERSTATS, val);
 		}
