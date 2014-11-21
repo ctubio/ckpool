@@ -164,7 +164,8 @@ struct ckpool_instance {
 
 	/* Stratum options */
 	server_instance_t **servers;
-	char *serverurl; // URL to bind our server/proxy to
+	char **serverurl; // Array of URLs to bind our server/proxy to
+	int serverurls; // Number of server bindings
 	int update_interval; // Seconds between stratum updates
 	int chosen_server; // Chosen server for next connection
 

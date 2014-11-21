@@ -603,7 +603,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", ckp->serverurl);
+			"createinet", ckp->serverurl[0]);
 	ckdbq_add(ckp, ID_WORKINFO, val);
 }
 
@@ -622,7 +622,7 @@ static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", ckp->serverurl);
+			"createinet", ckp->serverurl[0]);
 	ckdbq_add(ckp, ID_AGEWORKINFO, val);
 }
 
@@ -2304,7 +2304,7 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
-			"createinet", ckp->serverurl);
+			"createinet", ckp->serverurl[0]);
 	val_copy = json_deep_copy(val);
 	block_ckmsg = ckalloc(sizeof(ckmsg_t));
 	block_ckmsg->data = val_copy;
@@ -2604,7 +2604,7 @@ out_unlock:
 	json_set_string(val, "createdate", cdfield);
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
-	json_set_string(val, "createinet", ckp->serverurl);
+	json_set_string(val, "createinet", ckp->serverurl[0]);
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", user_instance->username);
 
@@ -2656,7 +2656,7 @@ out:
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", ckp->serverurl);
+				"createinet", ckp->serverurl[0]);
 		ckdbq_add(ckp, ID_SHAREERR, val);
 		LOGINFO("Invalid share from client %ld: %s", client->id, client->workername);
 	}
@@ -3595,7 +3595,7 @@ static void *statsupdate(void *arg)
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", ckp->serverurl);
+				"createinet", ckp->serverurl[0]);
 		ckdbq_add(ckp, ID_POOLSTATS, val);
 
 		/* Update stats 3 times per minute for smooth values, displaying
@@ -3660,7 +3660,7 @@ static void *ckdb_heartbeat(void *arg)
 				"createdate", cdfield,
 				"createby", "code",
 				"createcode", __func__,
-				"createinet", ckp->serverurl);
+				"createinet", ckp->serverurl[0]);
 		ckdbq_add(ckp, ID_HEARTBEAT, val);
 	}
 	return NULL;
@@ -3713,8 +3713,10 @@ int stratifier(proc_instance_t *pi)
 
 	dealloc(buf);
 
-	if (!ckp->serverurl)
-		ckp->serverurl = "127.0.0.1";
+	if (!ckp->serverurls) {
+		ckp->serverurl[0] = "127.0.0.1";
+		ckp->serverurls = 1;
+	}
 	cklock_init(&sdata->instance_lock);
 
 	mutex_init(&sdata->ckdb_lock);

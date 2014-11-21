@@ -890,9 +890,8 @@ static void sighandler(int sig)
 	exit(0);
 }
 
-bool json_get_string(char **store, json_t *val, const char *res)
+static bool _json_get_string(char **store, json_t *entry, const char *res)
 {
-	json_t *entry = json_object_get(val, res);
 	bool ret = false;
 	const char *buf;
 
@@ -911,6 +910,11 @@ bool json_get_string(char **store, json_t *val, const char *res)
 	ret = true;
 out:
 	return ret;
+}
+
+bool json_get_string(char **store, json_t *val, const char *res)
+{
+	return _json_get_string(store, json_object_get(val, res), res);
 }
 
 static void json_get_int64(int64_t *store, json_t *val, const char *res)
@@ -1005,10 +1009,41 @@ static void parse_proxies(ckpool_t *ckp, json_t *arr_val, int arr_size)
 	}
 }
 
+static bool parse_serverurls(ckpool_t *ckp, json_t *arr_val)
+{
+	bool ret = false;
+	int arr_size, i;
+
+	if (!arr_val)
+		goto out;
+	if (!json_is_array(arr_val)) {
+		LOGWARNING("Unable to parse serverurl entries as an array");
+		goto out;
+	}
+	arr_size = json_array_size(arr_val);
+	if (!arr_size) {
+		LOGWARNING("Serverurl array empty");
+		goto out;
+	}
+	ckp->serverurls = arr_size;
+	ckp->serverurl = ckalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		json_t *val = json_array_get(arr_val, i);
+
+		if (!_json_get_string(&ckp->serverurl[i], val, "serverurl"))
+			LOGWARNING("Invalid serverurl entry number %d", i);
+	}
+	ret = true;
+out:
+	return ret;
+}
+
 static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
 	json_error_t err_val;
+	int arr_size;
+	char *url;
 
 	json_conf = json_load_file(ckp->config, JSON_DISABLE_EOF_CHECK, &err_val);
 	if (!json_conf) {
@@ -1018,8 +1053,7 @@ static void parse_config(ckpool_t *ckp)
 	}
 	arr_val = json_object_get(json_conf, "btcd");
 	if (arr_val && json_is_array(arr_val)) {
-		int arr_size = json_array_size(arr_val);
-
+		arr_size = json_array_size(arr_val);
 		if (arr_size)
 			parse_btcds(ckp, arr_val, arr_size);
 	}
@@ -1033,7 +1067,15 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->nonce1length, json_conf, "nonce1length");
 	json_get_int(&ckp->nonce2length, json_conf, "nonce2length");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
-	json_get_string(&ckp->serverurl, json_conf, "serverurl");
+	/* Look for an array first and then a single entry */
+	arr_val = json_object_get(json_conf, "serverurl");
+	if (!parse_serverurls(ckp, arr_val)) {
+		if (json_get_string(&url, json_conf, "serverurl")) {
+			ckp->serverurl = ckalloc(sizeof(char *));
+			ckp->serverurl[0] = url;
+			ckp->serverurls = 1;
+		}
+	}
 	json_get_int64(&ckp->mindiff, json_conf, "mindiff");
 	json_get_int64(&ckp->startdiff, json_conf, "startdiff");
 	json_get_int64(&ckp->maxdiff, json_conf, "maxdiff");
@@ -1041,8 +1083,7 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->maxclients, json_conf, "maxclients");
 	arr_val = json_object_get(json_conf, "proxy");
 	if (arr_val && json_is_array(arr_val)) {
-		int arr_size = json_array_size(arr_val);
-
+		arr_size = json_array_size(arr_val);
 		if (arr_size)
 			parse_proxies(ckp, arr_val, arr_size);
 	}
@@ -1342,6 +1383,8 @@ int main(int argc, char **argv)
 		ckp.startdiff = 42;
 	if (!ckp.logdir)
 		ckp.logdir = strdup("logs");
+	if (!ckp.serverurls)
+		ckp.serverurl = ckzalloc(sizeof(char *));
 	if (ckp.proxy && !ckp.proxies)
 		quit(0, "No proxy entries found in config file %s", ckp.config);
 
