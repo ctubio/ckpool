@@ -279,13 +279,13 @@ typedef struct proc_instance proc_instance_t;
 
 
 void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line);
-#define json_check(val, err) _json_check(val, err,  __FILE__, __func__, __LINE__)
+#define json_check(VAL, ERR) _json_check(VAL, ERR,  __FILE__, __func__, __LINE__)
 
 /* Check and pack json */
-#define JSON_CPACK(val, ...) do { \
-	json_error_t err; \
-	val = json_pack_ex(&err, 0, ##__VA_ARGS__); \
-	json_check(val, &err); \
+#define JSON_CPACK(VAL, ...) do { \
+	json_error_t ERR; \
+	VAL = json_pack_ex(&ERR, 0, ##__VA_ARGS__); \
+	json_check(VAL, &ERR); \
 } while (0)
 
 /* No error checking with these, make sure we know they're valid already! */
