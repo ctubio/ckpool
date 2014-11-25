@@ -2518,7 +2518,8 @@ out:
 	if (!share) {
 		val = json_object();
 		json_set_int(val, "clientid", client->id);
-		json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
+		if (!CKP_STANDALONE(ckp))
+			json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
 		json_set_string(val, "enonce1", client->enonce1);
 		json_set_int(val, "workinfoid", current_workbase->id);
 		json_set_string(val, "workername", client->workername);
