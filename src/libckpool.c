@@ -509,7 +509,7 @@ int bind_socket(char *url, char *port)
 
 	if (getaddrinfo(url, port, &hints, &servinfo) != 0) {
 		LOGWARNING("Failed to resolve (?wrong URL) %s:%s", url, port);
-		goto out;
+		return sockd;
 	}
 	for (p = servinfo; p != NULL; p = p->ai_next) {
 		sockd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
@@ -529,6 +529,7 @@ int bind_socket(char *url, char *port)
 	}
 
 out:
+	freeaddrinfo(servinfo);
 	return sockd;
 }
 
