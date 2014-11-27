@@ -30,6 +30,7 @@
 #include <time.h>
 #include <math.h>
 #include <poll.h>
+#include <arpa/inet.h>
 
 #include "libckpool.h"
 #include "sha2.h"
@@ -403,6 +404,30 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 	*sockaddr_port = port;
 	*sockaddr_url = url_address;
 
+	return true;
+}
+
+/* Convert a sockaddr structure into a url and port. URL should be a string of
+ * INET6_ADDRSTRLEN size */
+bool url_from_sockaddr(const struct sockaddr *addr, char *url, int *port_no)
+{
+	switch(addr->sa_family) {
+		const struct sockaddr_in *inet4_in;
+		const struct sockaddr_in6 *inet6_in;
+
+		case AF_INET:
+			inet4_in = (struct sockaddr_in *)url;
+			inet_ntop(AF_INET, &inet4_in->sin_addr, url, INET6_ADDRSTRLEN);
+			*port_no = htons(inet4_in->sin_port);
+			break;
+		case AF_INET6:
+			inet6_in = (struct sockaddr_in6 *)url;
+			inet_ntop(AF_INET6, &inet6_in->sin6_addr, url, INET6_ADDRSTRLEN);
+			*port_no = htons(inet6_in->sin6_port);
+			break;
+		default:
+			return false;
+	}
 	return true;
 }
 
