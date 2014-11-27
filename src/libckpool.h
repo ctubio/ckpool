@@ -425,6 +425,7 @@ static inline bool sock_timeout(void)
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);
 bool url_from_sockaddr(const struct sockaddr *addr, char *url, char *port);
 bool addrinfo_from_url(const char *url, const char *port, struct addrinfo *addrinfo);
+bool url_from_serverurl(char *serverurl, char *newurl, char *newport);
 bool url_from_socket(const int sockd, char *url, char *port);
 
 void keep_sockalive(int fd);

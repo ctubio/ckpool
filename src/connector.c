@@ -70,8 +70,6 @@ struct connector_data {
 
 	/* Array of server fds */
 	int *serverfd;
-	/* Number of server fds */
-	int serverfds;
 	/* All time count of clients connected */
 	int nfds;
 
@@ -358,8 +356,8 @@ reparse:
 void *receiver(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
+	int ret, epfd, i, serverfds;
 	struct epoll_event event;
-	int ret, epfd, i;
 
 	rename_proc("creceiver");
 
@@ -368,8 +366,9 @@ void *receiver(void *arg)
 		LOGEMERG("FATAL: Failed to create epoll in receiver");
 		return NULL;
 	}
+	serverfds = cdata->ckp->serverurls;
 	/* Add all the serverfds to the epoll */
-	for (i = 0; i < cdata->serverfds; i++) {
+	for (i = 0; i < serverfds; i++) {
 		/* The small values will be easily identifiable compared to
 		 * pointers */
 		event.data.u64 = i;
@@ -399,7 +398,7 @@ void *receiver(void *arg)
 		}
 		if (unlikely(!ret))
 			continue;
-		if (event.data.u64 < (uint64_t)cdata->serverfds) {
+		if (event.data.u64 < (uint64_t)serverfds) {
 			ret = accept_client(cdata, epfd, event.data.u64);
 			if (unlikely(ret < 0)) {
 				LOGEMERG("FATAL: Failed to accept_client in receiver");
@@ -726,7 +725,7 @@ retry:
 		int fdno = -1;
 
 		sscanf(buf, "getxfd%d", &fdno);
-		if (fdno > -1 && fdno < cdata->serverfds)
+		if (fdno > -1 && fdno < ckp->serverurls)
 			send_fd(cdata->serverfd[fdno], sockd);
 	} else
 		LOGWARNING("Unhandled connector message: %s", buf);
@@ -740,7 +739,6 @@ out:
 int connector(proc_instance_t *pi)
 {
 	cdata_t *cdata = ckzalloc(sizeof(cdata_t));
-	char *url = NULL, *port = NULL;
 	ckpool_t *ckp = pi->ckp;
 	int sockd, ret = 0, i;
 	const int on = 1;
@@ -755,19 +753,11 @@ int connector(proc_instance_t *pi)
 	else
 		cdata->serverfd = ckalloc(sizeof(int *) * ckp->serverurls);
 
-	for (i = 0; i < ckp->serverurls; i++) {
-		if (!ckp->oldconnfd[i])
-			break;
-		cdata->serverfd[i] = ckp->oldconnfd[i];
-		cdata->serverfds++;
-	}
-
-	if (!cdata->serverfds && !ckp->serverurls) {
-		/* No serverurls have been specified and no sockets have been
-		 * inherited. Bind to all interfaces on default sockets. */
+	if (!ckp->serverurls) {
+		/* No serverurls have been specified. Bind to all interfaces
+		 * on default sockets. */
 		struct sockaddr_in serv_addr;
 
-		cdata->serverfds = 1;
 		sockd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockd < 0) {
 			LOGERR("Connector failed to open socket");
@@ -798,24 +788,35 @@ int connector(proc_instance_t *pi)
 		}
 		cdata->serverfd[0] = sockd;
 	} else {
-		for ( ; cdata->serverfds < ckp->serverurls; cdata->serverfds++) {
-			char *serverurl = ckp->serverurl[cdata->serverfds];
+		for (i = 0; i < ckp->serverurls; i++) {
+			char oldurl[INET6_ADDRSTRLEN], oldport[8];
+			char newurl[INET6_ADDRSTRLEN], newport[8];
+			char *serverurl = ckp->serverurl[i];
 
-			if (!extract_sockaddr(serverurl, &url, &port)) {
-				LOGWARNING("Failed to extract server address from %s", serverurl);
+			if (!url_from_serverurl(serverurl, newurl, newport)) {
+				LOGWARNING("Failed to extract resolved url from %s", serverurl);
 				ret = 1;
 				goto out;
 			}
+			sockd = ckp->oldconnfd[i];
+			if (url_from_socket(sockd, oldurl, oldport)) {
+				if (strcmp(newurl, oldurl) || strcmp(newport, oldport)) {
+					LOGWARNING("Handed over socket url %s:%s does not match config %s:%s, creating new socket",
+						   oldurl, oldport, newurl, newport);
+					Close(sockd);
+				}
+			}
+
 			do {
-				sockd = bind_socket(url, port);
+				if (sockd > 0)
+					break;
+				sockd = bind_socket(newurl, newport);
 				if (sockd > 0)
 					break;
 				LOGWARNING("Connector failed to bind to socket, retrying in 5s");
 				sleep(5);
 			} while (++tries < 25);
 
-			dealloc(url);
-			dealloc(port);
 			if (sockd < 0) {
 				LOGERR("Connector failed to bind to socket for 2 minutes");
 				ret = 1;
@@ -826,7 +827,7 @@ int connector(proc_instance_t *pi)
 				Close(sockd);
 				goto out;
 			}
-			cdata->serverfd[cdata->serverfds] = sockd;
+			cdata->serverfd[i] = sockd;
 		}
 	}
 

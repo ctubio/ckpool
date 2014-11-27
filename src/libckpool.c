@@ -342,6 +342,8 @@ void cksem_destroy(sem_t *sem)
 	sem_destroy(sem);
 }
 
+/* Extract just the url and port information from a url string, allocating
+ * heap memory for sockaddr_url and sockaddr_port. */
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 {
 	char *url_begin, *url_end, *ipv6_begin, *ipv6_end, *port_start = NULL;
@@ -418,12 +420,12 @@ bool url_from_sockaddr(const struct sockaddr *addr, char *url, char *port)
 		const struct sockaddr_in6 *inet6_in;
 
 		case AF_INET:
-			inet4_in = (struct sockaddr_in *)url;
+			inet4_in = (struct sockaddr_in *)addr;
 			inet_ntop(AF_INET, &inet4_in->sin_addr, url, INET6_ADDRSTRLEN);
 			port_no = htons(inet4_in->sin_port);
 			break;
 		case AF_INET6:
-			inet6_in = (struct sockaddr_in6 *)url;
+			inet6_in = (struct sockaddr_in6 *)addr;
 			inet_ntop(AF_INET6, &inet6_in->sin6_addr, url, INET6_ADDRSTRLEN);
 			port_no = htons(inet6_in->sin6_port);
 			break;
@@ -446,9 +448,37 @@ bool addrinfo_from_url(const char *url, const char *port, struct addrinfo *addri
 		return false;
 	if (!servinfo)
 		return false;
-	memcpy(addrinfo, servinfo->ai_addr, sizeof(struct addrinfo));
+	memcpy(addrinfo, servinfo->ai_addr, servinfo->ai_addrlen);
 	freeaddrinfo(servinfo);
 	return true;
+}
+
+/* Extract a resolved url and port from a serverurl string. newurl must be
+ * a string of at least INET6_ADDRSTRLEN and newport at least 6 bytes. */
+bool url_from_serverurl(char *serverurl, char *newurl, char *newport)
+{
+	char *url = NULL, *port = NULL;
+	struct addrinfo addrinfo;
+	bool ret = false;
+
+	if (!extract_sockaddr(serverurl, &url, &port)) {
+		LOGWARNING("Failed to extract server address from %s", serverurl);
+		goto out;
+	}
+	if (!addrinfo_from_url(url, port, &addrinfo)) {
+		LOGWARNING("Failed to extract addrinfo from url %s:%s", url, port);
+		goto out;
+	}
+	if (!url_from_sockaddr((const struct sockaddr *)&addrinfo, newurl, newport)) {
+		LOGWARNING("Failed to extract url from sockaddr for original url: %s:%s",
+			   url, port);
+		goto out;
+	}
+	ret = true;
+out:
+	dealloc(url);
+	dealloc(port);
+	return ret;
 }
 
 /* Convert a socket into a url and port. URL should be a string of
