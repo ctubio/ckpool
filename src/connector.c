@@ -359,7 +359,6 @@ void *receiver(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
 	struct epoll_event event;
-	bool maxconn = true;
 	int ret, epfd, i;
 
 	rename_proc("creceiver");
@@ -380,6 +379,12 @@ void *receiver(void *arg)
 			LOGEMERG("FATAL: Failed to add epfd %d to epoll_ctl", epfd);
 			return NULL;
 		}
+		/* When we first start we listen to as many connections as
+		 * possible. Once we start polling we drop the listen to the
+		 * minimum to effectively ratelimit how fast we can receive
+		 * connections. */
+		LOGDEBUG("Dropping listen backlog to 0");
+		listen(cdata->serverfd[i], 0);
 	}
 
 	while (42) {
@@ -392,19 +397,8 @@ void *receiver(void *arg)
 			LOGEMERG("FATAL: Failed to epoll_wait in receiver");
 			break;
 		}
-		if (unlikely(!ret)) {
-			if (unlikely(maxconn)) {
-				/* When we first start we listen to as many connections as
-				* possible. Once we stop receiving connections we drop the
-				* listen to the minimum to effectively ratelimit how fast we
-				* can receive connections. */
-				LOGDEBUG("Dropping listen backlog to 0");
-				maxconn = false;
-				for (i = 0; i < cdata->serverfds; i++)
-					listen(cdata->serverfd[i], 0);
-			}
+		if (unlikely(!ret))
 			continue;
-		}
 		if (event.data.u64 < (uint64_t)cdata->serverfds) {
 			ret = accept_client(cdata, epfd, event.data.u64);
 			if (unlikely(ret < 0)) {
