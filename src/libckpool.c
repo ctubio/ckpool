@@ -408,9 +408,11 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 }
 
 /* Convert a sockaddr structure into a url and port. URL should be a string of
- * INET6_ADDRSTRLEN size */
-bool url_from_sockaddr(const struct sockaddr *addr, char *url, int *port_no)
+ * INET6_ADDRSTRLEN size, port at least a string of 6 bytes */
+bool url_from_sockaddr(const struct sockaddr *addr, char *url, char *port)
 {
+	int port_no = 0;
+
 	switch(addr->sa_family) {
 		const struct sockaddr_in *inet4_in;
 		const struct sockaddr_in6 *inet6_in;
@@ -418,16 +420,17 @@ bool url_from_sockaddr(const struct sockaddr *addr, char *url, int *port_no)
 		case AF_INET:
 			inet4_in = (struct sockaddr_in *)url;
 			inet_ntop(AF_INET, &inet4_in->sin_addr, url, INET6_ADDRSTRLEN);
-			*port_no = htons(inet4_in->sin_port);
+			port_no = htons(inet4_in->sin_port);
 			break;
 		case AF_INET6:
 			inet6_in = (struct sockaddr_in6 *)url;
 			inet_ntop(AF_INET6, &inet6_in->sin6_addr, url, INET6_ADDRSTRLEN);
-			*port_no = htons(inet6_in->sin6_port);
+			port_no = htons(inet6_in->sin6_port);
 			break;
 		default:
 			return false;
 	}
+	sprintf(port, "%d", port_no);
 	return true;
 }
 
