@@ -350,8 +350,10 @@ bool ping_main(ckpool_t *ckp)
 {
 	char *buf;
 
+	if (unlikely(kill_pid(ckp->main.pid, 0)))
+		return false;
 	buf = send_recv_proc(&ckp->main, "ping");
-	if (!buf)
+	if (unlikely(!buf))
 		return false;
 	free(buf);
 	return true;
