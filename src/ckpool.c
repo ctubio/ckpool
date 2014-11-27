@@ -312,8 +312,8 @@ retry:
 			broadcast_proc(ckp, buf);
 			send_unix_msg(sockd, "success");
 		}
-	} else if (cmdmatch(buf, "getfd")) {
-		int connfd = send_procmsg(ckp->connector, "getfd");
+	} else if (cmdmatch(buf, "getxfd")) {
+		int connfd = send_procmsg(ckp->connector, buf);
 
 		if (connfd > 0) {
 			int newfd = get_fd(connfd);
@@ -1221,16 +1221,21 @@ static struct option long_options[] = {
 };
 #endif
 
-static void send_recv_path(const char *path, const char *msg)
+static bool send_recv_path(const char *path, const char *msg)
 {
 	int sockd = open_unix_client(path);
+	bool ret = false;
 	char *response;
 
 	send_unix_msg(sockd, msg);
 	response = recv_unix_msg(sockd);
-	LOGWARNING("Received: %s in response to %s request", response, msg);
-	dealloc(response);
+	if (response) {
+		ret = true;
+		LOGWARNING("Received: %s in response to %s request", response, msg);
+		dealloc(response);
+	}
 	Close(sockd);
+	return ret;
 }
 
 int main(int argc, char **argv)
@@ -1456,19 +1461,31 @@ int main(int argc, char **argv)
 	ckp.main.processname = strdup("main");
 	ckp.main.sockname = strdup("listener");
 	name_process_sockname(&ckp.main.us, &ckp.main);
+	ckp.oldconnfd = ckzalloc(sizeof(int *) * ckp.serverurls);
 	if (ckp.handover) {
-		int sockd = open_unix_client(ckp.main.us.path);
+		const char *path = ckp.main.us.path;
 
-		if (sockd > 0 && send_unix_msg(sockd, "getfd")) {
-			ckp.oldconnfd = get_fd(sockd);
-			Close(sockd);
+		if (send_recv_path(path, "ping")) {
+			for (i = 0; i < ckp.serverurls; i++) {
+				char getfd[16];
+				int sockd;
 
-			send_recv_path(ckp.main.us.path, "reject");
-			send_recv_path(ckp.main.us.path, "reconnect");
-			send_recv_path(ckp.main.us.path, "shutdown");
-
-			if (ckp.oldconnfd > 0)
-				LOGWARNING("Inherited old socket with new file descriptor %d!", ckp.oldconnfd);
+				snprintf(getfd, 15, "getxfd%d", i);
+				sockd = open_unix_client(path);
+				if (sockd < 1)
+					break;
+				if (!send_unix_msg(sockd, getfd))
+					break;
+				ckp.oldconnfd[i] = get_fd(sockd);
+				Close(sockd);
+				if (!ckp.oldconnfd[i])
+					break;
+				LOGWARNING("Inherited old server socket %d with new file descriptor %d!",
+					   i, ckp.oldconnfd[i]);
+			}
+			send_recv_path(path, "reject");
+			send_recv_path(path, "reconnect");
+			send_recv_path(path, "shutdown");
 		}
 	}
 

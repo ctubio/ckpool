@@ -722,8 +722,12 @@ retry:
 		}
 		passthrough_client(cdata, client);
 		dec_instance_ref(cdata, client);
-	} else if (cmdmatch(buf, "getfd")) {
-		send_fd(cdata->serverfd[0], sockd);
+	} else if (cmdmatch(buf, "getxfd")) {
+		int fdno = -1;
+
+		sscanf(buf, "getxfd%d", &fdno);
+		if (fdno > -1 && fdno < cdata->serverfds)
+			send_fd(cdata->serverfd[fdno], sockd);
 	} else
 		LOGWARNING("Unhandled connector message: %s", buf);
 	goto retry;
@@ -738,7 +742,7 @@ int connector(proc_instance_t *pi)
 	cdata_t *cdata = ckzalloc(sizeof(cdata_t));
 	char *url = NULL, *port = NULL;
 	ckpool_t *ckp = pi->ckp;
-	int sockd, ret = 0;
+	int sockd, ret = 0, i;
 	const int on = 1;
 	int tries = 0;
 
@@ -751,9 +755,10 @@ int connector(proc_instance_t *pi)
 	else
 		cdata->serverfd = ckalloc(sizeof(int *) * ckp->serverurls);
 
-	if (ckp->oldconnfd > 0) {
-		/* Only handing over the first interface socket for now */
-		cdata->serverfd[0] = ckp->oldconnfd;
+	for (i = 0; i < ckp->serverurls; i++) {
+		if (!ckp->oldconnfd[i])
+			break;
+		cdata->serverfd[i] = ckp->oldconnfd[i];
 		cdata->serverfds++;
 	}
 
