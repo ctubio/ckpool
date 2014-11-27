@@ -451,6 +451,23 @@ bool addrinfo_from_url(const char *url, const char *port, struct addrinfo *addri
 	return true;
 }
 
+/* Convert a socket into a url and port. URL should be a string of
+ * INET6_ADDRSTRLEN size, port at least a string of 6 bytes */
+bool url_from_socket(const int sockd, char *url, char *port)
+{
+	socklen_t addrlen = sizeof(struct sockaddr);
+	struct sockaddr addr;
+
+	if (sockd < 1)
+		return false;
+	if (getsockname(sockd, &addr, &addrlen))
+		return false;
+	if (!url_from_sockaddr(&addr, url, port))
+		return false;
+	return true;
+}
+
+
 void keep_sockalive(int fd)
 {
 	const int tcp_one = 1;
