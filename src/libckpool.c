@@ -434,6 +434,23 @@ bool url_from_sockaddr(const struct sockaddr *addr, char *url, char *port)
 	return true;
 }
 
+bool addrinfo_from_url(const char *url, const char *port, struct addrinfo *addrinfo)
+{
+	struct addrinfo *servinfo, hints;
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	servinfo = addrinfo;
+	if (getaddrinfo(url, port, &hints, &servinfo) != 0)
+		return false;
+	if (!servinfo)
+		return false;
+	memcpy(addrinfo, servinfo->ai_addr, sizeof(struct addrinfo));
+	freeaddrinfo(servinfo);
+	return true;
+}
+
 void keep_sockalive(int fd)
 {
 	const int tcp_one = 1;
