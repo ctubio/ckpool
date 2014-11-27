@@ -2969,7 +2969,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_STORE *mu_store;
 	USERS *users;
 	int32_t height;
-	int64_t workinfoid, end_workinfoid = 0;
+	int64_t block_workinfoid, end_workinfoid;
 	int64_t begin_workinfoid;
 	int64_t total_share_count, acc_share_count;
 	int64_t ss_count, wm_count, ms_count;
@@ -3054,10 +3054,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			block_extra = EMPTY;
 			break;
 	}
-	workinfoid = blocks->workinfoid;
-	w_item = find_workinfo(workinfoid);
+	block_workinfoid = blocks->workinfoid;
+	w_item = find_workinfo(block_workinfoid);
 	if (!w_item) {
-		snprintf(reply, siz, "ERR.missing workinfo %"PRId64, workinfoid);
+		snprintf(reply, siz, "ERR.missing workinfo %"PRId64, block_workinfoid);
 		return strdup(reply);
 	}
 	DATA_WORKINFO(workinfo, w_item);
@@ -3072,7 +3072,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		return strdup(reply);
 	}
 
-	begin_workinfoid = 0;
+	begin_workinfoid = end_workinfoid = 0;
 	total_share_count = acc_share_count = 0;
 	total_diff = 0;
 	ss_count = wm_count = ms_count = 0;
@@ -3080,7 +3080,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	mu_store = k_new_store(miningpayouts_free);
 	mu_root = new_ktree();
 
-	looksharesummary.workinfoid = workinfoid;
+	looksharesummary.workinfoid = block_workinfoid;
 	looksharesummary.userid = MAXID;
 	looksharesummary.workername = EMPTY;
 	INIT_SHARESUMMARY(&ss_look);
@@ -3150,7 +3150,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (total_diff < diff_want) {
 		lookworkmarkers.expirydate.tv_sec = default_expiry.tv_sec;
 		lookworkmarkers.expirydate.tv_usec = default_expiry.tv_usec;
-		lookworkmarkers.workinfoidend = begin_workinfoid;
+		if (begin_workinfoid != 0)
+			lookworkmarkers.workinfoidend = begin_workinfoid;
+		else
+			lookworkmarkers.workinfoidend = block_workinfoid + 1;
 		INIT_WORKMARKERS(&wm_look);
 		wm_look.data = (void *)(&lookworkmarkers);
 		wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
@@ -3196,13 +3199,13 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (total_diff == 0.0) {
 		snprintf(reply, siz,
 			 "ERR.total share diff 0 before workinfo %"PRId64,
-			 workinfoid);
+			 block_workinfoid);
 		goto shazbot;
 	}
 
 	wb_item = find_workinfo(begin_workinfoid);
 	if (!wb_item) {
-		snprintf(reply, siz, "ERR.missing begin workinfo record! %"PRId64, workinfoid);
+		snprintf(reply, siz, "ERR.missing begin workinfo record! %"PRId64, block_workinfoid);
 		goto shazbot;
 	}
 	DATA_WORKINFO(workinfo, wb_item);
@@ -3238,7 +3241,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "begin_workinfoid=%"PRId64"%c", begin_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "block_workinfoid=%"PRId64"%c", workinfoid, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "block_workinfoid=%"PRId64"%c", block_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "end_workinfoid=%"PRId64"%c", end_workinfoid, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
