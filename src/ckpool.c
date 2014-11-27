@@ -221,6 +221,21 @@ static int kill_pid(int pid, int sig)
 	return kill(pid, sig);
 }
 
+static int pid_wait(pid_t pid, int ms)
+{
+	tv_t start, now;
+	int ret;
+
+	tv_time(&start);
+	do {
+		ret = kill_pid(pid, 0);
+		if (ret)
+			break;
+		tv_time(&now);
+	} while (ms_tvdiff(&now, &start) < ms);
+	return ret;
+}
+
 static int send_procmsg(proc_instance_t *pi, const char *buf)
 {
 	char *path = pi->us.path;
@@ -676,18 +691,35 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		ret = fscanf(fp, "%d", &oldpid);
 		fclose(fp);
 		if (ret == 1 && !(kill_pid(oldpid, 0))) {
+			if (ckp->handover) {
+				if (pid_wait(oldpid, 500))
+					goto out;
+				LOGWARNING("Old process pid %d failed to shutdown cleanly, terminating");
+			}
 			if (!ckp->killold) {
 				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
 					 path, oldpid);
 				return false;
 			}
+			if (kill_pid(oldpid, 15)) {
+				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				return false;
+			}
+			LOGWARNING("Terminating old process %s pid %d", path, oldpid);
+			if (pid_wait(oldpid, 500))
+				goto out;
 			if (kill_pid(oldpid, 9)) {
 				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
 				return false;
 			}
-			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
+			LOGWARNING("Unable to terminate old process %s pid %d, killing", path, oldpid);
+			if (!pid_wait(oldpid, 500)) {
+				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				return false;
+			}
 		}
 	}
+out:
 	fp = fopen(path, "we");
 	if (!fp) {
 		LOGERR("Failed to open file %s", path);
@@ -749,11 +781,9 @@ static void childsighandler(int sig)
 	signal(sig, SIG_IGN);
 	signal(SIGTERM, SIG_IGN);
 	if (sig != SIGUSR1) {
-		pid_t ppid = getppid();
-
 		LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
-			sig, global_ckp->name);
-		kill_pid(ppid, sig);
+			   sig, global_ckp->name);
+		kill_pid(global_ckp->main.pid, sig);
 	}
 	exit(0);
 }
@@ -1436,7 +1466,6 @@ int main(int argc, char **argv)
 			send_recv_path(ckp.main.us.path, "reject");
 			send_recv_path(ckp.main.us.path, "reconnect");
 			send_recv_path(ckp.main.us.path, "shutdown");
-			cksleep_ms(500);
 
 			if (ckp.oldconnfd > 0)
 				LOGWARNING("Inherited old socket with new file descriptor %d!", ckp.oldconnfd);
