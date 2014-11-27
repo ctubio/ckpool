@@ -1443,9 +1443,18 @@ retry:
 
 	dealloc(buf);
 	buf = recv_unix_msg(sockd);
-	if (!buf) {
+	if (unlikely(!buf)) {
 		Close(sockd);
 		LOGWARNING("Failed to get message in stratum_loop");
+		goto retry;
+	}
+	if (likely(buf[0] == '{')) {
+		/* The bulk of the messages will be received json from the
+		 * connector so look for this first. The srecv_process frees
+		 * the buf heap ram */
+		ckmsgq_add(sdata->srecvs, buf);
+		Close(sockd);
+		buf = NULL;
 		goto retry;
 	}
 	if (cmdmatch(buf, "ping")) {
@@ -1488,11 +1497,8 @@ retry:
 		reconnect_clients(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
-	} else {
-		/* The srecv_process frees the buf heap ram */
-		ckmsgq_add(sdata->srecvs, buf);
-		buf = NULL;
-	}
+	} else
+		LOGWARNING("Unhandled stratifier message: %s", buf);
 	goto retry;
 
 out:
