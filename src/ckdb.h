@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.666"
+#define CKDB_VERSION DB_VERSION"-0.667"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -856,6 +856,12 @@ typedef struct optioncontrol {
 #if ((OPTIONCONTROL_HEIGHT+1) != START_POOL_HEIGHT)
 #error "START_POOL_HEIGHT must = (OPTIONCONTROL_HEIGHT+1)"
 #endif
+
+/* If set, then cmd_auth() will create unknown users
+ * It will use the optionvalue as the hex sha256 password hash
+ * A blank or random/invalid hash will mean the accounts created
+ *  are password locked, like an address account is */
+#define OPTIONCONTROL_AUTOADDUSER "AutoAddUser"
 
 extern K_TREE *optioncontrol_root;
 extern K_LIST *optioncontrol_free;

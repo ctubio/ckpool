@@ -1801,9 +1801,11 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
-	K_ITEM *i_enonce1, *i_useragent, *i_preauth;
+	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *u_item, *oc_item;
 	USERS *users = NULL;
+	char *username;
 	WORKERS *workers = NULL;
+	OPTIONCONTROL *optioncontrol;
 	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -1816,6 +1818,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
 	if (!i_username)
 		return strdup(reply);
+	username = transfer_data(i_username);
 
 	i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
 	if (!i_workername)
@@ -1837,8 +1840,23 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!i_preauth)
 		i_preauth = &auth_preauth;
 
+	K_RLOCK(optioncontrol_free);
+	oc_item = find_optioncontrol(OPTIONCONTROL_AUTOADDUSER, cd);
+	K_RUNLOCK(optioncontrol_free);
+	if (oc_item) {
+		K_RLOCK(users_free);
+		u_item = find_users(username);
+		K_RUNLOCK(users_free);
+		if (!u_item) {
+			DATA_OPTIONCONTROL(optioncontrol, oc_item);
+			u_item = users_add(conn, username, EMPTY,
+					   optioncontrol->optionvalue,
+					   by, code, inet, cd, trf_root);
+		}
+	}
+
 	ok = auths_add(conn, transfer_data(i_poolinstance),
-			     transfer_data(i_username),
+			     username,
 			     transfer_data(i_workername),
 			     transfer_data(i_clientid),
 			     transfer_data(i_enonce1),
