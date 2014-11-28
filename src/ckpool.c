@@ -782,6 +782,7 @@ static void launch_process(proc_instance_t *pi)
 		handler.sa_handler = &childsighandler;
 		handler.sa_flags = 0;
 		sigemptyset(&handler.sa_mask);
+		sigaction(SIGUSR1, &handler, NULL);
 		sigaction(SIGTERM, &handler, NULL);
 		signal(SIGINT, SIG_IGN);
 		signal(SIGQUIT, SIG_IGN);
