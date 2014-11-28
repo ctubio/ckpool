@@ -1946,7 +1946,7 @@ static void summarise_userstats()
 		//upgrade = false;
 
 		if (error[0])
-			LOGERR(error);
+			LOGERR("%s", error);
 	}
 
 	if (locked) {
