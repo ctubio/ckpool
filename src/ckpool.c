@@ -865,7 +865,7 @@ static void clean_up(ckpool_t *ckp)
 
 static void cancel_join_pthread(pthread_t *pth)
 {
-	if (!*pth)
+	if (!pth || !*pth)
 		return;
 	pthread_cancel(*pth);
 	join_pthread(*pth);
@@ -874,7 +874,7 @@ static void cancel_join_pthread(pthread_t *pth)
 
 static void cancel_pthread(pthread_t *pth)
 {
-	if (!*pth)
+	if (!pth || !*pth)
 		return;
 	pthread_cancel(*pth);
 	pth = NULL;
