@@ -488,7 +488,7 @@ K_ITEM *_optional_name(K_TREE *trf_root, char *name, int len, char *patt,
 		dlen = 0;
 	if (!mvalue || (int)dlen < len) {
 		if (!mvalue) {
-			LOGERR("%s(): field '%s' NULL (%d) from %s():%d",
+			LOGERR("%s(): field '%s' NULL (%d:%d) from %s():%d",
 				__func__, name, (int)dlen, len, func, line);
 		} else
 			snprintf(reply, siz, "failed.short %s", name);
@@ -1749,8 +1749,8 @@ void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 					 min_buf, max_buf);
 			}
 			LOGWARNING("%s() Auto-aged %"PRId64"(%"PRId64") "
-				   "share%s %d sharesummar%s %d workinfoid%s "
-				   "%s %s",
+				   "share%s %"PRId64" sharesummar%s %"PRId32
+				   " workinfoid%s %s %s",
 				   __func__,
 				   s_count_tot, s_diff_tot,
 				   (s_count_tot == 1) ? "" : "s",
@@ -2028,7 +2028,7 @@ void set_block_share_counters()
 				LOGEMERG("%s(): ERROR workmarker %"PRId64" has an invalid"
 					 " workinfoid range start=%"PRId64" end=%"PRId64
 					 " due to pool lastblock=%"PRId32
-					 " workinfoid="PRId64,
+					 " workinfoid=%"PRId64,
 					 __func__, workmarkers->markerid,
 					 workmarkers->workinfoidstart,
 					 workmarkers->workinfoidend,

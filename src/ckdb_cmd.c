@@ -1665,7 +1665,7 @@ awconf:
 		return strdup(reply);
 	}
 
-	LOGERR("%s.bad.cmd %s", cmd);
+	LOGERR("%s.bad.cmd %s", id, cmd);
 	return strdup("bad.cmd");
 }
 

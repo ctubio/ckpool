@@ -3160,7 +3160,7 @@ static void confirm_reload()
 	}
 	if (confirm_last_workinfoid == 0) {
 		LOGWARNING("%s(): there are no unconfirmed sharesummary records in the DB",
-			   __func__, buf);
+			   __func__);
 		return;
 	}
 
@@ -3230,7 +3230,7 @@ static void confirm_reload()
 				// last from default
 				if (confirm_last_workinfoid < confirm_first_workinfoid) {
 					LOGWARNING("%s(): no unconfirmed sharesummary records before start",
-						   __func__, buf);
+						   __func__);
 					return;
 				}
 				first_reason = "start range";
