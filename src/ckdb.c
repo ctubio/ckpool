@@ -2016,7 +2016,8 @@ static void *logger(__maybe_unused void *arg)
 	K_ITEM *lq_item;
 	LOGQUEUE *lq;
 	char buf[128];
-	tv_t now;
+	tv_t now, then;
+	int count;
 
 	pthread_detach(pthread_self());
 
@@ -2051,18 +2052,26 @@ static void *logger(__maybe_unused void *arg)
 	}
 
 	K_WLOCK(logqueue_free);
+	count = logqueue_store->count;
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstopping.%d.%ld,%ld",
-				   logqueue_store->count,
-				   now.tv_sec, now.tv_usec);
+				   count, now.tv_sec, now.tv_usec);
 	LOGFILE(buf);
-	if (logqueue_store->count)
+	if (count)
 		LOGERR("%s", buf);
 	lq_item = logqueue_store->head;
+	copy_tv(&then, &now);
 	while (lq_item) {
 		DATA_LOGQUEUE(lq, lq_item);
 		LOGFILE(lq->msg);
 		free(lq->msg);
+		count--;
+		setnow(&now);
+		if ((now.tv_sec - then.tv_sec) > 10) {
+			snprintf(buf, sizeof(buf), "logging ... %d", count);
+			LOGERR("%s", buf);
+			copy_tv(&then, &now);
+		}
 		lq_item = lq_item->next;
 	}
 	K_WUNLOCK(logqueue_free);
@@ -2073,6 +2082,7 @@ static void *logger(__maybe_unused void *arg)
 	snprintf(buf, sizeof(buf), "logstop.%ld,%ld",
 				   now.tv_sec, now.tv_usec);
 	LOGFILE(buf);
+	LOGWARNING("%s", buf);
 
 	return NULL;
 }
