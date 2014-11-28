@@ -881,7 +881,7 @@ static void cancel_pthread(pthread_t *pth)
 	pth = NULL;
 }
 
-static void __shutdown_children(ckpool_t *ckp, int sig)
+static void __shutdown_children(ckpool_t *ckp)
 {
 	int i;
 
@@ -894,15 +894,15 @@ static void __shutdown_children(ckpool_t *ckp, int sig)
 	for (i = 0; i < ckp->proc_instances; i++) {
 		pid_t pid = ckp->children[i]->pid;
 		if (!kill_pid(pid, 0))
-			kill_pid(pid, sig);
+			kill_pid(pid, SIGUSR1);
 	}
 }
 
-static void shutdown_children(ckpool_t *ckp, int sig)
+static void shutdown_children(ckpool_t *ckp)
 {
 	cancel_join_pthread(&ckp->pth_watchdog);
 
-	__shutdown_children(ckp, sig);
+	__shutdown_children(ckp);
 }
 
 static void sighandler(int sig)
@@ -915,10 +915,7 @@ static void sighandler(int sig)
 		   ckp->name, sig);
 	cancel_join_pthread(&ckp->pth_watchdog);
 
-	__shutdown_children(ckp, SIGUSR1);
-	/* Wait, then send SIGKILL */
-	cksleep_ms(100);
-	__shutdown_children(ckp, SIGKILL);
+	__shutdown_children(ckp);
 	cancel_pthread(&ckp->pth_listener);
 	exit(0);
 }
@@ -1516,7 +1513,7 @@ int main(int argc, char **argv)
 	if (ckp.pth_listener)
 		join_pthread(ckp.pth_listener);
 
-	shutdown_children(&ckp, SIGTERM);
+	shutdown_children(&ckp);
 	clean_up(&ckp);
 
 	return 0;
