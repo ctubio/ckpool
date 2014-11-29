@@ -1201,6 +1201,7 @@ static void *watchdog(void *arg)
 static struct option long_options[] = {
 	{"standalone",	no_argument,		0,	'A'},
 	{"config",	required_argument,	0,	'c'},
+	{"daemonise",	no_argument,		0,	'D'},
 	{"ckdb-name",	required_argument,	0,	'd'},
 	{"group",	required_argument,	0,	'g'},
 	{"handover",	no_argument,		0,	'H'},
@@ -1218,6 +1219,7 @@ static struct option long_options[] = {
 #else
 static struct option long_options[] = {
 	{"config",	required_argument,	0,	'c'},
+	{"daemonise",	no_argument,		0,	'D'},
 	{"group",	required_argument,	0,	'g'},
 	{"handover",	no_argument,		0,	'H'},
 	{"help",	no_argument,		0,	'h'},
@@ -1267,13 +1269,16 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:d:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
 				break;
 			case 'c':
 				ckp.config = optarg;
+				break;
+			case 'D':
+				ckp.daemon = true;
 				break;
 			case 'd':
 				ckp.ckdb_name = optarg;
@@ -1497,6 +1502,20 @@ int main(int argc, char **argv)
 			send_recv_path(path, "reject");
 			send_recv_path(path, "reconnect");
 			send_recv_path(path, "shutdown");
+		}
+	}
+
+	if (ckp.daemon) {
+		int fd;
+
+		if (fork())
+			exit(0);
+		setsid();
+		fd = open("/dev/null",O_RDWR, 0);
+		if (fd != -1) {
+			dup2(fd, STDIN_FILENO);
+			dup2(fd, STDOUT_FILENO);
+			dup2(fd, STDERR_FILENO);
 		}
 	}
 

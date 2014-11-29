@@ -141,6 +141,9 @@ struct ckpool_instance {
 	/* Are we running without ckdb */
 	bool standalone;
 
+	/* Should we daemonise the ckpool process */
+	bool daemon;
+
 	/* Bitcoind data */
 	int btcds;
 	char **btcdurl;
