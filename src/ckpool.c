@@ -881,6 +881,15 @@ static void cancel_pthread(pthread_t *pth)
 	pth = NULL;
 }
 
+static void wait_child(pid_t *pid)
+{
+	int ret;
+
+	do {
+		ret = waitpid(*pid, NULL, 0);
+	} while (ret != *pid);
+}
+
 static void __shutdown_children(ckpool_t *ckp)
 {
 	int i;
@@ -891,10 +900,14 @@ static void __shutdown_children(ckpool_t *ckp)
 	if (!ckp->children)
 		return;
 
+	/* Send the children a SIGUSR1 for them to shutdown gracefully, then
+	 * wait for them to exit and kill them if they don't for 500ms. */
 	for (i = 0; i < ckp->proc_instances; i++) {
 		pid_t pid = ckp->children[i]->pid;
-		if (!kill_pid(pid, 0))
-			kill_pid(pid, SIGUSR1);
+
+		kill_pid(pid, SIGUSR1);
+		if (!ck_completion_timeout(&wait_child, (void *)&pid, 500))
+			kill_pid(pid, SIGKILL);
 	}
 }
 
