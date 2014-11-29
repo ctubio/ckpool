@@ -399,13 +399,13 @@ void _cksem_init(sem_t *sem, const char *file, const char *func, const int line)
 void _cksem_post(sem_t *sem, const char *file, const char *func, const int line);
 void _cksem_wait(sem_t *sem, const char *file, const char *func, const int line);
 int _cksem_mswait(sem_t *sem, int ms, const char *file, const char *func, const int line);
-void cksem_reset(sem_t *sem);
-void cksem_destroy(sem_t *sem);
+void _cksem_destroy(sem_t *sem, const char *file, const char *func, const int line);
 
-#define cksem_init(_sem) _cksem_init(_sem, __FILE__, __func__, __LINE__)
-#define cksem_post(_sem) _cksem_post(_sem, __FILE__, __func__, __LINE__)
-#define cksem_wait(_sem) _cksem_wait(_sem, __FILE__, __func__, __LINE__)
-#define cksem_mswait(_sem, _timeout) _cksem_mswait(_sem, _timeout, __FILE__, __func__, __LINE__)
+#define cksem_init(SEM) _cksem_init(SEM, __FILE__, __func__, __LINE__)
+#define cksem_post(SEM) _cksem_post(SEM, __FILE__, __func__, __LINE__)
+#define cksem_wait(SEM) _cksem_wait(SEM, __FILE__, __func__, __LINE__)
+#define cksem_mswait(SEM, _timeout) _cksem_mswait(SEM, _timeout, __FILE__, __func__, __LINE__)
+#define cksem_destroy(SEM) _cksem_destroy(SEM, __FILE__, __func__, __LINE__)
 
 static inline bool sock_connecting(void)
 {

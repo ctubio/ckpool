@@ -141,7 +141,7 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	if (unlikely(fd < 0)) {
 		/* Handle these errors gracefully should we ever share this
 		 * socket */
-		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED || errno == EINTR) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED) {
 			LOGERR("Recoverable error on accept in accept_client");
 			return 0;
 		}

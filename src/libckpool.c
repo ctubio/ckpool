@@ -295,10 +295,9 @@ void _cksem_post(sem_t *sem, const char *file, const char *func, const int line)
 
 void _cksem_wait(sem_t *sem, const char *file, const char *func, const int line)
 {
-retry:
 	if (unlikely(sem_wait(sem))) {
 		if (errno == EINTR)
-			goto retry;
+			return;
 		quitfrom(1, file, func, line, "Failed to sem_wait errno=%d sem=0x%p", errno, sem);
 	}
 }
@@ -312,7 +311,6 @@ int _cksem_mswait(sem_t *sem, int ms, const char *file, const char *func, const 
 	tv_time(&tv_now);
 	tv_to_ts(&ts_now, &tv_now);
 	ms_to_ts(&abs_timeout, ms);
-retry:
 	timeraddspec(&abs_timeout, &ts_now);
 	ret = sem_timedwait(sem, &abs_timeout);
 
@@ -320,26 +318,17 @@ retry:
 		if (likely(errno == ETIMEDOUT))
 			return ETIMEDOUT;
 		if (errno == EINTR)
-			goto retry;
+			return EINTR;
 		quitfrom(1, file, func, line, "Failed to sem_timedwait errno=%d sem=0x%p", errno, sem);
 	}
 	return 0;
 }
 
-void cksem_reset(sem_t *sem)
+void _cksem_destroy(sem_t *sem, const char *file, const char *func, const int line)
 {
-	int ret;
 
-	do {
-		ret = sem_trywait(sem);
-		if (unlikely(ret < 0 && (errno == EINTR)))
-			ret = 0;
-	} while (!ret);
-}
-
-void cksem_destroy(sem_t *sem)
-{
-	sem_destroy(sem);
+	if (unlikely(sem_destroy(sem)))
+		quitfrom(1, file, func, line, "Failed to sem_destroy errno=%d sem=0x%p", errno, sem);
 }
 
 /* Extract just the url and port information from a url string, allocating
@@ -1587,11 +1576,7 @@ void cksleep_prepare_r(ts_t *ts)
 
 void nanosleep_abstime(ts_t *ts_end)
 {
-	int ret;
-
-	do {
-		ret = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts_end, NULL);
-	} while (ret == EINTR);
+	clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts_end, NULL);
 }
 
 void timeraddspec(ts_t *a, const ts_t *b)
