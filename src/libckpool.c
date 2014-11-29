@@ -78,6 +78,43 @@ void join_pthread(pthread_t thread)
 		pthread_join(thread, NULL);
 }
 
+struct ck_completion {
+	sem_t sem;
+	void (*fn)(void *fnarg);
+	void *fnarg;
+};
+
+static void *completion_thread(void *arg)
+{
+	struct ck_completion *ckc = (struct ck_completion *)arg;
+
+	ckc->fn(ckc->fnarg);
+	cksem_post(&ckc->sem);
+
+	return NULL;
+}
+
+bool ck_completion_timeout(void *fn, void *fnarg, int timeout)
+{
+	struct ck_completion ckc;
+	pthread_t pthread;
+	bool ret = false;
+
+	cksem_init(&ckc.sem);
+	ckc.fn = fn;
+	ckc.fnarg = fnarg;
+
+	pthread_create(&pthread, NULL, completion_thread, (void *)&ckc);
+
+	ret = cksem_mswait(&ckc.sem, timeout);
+	if (!ret)
+		pthread_join(pthread, NULL);
+	else
+		pthread_cancel(pthread);
+	return !ret;
+}
+
+
 /* Place holders for when we add lock debugging */
 #define GETLOCK(_lock, _file, _func, _line)
 #define GOTLOCK(_lock, _file, _func, _line)

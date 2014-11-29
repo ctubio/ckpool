@@ -362,6 +362,7 @@ static inline void _json_set_bool(json_t *val, const char *key, bool boolean,
 void rename_proc(const char *name);
 void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg);
 void join_pthread(pthread_t thread);
+bool ck_completion_timeout(void *fn, void *fnarg, int timeout);
 
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line);
