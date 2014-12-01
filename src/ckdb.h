@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.701"
+#define CKDB_VERSION DB_VERSION"-0.710"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -63,6 +63,13 @@
 
 #define STRINT(x) STRINT2(x)
 #define STRINT2(x) #x
+
+#define FREENULL(mem) do { \
+		if (mem) { \
+			free(mem); \
+			mem = NULL; \
+		} \
+	} while (0)
 
 // So they can fit into a 1 byte flag field
 #define TRUE_STR "Y"

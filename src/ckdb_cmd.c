@@ -2758,7 +2758,7 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 	ExecStatusType rescode;
 	PGresult *res;
 	bool conned = false;
-	K_ITEM *t_item, *oc_item = NULL;
+	K_ITEM *t_item, *oc_item = NULL, *ok = NULL;
 	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -2806,10 +2806,11 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 					}
 					begun = true;
 				}
-				if (optioncontrol_item_add(conn, oc_item, now, begun)) {
-					oc_item = NULL;
+				ok = optioncontrol_item_add(conn, oc_item, now, begun);
+				oc_item = NULL;
+				if (ok)
 					db++;
-				} else {
+				else {
 					reason = "DBERR";
 					goto rollback;
 				}
@@ -2863,11 +2864,14 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 			}
 			begun = true;
 		}
-		if (!optioncontrol_item_add(conn, oc_item, now, begun)) {
+		ok = optioncontrol_item_add(conn, oc_item, now, begun);
+		oc_item = NULL;
+		if (ok)
+			db++;
+		else {
 			reason = "DBERR";
 			goto rollback;
 		}
-		db++;
 	}
 rollback:
 	if (begun) {
@@ -2882,15 +2886,6 @@ rollback:
 	if (conned)
 		PQfinish(conn);
 	if (reason) {
-		if (oc_item) {
-			if (optioncontrol->optionvalue) {
-				free(optioncontrol->optionvalue);
-				optioncontrol->optionvalue = NULL;
-			}
-			K_WLOCK(optioncontrol_free);
-			k_add_head(optioncontrol_free, oc_item);
-			K_WUNLOCK(optioncontrol_free);
-		}
 		snprintf(reply, siz, "ERR.%s", reason);
 		LOGERR("%s.%s.%s", cmd, id, reply);
 		return strdup(reply);

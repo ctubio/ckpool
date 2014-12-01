@@ -1841,7 +1841,7 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *old_item, look;
-	OPTIONCONTROL *row;
+	OPTIONCONTROL *row, *optioncontrol;
 	char *upd, *ins;
 	bool ok = false;
 	char *params[4 + HISTORYDATECOUNT];
@@ -1935,13 +1935,17 @@ nostart:
 		free(params[n]);
 
 	K_WLOCK(optioncontrol_free);
-	if (!ok)
+	if (!ok) {
+		// Cleanup item passed in
+		FREENULL(row->optionvalue);
 		k_add_head(optioncontrol_free, oc_item);
-	else {
-		// Discard it
+	} else {
+		// Discard old
 		if (old_item) {
+			DATA_OPTIONCONTROL(optioncontrol, old_item);
 			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
 							       cmp_optioncontrol);
+			FREENULL(optioncontrol->optionvalue);
 			k_add_head(optioncontrol_free, old_item);
 		}
 		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
@@ -1962,7 +1966,6 @@ K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 {
 	K_ITEM *item;
 	OPTIONCONTROL *row;
-	bool ok = false;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -1990,19 +1993,7 @@ K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
-	ok = optioncontrol_item_add(conn, item, cd, begun);
-
-	if (!ok) {
-		free(row->optionvalue);
-		K_WLOCK(optioncontrol_free);
-		k_add_head(optioncontrol_free, item);
-		K_WUNLOCK(optioncontrol_free);
-	}
-
-	if (ok)
-		return item;
-	else
-		return NULL;
+	return optioncontrol_item_add(conn, item, cd, begun);
 }
 
 bool optioncontrol_fill(PGconn *conn)
@@ -2084,8 +2075,10 @@ bool optioncontrol_fill(PGconn *conn)
 		optioncontrol_root = add_to_ktree(optioncontrol_root, item, cmp_optioncontrol);
 		k_add_head(optioncontrol_store, item);
 	}
-	if (!ok)
+	if (!ok) {
+		FREENULL(row->optionvalue);
 		k_add_head(optioncontrol_free, item);
+	}
 
 	K_WUNLOCK(optioncontrol_free);
 	PQclear(res);
@@ -2148,10 +2141,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 	K_WLOCK(workinfo_free);
 	if (find_in_ktree(workinfo_root, item, cmp_workinfo, ctx)) {
-		free(row->transactiontree);
-		row->transactiontree = NULL;
-		free(row->merklehash);
-		row->merklehash = NULL;
+		FREENULL(row->transactiontree);
+		FREENULL(row->merklehash);
 		workinfoid = row->workinfoid;
 		k_add_head(workinfo_free, item);
 		K_WUNLOCK(workinfo_free);
@@ -2213,10 +2204,8 @@ unparam:
 
 	K_WLOCK(workinfo_free);
 	if (workinfoid == -1) {
-		free(row->transactiontree);
-		row->transactiontree = NULL;
-		free(row->merklehash);
-		row->merklehash = NULL;
+		FREENULL(row->transactiontree);
+		FREENULL(row->merklehash);
 		k_add_head(workinfo_free, item);
 	} else {
 		if (row->transactiontree && *(row->transactiontree)) {
@@ -3165,8 +3154,7 @@ bool sharesummary_fill(PGconn *conn)
 		DATA_SHARESUMMARY(row, item);
 		if (row->workername) {
 			LIST_MEM_SUB(sharesummary_free, row->workername);
-			free(row->workername);
-			row->workername = NULL;
+			FREENULL(row->workername);
 		}
 		k_add_head(sharesummary_free, item);
 	}

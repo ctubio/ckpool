@@ -1070,9 +1070,9 @@ static void free_workinfo_data(K_ITEM *item)
 
 	DATA_WORKINFO(workinfo, item);
 	if (workinfo->transactiontree)
-		free(workinfo->transactiontree);
+		FREENULL(workinfo->transactiontree);
 	if (workinfo->merklehash)
-		free(workinfo->merklehash);
+		FREENULL(workinfo->merklehash);
 }
 
 static void free_sharesummary_data(K_ITEM *item)
@@ -1082,8 +1082,7 @@ static void free_sharesummary_data(K_ITEM *item)
 	DATA_SHARESUMMARY(sharesummary, item);
 	if (sharesummary->workername) {
 		LIST_MEM_SUB(sharesummary_free, sharesummary->workername);
-		free(sharesummary->workername);
-		sharesummary->workername = NULL;
+		FREENULL(sharesummary->workername);
 	}
 	SET_CREATEBY(sharesummary_free, sharesummary->createby, EMPTY);
 	SET_CREATECODE(sharesummary_free, sharesummary->createcode, EMPTY);
@@ -1099,7 +1098,7 @@ static void free_optioncontrol_data(K_ITEM *item)
 
 	DATA_OPTIONCONTROL(optioncontrol, item);
 	if (optioncontrol->optionvalue)
-		free(optioncontrol->optionvalue);
+		FREENULL(optioncontrol->optionvalue);
 }
 
 static void free_markersummary_data(K_ITEM *item)
@@ -1108,7 +1107,7 @@ static void free_markersummary_data(K_ITEM *item)
 
 	DATA_MARKERSUMMARY(markersummary, item);
 	if (markersummary->workername)
-		free(markersummary->workername);
+		FREENULL(markersummary->workername);
 	SET_CREATEBY(markersummary_free, markersummary->createby, EMPTY);
 	SET_CREATECODE(markersummary_free, markersummary->createcode, EMPTY);
 	SET_CREATEINET(markersummary_free, markersummary->createinet, EMPTY);
@@ -1123,9 +1122,9 @@ static void free_workmarkers_data(K_ITEM *item)
 
 	DATA_WORKMARKERS(workmarkers, item);
 	if (workmarkers->poolinstance)
-		free(workmarkers->poolinstance);
+		FREENULL(workmarkers->poolinstance);
 	if (workmarkers->description)
-		free(workmarkers->description);
+		FREENULL(workmarkers->description);
 }
 
 static void free_marks_data(K_ITEM *item)
@@ -1134,11 +1133,11 @@ static void free_marks_data(K_ITEM *item)
 
 	DATA_MARKS(marks, item);
 	if (marks->poolinstance && marks->poolinstance != EMPTY)
-		free(marks->poolinstance);
+		FREENULL(marks->poolinstance);
 	if (marks->description && marks->description != EMPTY)
-		free(marks->description);
+		FREENULL(marks->description);
 	if (marks->extra && marks->extra != EMPTY)
-		free(marks->extra);
+		FREENULL(marks->extra);
 }
 
 #define FREE_TREE(_tree) \
@@ -1473,7 +1472,7 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 				STRNCPY(transfer->name, json_key);
 			if (!ok || find_in_ktree(*trf_root, item, cmp_transfer, ctx)) {
 				if (transfer->mvalue != transfer->svalue)
-					free(transfer->mvalue);
+					FREENULL(transfer->mvalue);
 				k_add_head(transfer_free, item);
 			} else {
 				*trf_root = add_to_ktree(*trf_root, item, cmp_transfer);
@@ -1505,7 +1504,7 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 
 			if (find_in_ktree(*trf_root, item, cmp_transfer, ctx)) {
 				if (transfer->mvalue != transfer->svalue)
-					free(transfer->mvalue);
+					FREENULL(transfer->mvalue);
 				k_add_head(transfer_free, item);
 			} else {
 				*trf_root = add_to_ktree(*trf_root, item, cmp_transfer);
@@ -2038,7 +2037,7 @@ static void *logger(__maybe_unused void *arg)
 		while (lq_item) {
 			DATA_LOGQUEUE(lq, lq_item);
 			LOGFILE(lq->msg);
-			free(lq->msg);
+			FREENULL(lq->msg);
 
 			K_WLOCK(logqueue_free);
 			k_add_head(logqueue_free, lq_item);
@@ -2064,7 +2063,7 @@ static void *logger(__maybe_unused void *arg)
 	while (lq_item) {
 		DATA_LOGQUEUE(lq, lq_item);
 		LOGFILE(lq->msg);
-		free(lq->msg);
+		FREENULL(lq->msg);
 		count--;
 		setnow(&now);
 		if ((now.tv_sec - then.tv_sec) > 10) {
@@ -2330,8 +2329,7 @@ static void *socketer(__maybe_unused void *arg)
 						rep = malloc(siz);
 						snprintf(rep, siz, "%s.%ld.%s", id, now.tv_sec, ans);
 						send_unix_msg(sockd, rep);
-						free(ans);
-						ans = NULL;
+						FREENULL(ans);
 						switch (cmdnum) {
 							case CMD_AUTH:
 								STORELASTREPLY(auth);
@@ -2395,8 +2393,7 @@ static void *socketer(__maybe_unused void *arg)
 							rep = malloc(siz);
 							snprintf(rep, siz, "%s.%ld.%s", id, now.tv_sec, ans);
 							send_unix_msg(sockd, rep);
-							free(ans);
-							ans = NULL;
+							FREENULL(ans);
 							if (cmdnum == CMD_DSP)
 								free(rep);
 							else {
@@ -2429,10 +2426,8 @@ static void *socketer(__maybe_unused void *arg)
 							rep = malloc(siz);
 							snprintf(rep, siz, "%s.%ld.%s", id, now.tv_sec, ans);
 							send_unix_msg(sockd, rep);
-							free(ans);
-							ans = NULL;
-							free(rep);
-							rep = NULL;
+							FREENULL(ans);
+							FREENULL(rep);
 						}
 						break;
 					// Always queue (ok.queued)
@@ -2504,7 +2499,7 @@ static void *socketer(__maybe_unused void *arg)
 			while (item) {
 				DATA_TRANSFER(transfer, item);
 				if (transfer->mvalue != transfer->svalue)
-					free(transfer->mvalue);
+					FREENULL(transfer->mvalue);
 				item = item->next;
 			}
 			K_WLOCK(transfer_free);
@@ -2632,7 +2627,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			while (item) {
 				DATA_TRANSFER(transfer, item);
 				if (transfer->mvalue != transfer->svalue)
-					free(transfer->mvalue);
+					FREENULL(transfer->mvalue);
 				item = item->next;
 			}
 			K_WLOCK(transfer_free);
@@ -2728,8 +2723,7 @@ static bool reload_from(tv_t *start)
 		fp = fopen(filename, "re");
 		if (!fp) {
 			missingfirst = strdup(filename);
-			free(filename);
-			filename = NULL;
+			FREENULL(filename);
 			errno = 0;
 			missing_count = 1;
 			setnow(&now);
@@ -2753,19 +2747,16 @@ static bool reload_from(tv_t *start)
 				if (missing_count++ > 1)
 					free(missinglast);
 				missinglast = strdup(filename);
-				free(filename);
-				filename = NULL;
+				FREENULL(filename);
 			}
 			if (missing_count == 1)
 				LOGWARNING("%s(): skipped %s", __func__, missingfirst+rflen);
 			else {
 				LOGWARNING("%s(): skipped %d files from %s to %s",
 					   __func__, missing_count, missingfirst+rflen, missinglast+rflen);
-				free(missinglast);
-				missinglast = NULL;
+				FREENULL(missinglast);
 			}
-			free(missingfirst);
-			missingfirst = NULL;
+			FREENULL(missingfirst);
 		}
 	}
 
@@ -2793,10 +2784,7 @@ static bool reload_from(tv_t *start)
 	}
 
 	reloading = false;
-
-	free(reload_buf);
-	reload_buf = NULL;
-
+	FREENULL(reload_buf);
 	return ret;
 }
 
@@ -2828,7 +2816,7 @@ static void process_queued(PGconn *conn, K_ITEM *wq_item)
 	while (item) {
 		DATA_TRANSFER(transfer, item);
 		if (transfer->mvalue != transfer->svalue)
-			free(transfer->mvalue);
+			FREENULL(transfer->mvalue);
 		item = item->next;
 	}
 	K_WLOCK(transfer_free);
