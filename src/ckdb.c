@@ -2771,9 +2771,14 @@ static bool reload_from(tv_t *start)
 			   count, count == 1 ? "" : "s",
 			   filename);
 		total += count;
-		if (apipe)
+		if (apipe) {
 			pclose(fp);
-		else
+			if (count == 0) {
+				quithere(1, "ABORTING - No data returned from "
+					    "compressed file \"%s\"",
+					    filename);
+			}
+		} else
 			fclose(fp);
 		free(filename);
 		if (everyone_die || matched)
