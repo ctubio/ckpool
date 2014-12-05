@@ -36,7 +36,6 @@
 #elif defined (HAVE_POSTGRESQL_LIBPQ_FE_H)
 #include <postgresql/libpq-fe.h>
 #endif
-#include <bzlib.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -53,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.720"
+#define CKDB_VERSION DB_VERSION"-0.730"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
