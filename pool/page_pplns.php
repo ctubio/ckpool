@@ -42,10 +42,11 @@ function calctx($ans, $count, $miner_sat, $diffacc_total)
 	$payaddress = $ans['payaddress:'.$i];
 	if ($payaddress == 'none')
 	{
-		$len = strlen($username);
 		$c0 = substr($username, 0, 1);
+		$parts = explode('.', $username);
+		$len = strlen($parts[0]);
 		if (($c0 == '1' || $c0 == '3') && $len > 26 && $len < 37)
-			$payaddress = $username;
+			$payaddress = $parts[0];
 		else
 		{
 			if ($pay_sat > 0)

@@ -3390,42 +3390,71 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RLOCK(users_free);
 		u_item = find_userid(miningpayouts->userid);
 		K_RUNLOCK(users_free);
-		if (u_item) {
-			K_ITEM *pa_item;
-			PAYMENTADDRESSES *pa;
-			char *payaddress;
-
-			// TODO: handle multiple addresses for one user
-			pa_item = find_paymentaddresses(miningpayouts->userid, pay_ctx);
-			if (pa_item) {
-				DATA_PAYMENTADDRESSES(pa, pa_item);
-				payaddress = pa->payaddress;
-			} else
-				payaddress = "none";
-
-			DATA_USERS(users, u_item);
-			snprintf(tmp, sizeof(tmp),
-				 "user:%d=%s%cpayaddress:%d=%s%c",
-				 rows, users->username, FLDSEP,
-				 rows, payaddress, FLDSEP);
-
-		} else {
-			snprintf(tmp, sizeof(tmp),
-				 "user:%d=%"PRId64"%cpayaddress:%d=none%c",
-				 rows, miningpayouts->userid, FLDSEP,
-				 rows, FLDSEP);
+		if (!u_item) {
+			snprintf(reply, siz,
+				 "ERR.unknown userid %"PRId64,
+				 miningpayouts->userid);
+			goto shazbot;
 		}
-		APPEND_REALLOC(buf, off, len, tmp);
 
-		snprintf(tmp, sizeof(tmp),
+		DATA_USERS(users, u_item);
+
+		K_ITEM *pa_item;
+		PAYMENTADDRESSES *pa;
+		int64_t paytotal;
+		double amount;
+		int count;
+
+		K_RLOCK(paymentaddresses_free);
+		pa_item = find_paymentaddresses(miningpayouts->userid, pay_ctx);
+		if (pa_item) {
+			paytotal = 0;
+			DATA_PAYMENTADDRESSES(pa, pa_item);
+			while (pa_item && CURRENT(&(pa->expirydate)) &&
+			       pa->userid == miningpayouts->userid) {
+				paytotal += pa->payratio;
+				pa_item = prev_in_ktree(pay_ctx);
+				DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
+			}
+			count = 0;
+			pa_item = find_paymentaddresses(miningpayouts->userid, pay_ctx);
+			DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
+			while (pa_item && CURRENT(&(pa->expirydate)) &&
+			       pa->userid == miningpayouts->userid) {
+				amount = (double)(miningpayouts->amount) *
+					 (double)pa->payratio / (double)paytotal;
+
+				snprintf(tmp, sizeof(tmp),
+					 "user:%d=%s.%d%cpayaddress:%d=%s%c",
+					 rows, users->username, ++count, FLDSEP,
+					 rows, pa->payaddress, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "diffacc_user:%d=%.1f%c",
+					 rows, amount, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				rows++;
+
+				pa_item = prev_in_ktree(pay_ctx);
+				DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
+			}
+			K_RUNLOCK(paymentaddresses_free);
+		} else {
+			K_RUNLOCK(paymentaddresses_free);
+			snprintf(tmp, sizeof(tmp),
+				 "user:%d=%s.0%cpayaddress:%d=%s%c",
+				 rows, users->username, FLDSEP,
+				 rows, "none", FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp),
 				 "diffacc_user:%d=%"PRId64"%c",
 				 rows,
 				 miningpayouts->amount,
 				 FLDSEP);
-		APPEND_REALLOC(buf, off, len, tmp);
-
+			APPEND_REALLOC(buf, off, len, tmp);
+			rows++;
+		}
 		mu_item = next_in_ktree(ctx);
-		rows++;
 	}
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
