@@ -281,9 +281,9 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
  return $pg;
 }
 #
-function show_pplns($page, $menu, $name, $user)
+function show_pplns($info, $page, $menu, $name, $user)
 {
- gopage(NULL, 'dopplns', $page, $menu, $name, $user);
+ gopage($info, NULL, 'dopplns', $page, $menu, $name, $user);
 }
 #
 ?>

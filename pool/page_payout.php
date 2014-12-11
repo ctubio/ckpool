@@ -13,9 +13,9 @@ function dopayout($data, $user)
  return $pg;
 }
 #
-function show_payout($page, $menu, $name, $user)
+function show_payout($info, $page, $menu, $name, $user)
 {
- gopage(NULL, 'dopayout', $page, $menu, $name, $user);
+ gopage($info, NULL, 'dopayout', $page, $menu, $name, $user);
 }
 #
 ?>

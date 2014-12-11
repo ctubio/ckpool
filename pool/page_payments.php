@@ -34,9 +34,9 @@ function dopayments($data, $user)
  return $pg;
 }
 #
-function show_payments($page, $menu, $name, $user)
+function show_payments($info, $page, $menu, $name, $user)
 {
- gopage(NULL, 'dopayments', $page, $menu, $name, $user);
+ gopage($info, NULL, 'dopayments', $page, $menu, $name, $user);
 }
 #
 ?>

@@ -8,6 +8,12 @@ include_once('base.php');
 #
 function process($p, $user, $menu)
 {
+ $info = homeInfo($user);
+ if (is_array($info) && isset($info['u_multiaddr']))
+ {
+	if (isset($menu['Account']))
+		$menu['Account']['Addresses'] = 'addrmgt';
+ }
  if ($user == 'Kano' || $user == 'ckolivas' || $user == 'wvr2' || $user == 'aphorise')
  {
 	$menu['Admin']['ckp'] = 'ckp';
@@ -26,9 +32,9 @@ function process($p, $user, $menu)
 			}
 
  if ($page === '')
-	showPage('index', $menu, '', $user);
+	showPage($info, 'index', $menu, '', $user);
  else
-	showPage($page, $menu, $n, $user);
+	showPage($info, $page, $menu, $n, $user);
 }
 #
 function def_menu()
@@ -80,11 +86,11 @@ function check()
  {
 	$p = getparam('k', true);
 	if ($p == 'reset')
-		showPage('reset', $dmenu, '', $who);
+		showPage(NULL, 'reset', $dmenu, '', $who);
 	else
 	{
 		if (requestRegister() == true)
-			showPage('reg', $dmenu, '', $who);
+			showPage(NULL, 'reg', $dmenu, '', $who);
 		else
 		{
 			$p = getparam('k', true);

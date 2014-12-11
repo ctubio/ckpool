@@ -163,11 +163,11 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 {
 	K_ITEM *i_username, *i_passwordhash, *i_rows, *i_address, *i_ratio;
 	K_ITEM *i_email, *u_item, *pa_item;
-	char *email;
+	char *email, *address;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	char tmp[1024];
-	PAYMENTADDRESSES *paymentaddresses;
+	PAYMENTADDRESSES *row;
 	K_STORE *pa_store = NULL;
 	K_TREE_CTX ctx[1];
 	USERS *users;
@@ -212,26 +212,24 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 
 			K_RLOCK(paymentaddresses_free);
 			pa_item = find_paymentaddresses(users->userid, ctx);
+			rows = 0;
 			if (pa_item) {
-				DATA_PAYMENTADDRESSES(paymentaddresses, pa_item);
-				while (pa_item && CURRENT(&(paymentaddresses->expirydate)) &&
-				       paymentaddresses->userid == users->userid) {
+				DATA_PAYMENTADDRESSES(row, pa_item);
+				while (pa_item && CURRENT(&(row->expirydate)) &&
+				       row->userid == users->userid) {
 					snprintf(tmp, sizeof(tmp), "addr:%d=%s%c",
-						 rows, paymentaddresses->payaddress, FLDSEP);
+						 rows, row->payaddress, FLDSEP);
 					APPEND_REALLOC(answer, off, len, tmp);
 					snprintf(tmp, sizeof(tmp), "ratio:%d=%d%c",
-						 rows, paymentaddresses->payratio, FLDSEP);
+						 rows, row->payratio, FLDSEP);
 					APPEND_REALLOC(answer, off, len, tmp);
 					rows++;
 
 					pa_item = prev_in_ktree(ctx);
-					DATA_PAYMENTADDRESSES_NULL(paymentaddresses, pa_item);
+					DATA_PAYMENTADDRESSES_NULL(row, pa_item);
 				}
-				K_RUNLOCK(paymentaddresses_free);
-			} else {
-				K_RUNLOCK(paymentaddresses_free);
-				rows = 0;
 			}
+			K_RUNLOCK(paymentaddresses_free);
 
 			snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 				 rows, FLDSEP,
@@ -306,12 +304,22 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 							reason = "Invalid address";
 							goto struckout;
 						}
+						address = transfer_data(i_address);
+						pa_item = pa_store->head;
+						while (pa_item) {
+							DATA_PAYMENTADDRESSES(row, pa_item);
+							if (strcmp(row->payaddress, address) == 0) {
+								K_WUNLOCK(paymentaddresses_free);
+								reason = "Duplicate address";
+								goto struckout;
+							}
+							pa_item = pa_item->next;
+						}
 						pa_item = k_unlink_head(paymentaddresses_free);
-						DATA_PAYMENTADDRESSES(paymentaddresses, pa_item);
-						bzero(paymentaddresses, sizeof(*paymentaddresses));
-						STRNCPY(paymentaddresses->payaddress,
-							transfer_data(i_address));
-						paymentaddresses->payratio = ratio;
+						DATA_PAYMENTADDRESSES(row, pa_item);
+						bzero(row, sizeof(*row));
+						STRNCPY(row->payaddress, address);
+						row->payratio = ratio;
 						k_add_head(pa_store, pa_item);
 					}
 					K_WUNLOCK(paymentaddresses_free);
@@ -328,8 +336,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			if (pa_store && pa_store->count > 0) {
 				pa_item = pa_store->head;
 				while (pa_item) {
-					DATA_PAYMENTADDRESSES(paymentaddresses, pa_item);
-					if (!btc_valid_address(paymentaddresses->payaddress)) {
+					DATA_PAYMENTADDRESSES(row, pa_item);
+					if (!btc_valid_address(row->payaddress)) {
 						reason = "Invalid BTC address";
 						goto struckout;
 					}

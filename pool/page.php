@@ -436,7 +436,7 @@ function pgfoot()
  return $foot;
 }
 #
-function gopage($data, $pagefun, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
+function gopage($info, $data, $pagefun, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
 {
  global $dbg, $stt;
  global $page_scripts;
@@ -449,7 +449,8 @@ function gopage($data, $pagefun, $page, $menu, $name, $user, $ispage = true, $do
  else
 	$pg = '';
 
- $info = homeInfo($user);
+ if ($info === NULL)
+	$info = homeInfo($user);
 
  if ($ispage == true)
  {
