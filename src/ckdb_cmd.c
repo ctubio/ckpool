@@ -2134,6 +2134,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
 	K_ITEM *i_username, *u_item, *b_item, *p_item, *us_item, look;
+	K_ITEM *ua_item, *pa_item;
 	double u_hashrate5m, u_hashrate1hr;
 	char reply[1024], tmp[1024], *buf;
 	size_t siz = sizeof(reply);
@@ -2274,9 +2275,34 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RUNLOCK(users_free);
 	}
 
+	// User info to add to or affect the web site display
+	if (u_item) {
+		DATA_USERS(users, u_item);
+		K_RLOCK(useratts_free);
+		ua_item = find_useratts(users->userid, USER_MULTI_PAYOUT);
+		K_RUNLOCK(useratts_free);
+		if (ua_item) {
+			snprintf(tmp, sizeof(tmp),
+				 "u_multiaddr=1%c", FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+		if (!(*(users->emailaddress))) {
+			snprintf(tmp, sizeof(tmp),
+				 "u_noemail=1%c", FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+		K_RLOCK(paymentaddresses_free);
+		pa_item = find_paymentaddresses(users->userid, ctx);
+		K_RUNLOCK(paymentaddresses_free);
+		if (!pa_item) {
+			snprintf(tmp, sizeof(tmp),
+				 "u_nopayaddr=1%c", FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+	}
+
 	has_uhr = false;
 	if (p_item && u_item) {
-		DATA_USERS(users, u_item);
 		K_TREE *userstats_workername_root = new_ktree();
 		u_hashrate5m = u_hashrate1hr = 0.0;
 		u_elapsed = -1;

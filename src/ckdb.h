@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.740"
+#define CKDB_VERSION DB_VERSION"-0.741"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -708,6 +708,9 @@ typedef struct useratts {
 extern K_TREE *useratts_root;
 extern K_LIST *useratts_free;
 extern K_STORE *useratts_store;
+
+// This att means the user uses multiple % based payout addresses
+#define USER_MULTI_PAYOUT "PayAddresses"
 
 // WORKERS
 typedef struct workers {
