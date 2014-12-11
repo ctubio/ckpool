@@ -102,8 +102,9 @@ function dosettings($data, $user)
 	break;
   case 'Address':
 	$addr = getparam('baddr', false);
+	$addrarr = array(array('addr' => $addr));
 	$pass = getparam('pass', false);
-	$ans = userSettings($user, null, $addr, $pass);
+	$ans = userSettings($user, null, $addrarr, $pass);
 	$check = true;
 	break;
   case 'Password':
@@ -139,8 +140,9 @@ function dosettings($data, $user)
 	$email = $ans['email'];
  else
 	$email = '';
- if (isset($ans['addr']))
-	$addr = $ans['addr'];
+ // Use the first one - updating will expire all others
+ if (isset($ans['rows']) and $ans['rows'] > 0)
+	$addr = $ans['addr:0'];
  else
 	$addr = '';
  $pg = settings($data, $user, $email, $addr, $err);

@@ -180,7 +180,17 @@ function userSettings($user, $email = null, $addr = null, $pass = null)
 	$flds['email'] = $email;
  if ($addr != null)
  {
-	$flds['address'] = $addr;
+	$rows = count($addr);
+	$i = 0;
+	foreach ($addr as $ar)
+	{
+		$flds['address:'.$i] = $ar['addr'];
+		// optional - missing = use default
+		if (isset($ar['ratio']))
+			$flds['ratio:'.$i] = $ar['ratio'];
+		$i++;
+	}
+	$flds['rows'] = $rows;
 	$tmo = 3; # 3x the timeout
  }
  if ($pass != null)

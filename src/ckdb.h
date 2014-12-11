@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.731"
+#define CKDB_VERSION DB_VERSION"-0.740"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -751,16 +751,20 @@ typedef struct paymentaddresses {
 	char payaddress[TXT_BIG+1];
 	int32_t payratio;
 	HISTORYDATECONTROLFIELDS;
+	bool match; // Non-db field
 } PAYMENTADDRESSES;
 
 #define ALLOC_PAYMENTADDRESSES 1024
 #define LIMIT_PAYMENTADDRESSES 0
 #define INIT_PAYMENTADDRESSES(_item) INIT_GENERIC(_item, paymentaddresses)
 #define DATA_PAYMENTADDRESSES(_var, _item) DATA_GENERIC(_var, _item, paymentaddresses, true)
+#define DATA_PAYMENTADDRESSES_NULL(_var, _item) DATA_GENERIC(_var, _item, paymentaddresses, false)
 
 extern K_TREE *paymentaddresses_root;
 extern K_LIST *paymentaddresses_free;
 extern K_STORE *paymentaddresses_store;
+
+#define PAYRATIODEF 1000000
 
 // PAYMENTS
 typedef struct payments {
@@ -1553,7 +1557,8 @@ extern K_ITEM *new_default_worker(PGconn *conn, bool update, int64_t userid, cha
 				  char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern void dsp_paymentaddresses(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_paymentaddresses(int64_t userid);
+extern K_ITEM *find_paymentaddresses(int64_t userid, K_TREE_CTX *ctx);
+extern K_ITEM *find_one_payaddress(int64_t userid, char *payaddress, K_TREE_CTX *ctx);
 extern cmp_t cmp_payments(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_optioncontrol(char *optionname, tv_t *now);
@@ -1695,9 +1700,9 @@ extern bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 			   char *idlenotificationtime, char *by, char *code,
 			   char *inet, tv_t *cd, K_TREE *trf_root, bool check);
 extern bool workers_fill(PGconn *conn);
-extern K_ITEM *paymentaddresses_set(PGconn *conn, int64_t userid, char *payaddress,
-					char *by, char *code, char *inet, tv_t *cd,
-					K_TREE *trf_root);
+extern bool paymentaddresses_set(PGconn *conn, int64_t userid, K_LIST *pa_store,
+				 char *by, char *code, char *inet, tv_t *cd,
+				 K_TREE *trf_root);
 extern bool paymentaddresses_fill(PGconn *conn);
 extern bool payments_fill(PGconn *conn);
 extern bool idcontrol_add(PGconn *conn, char *idname, char *idvalue, char *by,
