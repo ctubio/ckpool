@@ -50,7 +50,7 @@ function show_api($info, $page, $menu, $name, $user)
 	$ans = getWorkers($u);
 	if ($ans === false)
 		no_api($jfu);
-	$rep .= fldEncode($ans, 'rows', true);
+	$rep = fldEncode($ans, 'rows', true);
 	$rows = $ans['rows'];
 	$flds = explode(',', $ans['flds']);
 	$zeflds = '';
