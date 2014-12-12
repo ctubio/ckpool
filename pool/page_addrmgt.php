@@ -15,6 +15,19 @@ function addrmgtuser($data, $user, $err)
  $pg .= '<td class=dr>%</td>';
  $pg .= '</tr>';
 
+ # new row template for '+'
+ $pg .= '<tr class=hid id=bs>';
+ $pg .= '<td class=dl>';
+ $pg .= "<input type=text size=42 name='addr:' value=''>";
+ $pg .= '</td>';
+ $pg .= '<td class=dr>';
+ $pg .= "<input type=text size=6 name='ratio:' value='0' id=rat onchange='repc()'>";
+ $pg .= '</td>';
+ $pg .= '<td class=dr>';
+ $pg .= "<span id=per>0.00%</span>";
+ $pg .= '</td>';
+ $pg .= "</tr>\n";
+
  $ans = userSettings($user);
 
  $offset = 0;
@@ -29,25 +42,18 @@ function addrmgtuser($data, $user, $err)
 		else
 			$row = 'odd';
 
-		$pg .= "<tr class=$row";
-		if ($i == 0)
-			$pg .= ' id=bs';
-		$pg .= '>';
-
+		$pg .= "<tr class=$row>";
 		$addr = $ans['addr:'.$i];
 		$pg .= '<td class=dl>';
 		$pg .= "<input type=text size=42 name='addr:$i' value='$addr'>";
 		$pg .= '</td>';
-
 		$ratio = intval($ans['ratio:'.$i]);
 		$pg .= '<td class=dr>';
 		$pg .= "<input type=text size=6 name='ratio:$i' value='$ratio' id=rat$i onchange='repc()'>";
 		$pg .= '</td>';
-
 		$pg .= '<td class=dr>';
 		$pg .= "<span id=per$i>%</span>";
 		$pg .= '</td>';
-
 		$pg .= "</tr>\n";
 
 		$offset++;
@@ -68,18 +74,18 @@ function addrmgtuser($data, $user, $err)
 	$pg .= "<tr class=$row>";
 	$pg .= '<td colspan=3 class=dc>';
 	$pg .= 'Password: <input type=password name=pass size=20>';
-	$pg .= '&nbsp;<input type=submit name=OK value=OK></td></tr>';
+	$pg .= '&nbsp;<input type=submit name=OK value=Save></td></tr>';
  }
  $pg .= '<tr><td colspan=3 class=dc><font size=-1><span class=st1>*</span>';
- $pg .= ' You must enter your password<br>';
+ $pg .= ' You must enter your password to save changes<br>';
  $pg .= 'A ratio of 0, will remove the address from the payouts</font></td></tr>';
  $pg .= "</table><input type=hidden name=rows value=$count id=rows></form>\n";
 
  $pg .= "<script type='text/javascript'>\n";
  $pg .= "function adrw(){var p=document.getElementById('plus');";
  $pg .=  "var r=document.getElementById('rows');var c=parseInt(r.value);";
- $pg .=  "var bs=document.getElementById('bs');var n=bs.cloneNode(true);";
- $pg .=  "var ia=n.childNodes[0].firstChild;ia.name='addr:'+c;ia.value='';";
+ $pg .=  "var bs=document.getElementById('bs');var n=bs.cloneNode(true);n.id='z';";
+ $pg .=  "n.className='odd';var ia=n.childNodes[0].firstChild;ia.name='addr:'+c;ia.value='';";
  $pg .=  "var ir=n.childNodes[1].firstChild;ir.id='rat'+c;ir.name='ratio:'+c;ir.value='0';";
  $pg .=  "var ip=n.childNodes[2].firstChild;ip.id='per'+c;ip.innerHTML='0.00%';";
  $pg .=  "p.parentNode.insertBefore(n, p);";
@@ -101,7 +107,7 @@ function doaddrmgt($data, $user)
  $OK = getparam('OK', false);
  $count = getparam('rows', false);
  $pass = getparam('pass', false);
- if ($OK == 'OK' && !nuem($count) && !nuem($pass))
+ if ($OK == 'Save' && !nuem($count) && !nuem($pass))
  {
 	if ($count > 0 && $count < 1000)
 	{
@@ -116,7 +122,6 @@ function doaddrmgt($data, $user)
 		$ans = userSettings($user, null, $addrarr, $pass);
 		if ($ans['STATUS'] != 'ok')
 			$err = $ans['ERROR'];
-#$err = print_r($addrarr, true).$pass;
 	}
  }
 
