@@ -2,7 +2,12 @@
 #
 function dopayments($data, $user)
 {
+ $bc = 'https://blockchain.info/address/';
+ $addr1 = '1KzFJddTvK9TQWsmWFKYJ9fRx9QeSATyrT';
+
  $pg = '<h1>Payments</h1>';
+ $pg .= 'The payout transactions on blockchain are here:';
+ $pg .= " <a href='$bc$addr1' target=_blank>BTC</a><br><br>";
 
  $ans = getPayments($user);
 
