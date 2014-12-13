@@ -162,12 +162,12 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
 	K_ITEM *i_username, *i_passwordhash, *i_rows, *i_address, *i_ratio;
-	K_ITEM *i_email, *u_item, *pa_item;
+	K_ITEM *i_email, *u_item, *pa_item, *old_pa_item;
 	char *email, *address;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	char tmp[1024];
-	PAYMENTADDRESSES *row;
+	PAYMENTADDRESSES *row, *pa;
 	K_STORE *pa_store = NULL;
 	K_TREE_CTX ctx[1];
 	USERS *users;
@@ -337,7 +337,18 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				pa_item = pa_store->head;
 				while (pa_item) {
 					DATA_PAYMENTADDRESSES(row, pa_item);
-					if (!btc_valid_address(row->payaddress)) {
+					// Only EVER validate addresses once ... for now
+					old_pa_item = find_any_payaddress(row->payaddress);
+					if (old_pa_item) {
+						/* This test effectively means that
+						 * two users can never add the same
+						 * payout address */
+						DATA_PAYMENTADDRESSES(pa, old_pa_item);
+						if (pa->userid != users->userid) {
+							reason = "Unavailable BTC address";
+							goto struckout;
+						}
+					} else if (!btc_valid_address(row->payaddress)) {
 						reason = "Invalid BTC address";
 						goto struckout;
 					}

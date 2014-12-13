@@ -1164,6 +1164,28 @@ K_ITEM *find_one_payaddress(int64_t userid, char *payaddress, K_TREE_CTX *ctx)
 	return find_in_ktree(paymentaddresses_root, &look, cmp_paymentaddresses, ctx);
 }
 
+/* This will match any user that has the payaddress
+ * This avoids the bitcoind delay of rechecking an address
+ *  that has EVER been seen before
+ * However, also, cmd_userset() that uses it, effectively ensures
+ *  that 2 standard users, that mine to a username rather than
+ *  a bitcoin address, cannot ever use the same bitcoin address */
+K_ITEM *find_any_payaddress(char *payaddress)
+{
+	PAYMENTADDRESSES *pa;
+	K_TREE_CTX ctx[1];
+	K_ITEM *item;
+
+	item = first_in_ktree(paymentaddresses_root, ctx);
+	DATA_PAYMENTADDRESSES_NULL(pa, item);
+	while (item) {
+		if (strcmp(pa->payaddress, payaddress) == 0)
+			return item;
+		item = next_in_ktree(ctx);
+	}
+	return NULL;
+}
+
 // order by userid asc,paydate asc,payaddress asc,expirydate desc
 cmp_t cmp_payments(K_ITEM *a, K_ITEM *b)
 {

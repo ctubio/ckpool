@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.743"
+#define CKDB_VERSION DB_VERSION"-0.744"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1562,6 +1562,7 @@ extern void dsp_paymentaddresses(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_paymentaddresses(int64_t userid, K_TREE_CTX *ctx);
 extern K_ITEM *find_one_payaddress(int64_t userid, char *payaddress, K_TREE_CTX *ctx);
+extern K_ITEM *find_any_payaddress(char *payaddress);
 extern cmp_t cmp_payments(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_optioncontrol(char *optionname, tv_t *now);
