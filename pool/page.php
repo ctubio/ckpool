@@ -126,6 +126,7 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .title {background-color: #909090;}
 .even {background-color: #cccccc;}
 .odd {background-color: #a8a8a8;}
+.hid {display: none;}
 .dl {text-align: left; padding: 2px 8px;}
 .dr {text-align: right; padding: 2px 8px;}
 .dc {text-align: center; padding: 2px 8px;}
