@@ -88,6 +88,8 @@ function pghead($script_marker, $name)
 
  $head .= "<html><head><title>$page_title$name</title>";
  $head .= "<meta content='text/html; charset=iso-8859-1' http-equiv='Content-Type'>";
+ $head .= "<meta content='IE=edge' http-equiv='X-UA-Compatible'>";
+ $head .= "<meta content='width=device-width, initial-scale=1' name='viewport'>";
 
  $head .= "<script type='text/javascript'>\n";
  $head .= "function jst(){document.getElementById('jst').style.visibility='hidden';}\n";
@@ -95,9 +97,10 @@ function pghead($script_marker, $name)
 
  $head .= "<style type='text/css'>
 form {display: inline-block;}
-html, body {height: 100%; font-family:Arial, Verdana, sans-serif; font-size:12pt; background-color:#eff; text-align: center; background-repeat: no-repeat; background-position: center; }
+html, body {height: 100%; font-family:Arial, Verdana, sans-serif; font-size:12pt; background-color:#eeffff; text-align: center; background-repeat: no-repeat; background-position: center;}
 .page {min-height: 100%; height: auto !important; height: 100%; margin: 0 auto -50px; position: relative;}
 div.jst {color:red; font-weight: bold; font-size: 8; text-align: center; vertical-align: top;}
+div.accwarn {color:red; font-weight: bold; font-size: 8; text-align: center; vertical-align: top;}
 div.topd {background-color:#cff; border-color: #cff; border-style: solid; border-width: 9px;}
 .topdes {color:blue; text-align: right;}
 .topwho {color:black; font-weight: bold; margin-right: 8px;}
@@ -123,6 +126,7 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .title {background-color: #909090;}
 .even {background-color: #cccccc;}
 .odd {background-color: #a8a8a8;}
+.hid {display: none;}
 .dl {text-align: left; padding: 2px 8px;}
 .dr {text-align: right; padding: 2px 8px;}
 .dc {text-align: center; padding: 2px 8px;}
@@ -271,6 +275,12 @@ function pgtop($info, $dotop, $user, $douser)
  $top = "<div class=jst id=jst>&nbsp;Javascript isn't enabled.";
  $top .= " You need to enable javascript to use";
  $top .= " the $site_title web site.</div>";
+
+ if (isset($info['u_nopayaddr']))
+	$top .= '<div class=accwarn>Please set a payout address on your account!</div>';
+ if (isset($info['u_noemail']))
+	$top .= '<div class=accwarn>Please set an email address on your account!</div>';
+
  $top .= '<div class=topd>';
  if ($dotop === true)
  {
@@ -427,7 +437,7 @@ function pgfoot()
  return $foot;
 }
 #
-function gopage($data, $pagefun, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
+function gopage($info, $data, $pagefun, $page, $menu, $name, $user, $ispage = true, $dotop = true, $douser = true)
 {
  global $dbg, $stt;
  global $page_scripts;
@@ -440,7 +450,8 @@ function gopage($data, $pagefun, $page, $menu, $name, $user, $ispage = true, $do
  else
 	$pg = '';
 
- $info = homeInfo($user);
+ if ($info === NULL)
+	$info = homeInfo($user);
 
  if ($ispage == true)
  {

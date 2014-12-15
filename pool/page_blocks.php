@@ -182,9 +182,9 @@ function doblocks($data, $user)
  return $pg;
 }
 #
-function show_blocks($page, $menu, $name, $user)
+function show_blocks($info, $page, $menu, $name, $user)
 {
- gopage(NULL, 'doblocks', $page, $menu, $name, $user);
+ gopage($info, NULL, 'doblocks', $page, $menu, $name, $user);
 }
 #
 ?>

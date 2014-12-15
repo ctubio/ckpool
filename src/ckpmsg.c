@@ -130,7 +130,7 @@ int main(int argc, char **argv)
 			continue;
 		}
 		mkstamp(stamp, sizeof(stamp));
-		LOGNOTICE("%s Received response: %s", stamp, buf);
+		LOGMSGSIZ(65536, LOG_NOTICE, "%s Received response: %s", stamp, buf);
 	}
 
 	dealloc(buf);

@@ -488,7 +488,7 @@ K_ITEM *_optional_name(K_TREE *trf_root, char *name, int len, char *patt,
 		dlen = 0;
 	if (!mvalue || (int)dlen < len) {
 		if (!mvalue) {
-			LOGERR("%s(): field '%s' NULL (%d) from %s():%d",
+			LOGERR("%s(): field '%s' NULL (%d:%d) from %s():%d",
 				__func__, name, (int)dlen, len, func, line);
 		} else
 			snprintf(reply, siz, "failed.short %s", name);
@@ -1108,35 +1108,37 @@ void dsp_paymentaddresses(K_ITEM *item, FILE *stream)
 	}
 }
 
-// order by userid asc,expirydate desc,payaddress asc
+// order by expirydate asc,userid asc,payaddress asc
 cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b)
 {
 	PAYMENTADDRESSES *pa, *pb;
 	DATA_PAYMENTADDRESSES(pa, a);
 	DATA_PAYMENTADDRESSES(pb, b);
-	cmp_t c = CMP_BIGINT(pa->userid, pb->userid);
+	cmp_t c = CMP_TV(pa->expirydate, pb->expirydate);
 	if (c == 0) {
-		c = CMP_TV(pb->expirydate, pa->expirydate);
+		c = CMP_BIGINT(pa->userid, pb->userid);
 		if (c == 0)
 			c = CMP_STR(pa->payaddress, pb->payaddress);
 	}
 	return c;
 }
 
-// Only one for now ...
-K_ITEM *find_paymentaddresses(int64_t userid)
+/* Find the last CURRENT paymentaddresses for the given userid
+ * N.B. there can be more than one
+ *  any more will be prev_in_ktree(ctx): CURRENT and userid matches */
+K_ITEM *find_paymentaddresses(int64_t userid, K_TREE_CTX *ctx)
 {
 	PAYMENTADDRESSES paymentaddresses, *pa;
-	K_TREE_CTX ctx[1];
 	K_ITEM look, *item;
 
-	paymentaddresses.userid = userid;
+	paymentaddresses.expirydate.tv_sec = default_expiry.tv_sec;
+	paymentaddresses.expirydate.tv_usec = default_expiry.tv_usec;
+	paymentaddresses.userid = userid+1;
 	paymentaddresses.payaddress[0] = '\0';
-	paymentaddresses.expirydate.tv_sec = DATE_S_EOT;
 
 	INIT_PAYMENTADDRESSES(&look);
 	look.data = (void *)(&paymentaddresses);
-	item = find_after_in_ktree(paymentaddresses_root, &look, cmp_paymentaddresses, ctx);
+	item = find_before_in_ktree(paymentaddresses_root, &look, cmp_paymentaddresses, ctx);
 	if (item) {
 		DATA_PAYMENTADDRESSES(pa, item);
 		if (pa->userid == userid && CURRENT(&(pa->expirydate)))
@@ -1145,6 +1147,43 @@ K_ITEM *find_paymentaddresses(int64_t userid)
 			return NULL;
 	} else
 		return NULL;
+}
+
+K_ITEM *find_one_payaddress(int64_t userid, char *payaddress, K_TREE_CTX *ctx)
+{
+	PAYMENTADDRESSES paymentaddresses;
+	K_ITEM look;
+
+	paymentaddresses.expirydate.tv_sec = default_expiry.tv_sec;
+	paymentaddresses.expirydate.tv_usec = default_expiry.tv_usec;
+	paymentaddresses.userid = userid;
+	STRNCPY(paymentaddresses.payaddress, payaddress);
+
+	INIT_PAYMENTADDRESSES(&look);
+	look.data = (void *)(&paymentaddresses);
+	return find_in_ktree(paymentaddresses_root, &look, cmp_paymentaddresses, ctx);
+}
+
+/* This will match any user that has the payaddress
+ * This avoids the bitcoind delay of rechecking an address
+ *  that has EVER been seen before
+ * However, also, cmd_userset() that uses it, effectively ensures
+ *  that 2 standard users, that mine to a username rather than
+ *  a bitcoin address, cannot ever use the same bitcoin address */
+K_ITEM *find_any_payaddress(char *payaddress)
+{
+	PAYMENTADDRESSES *pa;
+	K_TREE_CTX ctx[1];
+	K_ITEM *item;
+
+	item = first_in_ktree(paymentaddresses_root, ctx);
+	DATA_PAYMENTADDRESSES_NULL(pa, item);
+	while (item) {
+		if (strcmp(pa->payaddress, payaddress) == 0)
+			return item;
+		item = next_in_ktree(ctx);
+	}
+	return NULL;
 }
 
 // order by userid asc,paydate asc,payaddress asc,expirydate desc
@@ -1749,8 +1788,8 @@ void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 					 min_buf, max_buf);
 			}
 			LOGWARNING("%s() Auto-aged %"PRId64"(%"PRId64") "
-				   "share%s %d sharesummar%s %d workinfoid%s "
-				   "%s %s",
+				   "share%s %"PRId64" sharesummar%s %"PRId32
+				   " workinfoid%s %s %s",
 				   __func__,
 				   s_count_tot, s_diff_tot,
 				   (s_count_tot == 1) ? "" : "s",
@@ -2028,7 +2067,7 @@ void set_block_share_counters()
 				LOGEMERG("%s(): ERROR workmarker %"PRId64" has an invalid"
 					 " workinfoid range start=%"PRId64" end=%"PRId64
 					 " due to pool lastblock=%"PRId32
-					 " workinfoid="PRId64,
+					 " workinfoid=%"PRId64,
 					 __func__, workmarkers->markerid,
 					 workmarkers->workinfoidstart,
 					 workmarkers->workinfoidend,

@@ -694,7 +694,7 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 			if (ckp->handover) {
 				if (pid_wait(oldpid, 500))
 					goto out;
-				LOGWARNING("Old process pid %d failed to shutdown cleanly, terminating");
+				LOGWARNING("Old process pid %d failed to shutdown cleanly, terminating", oldpid);
 			}
 			if (!ckp->killold) {
 				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",

@@ -1427,56 +1427,44 @@ bool workers_fill(PGconn *conn)
 	return ok;
 }
 
-/* Whatever the current paymentaddresses are, replace them with this one
- * Code allows for zero, one or more current payment address
- *  even though there currently can only be zero or one */
-K_ITEM *paymentaddresses_set(PGconn *conn, int64_t userid, char *payaddress,
-				char *by, char *code, char *inet, tv_t *cd,
-				K_TREE *trf_root)
+/* Whatever the current paymentaddresses are, replace them with the list
+ *  in pa_store
+ * Code allows for zero, one or more current payment address */
+bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
+			  char *by, char *code, char *inet, tv_t *cd,
+			  K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
 	PGresult *res;
 	K_TREE_CTX ctx[1];
-	K_ITEM *item, *old, *this, look;
-	PAYMENTADDRESSES *row, pa, *thispa;
-	char *upd, *ins;
-	bool ok = false;
-	char *params[4 + HISTORYDATECOUNT];
-	int n, par = 0;
+	K_ITEM *item, *match, *next, *prev;
+	PAYMENTADDRESSES *row, *pa;
+	char *upd = NULL, *ins;
+	size_t len, off;
+	bool ok = false, first;
+	char *params[1002]; // Limit of 999 addresses per user
+	char tmp[1024];
+	int n, par = 0, count, matches;
 
 	LOGDEBUG("%s(): add", __func__);
 
+	// Quick early abort
+	if (pa_store->count > 999)
+		return false;
+
+	/* Since we are merging the changes in rather than just
+	 *  replacing the db contents, lock the data for the duration
+	 *  of the update to ensure nothing else changes it */
 	K_WLOCK(paymentaddresses_free);
-	item = k_unlink_head(paymentaddresses_free);
-	K_WUNLOCK(paymentaddresses_free);
-
-	DATA_PAYMENTADDRESSES(row, item);
-
-	row->paymentaddressid = nextid(conn, "paymentaddressid", 1,
-					cd, by, code, inet);
-	if (row->paymentaddressid == 0)
-		goto unitem;
-
-	row->userid = userid;
-	STRNCPY(row->payaddress, payaddress);
-	row->payratio = 1000000;
-
-	HISTORYDATEINIT(row, cd, by, code, inet);
-	HISTORYDATETRANSFER(trf_root, row);
-
-	upd = "update paymentaddresses set expirydate=$1 where userid=$2 and expirydate=$3";
-	par = 0;
-	params[par++] = tv_to_buf(cd, NULL, 0);
-	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
-	PARCHKVAL(par, 3, params);
 
 	if (conn == NULL) {
 		conn = dbconnect();
 		conned = true;
 	}
 
+	/* This means the nextid updates will rollback on an error, but also
+	 *  means that it will lock the nextid record for the whole update */
 	res = PQexec(conn, "Begin", CKPQ_WRITE);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
@@ -1485,36 +1473,126 @@ K_ITEM *paymentaddresses_set(PGconn *conn, int64_t userid, char *payaddress,
 	}
 	PQclear(res);
 
-	res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
-	rescode = PQresultStatus(res);
-	PQclear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Update", rescode, conn);
-		goto rollback;
+	// First step - DB expire all the old/changed records in RAM
+	LOGDEBUG("%s(): Step 1 userid=%"PRId64, __func__, userid);
+	count = matches = 0;
+	APPEND_REALLOC_INIT(upd, off, len);
+	APPEND_REALLOC(upd, off, len,
+			"update paymentaddresses set expirydate=$1 where "
+			"userid=$2 and expirydate=$3 and payaddress in (");
+	par = 0;
+	params[par++] = tv_to_buf(cd, NULL, 0);
+	params[par++] = bigint_to_buf(userid, NULL, 0);
+	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+
+	first = true;
+	item = find_paymentaddresses(userid, ctx);
+	DATA_PAYMENTADDRESSES_NULL(row, item);
+	while (item && CURRENT(&(row->expirydate)) && row->userid == userid) {
+		/* This is only possible if the DB was directly updated with
+		 * more than 999 records then reloaded (or a code bug) */
+		if (++count > 999)
+			break;
+
+		// Find the RAM record in pa_store
+		match = pa_store->head;
+		while (match) {
+			DATA_PAYMENTADDRESSES(pa, match);
+			if (strcmp(pa->payaddress, row->payaddress) == 0 &&
+			    pa->payratio == row->payratio) {
+				pa->match = true; // Don't store it
+				matches++;
+				break;
+			}
+			match = match->next;
+		}
+		if (!match) {
+			// No matching replacement, so expire 'row'
+			params[par++] = str_to_buf(row->payaddress, NULL, 0);
+			if (!first)
+				APPEND_REALLOC(upd, off, len, ",");
+			first = false;
+			snprintf(tmp, sizeof(tmp), "$%d", par);
+			APPEND_REALLOC(upd, off, len, tmp);
+		}
+		item = prev_in_ktree(ctx);
+		DATA_PAYMENTADDRESSES_NULL(row, item);
+	}
+	LOGDEBUG("%s(): Step 1 par=%d count=%d matches=%d first=%s", __func__,
+		 par, count, matches, first ? "true" : "false");
+	// Too many, or none need expiring = don't do the update
+	if (count > 999 || first == true) {
+		for (n = 0; n < par; n++)
+			free(params[n]);
+		par = 0;
+		// Too many
+		if (count > 999)
+			goto rollback;
+	} else {
+		APPEND_REALLOC(upd, off, len, ")");
+		PARCHKVAL(par, par, params);
+		res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Update", rescode, conn);
+			goto rollback;
+		}
+
+		LOGDEBUG("%s(): Step 1 expired %d", __func__, par-3);
+
+		for (n = 0; n < par; n++)
+			free(params[n]);
+		par = 0;
 	}
 
-	for (n = 0; n < par; n++)
-		free(params[n]);
-
+	// Second step - add the non-matching records to the DB
+	LOGDEBUG("%s(): Step 2", __func__);
 	ins = "insert into paymentaddresses "
 		"(paymentaddressid,userid,payaddress,payratio"
 		HISTORYDATECONTROL ") values (" PQPARAM9 ")";
 
-	par = 0;
-	params[par++] = bigint_to_buf(row->paymentaddressid, NULL, 0);
-	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(row->payaddress, NULL, 0);
-	params[par++] = int_to_buf(row->payratio, NULL, 0);
-	HISTORYDATEPARAMS(params, par, row);
-	PARCHK(par, params);
+	count = 0;
+	match = pa_store->head;
+	while (match) {
+		DATA_PAYMENTADDRESSES(row, match);
+		if (!row->match) {
+			row->paymentaddressid = nextid(conn, "paymentaddressid", 1,
+							cd, by, code, inet);
+			if (row->paymentaddressid == 0)
+				goto rollback;
 
-	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
-	rescode = PQresultStatus(res);
-	PQclear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Insert", rescode, conn);
-		goto rollback;
+			row->userid = userid;
+
+			HISTORYDATEINIT(row, cd, by, code, inet);
+			HISTORYDATETRANSFER(trf_root, row);
+
+			par = 0;
+			params[par++] = bigint_to_buf(row->paymentaddressid, NULL, 0);
+			params[par++] = bigint_to_buf(row->userid, NULL, 0);
+			params[par++] = str_to_buf(row->payaddress, NULL, 0);
+			params[par++] = int_to_buf(row->payratio, NULL, 0);
+			HISTORYDATEPARAMS(params, par, row);
+			PARCHKVAL(par, 9, params); // As per PQPARAM9 above
+
+			res = PQexecParams(conn, ins, par, NULL, (const char **)params,
+					   NULL, NULL, 0, CKPQ_WRITE);
+			rescode = PQresultStatus(res);
+			PQclear(res);
+			if (!PGOK(rescode)) {
+				PGLOGERR("Insert", rescode, conn);
+				goto rollback;
+			}
+
+			for (n = 0; n < par; n++)
+				free(params[n]);
+			par = 0;
+
+			count++;
+		}
+		match = match->next;
 	}
+	LOGDEBUG("%s(): Step 2 inserted %d", __func__, count);
 
 	ok = true;
 rollback:
@@ -1529,46 +1607,62 @@ unparam:
 		PQfinish(conn);
 	for (n = 0; n < par; n++)
 		free(params[n]);
-unitem:
-	K_WLOCK(paymentaddresses_free);
-	if (!ok)
-		k_add_head(paymentaddresses_free, item);
-	else {
-		// Change the expiry on all the old ones
-		pa.userid = userid;
-		pa.expirydate.tv_sec = DATE_S_EOT;
-		pa.payaddress[0] = '\0';
-		INIT_PAYMENTADDRESSES(&look);
-		look.data = (void *)(&pa);
-		// Tree order is expirydate desc
-		old = find_after_in_ktree(paymentaddresses_root, &look,
-					  cmp_paymentaddresses, ctx);
-		while (old) {
-			this = old;
-			DATA_PAYMENTADDRESSES(thispa, this);
-			if (thispa->userid != userid)
-				break;
-			old = next_in_ktree(ctx);
-			/* Tree remove+add below doesn't matter since
-			 * this test will avoid reprocessing */
-			if (CURRENT(&(thispa->expirydate))) {
-				paymentaddresses_root = remove_from_ktree(paymentaddresses_root, this,
+	FREENULL(upd);
+	// Third step - do step 1 and 2 to the RAM version of the DB
+	LOGDEBUG("%s(): Step 3, ok=%s", __func__, ok ? "true" : "false");
+	matches = count = n = 0;
+	if (ok) {
+		// Change the expiry on all records that we expired in the DB
+		item = find_paymentaddresses(userid, ctx);
+		DATA_PAYMENTADDRESSES_NULL(row, item);
+		while (item && CURRENT(&(row->expirydate)) && row->userid == userid) {
+			prev = prev_in_ktree(ctx);
+			// Find the RAM record in pa_store
+			match = pa_store->head;
+			while (match) {
+				DATA_PAYMENTADDRESSES(pa, match);
+				if (strcmp(pa->payaddress, row->payaddress) == 0 &&
+				    pa->payratio == row->payratio) {
+					break;
+				}
+				match = match->next;
+			}
+			if (match)
+				matches++;
+			else {
+				// It wasn't a match, thus it was expired
+				n++;
+				paymentaddresses_root = remove_from_ktree(paymentaddresses_root, item,
 									  cmp_paymentaddresses);
-				copy_tv(&(thispa->expirydate), cd);
-				paymentaddresses_root = add_to_ktree(paymentaddresses_root, this,
+				copy_tv(&(row->expirydate), cd);
+				paymentaddresses_root = add_to_ktree(paymentaddresses_root, item,
 								     cmp_paymentaddresses);
 			}
+			item = prev;
+			DATA_PAYMENTADDRESSES_NULL(row, item);
 		}
-		paymentaddresses_root = add_to_ktree(paymentaddresses_root, item,
-						     cmp_paymentaddresses);
-		k_add_head(paymentaddresses_store, item);
+
+		// Add in all the non-matching ps_store
+		match = pa_store->head;
+		while (match) {
+			next = match->next;
+			DATA_PAYMENTADDRESSES(pa, match);
+			if (!pa->match) {
+				paymentaddresses_root = add_to_ktree(paymentaddresses_root, match,
+								     cmp_paymentaddresses);
+				k_unlink_item(pa_store, match);
+				k_add_head(paymentaddresses_store, match);
+				count++;
+			}
+			match = next;
+		}
 	}
+	LOGDEBUG("%s(): Step 3, untouched %d expired %d added %d", __func__, matches, n, count);
+
 	K_WUNLOCK(paymentaddresses_free);
 
-	if (ok)
-		return item;
-	else
-		return NULL;
+	// Calling function must clean up anything left in pa_store
+	return ok;
 }
 
 bool paymentaddresses_fill(PGconn *conn)
@@ -1841,7 +1935,7 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *old_item, look;
-	OPTIONCONTROL *row;
+	OPTIONCONTROL *row, *optioncontrol;
 	char *upd, *ins;
 	bool ok = false;
 	char *params[4 + HISTORYDATECOUNT];
@@ -1935,13 +2029,17 @@ nostart:
 		free(params[n]);
 
 	K_WLOCK(optioncontrol_free);
-	if (!ok)
+	if (!ok) {
+		// Cleanup item passed in
+		FREENULL(row->optionvalue);
 		k_add_head(optioncontrol_free, oc_item);
-	else {
-		// Discard it
+	} else {
+		// Discard old
 		if (old_item) {
+			DATA_OPTIONCONTROL(optioncontrol, old_item);
 			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
 							       cmp_optioncontrol);
+			FREENULL(optioncontrol->optionvalue);
 			k_add_head(optioncontrol_free, old_item);
 		}
 		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
@@ -1962,7 +2060,6 @@ K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 {
 	K_ITEM *item;
 	OPTIONCONTROL *row;
-	bool ok = false;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -1990,19 +2087,7 @@ K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
-	ok = optioncontrol_item_add(conn, item, cd, begun);
-
-	if (!ok) {
-		free(row->optionvalue);
-		K_WLOCK(optioncontrol_free);
-		k_add_head(optioncontrol_free, item);
-		K_WUNLOCK(optioncontrol_free);
-	}
-
-	if (ok)
-		return item;
-	else
-		return NULL;
+	return optioncontrol_item_add(conn, item, cd, begun);
 }
 
 bool optioncontrol_fill(PGconn *conn)
@@ -2084,8 +2169,10 @@ bool optioncontrol_fill(PGconn *conn)
 		optioncontrol_root = add_to_ktree(optioncontrol_root, item, cmp_optioncontrol);
 		k_add_head(optioncontrol_store, item);
 	}
-	if (!ok)
+	if (!ok) {
+		FREENULL(row->optionvalue);
 		k_add_head(optioncontrol_free, item);
+	}
 
 	K_WUNLOCK(optioncontrol_free);
 	PQclear(res);
@@ -2148,10 +2235,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 	K_WLOCK(workinfo_free);
 	if (find_in_ktree(workinfo_root, item, cmp_workinfo, ctx)) {
-		free(row->transactiontree);
-		row->transactiontree = NULL;
-		free(row->merklehash);
-		row->merklehash = NULL;
+		FREENULL(row->transactiontree);
+		FREENULL(row->merklehash);
 		workinfoid = row->workinfoid;
 		k_add_head(workinfo_free, item);
 		K_WUNLOCK(workinfo_free);
@@ -2213,10 +2298,8 @@ unparam:
 
 	K_WLOCK(workinfo_free);
 	if (workinfoid == -1) {
-		free(row->transactiontree);
-		row->transactiontree = NULL;
-		free(row->merklehash);
-		row->merklehash = NULL;
+		FREENULL(row->transactiontree);
+		FREENULL(row->merklehash);
 		k_add_head(workinfo_free, item);
 	} else {
 		if (row->transactiontree && *(row->transactiontree)) {
@@ -3165,8 +3248,7 @@ bool sharesummary_fill(PGconn *conn)
 		DATA_SHARESUMMARY(row, item);
 		if (row->workername) {
 			LIST_MEM_SUB(sharesummary_free, row->workername);
-			free(row->workername);
-			row->workername = NULL;
+			FREENULL(row->workername);
 		}
 		k_add_head(sharesummary_free, item);
 	}
