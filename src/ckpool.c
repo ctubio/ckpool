@@ -1421,7 +1421,7 @@ int main(int argc, char **argv)
 	if (!ckp.blockpoll)
 		ckp.blockpoll = 100;
 	if (!ckp.nonce1length)
-		ckp.nonce1length = 8;
+		ckp.nonce1length = 4;
 	else if (ckp.nonce1length < 2 || ckp.nonce1length > 8)
 		quit(0, "Invalid nonce1length %d specified, must be 2~8", ckp.nonce1length);
 	if (!ckp.nonce2length)
