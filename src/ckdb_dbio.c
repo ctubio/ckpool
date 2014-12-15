@@ -4686,6 +4686,7 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	SIMPLEDATEINIT(row, cd, by, code, inet);
 	SIMPLEDATETRANSFER(trf_root, row);
 	copy_tv(&(row->statsdate), &(row->createdate));
+	row->six = true;
 
 	if (eos) {
 		// Save it for end processing
@@ -4784,6 +4785,89 @@ advancetogo:
 			k_list_transfer_to_head(userstats_eos_store, userstats_free);
 		K_WUNLOCK(userstats_free);
 	}
+
+	return true;
+}
+
+// This is to RAM. The summariser calls the DB I/O functions for userstats
+bool workerstats_add(char *poolinstance, char *elapsed, char *username,
+			char *workername, char *hashrate, char *hashrate5m,
+			char *hashrate1hr, char *hashrate24hr, bool idle,
+			char *by, char *code, char *inet, tv_t *cd,
+			K_TREE *trf_root)
+{
+	K_ITEM *us_item, *u_item, *us_match, look;
+	USERSTATS *row, cmp, *match;
+	USERS *users;
+	K_TREE_CTX ctx[1];
+
+	LOGDEBUG("%s(): add", __func__);
+
+	K_WLOCK(userstats_free);
+	us_item = k_unlink_head(userstats_free);
+	K_WUNLOCK(userstats_free);
+
+	DATA_USERSTATS(row, us_item);
+
+	STRNCPY(row->poolinstance, poolinstance);
+	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
+	K_RLOCK(users_free);
+	u_item = find_users(username);
+	K_RUNLOCK(users_free);
+	if (!u_item)
+		return false;
+	DATA_USERS(users, u_item);
+	row->userid = users->userid;
+	TXT_TO_STR("workername", workername, row->workername);
+	TXT_TO_DOUBLE("hashrate", hashrate, row->hashrate);
+	TXT_TO_DOUBLE("hashrate5m", hashrate5m, row->hashrate5m);
+	TXT_TO_DOUBLE("hashrate1hr", hashrate1hr, row->hashrate1hr);
+	TXT_TO_DOUBLE("hashrate24hr", hashrate24hr, row->hashrate24hr);
+	row->idle = idle;
+	row->summarylevel[0] = SUMMARY_NONE;
+	row->summarylevel[1] = '\0';
+	row->summarycount = 1;
+	SIMPLEDATEINIT(row, cd, by, code, inet);
+	SIMPLEDATETRANSFER(trf_root, row);
+	copy_tv(&(row->statsdate), &(row->createdate));
+	row->six = false;
+
+	// confirm_summaries() doesn't call this
+	if (reloading) {
+		memcpy(&cmp, row, sizeof(cmp));
+		INIT_USERSTATS(&look);
+		look.data = (void *)(&cmp);
+		// Just zero it to ensure the DB record is after it, not equal to it
+		cmp.statsdate.tv_usec = 0;
+		/* If there is a matching user+worker DB record summarising this row,
+		 * or a matching user+worker DB record next after this row, discard it */
+		us_match = find_after_in_ktree(userstats_workerstatus_root, &look,
+						cmp_userstats_workerstatus, ctx);
+		DATA_USERSTATS_NULL(match, us_match);
+		if (us_match &&
+		    match->userid == row->userid &&
+		    strcmp(match->workername, row->workername) == 0 &&
+		    match->summarylevel[0] != SUMMARY_NONE) {
+			K_WLOCK(userstats_free);
+			k_add_head(userstats_free, us_item);
+			K_WUNLOCK(userstats_free);
+			return true;
+		}
+	}
+
+	workerstatus_update(NULL, NULL, row);
+
+	K_WLOCK(userstats_free);
+	userstats_root = add_to_ktree(userstats_root, us_item, cmp_userstats);
+	userstats_statsdate_root = add_to_ktree(userstats_statsdate_root, us_item,
+						cmp_userstats_statsdate);
+	if (!startup_complete) {
+		userstats_workerstatus_root = add_to_ktree(userstats_workerstatus_root,
+							   us_item,
+							   cmp_userstats_workerstatus);
+	}
+	k_add_head(userstats_store, us_item);
+	K_WUNLOCK(userstats_free);
 
 	return true;
 }

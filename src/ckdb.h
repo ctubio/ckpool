@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.744"
+#define CKDB_VERSION DB_VERSION"-0.750"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -296,6 +296,7 @@ enum cmd_values {
 	CMD_WORKERSET,
 	CMD_POOLSTAT,
 	CMD_USERSTAT,
+	CMD_WORKERSTAT,
 	CMD_BLOCK,
 	CMD_BLOCKLIST,
 	CMD_BLOCKSTATUS,
@@ -1173,6 +1174,7 @@ typedef struct userstats {
 	double hashrate1hr;
 	double hashrate24hr;
 	bool idle; // Non-db field
+	bool six; // Non-db field
 	char summarylevel[TXT_FLAG+1]; // Initially SUMMARY_NONE in RAM
 	int32_t summarycount;
 	tv_t statsdate;
@@ -1772,6 +1774,11 @@ extern bool userstats_add(char *poolinstance, char *elapsed, char *username,
 			  char *hashrate1hr, char *hashrate24hr, bool idle,
 			  bool eos, char *by, char *code, char *inet, tv_t *cd,
 			  K_TREE *trf_root);
+extern bool workerstats_add(char *poolinstance, char *elapsed, char *username,
+			    char *workername, char *hashrate, char *hashrate5m,
+			    char *hashrate1hr, char *hashrate24hr, bool idle,
+			    char *by, char *code, char *inet, tv_t *cd,
+			    K_TREE *trf_root);
 extern bool userstats_fill(PGconn *conn);
 extern bool markersummary_fill(PGconn *conn);
 #define workmarkers_process(_conn, _add, _markerid, _poolinstance, \

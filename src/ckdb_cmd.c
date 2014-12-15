@@ -728,6 +728,79 @@ static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(reply);
 }
 
+static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
+			     __maybe_unused tv_t *notnow, char *by, char *code,
+			     char *inet, tv_t *cd, K_TREE *trf_root)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+
+	// log to logfile
+
+	K_ITEM *i_poolinstance, *i_elapsed, *i_username, *i_workername;
+	K_ITEM *i_hashrate, *i_hashrate5m, *i_hashrate1hr, *i_hashrate24hr;
+	K_ITEM *i_idle;
+	bool ok = false, idle;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
+	if (!i_poolinstance)
+		return strdup(reply);
+
+	i_elapsed = require_name(trf_root, "elapsed", 1, NULL, reply, siz);
+	if (!i_elapsed)
+		return strdup(reply);
+
+	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
+	if (!i_workername)
+		return strdup(reply);
+
+	i_hashrate = require_name(trf_root, "hashrate", 1, NULL, reply, siz);
+	if (!i_hashrate)
+		return strdup(reply);
+
+	i_hashrate5m = require_name(trf_root, "hashrate5m", 1, NULL, reply, siz);
+	if (!i_hashrate5m)
+		return strdup(reply);
+
+	i_hashrate1hr = require_name(trf_root, "hashrate1hr", 1, NULL, reply, siz);
+	if (!i_hashrate1hr)
+		return strdup(reply);
+
+	i_hashrate24hr = require_name(trf_root, "hashrate24hr", 1, NULL, reply, siz);
+	if (!i_hashrate24hr)
+		return strdup(reply);
+
+	i_idle = require_name(trf_root, "idle", 1, NULL, reply, siz);
+	if (!i_idle)
+		return strdup(reply);
+
+	idle = (strcasecmp(transfer_data(i_idle), TRUE_STR) == 0);
+
+	ok = workerstats_add(transfer_data(i_poolinstance),
+			     transfer_data(i_elapsed),
+			     transfer_data(i_username),
+			     transfer_data(i_workername),
+			     transfer_data(i_hashrate),
+			     transfer_data(i_hashrate5m),
+			     transfer_data(i_hashrate1hr),
+			     transfer_data(i_hashrate24hr),
+			     idle, by, code, inet, cd, trf_root);
+
+	if (!ok) {
+		LOGERR("%s() %s.failed.DATA", __func__, id);
+		return strdup("failed.DATA");
+	}
+	LOGDEBUG("%s.ok.", id);
+	snprintf(reply, siz, "ok.");
+	return strdup(reply);
+}
+
 static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 			   __maybe_unused tv_t *now, __maybe_unused char *by,
 			   __maybe_unused char *code, __maybe_unused char *inet,
@@ -4126,6 +4199,7 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_WORKERSET,"workerset",	false,	false,	cmd_workerset,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	false,	true,	cmd_poolstats,	ACCESS_POOL },
 	{ CMD_USERSTAT,	"userstats",	false,	true,	cmd_userstats,	ACCESS_POOL },
+	{ CMD_WORKERSTAT,"workerstats",	false,	true,	cmd_workerstats,ACCESS_POOL },
 	{ CMD_BLOCK,	"block",	false,	true,	cmd_blocks,	ACCESS_POOL },
 	{ CMD_BLOCKLIST,"blocklist",	false,	false,	cmd_blocklist,	ACCESS_WEB },
 	{ CMD_BLOCKSTATUS,"blockstatus",false,	false,	cmd_blockstatus,ACCESS_WEB },

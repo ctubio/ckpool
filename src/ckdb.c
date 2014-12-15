@@ -1778,10 +1778,10 @@ static void summarise_userstats()
 	K_ITEM *first, *last, *new, *next, *tmp;
 	USERSTATS *userstats, *us_first, *us_last, *us_next;
 	double statrange, factor;
-	bool locked, upgrade;
+	bool locked, upgrade, issix, sixdiff;
 	tv_t now, process, when;
 	PGconn *conn = NULL;
-	int count;
+	int count, sixcount;
 	char error[1024];
 	char tvbuf1[DATE_BUFSIZ], tvbuf2[DATE_BUFSIZ];
 
@@ -1838,6 +1838,8 @@ static void summarise_userstats()
 		next = next_in_ktree(ctx);
 
 		upgrade = true;
+		issix = us_first->six;
+		sixdiff = false;
 		K_ULOCK(userstats_free);
 		new = k_unlink_head(userstats_free);
 		DATA_USERSTATS(userstats, new);
@@ -1850,6 +1852,7 @@ static void summarise_userstats()
 		k_add_head(userstats_summ, first);
 
 		count = 1;
+		sixcount = issix ? 1 : 0;
 		while (next) {
 			DATA_USERSTATS(us_next, next);
 			statrange = tvdiff(&when, &(us_next->statsdate));
@@ -1861,7 +1864,10 @@ static void summarise_userstats()
 			if (us_next->summarylevel[0] == SUMMARY_NONE &&
 			    us_next->userid == userstats->userid &&
 			    strcmp(us_next->workername, userstats->workername) == 0) {
+				if (us_next->six != issix)
+					sixdiff = true;
 				count++;
+				sixcount += us_next->six ? 1 : 0;
 				userstats->hashrate += us_next->hashrate;
 				userstats->hashrate5m += us_next->hashrate5m;
 				userstats->hashrate1hr += us_next->hashrate1hr;
@@ -1870,8 +1876,10 @@ static void summarise_userstats()
 					userstats->elapsed = us_next->elapsed;
 				userstats->summarycount += us_next->summarycount;
 
-				userstats_root = remove_from_ktree(userstats_root, next, cmp_userstats);
-				userstats_statsdate_root = remove_from_ktree(userstats_statsdate_root, next,
+				userstats_root = remove_from_ktree(userstats_root,
+								   next, cmp_userstats);
+				userstats_statsdate_root = remove_from_ktree(userstats_statsdate_root,
+									     next,
 									     cmp_userstats_statsdate);
 				k_unlink_item(userstats_store, next);
 				k_add_head(userstats_summ, next);
@@ -1895,8 +1903,14 @@ static void summarise_userstats()
 		userstats->summarylevel[0] = SUMMARY_DB;
 		userstats->summarylevel[1] = '\0';
 
-		// Expect 6 per poolinstance
-		factor = (double)count / 6.0;
+		if (issix && !sixdiff) {
+			// Expect 6 per poolinstance
+			factor = (double)count / 6.0;
+		} else {
+			// For now ... new format is still 6 per hour
+			factor = (double)count / 6.0;
+		}
+
 		userstats->hashrate *= factor;
 		userstats->hashrate5m *= factor;
 		userstats->hashrate1hr *= factor;
@@ -2434,6 +2448,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_SHARELOG:
 					case CMD_POOLSTAT:
 					case CMD_USERSTAT:
+					case CMD_WORKERSTAT:
 					case CMD_BLOCK:
 						// First message from the pool
 						if (want_first) {
@@ -2601,6 +2616,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_HEARTBEAT:
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
+			case CMD_WORKERSTAT:
 			case CMD_BLOCK:
 				if (confirm_sharesummary)
 					break;
