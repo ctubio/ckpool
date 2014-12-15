@@ -221,6 +221,21 @@ static int kill_pid(int pid, int sig)
 	return kill(pid, sig);
 }
 
+static int pid_wait(pid_t pid, int ms)
+{
+	tv_t start, now;
+	int ret;
+
+	tv_time(&start);
+	do {
+		ret = kill_pid(pid, 0);
+		if (ret)
+			break;
+		tv_time(&now);
+	} while (ms_tvdiff(&now, &start) < ms);
+	return ret;
+}
+
 static int send_procmsg(proc_instance_t *pi, const char *buf)
 {
 	char *path = pi->us.path;
@@ -297,8 +312,8 @@ retry:
 			broadcast_proc(ckp, buf);
 			send_unix_msg(sockd, "success");
 		}
-	} else if (cmdmatch(buf, "getfd")) {
-		int connfd = send_procmsg(ckp->connector, "getfd");
+	} else if (cmdmatch(buf, "getxfd")) {
+		int connfd = send_procmsg(ckp->connector, buf);
 
 		if (connfd > 0) {
 			int newfd = get_fd(connfd);
@@ -350,8 +365,10 @@ bool ping_main(ckpool_t *ckp)
 {
 	char *buf;
 
+	if (unlikely(kill_pid(ckp->main.pid, 0)))
+		return false;
 	buf = send_recv_proc(&ckp->main, "ping");
-	if (!buf)
+	if (unlikely(!buf))
 		return false;
 	free(buf);
 	return true;
@@ -674,18 +691,35 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		ret = fscanf(fp, "%d", &oldpid);
 		fclose(fp);
 		if (ret == 1 && !(kill_pid(oldpid, 0))) {
+			if (ckp->handover) {
+				if (pid_wait(oldpid, 500))
+					goto out;
+				LOGWARNING("Old process pid %d failed to shutdown cleanly, terminating", oldpid);
+			}
 			if (!ckp->killold) {
 				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
 					 path, oldpid);
 				return false;
 			}
+			if (kill_pid(oldpid, 15)) {
+				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				return false;
+			}
+			LOGWARNING("Terminating old process %s pid %d", path, oldpid);
+			if (pid_wait(oldpid, 500))
+				goto out;
 			if (kill_pid(oldpid, 9)) {
 				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
 				return false;
 			}
-			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
+			LOGWARNING("Unable to terminate old process %s pid %d, killing", path, oldpid);
+			if (!pid_wait(oldpid, 500)) {
+				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				return false;
+			}
 		}
 	}
+out:
 	fp = fopen(path, "we");
 	if (!fp) {
 		LOGERR("Failed to open file %s", path);
@@ -747,11 +781,9 @@ static void childsighandler(int sig)
 	signal(sig, SIG_IGN);
 	signal(SIGTERM, SIG_IGN);
 	if (sig != SIGUSR1) {
-		pid_t ppid = getppid();
-
 		LOGWARNING("Child process received signal %d, forwarding signal to %s main process",
-			sig, global_ckp->name);
-		kill_pid(ppid, sig);
+			   sig, global_ckp->name);
+		kill_pid(global_ckp->main.pid, sig);
 	}
 	exit(0);
 }
@@ -834,7 +866,7 @@ static void clean_up(ckpool_t *ckp)
 
 static void cancel_join_pthread(pthread_t *pth)
 {
-	if (!*pth)
+	if (!pth || !*pth)
 		return;
 	pthread_cancel(*pth);
 	join_pthread(*pth);
@@ -843,13 +875,22 @@ static void cancel_join_pthread(pthread_t *pth)
 
 static void cancel_pthread(pthread_t *pth)
 {
-	if (!*pth)
+	if (!pth || !*pth)
 		return;
 	pthread_cancel(*pth);
 	pth = NULL;
 }
 
-static void __shutdown_children(ckpool_t *ckp, int sig)
+static void wait_child(pid_t *pid)
+{
+	int ret;
+
+	do {
+		ret = waitpid(*pid, NULL, 0);
+	} while (ret != *pid);
+}
+
+static void __shutdown_children(ckpool_t *ckp)
 {
 	int i;
 
@@ -859,18 +900,22 @@ static void __shutdown_children(ckpool_t *ckp, int sig)
 	if (!ckp->children)
 		return;
 
+	/* Send the children a SIGUSR1 for them to shutdown gracefully, then
+	 * wait for them to exit and kill them if they don't for 500ms. */
 	for (i = 0; i < ckp->proc_instances; i++) {
 		pid_t pid = ckp->children[i]->pid;
-		if (!kill_pid(pid, 0))
-			kill_pid(pid, sig);
+
+		kill_pid(pid, SIGUSR1);
+		if (!ck_completion_timeout(&wait_child, (void *)&pid, 500))
+			kill_pid(pid, SIGKILL);
 	}
 }
 
-static void shutdown_children(ckpool_t *ckp, int sig)
+static void shutdown_children(ckpool_t *ckp)
 {
 	cancel_join_pthread(&ckp->pth_watchdog);
 
-	__shutdown_children(ckp, sig);
+	__shutdown_children(ckp);
 }
 
 static void sighandler(int sig)
@@ -883,31 +928,36 @@ static void sighandler(int sig)
 		   ckp->name, sig);
 	cancel_join_pthread(&ckp->pth_watchdog);
 
-	__shutdown_children(ckp, SIGUSR1);
-	/* Wait, then send SIGKILL */
-	cksleep_ms(100);
-	__shutdown_children(ckp, SIGKILL);
+	__shutdown_children(ckp);
 	cancel_pthread(&ckp->pth_listener);
 	exit(0);
 }
 
-void json_get_string(char **store, json_t *val, const char *res)
+static bool _json_get_string(char **store, json_t *entry, const char *res)
 {
-	json_t *entry = json_object_get(val, res);
+	bool ret = false;
 	const char *buf;
 
 	*store = NULL;
 	if (!entry || json_is_null(entry)) {
 		LOGDEBUG("Json did not find entry %s", res);
-		return;
+		goto out;
 	}
 	if (!json_is_string(entry)) {
 		LOGWARNING("Json entry %s is not a string", res);
-		return;
+		goto out;
 	}
 	buf = json_string_value(entry);
 	LOGDEBUG("Json found entry %s: %s", res, buf);
 	*store = strdup(buf);
+	ret = true;
+out:
+	return ret;
+}
+
+bool json_get_string(char **store, json_t *val, const char *res)
+{
+	return _json_get_string(store, json_object_get(val, res), res);
 }
 
 static void json_get_int64(int64_t *store, json_t *val, const char *res)
@@ -926,36 +976,44 @@ static void json_get_int64(int64_t *store, json_t *val, const char *res)
 	LOGDEBUG("Json found entry %s: %ld", res, *store);
 }
 
-void json_get_int(int *store, json_t *val, const char *res)
+bool json_get_int(int *store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
+	bool ret = false;
 
 	if (!entry) {
 		LOGDEBUG("Json did not find entry %s", res);
-		return;
+		goto out;
 	}
 	if (!json_is_integer(entry)) {
 		LOGWARNING("Json entry %s is not an integer", res);
-		return;
+		goto out;
 	}
 	*store = json_integer_value(entry);
 	LOGDEBUG("Json found entry %s: %d", res, *store);
+	ret = true;
+out:
+	return ret;
 }
 
-static void json_get_bool(bool *store, json_t *val, const char *res)
+static bool json_get_bool(bool *store, json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
+	bool ret = false;
 
 	if (!entry) {
 		LOGDEBUG("Json did not find entry %s", res);
-		return;
+		goto out;
 	}
 	if (!json_is_boolean(entry)) {
 		LOGWARNING("Json entry %s is not a boolean", res);
-		return;
+		goto out;
 	}
 	*store = json_is_true(entry);
 	LOGDEBUG("Json found entry %s: %s", res, *store ? "true" : "false");
+	ret = true;
+out:
+	return ret;
 }
 
 static void parse_btcds(ckpool_t *ckp, json_t *arr_val, int arr_size)
@@ -994,10 +1052,41 @@ static void parse_proxies(ckpool_t *ckp, json_t *arr_val, int arr_size)
 	}
 }
 
+static bool parse_serverurls(ckpool_t *ckp, json_t *arr_val)
+{
+	bool ret = false;
+	int arr_size, i;
+
+	if (!arr_val)
+		goto out;
+	if (!json_is_array(arr_val)) {
+		LOGWARNING("Unable to parse serverurl entries as an array");
+		goto out;
+	}
+	arr_size = json_array_size(arr_val);
+	if (!arr_size) {
+		LOGWARNING("Serverurl array empty");
+		goto out;
+	}
+	ckp->serverurls = arr_size;
+	ckp->serverurl = ckalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		json_t *val = json_array_get(arr_val, i);
+
+		if (!_json_get_string(&ckp->serverurl[i], val, "serverurl"))
+			LOGWARNING("Invalid serverurl entry number %d", i);
+	}
+	ret = true;
+out:
+	return ret;
+}
+
 static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
 	json_error_t err_val;
+	int arr_size;
+	char *url;
 
 	json_conf = json_load_file(ckp->config, JSON_DISABLE_EOF_CHECK, &err_val);
 	if (!json_conf) {
@@ -1007,8 +1096,7 @@ static void parse_config(ckpool_t *ckp)
 	}
 	arr_val = json_object_get(json_conf, "btcd");
 	if (arr_val && json_is_array(arr_val)) {
-		int arr_size = json_array_size(arr_val);
-
+		arr_size = json_array_size(arr_val);
 		if (arr_size)
 			parse_btcds(ckp, arr_val, arr_size);
 	}
@@ -1019,8 +1107,18 @@ static void parse_config(ckpool_t *ckp)
 		ckp->btcsig[38] = '\0';
 	}
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
+	json_get_int(&ckp->nonce1length, json_conf, "nonce1length");
+	json_get_int(&ckp->nonce2length, json_conf, "nonce2length");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
-	json_get_string(&ckp->serverurl, json_conf, "serverurl");
+	/* Look for an array first and then a single entry */
+	arr_val = json_object_get(json_conf, "serverurl");
+	if (!parse_serverurls(ckp, arr_val)) {
+		if (json_get_string(&url, json_conf, "serverurl")) {
+			ckp->serverurl = ckalloc(sizeof(char *));
+			ckp->serverurl[0] = url;
+			ckp->serverurls = 1;
+		}
+	}
 	json_get_int64(&ckp->mindiff, json_conf, "mindiff");
 	json_get_int64(&ckp->startdiff, json_conf, "startdiff");
 	json_get_int64(&ckp->maxdiff, json_conf, "maxdiff");
@@ -1028,8 +1126,7 @@ static void parse_config(ckpool_t *ckp)
 	json_get_int(&ckp->maxclients, json_conf, "maxclients");
 	arr_val = json_object_get(json_conf, "proxy");
 	if (arr_val && json_is_array(arr_val)) {
-		int arr_size = json_array_size(arr_val);
-
+		arr_size = json_array_size(arr_val);
 		if (arr_size)
 			parse_proxies(ckp, arr_val, arr_size);
 	}
@@ -1104,6 +1201,7 @@ static void *watchdog(void *arg)
 static struct option long_options[] = {
 	{"standalone",	no_argument,		0,	'A'},
 	{"config",	required_argument,	0,	'c'},
+	{"daemonise",	no_argument,		0,	'D'},
 	{"ckdb-name",	required_argument,	0,	'd'},
 	{"group",	required_argument,	0,	'g'},
 	{"handover",	no_argument,		0,	'H'},
@@ -1121,6 +1219,7 @@ static struct option long_options[] = {
 #else
 static struct option long_options[] = {
 	{"config",	required_argument,	0,	'c'},
+	{"daemonise",	no_argument,		0,	'D'},
 	{"group",	required_argument,	0,	'g'},
 	{"handover",	no_argument,		0,	'H'},
 	{"help",	no_argument,		0,	'h'},
@@ -1135,16 +1234,21 @@ static struct option long_options[] = {
 };
 #endif
 
-static void send_recv_path(const char *path, const char *msg)
+static bool send_recv_path(const char *path, const char *msg)
 {
 	int sockd = open_unix_client(path);
+	bool ret = false;
 	char *response;
 
 	send_unix_msg(sockd, msg);
 	response = recv_unix_msg(sockd);
-	LOGWARNING("Received: %s in response to %s request", response, msg);
-	dealloc(response);
+	if (response) {
+		ret = true;
+		LOGWARNING("Received: %s in response to %s request", response, msg);
+		dealloc(response);
+	}
 	Close(sockd);
+	return ret;
 }
 
 int main(int argc, char **argv)
@@ -1165,13 +1269,16 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:d:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
 				break;
 			case 'c':
 				ckp.config = optarg;
+				break;
+			case 'D':
+				ckp.daemon = true;
 				break;
 			case 'd':
 				ckp.ckdb_name = optarg;
@@ -1313,6 +1420,14 @@ int main(int argc, char **argv)
 		ckp.btcaddress = ckp.donaddress;
 	if (!ckp.blockpoll)
 		ckp.blockpoll = 100;
+	if (!ckp.nonce1length)
+		ckp.nonce1length = 8;
+	else if (ckp.nonce1length < 2 || ckp.nonce1length > 8)
+		quit(0, "Invalid nonce1length %d specified, must be 2~8", ckp.nonce1length);
+	if (!ckp.nonce2length)
+		ckp.nonce2length = 8;
+	else if (ckp.nonce2length < 2 || ckp.nonce2length > 8)
+		quit(0, "Invalid nonce2length %d specified, must be 2~8", ckp.nonce2length);
 	if (!ckp.update_interval)
 		ckp.update_interval = 30;
 	if (!ckp.mindiff)
@@ -1321,6 +1436,8 @@ int main(int argc, char **argv)
 		ckp.startdiff = 42;
 	if (!ckp.logdir)
 		ckp.logdir = strdup("logs");
+	if (!ckp.serverurls)
+		ckp.serverurl = ckzalloc(sizeof(char *));
 	if (ckp.proxy && !ckp.proxies)
 		quit(0, "No proxy entries found in config file %s", ckp.config);
 
@@ -1360,20 +1477,45 @@ int main(int argc, char **argv)
 	ckp.main.processname = strdup("main");
 	ckp.main.sockname = strdup("listener");
 	name_process_sockname(&ckp.main.us, &ckp.main);
+	ckp.oldconnfd = ckzalloc(sizeof(int *) * ckp.serverurls);
 	if (ckp.handover) {
-		int sockd = open_unix_client(ckp.main.us.path);
+		const char *path = ckp.main.us.path;
 
-		if (sockd > 0 && send_unix_msg(sockd, "getfd")) {
-			ckp.oldconnfd = get_fd(sockd);
-			Close(sockd);
+		if (send_recv_path(path, "ping")) {
+			for (i = 0; i < ckp.serverurls; i++) {
+				char getfd[16];
+				int sockd;
 
-			send_recv_path(ckp.main.us.path, "reject");
-			send_recv_path(ckp.main.us.path, "reconnect");
-			send_recv_path(ckp.main.us.path, "shutdown");
-			cksleep_ms(500);
+				snprintf(getfd, 15, "getxfd%d", i);
+				sockd = open_unix_client(path);
+				if (sockd < 1)
+					break;
+				if (!send_unix_msg(sockd, getfd))
+					break;
+				ckp.oldconnfd[i] = get_fd(sockd);
+				Close(sockd);
+				if (!ckp.oldconnfd[i])
+					break;
+				LOGWARNING("Inherited old server socket %d with new file descriptor %d!",
+					   i, ckp.oldconnfd[i]);
+			}
+			send_recv_path(path, "reject");
+			send_recv_path(path, "reconnect");
+			send_recv_path(path, "shutdown");
+		}
+	}
 
-			if (ckp.oldconnfd > 0)
-				LOGWARNING("Inherited old socket with new file descriptor %d!", ckp.oldconnfd);
+	if (ckp.daemon) {
+		int fd;
+
+		if (fork())
+			exit(0);
+		setsid();
+		fd = open("/dev/null",O_RDWR, 0);
+		if (fd != -1) {
+			dup2(fd, STDIN_FILENO);
+			dup2(fd, STDOUT_FILENO);
+			dup2(fd, STDERR_FILENO);
 		}
 	}
 
@@ -1403,7 +1545,7 @@ int main(int argc, char **argv)
 	if (ckp.pth_listener)
 		join_pthread(ckp.pth_listener);
 
-	shutdown_children(&ckp, SIGTERM);
+	shutdown_children(&ckp);
 	clean_up(&ckp);
 
 	return 0;
