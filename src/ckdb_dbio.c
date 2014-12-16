@@ -4170,9 +4170,9 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 					   by, code, inet, cd, trf_root);
 		} else {
 			char *txt;
-			LOGERR("%s(): unknown user '%s'",
-				__func__,
-				txt = safe_text(username));
+			LOGDEBUG("%s(): unknown user '%s'",
+				 __func__,
+				 txt = safe_text(username));
 			free(txt);
 		}
 		if (!u_item)
