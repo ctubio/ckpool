@@ -827,8 +827,14 @@ K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
-	if (!u_item)
+	if (!u_item) {
+		char *txt;
+		LOGERR("%s(): unknown user '%s'",
+			__func__,
+			txt = safe_text(username));
+		free(txt);
 		goto unitem;
+	}
 	DATA_USERS(users, u_item);
 
 	row->userid = users->userid;
@@ -2504,10 +2510,12 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
 	if (!u_item) {
+		char *txt;
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s() %s/%ld,%ld %.19s no user! Share discarded!",
-			__func__, username,
+			__func__, txt = safe_text(username),
 			cd->tv_sec, cd->tv_usec, cd_buf);
+		free(txt);
 		goto unitem;
 	}
 	DATA_USERS(users, u_item);
@@ -2627,10 +2635,12 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
 	if (!u_item) {
+		char *txt;
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s() %s/%ld,%ld %.19s no user! Shareerror discarded!",
-			__func__, username,
+			__func__, txt = safe_text(username),
 			cd->tv_sec, cd->tv_usec, cd_buf);
+		free(txt);
 		goto unitem;
 	}
 	DATA_USERS(users, u_item);
@@ -3963,8 +3973,14 @@ bool miningpayouts_add(PGconn *conn, char *username, char *height,
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
-	if (!u_item)
+	if (!u_item) {
+		char *txt;
+		LOGERR("%s(): unknown user '%s'",
+			__func__,
+			txt = safe_text(username));
+		free(txt);
 		goto unitem;
+	}
 	DATA_USERS(users, u_item);
 
 	row->userid = users->userid;
@@ -4152,6 +4168,12 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			}
 			u_item = users_add(conn, username, EMPTY, EMPTY,
 					   by, code, inet, cd, trf_root);
+		} else {
+			char *txt;
+			LOGERR("%s(): unknown user '%s'",
+				__func__,
+				txt = safe_text(username));
+			free(txt);
 		}
 		if (!u_item)
 			goto unitem;
@@ -4670,8 +4692,14 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
-	if (!u_item)
+	if (!u_item) {
+		char *txt;
+		LOGERR("%s(): unknown user '%s'",
+			__func__,
+			txt = safe_text(username));
+		free(txt);
 		return false;
+	}
 	DATA_USERS(users, u_item);
 	row->userid = users->userid;
 	TXT_TO_STR("workername", workername, row->workername);
@@ -4814,8 +4842,14 @@ bool workerstats_add(char *poolinstance, char *elapsed, char *username,
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
-	if (!u_item)
+	if (!u_item) {
+		char *txt;
+		LOGERR("%s(): unknown user '%s'",
+			__func__,
+			txt = safe_text(username));
+		free(txt);
 		return false;
+	}
 	DATA_USERS(users, u_item);
 	row->userid = users->userid;
 	TXT_TO_STR("workername", workername, row->workername);
