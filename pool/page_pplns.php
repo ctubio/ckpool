@@ -144,6 +144,8 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 		$dotx = true;
 
 	$flds = array('height' => $blk, 'allow_aged' => 'Y');
+	if ($blk > 334106)
+		$flds['diff_times'] = '5';
 	$msg = msgEncode('pplns', 'pplns', $flds, $user);
 	$rep = sendsockreply('pplns', $msg);
 	if ($rep == false)

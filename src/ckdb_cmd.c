@@ -3163,6 +3163,16 @@ static K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid, in
 	data going back in time to 'begin'
 */
 
+/* Blocks after 334106 were set to 5xN
+ *  however, they cannot count back to include the workinfoid of 333809
+ *  due to the markersummaries that were created.
+ * Code checks that if the block is after FIVExSTT then it must stop
+ *  counting back shares at - and not include - FIVExWID */
+#define FIVExSTT 334106
+#define FIVExLIM 333809
+// 333809 workinfoid
+#define FIVExWID 6085620100361146842
+
 static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
@@ -3196,7 +3206,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	double diff_times = 1.0;
 	double diff_add = 0.0;
 	double diff_want;
-	bool allow_aged = false;
+	bool allow_aged = false, countbacklimit;
 	char ndiffbin[TXT_SML+1];
 	size_t len, off;
 	int rows;
@@ -3288,6 +3298,11 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		return strdup(reply);
 	}
 
+	if (blocks->height > FIVExSTT)
+		countbacklimit = true;
+	else
+		countbacklimit = false;
+
 	begin_workinfoid = end_workinfoid = 0;
 	total_share_count = acc_share_count = 0;
 	total_diff = 0;
@@ -3322,6 +3337,11 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			default:
 				share_status = "Not ready1";
 		}
+
+		// Stop before FIVExWID if necessary
+		if (countbacklimit && sharesummary->workinfoid <= FIVExWID)
+			break;
+
 		ss_count++;
 		total_share_count += sharesummary->sharecount;
 		acc_share_count += sharesummary->shareacc;
@@ -3377,6 +3397,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 		while (total_diff < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
 			if (WMPROCESSED(workmarkers->status)) {
+				// Stop before FIVExWID if necessary
+				if (countbacklimit && workmarkers->workinfoidstart <= FIVExWID)
+					break;
+
 				wm_count++;
 				lookmarkersummary.markerid = workmarkers->markerid;
 				lookmarkersummary.userid = MAXID;
