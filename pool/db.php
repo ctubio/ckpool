@@ -234,6 +234,18 @@ function getWorkers($user, $stats = 'Y')
  return repDecode($rep);
 }
 #
+function getPercents($user, $stats = 'Y')
+{
+ if ($user == false)
+	showIndex();
+ $flds = array('username' => $user, 'stats' => $stats, 'percent' => 'Y');
+ $msg = msgEncode('workers', 'work', $flds, $user);
+ $rep = sendsockreply('getPercents', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
+}
+#
 function getPayments($user)
 {
  if ($user == false)

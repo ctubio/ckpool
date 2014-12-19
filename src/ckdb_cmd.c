@@ -1141,12 +1141,256 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
+{
+	K_ITEM w_look, *w_item, us_look, *us_item, *ws_item;
+	K_TREE_CTX w_ctx[1], us_ctx[1], pay_ctx[1];
+	WORKERS lookworkers, *workers;
+	WORKERSTATUS *workerstatus;
+	USERSTATS lookuserstats, *userstats;
+	char tmp[1024];
+	char *buf;
+	size_t len, off;
+	int rows;
+
+	K_TREE *userstats_workername_root = new_ktree();
+	K_TREE_CTX usw_ctx[1];
+	double t_hashrate5m = 0, t_hashrate1hr = 0;
+	double t_hashrate24hr = 0;
+	double t_diffacc = 0, t_diffinv = 0;
+	double t_diffsta = 0, t_diffdup = 0;
+	double t_diffhi = 0, t_diffrej = 0;
+	double t_shareacc = 0, t_shareinv = 0;
+	double t_sharesta = 0, t_sharedup = 0;
+	double t_sharehi = 0, t_sharerej = 0;
+
+	K_ITEM *pa_item;
+	PAYMENTADDRESSES *pa;
+	int64_t paytotal;
+	double ratio;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	snprintf(tmp, sizeof(tmp), "blockacc=%.1f%c",
+				   pool.diffacc, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "blockreward=%"PRId64"%c",
+				   pool.reward, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	INIT_WORKERS(&w_look);
+	INIT_USERSTATS(&us_look);
+
+	// Add up all user's worker stats to be divided into payout percentages
+	lookworkers.userid = users->userid;
+	lookworkers.workername[0] = '\0';
+	lookworkers.expirydate.tv_sec = 0;
+	lookworkers.expirydate.tv_usec = 0;
+	w_look.data = (void *)(&lookworkers);
+	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
+	DATA_WORKERS_NULL(workers, w_item);
+	while (w_item && workers->userid == users->userid) {
+		if (CURRENT(&(workers->expirydate))) {
+			ws_item = find_workerstatus(users->userid, workers->workername,
+						    __FILE__, __func__, __LINE__);
+			if (ws_item) {
+				DATA_WORKERSTATUS(workerstatus, ws_item);
+				t_diffacc += workerstatus->diffacc;
+				t_diffinv += workerstatus->diffinv;
+				t_diffsta += workerstatus->diffsta;
+				t_diffdup += workerstatus->diffdup;
+				t_diffhi  += workerstatus->diffhi;
+				t_diffrej += workerstatus->diffrej;
+				t_shareacc += workerstatus->shareacc;
+				t_shareinv += workerstatus->shareinv;
+				t_sharesta += workerstatus->sharesta;
+				t_sharedup += workerstatus->sharedup;
+				t_sharehi += workerstatus->sharehi;
+				t_sharerej += workerstatus->sharerej;
+			}
+
+			// find last stored userstats record
+			lookuserstats.userid = users->userid;
+			lookuserstats.statsdate.tv_sec = date_eot.tv_sec;
+			lookuserstats.statsdate.tv_usec = date_eot.tv_usec;
+			// find/cmp doesn't get to here
+			lookuserstats.poolinstance[0] = '\0';
+			lookuserstats.workername[0] = '\0';
+			us_look.data = (void *)(&lookuserstats);
+			K_RLOCK(userstats_free);
+			us_item = find_before_in_ktree(userstats_root, &us_look, cmp_userstats, us_ctx);
+			DATA_USERSTATS_NULL(userstats, us_item);
+			while (us_item && userstats->userid == lookuserstats.userid) {
+				if (strcmp(userstats->workername, workers->workername) == 0) {
+					if (tvdiff(now, &(userstats->statsdate)) < USERSTATS_PER_S) {
+						if (!find_in_ktree(userstats_workername_root, us_item,
+						    cmp_userstats_workername, usw_ctx)) {
+							t_hashrate5m += userstats->hashrate5m;
+							t_hashrate1hr += userstats->hashrate1hr;
+							t_hashrate24hr += userstats->hashrate24hr;
+							userstats_workername_root =
+									add_to_ktree(userstats_workername_root,
+										     us_item,
+										     cmp_userstats_workername);
+						}
+					} else
+						break;
+
+				}
+				us_item = prev_in_ktree(us_ctx);
+				DATA_USERSTATS_NULL(userstats, us_item);
+			}
+			K_RUNLOCK(userstats_free);
+		}
+		w_item = next_in_ktree(w_ctx);
+		DATA_WORKERS_NULL(workers, w_item);
+	}
+
+	userstats_workername_root = free_ktree(userstats_workername_root, NULL);
+
+	// Calculate total payratio
+	paytotal = 0;
+	K_RLOCK(paymentaddresses_free);
+	pa_item = find_paymentaddresses(users->userid, pay_ctx);
+	DATA_PAYMENTADDRESSES(pa, pa_item);
+	while (pa_item && CURRENT(&(pa->expirydate)) &&
+	       pa->userid == users->userid) {
+		paytotal += pa->payratio;
+		pa_item = prev_in_ktree(pay_ctx);
+		DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
+	}
+	if (paytotal == 0)
+		paytotal = 1;
+
+	// Divide totals into payout percentages
+	rows = 0;
+	pa_item = find_paymentaddresses(users->userid, pay_ctx);
+	DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
+	while (pa_item && CURRENT(&(pa->expirydate)) &&
+	       pa->userid == users->userid) {
+		ratio = (double)(pa->payratio) / (double)paytotal;
+
+		snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c",
+					   rows, pa->payaddress, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "payratio:%d=%"PRId32"%c",
+					   rows, pa->payratio, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "paypercent:%d=%.6f%c",
+					   rows, ratio * 100.0, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_hashrate5m:%d=%.1f%c", rows,
+					   (double)t_hashrate5m * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_hashrate1hr:%d=%.1f%c", rows,
+					   (double)t_hashrate1hr * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_hashrate24hr:%d=%.1f%c", rows,
+					   (double)t_hashrate24hr * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_diffacc:%d=%.1f%c", rows,
+					   (double)t_diffacc * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_diffinv:%d=%.1f%c", rows,
+					   (double)t_diffinv * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_diffsta:%d=%.1f%c", rows,
+					   (double)t_diffsta * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_diffdup:%d=%.1f%c", rows,
+					   (double)t_diffdup * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_diffhi:%d=%.1f%c", rows,
+					   (double)t_diffhi * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_diffrej:%d=%.1f%c", rows,
+					   (double)t_diffrej * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_shareacc:%d=%.1f%c", rows,
+					   (double)t_shareacc * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_shareinv:%d=%.1f%c", rows,
+					   (double)t_shareinv * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_sharesta:%d=%.1f%c", rows,
+					   (double)t_sharesta * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_sharedup:%d=%.1f%c", rows,
+					   (double)t_sharedup * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_sharehi:%d=%.1f%c", rows,
+					   (double)t_sharehi * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "p_sharerej:%d=%.1f%c", rows,
+					   (double)t_sharerej * ratio,
+					   FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		rows++;
+
+		pa_item = prev_in_ktree(pay_ctx);
+		DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
+	}
+
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "payaddress,payratio,paypercent,"
+		 "p_hashrate5m,p_hashrate1hr,p_hashrate24hr,"
+		 "p_diffacc,p_diffinv,"
+		 "p_diffsta,p_diffdup,p_diffhi,p_diffrej,"
+		 "p_shareacc,p_shareinv,"
+		 "p_sharesta,p_sharedup,p_sharehi,p_sharerej",
+		 FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Percents", FLDSEP, "");
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%s", id, users->username);
+	return buf;
+}
+
 static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
-			 __maybe_unused tv_t *now, __maybe_unused char *by,
+			 tv_t *now, __maybe_unused char *by,
 			 __maybe_unused char *code, __maybe_unused char *inet,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
-	K_ITEM *i_username, *i_stats, w_look, *u_item, *w_item, us_look, *us_item, *ws_item;
+	K_ITEM *i_username, *i_stats, *i_percent, w_look, *u_item, *w_item;
+	K_ITEM *ua_item, us_look, *us_item, *ws_item;
 	K_TREE_CTX w_ctx[1], us_ctx[1];
 	WORKERS lookworkers, *workers;
 	WORKERSTATUS *workerstatus;
@@ -1157,7 +1401,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t siz = sizeof(reply);
 	char *buf;
 	size_t len, off;
-	bool stats;
+	bool stats, percent;
 	int rows;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -1179,6 +1423,28 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	else
 		stats = (strcasecmp(transfer_data(i_stats), TRUE_STR) == 0);
 
+	percent = false;
+	K_RLOCK(useratts_free);
+	ua_item = find_useratts(users->userid, USER_MULTI_PAYOUT);
+	K_RUNLOCK(useratts_free);
+	if (ua_item) {
+		i_percent = optional_name(trf_root, "percent", 1, NULL, reply, siz);
+		if (i_percent)
+			percent = (strcasecmp(transfer_data(i_stats), TRUE_STR) == 0);
+	}
+
+	if (percent)
+		return cmd_percent(cmd, id, now, users);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	snprintf(tmp, sizeof(tmp), "blockacc=%.1f%c",
+				   pool.diffacc, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "blockreward=%"PRId64"%c",
+				   pool.reward, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
 	INIT_WORKERS(&w_look);
 	INIT_USERSTATS(&us_look);
 
@@ -1189,15 +1455,6 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	w_look.data = (void *)(&lookworkers);
 	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
-	APPEND_REALLOC_INIT(buf, off, len);
-	APPEND_REALLOC(buf, off, len, "ok.");
-	snprintf(tmp, sizeof(tmp), "blockacc=%.1f%c",
-				   pool.diffacc, FLDSEP);
-	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "blockreward=%"PRId64"%c",
-				   pool.reward, FLDSEP);
-	APPEND_REALLOC(buf, off, len, tmp);
-
 	rows = 0;
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {

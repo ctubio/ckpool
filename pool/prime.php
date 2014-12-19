@@ -13,8 +13,10 @@ function process($p, $user, $menu)
  {
 	if (isset($menu['Account']))
 		$menu['Account']['Addresses'] = 'addrmgt';
+	if (isset($menu['Workers']))
+		$menu['Workers']['Percents'] = 'percent';
  }
- if ($user == 'Kano' || $user == 'ckolivas' || $user == 'wvr2' || $user == 'aphorise')
+ if ($user == 'Kano' || $user == 'ckolivas')
  {
 	$menu['Admin']['ckp'] = 'ckp';
 	$menu['Admin']['PPLNS'] = 'pplns';

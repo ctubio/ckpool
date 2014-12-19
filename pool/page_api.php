@@ -29,8 +29,7 @@ function show_api($info, $page, $menu, $name, $user)
 	no_api($jfu);
  if (nuem($work))
  {
-	if ($info === NULL)
-		$info = homeInfo($u);
+	$info = homeInfo($u);
 	if ($info === false)
 		no_api($jfu);
 	$rep = fldEncode($info, 'lastbc', true);
@@ -47,9 +46,26 @@ function show_api($info, $page, $menu, $name, $user)
  }
  else
  {
-	$ans = getWorkers($u);
+	$info = homeInfo($u);
+	if ($info === false)
+		no_api($jfu);
+
+	$per = false;
+	if (is_array($info) && isset($info['u_multiaddr']))
+	{
+		$percent = getparam('percent', true);
+		if (!nuem($percent))
+			$per = true;
+	}
+
+	if ($per === true)
+		$ans = getPercents($u);
+	else
+		$ans = getWorkers($u);
+
 	if ($ans === false)
 		no_api($jfu);
+
 	$rep = fldEncode($ans, 'rows', true);
 	$rows = $ans['rows'];
 	$flds = explode(',', $ans['flds']);
