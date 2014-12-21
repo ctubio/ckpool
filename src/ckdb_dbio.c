@@ -1448,7 +1448,7 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	PAYMENTADDRESSES *row, *pa;
 	char *upd = NULL, *ins;
 	size_t len, off;
-	bool ok = false, first;
+	bool ok = false, first, locked = false;
 	char *params[1002]; // Limit of 999 addresses per user
 	char tmp[1024];
 	int n, par = 0, count, matches;
@@ -1458,11 +1458,6 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	// Quick early abort
 	if (pa_store->count > 999)
 		return false;
-
-	/* Since we are merging the changes in rather than just
-	 *  replacing the db contents, lock the data for the duration
-	 *  of the update to ensure nothing else changes it */
-	K_WLOCK(paymentaddresses_free);
 
 	if (conn == NULL) {
 		conn = dbconnect();
@@ -1490,6 +1485,12 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	params[par++] = tv_to_buf(cd, NULL, 0);
 	params[par++] = bigint_to_buf(userid, NULL, 0);
 	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+
+	/* Since we are merging the changes in rather than just
+	 *  replacing the db contents, lock the data for the duration
+	 *  of the update to ensure nothing else changes it */
+	K_WLOCK(paymentaddresses_free);
+	locked = true;
 
 	first = true;
 	item = find_paymentaddresses(userid, ctx);
@@ -1663,9 +1664,10 @@ unparam:
 			match = next;
 		}
 	}
-	LOGDEBUG("%s(): Step 3, untouched %d expired %d added %d", __func__, matches, n, count);
+	if (locked)
+		K_WUNLOCK(paymentaddresses_free);
 
-	K_WUNLOCK(paymentaddresses_free);
+	LOGDEBUG("%s(): Step 3, untouched %d expired %d added %d", __func__, matches, n, count);
 
 	// Calling function must clean up anything left in pa_store
 	return ok;

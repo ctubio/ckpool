@@ -1364,6 +1364,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 		pa_item = prev_in_ktree(pay_ctx);
 		DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
 	}
+	K_RUNLOCK(paymentaddresses_free);
 
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
