@@ -58,6 +58,7 @@ function doblocks($data, $user)
  {
 	$pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
 	$pg .= "<tr class=title>";
+	$pg .= "<td class=dr>#</td>";
 	$pg .= "<td class=dl>Height</td>";
 	if ($user !== null)
 		$pg .= "<td class=dl>Who</td>";
@@ -65,7 +66,7 @@ function doblocks($data, $user)
 	$pg .= "<td class=dc>When</td>";
 	$pg .= "<td class=dr>Status</td>";
 	$pg .= "<td class=dr>Diff</td>";
-	$pg .= "<td class=dr>%</td>";
+	$pg .= "<td class=dr>Diff%</td>";
 	$pg .= "<td class=dr>CDF</td>";
 	$pg .= "</tr>\n";
  }
@@ -73,12 +74,13 @@ function doblocks($data, $user)
  $nettot = 0;
  $i = 0;
  $orph = false;
- $csv = "Height,Status,Timestamp,DiffAcc,NetDiff\n";
+ $csv = "Sequence,Height,Status,Timestamp,DiffAcc,NetDiff,Hash\n";
  if ($ans['STATUS'] == 'ok')
  {
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
+		$seq = $count - $i;
 		if (($i % 2) == 0)
 			$row = 'even';
 		else
@@ -142,6 +144,7 @@ function doblocks($data, $user)
 		if ($wantcsv === false)
 		{
 		 $pg .= "<tr class=$row>";
+		 $pg .= "<td class=dr$ex>$seq</td>";
 		 $pg .= "<td class=dl$ex>$hifld</td>";
 		 if ($user !== null)
 			$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
@@ -155,11 +158,13 @@ function doblocks($data, $user)
 		}
 		else
 		{
+		 $csv .= "$seq,";
 		 $csv .= "$hi,";
 		 $csv .= "\"$stat\",";
 		 $csv .= $ans['firstcreatedate:'.$i].',';
 		 $csv .= "$diffacc,";
-		 $csv .= "$netdiff\n";
+		 $csv .= "$netdiff,";
+		 $csv .= $ans['blockhash:'.$i]."\n";
 		}
 	}
  }
