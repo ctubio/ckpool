@@ -49,22 +49,31 @@ function doblocks($data, $user)
  else
 	$ans = getBlocks($user);
 
- $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
- $pg .= "<tr class=title>";
- $pg .= "<td class=dl>Height</td>";
- if ($user !== null)
-	$pg .= "<td class=dl>Who</td>";
- $pg .= "<td class=dr>Reward</td>";
- $pg .= "<td class=dc>When</td>";
- $pg .= "<td class=dr>Status</td>";
- $pg .= "<td class=dr>Diff</td>";
- $pg .= "<td class=dr>%</td>";
- $pg .= "<td class=dr>CDF</td>";
- $pg .= "</tr>\n";
+ if (nuem(getparam('csv', true)))
+	$wantcsv = false;
+ else
+	$wantcsv = true;
+
+ if ($wantcsv === false)
+ {
+	$pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
+	$pg .= "<tr class=title>";
+	$pg .= "<td class=dl>Height</td>";
+	if ($user !== null)
+		$pg .= "<td class=dl>Who</td>";
+	$pg .= "<td class=dr>Reward</td>";
+	$pg .= "<td class=dc>When</td>";
+	$pg .= "<td class=dr>Status</td>";
+	$pg .= "<td class=dr>Diff</td>";
+	$pg .= "<td class=dr>%</td>";
+	$pg .= "<td class=dr>CDF</td>";
+	$pg .= "</tr>\n";
+ }
  $blktot = 0;
  $nettot = 0;
  $i = 0;
  $orph = false;
+ $csv = "Height,Status,Timestamp,DiffAcc,NetDiff\n";
  if ($ans['STATUS'] == 'ok')
  {
 	$count = $ans['rows'];
@@ -130,18 +139,34 @@ function doblocks($data, $user)
 			$cdf = '?';
 		}
 
-		$pg .= "<tr class=$row>";
-		$pg .= "<td class=dl$ex>$hifld</td>";
-		if ($user !== null)
+		if ($wantcsv === false)
+		{
+		 $pg .= "<tr class=$row>";
+		 $pg .= "<td class=dl$ex>$hifld</td>";
+		 if ($user !== null)
 			$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
-		$pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
-		$pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate:'.$i]).'</td>';
-		$pg .= "<td class=dr$ex>".$stat.'</td>';
-		$pg .= "<td class=dr>$stara$acc</td>";
-		$pg .= "<td class=dr$bg>$bpct</td>";
-		$pg .= "<td class=dr>$cdf</td>";
-		$pg .= "</tr>\n";
+		 $pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
+		 $pg .= "<td class=dl$ex>".gmdate('Y-m-d H:i:s+00', $ans['firstcreatedate:'.$i]).'</td>';
+		 $pg .= "<td class=dr$ex>".$stat.'</td>';
+		 $pg .= "<td class=dr>$stara$acc</td>";
+		 $pg .= "<td class=dr$bg>$bpct</td>";
+		 $pg .= "<td class=dr>$cdf</td>";
+		 $pg .= "</tr>\n";
+		}
+		else
+		{
+		 $csv .= "$hi,";
+		 $csv .= "\"$stat\",";
+		 $csv .= $ans['firstcreatedate:'.$i].',';
+		 $csv .= "$diffacc,";
+		 $csv .= "$netdiff\n";
+		}
 	}
+ }
+ if ($wantcsv === true)
+ {
+	echo $csv;
+	exit(0);
  }
  if ($nettot > 0)
  {
