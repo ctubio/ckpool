@@ -2618,6 +2618,10 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 
+	// Don't bother with locking - it's just an FYI web stat
+	snprintf(tmp, sizeof(tmp), "sync=%d%c", workqueue_store->count, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
 	u_item = NULL;
 	if (i_username) {
 		K_RLOCK(users_free);

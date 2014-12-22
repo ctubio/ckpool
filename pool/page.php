@@ -137,6 +137,8 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .st1 {color:red; font-weight:bold; }
 .st2 {color:green; font-weight:bold; }
 .st3 {color:blue; font-weight:bold; }
+.fthi {color:red; font-size:7px; }
+.ftlo {color:green; font-size:7px; }
 .ft {color:blue; font-size:7px; }
 </style>\n";
 
@@ -420,14 +422,25 @@ function pgbody($info, $page, $menu, $dotop, $user, $douser)
  return $body;
 }
 #
-function pgfoot()
+function pgfoot($info)
 {
  $foot =      '</div></td></tr>';
  $foot .=    '</table>';
  $foot .=   '</center></td></tr>';
  $foot .=  '</table>';
  $foot .= '<div class=push></div></div>';
- $foot .= '<div class=foot><br>Copyright &copy; Kano 2014';
+ $foot .= '<div class=foot><br>';
+ if (is_array($info) && isset($info['sync']))
+ {
+  $sync = $info['sync'];
+  if ($sync > 1000)
+	$syc = 'hi';
+  else
+	$syc = 'lo';
+  $syncd = number_format($sync);
+  $foot .= "<span class=ft$syc>sync: $syncd</span> ";
+ }
+ $foot .= 'Copyright &copy; Kano 2014';
  $now = date('Y');
  if ($now != '2014')
 	$foot .= "-$now";
@@ -466,7 +479,7 @@ function gopage($info, $data, $pagefun, $page, $menu, $name, $user, $ispage = tr
 
  $head = pghead($script_marker, $name);
  $body = pgbody($info, $page, $menu, $dotop, $user, $douser);
- $foot = pgfoot();
+ $foot = pgfoot($info);
 
  if ($dbg === true)
 	$pg = str_replace($dbg_marker, cvtdbg(), $pg);
