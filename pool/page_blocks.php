@@ -186,7 +186,7 @@ function doblocks($data, $user)
 	$bg = " bgcolor=$bg";
 
 	$pg .= "<tr class=$row>";
-	$pg .= '<td class=dr>Total:</td>';
+	$pg .= '<td colspan=2 class=dr>Total:</td>';
 	$pg .= '<td class=dl colspan=';
 	if ($user === null)
 		$pg .= '4';
