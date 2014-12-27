@@ -4550,25 +4550,66 @@ bool poolstats_fill(PGconn *conn)
 	PGresult *res;
 	K_ITEM *item;
 	int n, i;
+	struct tm tm;
+	time_t now_t;
+	char tzinfo[16], stamp[128];
 	POOLSTATS *row;
 	char *field;
-	char *sel;
+	char *sel = NULL;
+	size_t len, off;
 	int fields = 8;
+	long minoff, hroff;
+	char tzch;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
-	sel = "select "
-		"poolinstance,elapsed,users,workers,hashrate,hashrate5m,"
-		"hashrate1hr,hashrate24hr"
-		SIMPLEDATECONTROL
-		" from poolstats";
+	// Temoprarily ... load last 24hrs worth
+	now_t = time(NULL);
+	now_t -= 24 * 60 * 60;
+	localtime_r(&now_t, &tm);
+	minoff = tm.tm_gmtoff / 60;
+	if (minoff < 0) {
+		tzch = '-';
+		minoff *= -1;
+	} else
+		tzch = '+';
+	hroff = minoff / 60;
+	if (minoff % 60) {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld:%02ld",
+			 tzch, hroff, minoff % 60);
+	} else {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld",
+			 tzch, hroff);
+	}
+	snprintf(stamp, sizeof(stamp),
+			"'%d-%02d-%02d %02d:%02d:%02d%s'",
+			tm.tm_year + 1900,
+			tm.tm_mon + 1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec,
+			tzinfo);
+
+	APPEND_REALLOC_INIT(sel, off, len);
+	APPEND_REALLOC(sel, off, len,
+			"select "
+			"poolinstance,elapsed,users,workers,hashrate,"
+			"hashrate5m,hashrate1hr,hashrate24hr"
+			SIMPLEDATECONTROL
+			" from poolstats where createdate>");
+	APPEND_REALLOC(sel, off, len, stamp);
+
 	res = PQexec(conn, sel, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Select", rescode, conn);
 		PQclear(res);
-		return false;
+		ok = false;
+		goto clean;
 	}
 
 	n = PQnfields(res);
@@ -4576,7 +4617,8 @@ bool poolstats_fill(PGconn *conn)
 		LOGERR("%s(): Invalid field count - should be %d, but is %d",
 			__func__, fields + SIMPLEDATECOUNT, n);
 		PQclear(res);
-		return false;
+		ok = false;
+		goto clean;
 	}
 
 	n = PQntuples(res);
@@ -4656,7 +4698,8 @@ bool poolstats_fill(PGconn *conn)
 		LOGDEBUG("%s(): built", __func__);
 		LOGWARNING("%s(): loaded %d poolstats records", __func__, n);
 	}
-
+clean:
+	free(sel);
 	return ok;
 }
 
@@ -4961,26 +5004,68 @@ bool userstats_fill(PGconn *conn)
 	PGresult *res;
 	K_ITEM *item;
 	int n, i;
+	struct tm tm;
+	time_t now_t;
+	char tzinfo[16], stamp[128];
 	USERSTATS *row;
 	tv_t statsdate;
 	char *field;
-	char *sel;
+	char *sel = NULL;
+	size_t len, off;
 	int fields = 10;
+	long minoff, hroff;
+	char tzch;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
-	sel = "select "
-		"userid,workername,elapsed,hashrate,hashrate5m,hashrate1hr,"
-		"hashrate24hr,summarylevel,summarycount,statsdate"
-		SIMPLEDATECONTROL
-		" from userstats";
+	// Temoprarily ... load last 24hrs worth
+	now_t = time(NULL);
+	now_t -= 24 * 60 * 60;
+	localtime_r(&now_t, &tm);
+	minoff = tm.tm_gmtoff / 60;
+	if (minoff < 0) {
+		tzch = '-';
+		minoff *= -1;
+	} else
+		tzch = '+';
+	hroff = minoff / 60;
+	if (minoff % 60) {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld:%02ld",
+			 tzch, hroff, minoff % 60);
+	} else {
+		snprintf(tzinfo, sizeof(tzinfo),
+			 "%c%02ld",
+			 tzch, hroff);
+	}
+	snprintf(stamp, sizeof(stamp),
+			"'%d-%02d-%02d %02d:%02d:%02d%s'",
+			tm.tm_year + 1900,
+			tm.tm_mon + 1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec,
+			tzinfo);
+
+	APPEND_REALLOC_INIT(sel, off, len);
+	APPEND_REALLOC(sel, off, len,
+			"select "
+			"userid,workername,elapsed,hashrate,hashrate5m,"
+			"hashrate1hr,hashrate24hr,summarylevel,summarycount,"
+			"statsdate"
+			SIMPLEDATECONTROL
+			" from userstats where statsdate>");
+	APPEND_REALLOC(sel, off, len, stamp);
+
 	res = PQexec(conn, sel, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Select", rescode, conn);
 		PQclear(res);
-		return false;
+		ok = false;
+		goto clean;
 	}
 
 	n = PQnfields(res);
@@ -4988,7 +5073,8 @@ bool userstats_fill(PGconn *conn)
 		LOGERR("%s(): Invalid field count - should be %d, but is %d",
 			__func__, fields + SIMPLEDATECOUNT, n);
 		PQclear(res);
-		return false;
+		ok = false;
+		goto clean;
 	}
 
 	n = PQntuples(res);
@@ -5092,7 +5178,8 @@ bool userstats_fill(PGconn *conn)
 		LOGDEBUG("%s(): built", __func__);
 		LOGWARNING("%s(): loaded %d userstats records", __func__, n);
 	}
-
+clean:
+	free(sel);
 	return ok;
 }
 
