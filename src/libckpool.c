@@ -1270,6 +1270,11 @@ void *_ckalloc(size_t len, const char *file, const char *func, const int line)
 	return ptr;
 }
 
+void *json_ckalloc(size_t size)
+{
+	return _ckalloc(size, __FILE__, __func__, __LINE__);
+}
+
 void *_ckzalloc(size_t len, const char *file, const char *func, const int line)
 {
 	int backoff = 1;

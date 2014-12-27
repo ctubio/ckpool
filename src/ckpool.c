@@ -810,6 +810,7 @@ static void launch_process(proc_instance_t *pi)
 		struct sigaction handler;
 		int ret;
 
+		json_set_alloc_funcs(json_ckalloc, free);
 		launch_logger(pi);
 		handler.sa_handler = &childsighandler;
 		handler.sa_flags = 0;
@@ -1260,6 +1261,7 @@ int main(int argc, char **argv)
 
 	/* Make significant floating point errors fatal to avoid subtle bugs being missed */
 	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW );
+	json_set_alloc_funcs(json_ckalloc, free);
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
