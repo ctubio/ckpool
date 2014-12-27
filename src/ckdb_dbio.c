@@ -4333,24 +4333,45 @@ bool auths_fill(PGconn *conn)
 	PGresult *res;
 	K_ITEM *item;
 	AUTHS *row;
-	char *params[1];
-	int n, i, par = 0;
+//	char *params[1];
+	int n, i;
+//	int par = 0;
 	char *field;
 	char *sel;
-	int fields = 7;
+	int fields = 7 + 1; // +1 = 'best'
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	// TODO: add/update a (single) fake auth every ~10min or 10min after the last one?
+#if 0
 	sel = "select "
 		"authid,userid,workername,clientid,enonce1,useragent,preauth"
 		HISTORYDATECONTROL
 		" from auths where expirydate=$1";
+
 	par = 0;
 	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
 	PARCHK(par, params);
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		PQclear(res);
+		return false;
+	}
+#endif
+
+	// Only load the last record for each workername
+	sel = "with last as ("
+		  "select authid,userid,workername,clientid,enonce1,useragent,preauth"
+		  HISTORYDATECONTROL
+		  ",row_number() over(partition by userid,workername "
+					"order by expirydate desc, createdate desc)"
+		  " as best from auths"
+		") select * from last where best=1";
+
+	res = PQexec(conn, sel, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Select", rescode, conn);
