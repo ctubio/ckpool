@@ -157,6 +157,9 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 	if ($ans['ERROR'] != null)
 		return '<font color=red size=+1><br>'.$ans['STATUS'].': '.$ans['ERROR'].'</font>';
 
+	if (!isset($ans['pplns_last']))
+		return '<font color=red size=+1><br>Partial data returned</font>';
+
 	$reward_sat = $ans['block_reward'];
 	$miner_sat = round($reward_sat * 0.991);
 	$ans['miner_sat'] = $miner_sat;
@@ -190,6 +193,13 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 
 	$pg = '<br><a href=https://blockchain.info/block-height/';
 	$pg .= $ans['block'].'>Blockchain '.$ans['block']."</a><br>\n";
+
+	if (strlen($ans['marks_status']) > 0)
+	{
+		$pg .= '<br><span class=err>';
+		$msg = $ans['marks_status'];
+		$pg .= str_replace(' ', '&nbsp;', $msg)."</span><br>\n";
+	}
 
 	if (strlen($ans['block_extra']) > 0)
 	{

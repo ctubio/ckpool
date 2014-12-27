@@ -1337,11 +1337,14 @@ cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-K_ITEM *find_workinfo(int64_t workinfoid)
+K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 {
 	WORKINFO workinfo;
-	K_TREE_CTX ctx[1];
+	K_TREE_CTX ctx0[1];
 	K_ITEM look, *item;
+
+	if (ctx == NULL)
+		ctx = ctx0;
 
 	workinfo.workinfoid = workinfoid;
 	workinfo.expirydate.tv_sec = default_expiry.tv_sec;
@@ -1377,7 +1380,7 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	ss_last->tv_sec = ss_last->tv_usec = 0;
 	*ss_count = *s_count = *s_diff = 0;
 
-	wi_item = find_workinfo(workinfoid);
+	wi_item = find_workinfo(workinfoid, NULL);
 	if (!wi_item) {
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %.19s no workinfo! Age discarded!",

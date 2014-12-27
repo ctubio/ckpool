@@ -2346,7 +2346,8 @@ bool workinfo_fill(PGconn *conn)
 	char *params[3];
 	int n, i, par = 0;
 	char *field;
-	char *sel;
+	char *sel = NULL;
+	size_t len, off;
 	int fields = 10;
 	bool ok;
 
@@ -2355,14 +2356,31 @@ bool workinfo_fill(PGconn *conn)
 	// TODO: select the data based on sharesummary since old data isn't needed
 	//  however, the ageing rules for workinfo will decide that also
 	//  keep the last block + current? Rules will depend on payout scheme also
-	sel = "select "
-//		"workinfoid,poolinstance,transactiontree,merklehash,prevhash,"
-		"workinfoid,poolinstance,merklehash,prevhash,"
-		"coinbase1,coinbase2,version,bits,ntime,reward"
-		HISTORYDATECONTROL
-		" from workinfo where expirydate=$1 and"
-		" ((workinfoid>=$2 and workinfoid<=$3) or"
-		"  workinfoid in (select workinfoid from blocks) )";
+
+	APPEND_REALLOC_INIT(sel, off, len);
+	APPEND_REALLOC(sel, off, len,
+			"select "
+//			"workinfoid,poolinstance,transactiontree,merklehash,prevhash,"
+			"workinfoid,poolinstance,merklehash,prevhash,"
+			"coinbase1,coinbase2,version,bits,ntime,reward"
+			HISTORYDATECONTROL
+			" from workinfo where expirydate=$1 and"
+			" ((workinfoid>=$2 and workinfoid<=$3)");
+
+	// If we aren't loading the full range, ensure the necessary ones are loaded
+	if ((!dbload_only_sharesummary && dbload_workinfoid_start != -1) ||
+	    dbload_workinfoid_finish != MAXID) {
+		APPEND_REALLOC(sel, off, len,
+				// we need all blocks workinfoids
+				" or workinfoid in (select workinfoid from blocks)"
+				// we need all marks workinfoids
+				" or workinfoid in (select workinfoid from marks)"
+				// we need all workmarkers workinfoids (start and end)
+				" or workinfoid in (select workinfoidstart from workmarkers)"
+				" or workinfoid in (select workinfoidend from workmarkers)");
+	}
+	APPEND_REALLOC(sel, off, len, ")");
+
 	par = 0;
 	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
 	if (dbload_only_sharesummary)
@@ -2550,7 +2568,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	HISTORYDATEINIT(shares, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, shares);
 
-	wi_item = find_workinfo(shares->workinfoid);
+	wi_item = find_workinfo(shares->workinfoid, NULL);
 	if (!wi_item) {
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		// TODO: store it for a few workinfoid changes
@@ -2671,7 +2689,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	HISTORYDATEINIT(shareerrors, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, shareerrors);
 
-	wi_item = find_workinfo(shareerrors->workinfoid);
+	wi_item = find_workinfo(shareerrors->workinfoid, NULL);
 	if (!wi_item) {
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %.19s no workinfo! Shareerror discarded!",
@@ -3066,9 +3084,11 @@ bool sharesummary_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_TREE_CTX ctx[1];
+	K_ITEM *item, *m_item;
 	int n, i, par = 0;
 	SHARESUMMARY *row;
+	MARKS *marks;
 	char *params[2];
 	char *field;
 	char *sel;
@@ -3076,6 +3096,32 @@ bool sharesummary_fill(PGconn *conn)
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
+
+	/* Load needs to go back to the last marks workinfoid(+1)
+	 * If it is later than that, we can't create markersummaries
+	 *  since some of the required data is missing -
+	 *  thus we also can't make the shift markersummaries */
+	m_item = last_in_ktree(marks_root, ctx);
+	if (!m_item) {
+		if (dbload_workinfoid_start != -1) {
+			sharesummary_marks_limit = true;
+			LOGWARNING("WARNING: dbload -w start used "
+				   "but there are no marks ...");
+		}
+	} else {
+		DATA_MARKS(marks, m_item);
+		if (dbload_workinfoid_start > marks->workinfoid) {
+			sharesummary_marks_limit = true;
+			LOGWARNING("WARNING: dbload -w start %"PRId64
+				   " is after the last mark %"PRId64" ...",
+				   dbload_workinfoid_start,
+				   marks->workinfoid);
+		}
+	}
+	if (sharesummary_marks_limit) {
+		LOGWARNING("WARNING: ... markersummaries cannot be created "
+			   "and pplns calculations may be wrong");
+	}
 
 	// TODO: limit how far back
 	sel = "select "
@@ -3733,7 +3779,7 @@ flail:
 				break;
 			case BLOCKS_CONFIRM:
 				blk = true;
-				w_item = find_workinfo(row->workinfoid);
+				w_item = find_workinfo(row->workinfoid, NULL);
 				if (w_item) {
 					char wdiffbin[TXT_SML+1];
 					double wdiff;
@@ -5302,10 +5348,10 @@ bool _workmarkers_process(PGconn *conn, bool add, int64_t markerid,
 				 WHERE_FFL_PASS);
 			goto rollback;
 		}
-		w_item = find_workinfo(workinfoidend);
+		w_item = find_workinfo(workinfoidend, NULL);
 		if (!w_item)
 			goto rollback;
-		w_item = find_workinfo(workinfoidstart);
+		w_item = find_workinfo(workinfoidstart, NULL);
 		if (!w_item)
 			goto rollback;
 		K_WLOCK(workmarkers_free);
@@ -5614,7 +5660,7 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 				 WHERE_FFL_PASS);
 			goto rollback;
 		}
-		w_item = find_workinfo(workinfoid);
+		w_item = find_workinfo(workinfoid, NULL);
 		if (!w_item)
 			goto rollback;
 		K_WLOCK(marks_free);

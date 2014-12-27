@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.782"
+#define CKDB_VERSION DB_VERSION"-0.800"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -249,6 +249,11 @@ extern int64_t dbload_workinfoid_start;
 extern int64_t dbload_workinfoid_finish;
 // Only restrict sharesummary, not workinfo
 extern bool dbload_only_sharesummary;
+
+/* If the above restriction - on sharesummaries - is after the last marks
+ *  then this means the sharesummaries can't be summarised into
+ *  markersummaries and pplns payouts may not be correct */
+extern bool sharesummary_marks_limit;
 
 // DB users,workers,auth load is complete
 extern bool db_auths_complete;
@@ -1574,7 +1579,7 @@ extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);
 #define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
 extern cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS);
 extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_workinfo(int64_t workinfoid);
+extern K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
 extern bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			 char *by, char *code, char *inet, tv_t *cd,
 			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,

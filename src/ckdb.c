@@ -154,6 +154,7 @@
 
 static bool socketer_using_data;
 static bool summariser_using_data;
+static bool marker_using_data;
 static bool logger_using_data;
 static bool listener_using_data;
 
@@ -274,6 +275,11 @@ int64_t dbload_workinfoid_start = -1;
 int64_t dbload_workinfoid_finish = MAXID;
 // Only restrict sharesummary, not workinfo
 bool dbload_only_sharesummary = false;
+
+/* If the above restriction - on sharesummaries - is after the last marks
+ *  then this means the sharesummaries can't be summarised into
+ *  markersummaries and pplns payouts may not be correct */
+bool sharesummary_marks_limit = false;
 
 // DB users,workers,auth load is complete
 bool db_auths_complete = false;
@@ -753,6 +759,8 @@ static bool getdata3()
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
 		goto sukamudai;
+	/* marks must be loaded before sharesummary
+	 * since sharesummary looks at the marks data */
 	if (!(ok = marks_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
@@ -1621,7 +1629,7 @@ static void summarise_blocks()
 	} else {
 		DATA_BLOCKS(prev_blocks, b_prev);
 		wi_start = prev_blocks->workinfoid;
-		wi_item = find_workinfo(wi_start);
+		wi_item = find_workinfo(wi_start, NULL);
 		if (!wi_item) {
 			// This will repeat until fixed ...
 			LOGERR("%s() block %d, but prev %d wid "
@@ -2020,6 +2028,86 @@ static void *summariser(__maybe_unused void *arg)
 	}
 
 	summariser_using_data = false;
+
+	return NULL;
+}
+
+// Number of workinfoids per shift
+#define WID_PER_SHIFT	100
+
+#if 0
+static void make_shift_marks()
+{
+	K_TREE_CTX ctx[1];
+	K_ITEM *m_item, *wi_item;;
+	WORKINFO *workinfo;
+	MARKS *marks;
+	int wid_count;
+	int64_t wid;
+
+	K_RLOCK(marks_free);
+	m_item = last_in_ktree(marks_root, ctx);
+	if (m_item) {
+		DATA_MARKS(marks, m_item);
+		wi_item = find_workinfo(marks->workinfoid, ctx);
+		if (!wi_item) {
+			LOGEMERG("%s() last mark %"PRId64"/%s/%s/%s/%s"
+				 " workinfoid is missing!",
+				 __func__, marks->workinfoid,
+				 marks_marktype(marks->marktype),
+				 marks->status, marks->description,
+				 marks->extra);
+		}
+	}
+	K_RUNLOCK(marks_free);
+}
+#endif
+
+static void *marker(__maybe_unused void *arg)
+{
+	int i;
+
+	pthread_detach(pthread_self());
+
+	rename_proc("db_marker");
+
+	while (!everyone_die && !startup_complete)
+		cksleep_ms(42);
+
+	marker_using_data = true;
+
+	while (!everyone_die) {
+		for (i = 0; i < 5; i++) {
+			if (!everyone_die)
+				sleep(1);
+		}
+#if 0
+		if (everyone_die)
+			break;
+		else
+			make_shift_marks();
+
+		for (i = 0; i < 4; i++) {
+			if (!everyone_die)
+				sleep(1);
+		}
+		if (everyone_die)
+			break;
+		else
+			make_a_workmarker();
+
+		for (i = 0; i < 4; i++) {
+			if (!everyone_die)
+				sleep(1);
+		}
+		if (everyone_die)
+			break;
+		else
+			make_markersummaries();
+#endif
+	}
+
+	marker_using_data = false;
 
 	return NULL;
 }
@@ -2924,6 +3012,7 @@ static void *listener(void *arg)
 	pthread_t log_pt;
 	pthread_t sock_pt;
 	pthread_t summ_pt;
+	pthread_t mark_pt;
 	K_ITEM *wq_item;
 	time_t now;
 	int wqcount, wqgot;
@@ -2937,6 +3026,8 @@ static void *listener(void *arg)
 	create_pthread(&sock_pt, socketer, arg);
 
 	create_pthread(&summ_pt, summariser, NULL);
+
+	create_pthread(&mark_pt, marker, NULL);
 
 	rename_proc("db_listener");
 
@@ -3827,7 +3918,8 @@ int main(int argc, char **argv)
 
 	trigger = start = time(NULL);
 	while (socketer_using_data || summariser_using_data ||
-		logger_using_data || listener_using_data) {
+		logger_using_data || listener_using_data ||
+		marker_using_data) {
 		msg = NULL;
 		curr = time(NULL);
 		if (curr - start > 4) {
@@ -3839,12 +3931,13 @@ int main(int argc, char **argv)
 		}
 		if (msg) {
 			trigger = curr;
-			printf("%s %ds due to%s%s%s%s\n",
+			printf("%s %ds due to%s%s%s%s%s\n",
 				msg, (int)(curr - start),
 				socketer_using_data ? " socketer" : EMPTY,
 				summariser_using_data ? " summariser" : EMPTY,
 				logger_using_data ? " logger" : EMPTY,
-				listener_using_data ? " listener" : EMPTY);
+				listener_using_data ? " listener" : EMPTY,
+				marker_using_data ? " marker" : EMPTY);
 			fflush(stdout);
 		}
 		sleep(1);

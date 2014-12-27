@@ -887,7 +887,7 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 			snprintf(tmp, sizeof(tmp), "elapsed:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
-			w_item = find_workinfo(blocks->workinfoid);
+			w_item = find_workinfo(blocks->workinfoid, NULL);
 			if (w_item) {
 					char wdiffbin[TXT_SML+1];
 					double wdiff;
@@ -3440,7 +3440,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused char *code, __maybe_unused char *inet,
 			  __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
-	char reply[1024], tmp[1024], *buf, *block_extra, *share_status = EMPTY;
+	char reply[1024], tmp[1024], *buf;
+	char *block_extra, *share_status = EMPTY, *marks_status = EMPTY;
 	size_t siz = sizeof(reply);
 	K_ITEM *i_height, *i_difftimes, *i_diffadd, *i_allowaged;
 	K_ITEM b_look, ss_look, *b_item, *w_item, *ss_item;
@@ -3474,6 +3475,9 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int rows;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	if (sharesummary_marks_limit)
+		marks_status = "ckdb -w load value means pplns may be incorrect";
 
 	i_height = require_name(trf_root, "height", 1, NULL, reply, siz);
 	if (!i_height)
@@ -3543,7 +3547,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			break;
 	}
 	block_workinfoid = blocks->workinfoid;
-	w_item = find_workinfo(block_workinfoid);
+	w_item = find_workinfo(block_workinfoid, NULL);
 	if (!w_item) {
 		snprintf(reply, siz, "ERR.missing workinfo %"PRId64, block_workinfoid);
 		return strdup(reply);
@@ -3705,7 +3709,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		goto shazbot;
 	}
 
-	wb_item = find_workinfo(begin_workinfoid);
+	wb_item = find_workinfo(begin_workinfoid, NULL);
 	if (!wb_item) {
 		snprintf(reply, siz, "ERR.missing begin workinfo record! %"PRId64, block_workinfoid);
 		goto shazbot;
@@ -3736,6 +3740,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "block_extra=%s%c", block_extra, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "share_status=%s%c", share_status, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "marks_status=%s%c", marks_status, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "workername=%s%c", blocks->workername, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
@@ -3870,8 +3876,10 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "wm_count=%"PRId64"%c", wm_count, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "ms_count=%"PRId64, ms_count);
+	snprintf(tmp, sizeof(tmp), "ms_count=%"PRId64"%c", ms_count, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
+	// So web can always verify it received all data
+	APPEND_REALLOC(buf, off, len, "pplns_last=1");
 
 	mu_root = free_ktree(mu_root, NULL);
 	K_WLOCK(mu_store);
@@ -4213,7 +4221,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 			snprintf(reply, siz, "workinfoid not found");
 			return strdup(reply);
 		}
-		w_item = find_workinfo(workinfoid);
+		w_item = find_workinfo(workinfoid, NULL);
 		if (!w_item) {
 			snprintf(reply, siz, "invalid workinfoid %"PRId64,
 				 workinfoid);
