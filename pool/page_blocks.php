@@ -42,7 +42,7 @@ function doblocks($data, $user)
 {
  $blink = '<a href=https://blockchain.info/block-height/';
 
- $pg = '<h1>Blocks</h1>';
+ $pg = '';
 
  if ($user === null)
 	$ans = getBlocks('Anon');
@@ -56,6 +56,25 @@ function doblocks($data, $user)
 
  if ($wantcsv === false)
  {
+	if ($ans['STATUS'] == 'ok')
+	{
+		$count = $ans['rows'];
+		if ($count == 1)
+		{
+			$num = '';
+			$s = '';
+		}
+		else
+		{
+			$num = " $count";
+			$s = 's';
+		}
+
+		$pg = "<h1>Last$num Block$s</h1>";
+	}
+	else
+		$pg = '<h1>Blocks</h1>';
+
 	$pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
 	$pg .= "<tr class=title>";
 	$pg .= "<td class=dr>#</td>";
@@ -80,7 +99,7 @@ function doblocks($data, $user)
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
-		$seq = $count - $i;
+		$seq = $i + 1;
 		if (($i % 2) == 0)
 			$row = 'even';
 		else
