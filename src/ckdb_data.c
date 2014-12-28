@@ -1177,8 +1177,8 @@ K_ITEM *find_any_payaddress(char *payaddress)
 	K_ITEM *item;
 
 	item = first_in_ktree(paymentaddresses_root, ctx);
-	DATA_PAYMENTADDRESSES_NULL(pa, item);
 	while (item) {
+		DATA_PAYMENTADDRESSES(pa, item);
 		if (strcmp(pa->payaddress, payaddress) == 0)
 			return item;
 		item = next_in_ktree(ctx);
