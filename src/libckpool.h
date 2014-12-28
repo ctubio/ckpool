@@ -489,6 +489,7 @@ void align_len(size_t *len);
 void realloc_strcat(char **ptr, const char *s);
 void trail_slash(char **buf);
 void *_ckalloc(size_t len, const char *file, const char *func, const int line);
+void *json_ckalloc(size_t size);
 void *_ckzalloc(size_t len, const char *file, const char *func, const int line);
 void _dealloc(void **ptr);
 extern const int hex2bin_tbl[];
