@@ -173,6 +173,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 	USERS *users;
 	char *reason = NULL;
 	char *answer = NULL;
+	char *ret = NULL;
 	size_t len, off;
 	int32_t ratio;
 	int rows, i;
@@ -398,10 +399,12 @@ struckout:
 		LOGERR("%s.%s.%s", cmd, id, reply);
 		return strdup(reply);
 	}
-	snprintf(reply, siz, "ok.%s", answer);
-	LOGDEBUG("%s.%s", id, answer);
+	APPEND_REALLOC_INIT(ret, off, len);
+	APPEND_REALLOC(ret, off, len, "ok.");
+	APPEND_REALLOC(ret, off, len, answer);
 	free(answer);
-	return strdup(reply);
+	LOGDEBUG("%s.%s", id, ret);
+	return ret;
 }
 
 static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
