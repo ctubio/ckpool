@@ -111,6 +111,22 @@ function calctx($ans, $count, $miner_sat, $diffacc_total)
  return $pg;
 }
 #
+function fmtdata($code, $val)
+{
+ switch ($code)
+ {
+ case ',':
+	$ret = number_format($val);
+	break;
+ case '.':
+	$ret = number_format($val, 1);
+	break;
+ default:
+	$ret = $val;
+ }
+ return $ret;
+}
+#
 function dopplns($data, $user)
 {
  global $send_sep;
@@ -169,9 +185,9 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 			'Block Hash' => 'block_hash',
 			'Block Reward (Satoshis)' => 'block_reward',
 			'Miner Reward (Satoshis)' => 'miner_sat',
-			'PPLNS Wanted' => 'diff_want',
-			'PPLNS Used' => 'diffacc_total',
-			'Elapsed Seconds' => 'pplns_elapsed',
+			'PPLNS Wanted' => '.diff_want',
+			'PPLNS Used' => '.diffacc_total',
+			'Elapsed Seconds' => ',pplns_elapsed',
 			'Users' => 'rows',
 			'Oldest Workinfoid' => 'begin_workinfoid',
 			'Oldest Time' => 'begin_stamp',
@@ -185,11 +201,11 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 			'Network Difficulty' => 'block_ndiff',
 			'PPLNS Factor' => 'diff_times',
 			'PPLNS Added' => 'diff_add',
-			'Accepted Share Count' => 'acc_share_count',
-			'Total Share Count' => 'total_share_count',
-			'ShareSummary Count' => 'ss_count',
-			'WorkMarkers Count' => 'wm_count',
-			'MarkerSummary Count' => 'ms_count');
+			'Accepted Share Count' => ',acc_share_count',
+			'Total Share Count' => ',total_share_count',
+			'ShareSummary Count' => ',ss_count',
+			'WorkMarkers Count' => ',wm_count',
+			'MarkerSummary Count' => ',ms_count');
 
 	$pg = '<br><a href=https://blockchain.info/block-height/';
 	$pg .= $ans['block'].'>Blockchain '.$ans['block']."</a><br>\n";
@@ -230,7 +246,18 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 
 		$pg .= "<tr class=$row>";
 		$pg .= "<td class=dl>$dsp</td>";
-		$pg .= '<td class=dr>'.$ans[$name].'</td>';
+		switch ($name[0])
+		{
+			case ',':
+			case '.':
+				$nm = substr($name, 1);
+				$fmt = fmtdata($name[0], $ans[$nm]);
+				break;
+			default:
+				$fmt = $ans[$name];
+				break;
+		}
+		$pg .= "<td class=dr>$fmt</td>";
 		$pg .= "</tr>\n";
 	}
 
