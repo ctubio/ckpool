@@ -147,7 +147,7 @@ Block: <input type=text name=blk size=10 value='$blkuse'>
 	if ($blk > 334106)
 		$flds['diff_times'] = '5';
 	$msg = msgEncode('pplns', 'pplns', $flds, $user);
-	$rep = sendsockreply('pplns', $msg);
+	$rep = sendsockreply('pplns', $msg, 4);
 	if ($rep == false)
 		$ans = array();
 	else
