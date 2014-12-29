@@ -103,6 +103,7 @@ div.jst {color:red; font-weight: bold; font-size: 8; text-align: center; vertica
 div.accwarn {color:red; font-weight: bold; font-size: 8; text-align: center; vertical-align: top;}
 div.topd {background-color:#cff; border-color: #cff; border-style: solid; border-width: 9px;}
 .topdes {color:blue; text-align: right;}
+.topdesl {color:blue; text-align: left;}
 .topwho {color:black; font-weight: bold; margin-right: 8px;}
 .topdat {margin-left: 8px; margin-right: 24px; color:green; font-weight: bold;}
 span.login {float: right; margin-left: 8px; margin-right: 24px;}
@@ -296,9 +297,11 @@ function pgtop($info, $dotop, $user, $douser)
 	$top .= "<td class=topdat>&nbsp;$per</td></tr></table>";
 	$top .= '</td><td>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
-	$top .= '<tr><td class=topdes>Pool, Last Block:&nbsp;</td>';
+	$top .= '<tr><td class=topdes>Last&nbsp;</td>';
+	$top .= '<td class=topdesl>Block</td></tr>';
+	$top .= '<tr><td class=topdes>Pool:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$plb</td></tr>";
-	$top .= '<tr><td class=topdes>Network, Last Block:&nbsp;</td>';
+	$top .= '<tr><td class=topdes>Network:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$nlb</td></tr></table>";
 	$top .= '</td><td>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
