@@ -74,7 +74,8 @@ function check()
 	),
 	'Admin' => NULL,
 	'gap' => array( # options not shown
-			'API' => 'api'
+			'API' => 'api',
+			'PBlocks' => 'pblocks'
 	),
 	'Help' => array(
 		'Payouts' => 'payout',
