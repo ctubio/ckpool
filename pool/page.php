@@ -339,9 +339,9 @@ function pgtop($info, $dotop, $user, $douser)
 				$extra = '&#133;';
 			}
 			$top .= "
-<span class=topwho>".htmlspecialchars($who)."$extra&nbsp;</span>
+<span class=topwho>".htmlspecialchars($who)."$extra&nbsp;</span><br>
 <span class=topdes>Hash Rate:</span>
-<span class=topdat>$uhr$u1hr</span>";
+<span class=topdat>$uhr$u1hr</span><br>";
 			$top .= makeForm('')."
 &nbsp;<input type=submit name=Logout value=Logout>
 </form>";
