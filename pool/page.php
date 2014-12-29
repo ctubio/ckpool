@@ -436,7 +436,7 @@ function pgfoot($info)
  if (is_array($info) && isset($info['sync']))
  {
   $sync = $info['sync'];
-  if ($sync > 1000)
+  if ($sync > 5000)
 	$syc = 'hi';
   else
 	$syc = 'lo';
