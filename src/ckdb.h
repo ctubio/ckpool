@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2014 Andrew Smith
+ * Copyright 1995-2015 Andrew Smith
  * Copyright 2014 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.820"
+#define CKDB_VERSION DB_VERSION"-0.821"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__

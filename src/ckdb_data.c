@@ -2870,7 +2870,7 @@ bool _marks_description(char *description, size_t siz, char *marktype,
 #define CODEBASE 32
 #define CODESHIFT(_x) ((_x) >> 5)
 #define CODECHAR(_x) (codebase[((_x) & (CODEBASE-1))])
-static char codebase[] = "2a3b4c5d6e7f8g9hjklmnpqrstuvwxyz";
+static char codebase[] = "23456789abcdefghjkmnopqrstuvwxyz";
 
 #define ASSERT3(condition) __maybe_unused static char codebase_length_must_be_CODEBASE[(condition)?1:-1]
 ASSERT3(sizeof(codebase) == (CODEBASE+1));
