@@ -475,10 +475,14 @@ const char *marktype_other_finish = "Other Finish";
 
 const char *marktype_block_fmt = "Block %"PRId32" fin";
 const char *marktype_pplns_fmt = "Payout %"PRId32" stt";
-const char *marktype_shift_begin_fmt = "Shift %s stt";
-const char *marktype_shift_end_fmt = "Shift %s fin";
+const char *marktype_shift_begin_fmt = "Shift stt: %s";
+const char *marktype_shift_end_fmt = "Shift fin: %s";
 const char *marktype_other_begin_fmt = "stt: %s";
 const char *marktype_other_finish_fmt = "fin: %s";
+
+// For getting back the shift code/name
+const char *marktype_shift_begin_skip = "Shift stt: ";
+const char *marktype_shift_end_skip = "Shift fin: ";
 
 static char logname[512];
 static char *dbcode;
@@ -2032,36 +2036,375 @@ static void *summariser(__maybe_unused void *arg)
 	return NULL;
 }
 
-// Number of workinfoids per shift
-#define WID_PER_SHIFT	100
+#define SHIFT_WORDS 26
+static char *shift_words[] =
+{
+	"akatsuki",
+	"belldandy",
+	"charlotte",
+	"darkchii",
+	"elen",
+	"felli",
+	"gin",
+	"hitagi",
+	"ichiko",
+	"juvia",
+	"kosaki",
+	"lucy",
+	"mutsumi",
+	"nodoka",
+	"origami",
+	"paru",
+	"quinn",
+	"rika",
+	"sena",
+	"tsubasa",
+	"ur",
+	"valentina",
+	"winry",
+	"xenovia",
+	"yuno",
+	"zekken"
+};
 
-#if 0
+#define ASSERT4(condition) __maybe_unused static char shift_words_must_have_ ## SHIFT_WORDS ## _words[(condition)?1:-1]
+ASSERT4((sizeof(shift_words) == (sizeof(char *) * SHIFT_WORDS)));
+
+// Number of workinfoids per shift
+#define WID_PER_SHIFT 100
+
+#define LOGDEBU2 LOGWARNING
 static void make_shift_marks()
 {
-	K_TREE_CTX ctx[1];
-	K_ITEM *m_item, *wi_item;;
-	WORKINFO *workinfo;
-	MARKS *marks;
-	int wid_count;
-	int64_t wid;
+	K_TREE_CTX ss_ctx[1], m_ctx[1], wi_ctx[1], b_ctx[1];
+	K_ITEM *ss_item = NULL, *m_item = NULL, *m_sh_item = NULL, *wi_item;
+	K_ITEM *b_item = NULL;
+	K_ITEM wi_look, ss_look;
+	SHARESUMMARY *sharesummary, looksharesummary;
+	WORKINFO *workinfo, lookworkinfo;
+	BLOCKS *blocks;
+	MARKS *marks, *sh_marks;
+	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
+	bool was_block = false;
+	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ];
+	int used_wid;
 
+	/* Find the last !new sharesummary workinfoid
+	 * If the shift needs to go beyond this, then it's not ready yet */
+	ss_age_wid = 0;
+	K_RLOCK(sharesummary_free);
+	ss_item = first_in_ktree(sharesummary_workinfoid_root, ss_ctx);
+	while (ss_item) {
+		DATA_SHARESUMMARY(sharesummary, ss_item);
+		if (sharesummary->complete[0] == SUMMARY_NEW)
+			break;
+		if (ss_age_wid < sharesummary->workinfoid)
+			ss_age_wid = sharesummary->workinfoid;
+		ss_item = next_in_ktree(ss_ctx);
+	}
+	K_RUNLOCK(sharesummary_free);
+	if (ss_item) {
+		tv_to_buf(&(sharesummary->lastshare), cd_buf, sizeof(cd_buf));
+		tv_to_buf(&(sharesummary->createdate), cd_buf2, sizeof(cd_buf2));
+		LOGDEBU2("%s() last sharesummary %s/%s/%"PRId64"/%s/%s",
+			 __func__, sharesummary->complete,
+			 sharesummary->workername,
+			 ss_age_wid, cd_buf, cd_buf2);
+	}
+	LOGDEBU2("%s() age sharesummary limit wid %"PRId64, __func__, ss_age_wid);
+
+	// Find the last CURRENT mark, the shift starts after this
 	K_RLOCK(marks_free);
-	m_item = last_in_ktree(marks_root, ctx);
+	m_item = last_in_ktree(marks_root, m_ctx);
 	if (m_item) {
 		DATA_MARKS(marks, m_item);
-		wi_item = find_workinfo(marks->workinfoid, ctx);
-		if (!wi_item) {
-			LOGEMERG("%s() last mark %"PRId64"/%s/%s/%s/%s"
-				 " workinfoid is missing!",
-				 __func__, marks->workinfoid,
-				 marks_marktype(marks->marktype),
-				 marks->status, marks->description,
-				 marks->extra);
+		if (!CURRENT(&(marks->expirydate))) {
+			/* This means there are no CURRENT marks
+			 *  since they are sorted all CURRENT last */
+			m_item = NULL;
+		} else {
+			wi_item = find_workinfo(marks->workinfoid, wi_ctx);
+			if (!wi_item) {
+				K_RUNLOCK(marks_free);
+				LOGEMERG("%s() ERR last mark "
+					 "%"PRId64"/%s/%s/%s/%s"
+					 " workinfoid is missing!",
+					 __func__, marks->workinfoid,
+					 marks_marktype(marks->marktype),
+					 marks->status, marks->description,
+					 marks->extra);
+				return;
+			}
+			/* Find the last shift so we can determine
+			 *  the next shift description
+			 * This will normally be the last mark,
+			 *  but manual marks may change that */
+			m_sh_item = m_item;
+			while (m_sh_item) {
+				DATA_MARKS(sh_marks, m_sh_item);
+				if (!CURRENT(&(sh_marks->expirydate))) {
+					m_sh_item = NULL;
+					break;
+				}
+				if (sh_marks->marktype[0] == MARKTYPE_SHIFT_END ||
+				    sh_marks->marktype[0] == MARKTYPE_SHIFT_BEGIN)
+					break;
+				m_sh_item = prev_in_ktree(m_ctx);
+			}
+			if (m_sh_item) {
+				wi_item = find_workinfo(sh_marks->workinfoid, wi_ctx);
+				if (!wi_item) {
+					K_RUNLOCK(marks_free);
+					LOGEMERG("%s() ERR last shift mark "
+						 "%"PRId64"/%s/%s/%s/%s "
+						 "workinfoid is missing!",
+						 __func__,
+						 sh_marks->workinfoid,
+						 marks_marktype(sh_marks->marktype),
+						 sh_marks->status,
+						 sh_marks->description,
+						 sh_marks->extra);
+					return;
+				}
+			}
 		}
 	}
 	K_RUNLOCK(marks_free);
+
+	if (m_item) {
+		last_marks_wid = marks->workinfoid;
+		LOGDEBU2("%s() last mark %"PRId64"/%s/%s/%s/%s",
+			 __func__, marks->workinfoid,
+			 marks_marktype(marks->marktype),
+			 marks->status, marks->description,
+			 marks->extra);
+	} else {
+		last_marks_wid = 0;
+		LOGDEBU2("%s() no last mark", __func__);
+	}
+
+	if (m_sh_item) {
+		if (m_sh_item == m_item)
+			LOGDEBU2("%s() last shift mark = last mark", __func__);
+		else {
+			LOGDEBU2("%s() last shift mark %"PRId64"/%s/%s/%s/%s",
+				 __func__, sh_marks->workinfoid,
+				 marks_marktype(sh_marks->marktype),
+				 sh_marks->status, sh_marks->description,
+				 sh_marks->extra);
+		}
+	} else
+		LOGDEBU2("%s() no last shift mark", __func__);
+
+	if (m_item) {
+		/* First block after the last mark
+		 * Shift must stop at or before this */
+		K_RLOCK(blocks_free);
+		b_item = first_in_ktree(blocks_root, b_ctx);
+		while (b_item) {
+			DATA_BLOCKS(blocks, b_item);
+			if (CURRENT(&(blocks->expirydate)) &&
+			    blocks->workinfoid > marks->workinfoid)
+				break;
+			b_item = next_in_ktree(b_ctx);
+		}
+		K_RUNLOCK(blocks_free);
+	}
+
+	if (b_item) {
+		tv_to_buf(&(blocks->createdate), cd_buf, sizeof(cd_buf));
+		LOGDEBU2("%s() block after last mark %"PRId32"/%"PRId64"/%s",
+			 __func__, blocks->height, blocks->workinfoid,
+			 blocks_confirmed(blocks->confirmed));
+	} else {
+		if (!m_item)
+			LOGDEBU2("%s() no last mark = no last block", __func__);
+		else
+			LOGDEBU2("%s() no block since last mark", __func__);
+	}
+
+	INIT_WORKINFO(&wi_look);
+	INIT_SHARESUMMARY(&ss_look);
+
+	// Start from the workinfoid after the last mark
+	lookworkinfo.workinfoid = last_marks_wid;
+	lookworkinfo.expirydate.tv_sec = default_expiry.tv_sec;
+	lookworkinfo.expirydate.tv_usec = default_expiry.tv_usec;
+	wi_look.data = (void *)(&lookworkinfo);
+	K_RLOCK(workinfo_free);
+	wi_item = find_after_in_ktree(workinfo_root, &wi_look, cmp_workinfo, wi_ctx);
+	K_RUNLOCK(workinfo_free);
+	marks_wid = 0;
+	used_wid = 0;
+	prev_wid = 0;
+	while (wi_item) {
+		DATA_WORKINFO(workinfo, wi_item);
+		if (CURRENT(&(workinfo->expirydate))) {
+			/* Did we meet or exceed the !new ss limit?
+			 *  for now limit it to BEFORE ss_age_wid
+			 * This will mean the shifts are created ~30s later */
+			if (workinfo->workinfoid >= ss_age_wid) {
+				LOGDEBU2("%s() not enough aged workinfos (%d)",
+					 __func__, used_wid);
+				return;
+			}
+			/* Did we find a pool restart? i.e. a wid skip
+			 * These will usually be a much larger jump,
+			 *  however the pool should never skip any */
+			if (prev_wid > 0 &&
+			    (workinfo->workinfoid - prev_wid) > 6) {
+				marks_wid = prev_wid;
+				LOGDEBU2("%s() OK shift stops at pool restart"
+					 " count %d(%d) workinfoid %"PRId64
+					 " next wid %"PRId64,
+					 __func__, used_wid, WID_PER_SHIFT,
+					 marks_wid, workinfo->workinfoid);
+				break;
+			}
+			prev_wid = workinfo->workinfoid;
+			// Did we hit the next block?
+			if (b_item && workinfo->workinfoid == blocks->workinfoid) {
+				LOGDEBU2("%s() OK shift stops at block limit",
+					 __func__);
+				marks_wid = workinfo->workinfoid;
+				was_block = true;
+				break;
+			}
+			// Does workinfo have (aged) sharesummaries?
+			looksharesummary.workinfoid = workinfo->workinfoid;
+			looksharesummary.userid = MAXID;
+			looksharesummary.workername = EMPTY;
+			ss_look.data = (void *)(&looksharesummary);
+			K_RLOCK(sharesummary_free);
+			ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
+							cmp_sharesummary_workinfoid, ss_ctx);
+			K_RUNLOCK(sharesummary_free);
+			DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
+			if (ss_item &&
+			    sharesummary->workinfoid == workinfo->workinfoid) {
+				/* Not aged = shift not complete
+				 * Though, it shouldn't happen */
+				if (sharesummary->complete[0] == SUMMARY_NEW) {
+					tv_to_buf(&(sharesummary->lastshare),
+						  cd_buf, sizeof(cd_buf));
+					tv_to_buf(&(sharesummary->createdate),
+						  cd_buf2, sizeof(cd_buf2));
+					LOGEMERG("%s() ERR unaged sharesummary "
+						 "%s/%s/%"PRId64"/%s/%s",
+						 __func__, sharesummary->complete,
+						 sharesummary->workername,
+						 sharesummary->workinfoid,
+						 cd_buf, cd_buf2);
+					return;
+				}
+			}
+			if (++used_wid >= WID_PER_SHIFT) {
+				marks_wid = workinfo->workinfoid;
+				LOGDEBU2("%s() OK shift stops at count"
+					 " %d(%d) workinfoid %"PRId64,
+					 __func__, used_wid,
+					 WID_PER_SHIFT, marks_wid);
+				break;
+			}
+		}
+		K_RLOCK(workinfo_free);
+		wi_item = next_in_ktree(wi_ctx);
+		K_RUNLOCK(workinfo_free);
+	}
+
+	// Create the shift marker
+	if (marks_wid) {
+		char shift[TXT_BIG+1] = { '\0' };
+		char des[TXT_BIG+1] = { '\0' };
+		char extra[TXT_BIG+1] = { '\0' };
+		char shifttype[TXT_FLAG+1] = { MARKTYPE_SHIFT_END, '\0' };
+		char blocktype[TXT_FLAG+1] = { MARKTYPE_BLOCK, '\0' };
+		char status[TXT_FLAG+1] = { MARK_READY, '\0' };
+		int word = 0;
+		char *invalid = NULL, *code, *space;
+		const char *skip = NULL;
+		size_t len;
+		tv_t now;
+
+		/* Shift description is shiftcode(createdate)
+		 *  + a space + shift_words
+		 * shift_words is incremented every shift */
+		if (m_sh_item) {
+			skip = NULL;
+			switch (sh_marks->marktype[0]) {
+				case MARKTYPE_BLOCK:
+				case MARKTYPE_PPLNS:
+				case MARKTYPE_OTHER_BEGIN:
+				case MARKTYPE_OTHER_FINISH:
+					// Reset
+					word = 0;
+					break;
+				case MARKTYPE_SHIFT_END:
+					skip = marktype_shift_end_skip;
+					break;
+				case MARKTYPE_SHIFT_BEGIN:
+					skip = marktype_shift_begin_skip;
+					break;
+				default:
+					invalid = "unkown marktype";
+					break;
+			}
+			if (skip) {
+				len = strlen(skip);
+				if (strncmp(sh_marks->description, skip, len) != 0)
+					invalid = "inv des (skip)";
+				else {
+					code = sh_marks->description + len;
+					space = strchr(code, ' ');
+					if (!space)
+						invalid = "inv des (space)";
+					else {
+						space++;
+						if (*space < 'a' || *space > 'z')
+							invalid = "inv des (a-z)";
+						else
+							word = (*space - 'a' + 1) % SHIFT_WORDS;
+					}
+				}
+			}
+			if (invalid) {
+				LOGEMERG("%s() ERR %s mark %"PRId64"/%s/%s/%s",
+					 __func__, invalid,
+					 sh_marks->workinfoid,
+					 marks_marktype(sh_marks->marktype),
+					 sh_marks->status,
+					 sh_marks->description);
+				return;
+			}
+		}
+		snprintf(shift, sizeof(shift), "%s %s",
+			 shiftcode(&(workinfo->createdate)),
+			 shift_words[word]);
+
+		LOGDEBU2("%s() shift='%s'", __func__, shift);
+
+		if (!marks_description(des, sizeof(des), shifttype, 0, shift, NULL))
+			return;
+
+		LOGDEBU2("%s() des='%s'", __func__, des);
+
+		if (was_block) {
+			// Put the block description in extra
+			if (!marks_description(extra, sizeof(extra), blocktype,
+						blocks->height, NULL, NULL))
+				return;
+
+			LOGDEBU2("%s() extra='%s'", __func__, extra);
+		}
+
+		setnow(&now);
+		marks_process(NULL, true, EMPTY, marks_wid, des, extra,
+			      shifttype, status, (char *)by_default,
+			      (char *)__func__, (char *)inet_default,
+			      &now, NULL);
+	} else
+		LOGDEBU2("%s() no marks wid", __func__);
 }
-#endif
 
 static void *marker(__maybe_unused void *arg)
 {
@@ -2074,19 +2417,35 @@ static void *marker(__maybe_unused void *arg)
 	while (!everyone_die && !startup_complete)
 		cksleep_ms(42);
 
+	if (sharesummary_marks_limit) {
+		LOGEMERG("%s() ALERT: dbload -w disables shift processing",
+			 __func__);
+		return NULL;
+	}
+
 	marker_using_data = true;
+
+/* TODO: trigger this every workinfo change?
+ *  note that history catch up would also mean the tigger would
+ *  catch up at most 100 missing marks per shift
+ *  however, also, a workinfo change means a sharesummary DB update,
+ *  so would be best to (usually) wait until that is done
+ * OR: avoid writing the sharesummaries to the DB at all
+ *  and only write the markersummaries? - since 100 workinfoid shifts
+ *  will usually mean that markersummaries are less than every hour
+ *  (and a reload processes more than an hour) */
 
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
 			if (!everyone_die)
 				sleep(1);
 		}
-#if 0
 		if (everyone_die)
 			break;
 		else
 			make_shift_marks();
 
+#if 0
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
 				sleep(1);

@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.810"
+#define CKDB_VERSION DB_VERSION"-0.820"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1433,11 +1433,17 @@ extern K_TREE *marks_root;
 extern K_LIST *marks_free;
 extern K_STORE *marks_store;
 
+// 'b' used for manual marks and 'extra' description in shifts
 #define MARKTYPE_BLOCK 'b'
+// 'p' used for manual marks
 #define MARKTYPE_PPLNS 'p'
+// 's' isn't used - but could be needed for manual marks
 #define MARKTYPE_SHIFT_BEGIN 's'
+// 'e' used for shifts
 #define MARKTYPE_SHIFT_END 'e'
+// 'o' used for manual marks
 #define MARKTYPE_OTHER_BEGIN 'o'
+// 'f' used for manual marks
 #define MARKTYPE_OTHER_FINISH 'f'
 
 extern const char *marktype_block;
@@ -1453,6 +1459,10 @@ extern const char *marktype_shift_begin_fmt;
 extern const char *marktype_shift_end_fmt;
 extern const char *marktype_other_begin_fmt;
 extern const char *marktype_other_finish_fmt;
+
+// For getting back the shift code/name
+extern const char *marktype_shift_begin_skip;
+extern const char *marktype_shift_end_skip;
 
 #define MARK_READY 'x'
 #define MARK_READY_STR "x"
@@ -1639,6 +1649,7 @@ extern const char *marks_marktype(char *marktype);
 extern bool _marks_description(char *description, size_t siz, char *marktype,
 				int32_t height, char *shift, char *other,
 				WHERE_FFL_ARGS);
+extern char *shiftcode(tv_t *createdate);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c

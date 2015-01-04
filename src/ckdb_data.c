@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2014 Andrew Smith
+ * Copyright 1995-2015 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -2867,3 +2867,45 @@ bool _marks_description(char *description, size_t siz, char *marktype,
 	return true;
 }
 
+#define CODEBASE 32
+#define CODESHIFT(_x) ((_x) >> 5)
+#define CODECHAR(_x) (codebase[((_x) & (CODEBASE-1))])
+static char codebase[] = "2a3b4c5d6e7f8g9hjklmnpqrstuvwxyz";
+
+#define ASSERT3(condition) __maybe_unused static char codebase_length_must_be_CODEBASE[(condition)?1:-1]
+ASSERT3(sizeof(codebase) == (CODEBASE+1));
+
+static int shift_code(long code, char *code_buf)
+{
+	int pos;
+
+	if (code > 0) {
+		pos = shift_code(CODESHIFT(code), code_buf);
+		code_buf[pos++] = codebase[code & (CODEBASE-1)];
+		return(pos);
+	} else
+		return(0);
+
+}
+
+// NON-thread safe
+char *shiftcode(tv_t *createdate)
+{
+	static char code_buf[64];
+	long code;
+	int pos;
+
+	// To reduce the code size, ignore the last 4 bits
+	code = (createdate->tv_sec - DATE_BEGIN) >> 4;
+	LOGDEBUG("%s() code=%ld cd=%ld BEGIN=%ld",
+		 __func__, code, createdate->tv_sec, DATE_BEGIN);
+	if (code <= 0)
+		strcpy(code_buf, "0");
+	else {
+		pos = shift_code(code, code_buf);
+		code_buf[pos] = '\0';
+	}
+
+	LOGDEBUG("%s() code_buf='%s'", __func__, code_buf);
+	return(code_buf);
+}
