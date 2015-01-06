@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2014 Andrew Smith
+ * Copyright 1995-2015 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -4337,7 +4337,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 		 * No parameters */
 		tmp[0] = '\0';
 		ok = workmarkers_generate(conn, tmp, sizeof(tmp),
-					  by, code, inet, cd, trf_root);
+					  by, code, inet, cd, trf_root, true);
 		if (!ok) {
 			snprintf(reply, siz, "%s error: %s", action, tmp);
 			LOGERR("%s.%s", id, reply);

@@ -2595,12 +2595,10 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
  * If a mark is found not READY it will stop at that one and
  *  report success with a message regarding the not READY one
  * No checks are done for the validity of the mark status
- *  information, however, until the next step of generating
- *  the markersummaries is completely automated, rather than
- *  simply running the SQL script manually, the existence of
-   a workmarker wont actually do anything automatically */
+ *  information */
 bool workmarkers_generate(PGconn *conn, char *err, size_t siz, char *by,
-			  char *code, char *inet, tv_t *cd, K_TREE *trf_root)
+			  char *code, char *inet, tv_t *cd, K_TREE *trf_root,
+			  bool none_error)
 {
 	K_ITEM *m_item, *m_next_item;
 	MARKS *mused, *mnext;
@@ -2728,8 +2726,10 @@ bool workmarkers_generate(PGconn *conn, char *err, size_t siz, char *by,
 		m_item = m_next_item;
 	}
 	if (!any) {
-		snprintf(err, siz, "%s", "No ready marks found");
-		return false;
+		if (none_error) {
+			snprintf(err, siz, "%s", "No ready marks found");
+			return false;
+		}
 	}
 	return true;
 }

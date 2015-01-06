@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2014 Andrew Smith
+ * Copyright 1995-2015 Andrew Smith
  * Copyright 2014 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -2073,8 +2073,7 @@ ASSERT4((sizeof(shift_words) == (sizeof(char *) * SHIFT_WORDS)));
 // Number of workinfoids per shift
 #define WID_PER_SHIFT 100
 
-#define LOGDEBU2 LOGWARNING
-static void make_shift_marks()
+static void make_a_shift_mark()
 {
 	K_TREE_CTX ss_ctx[1], m_ctx[1], wi_ctx[1], b_ctx[1];
 	K_ITEM *ss_item = NULL, *m_item = NULL, *m_sh_item = NULL, *wi_item;
@@ -2085,7 +2084,7 @@ static void make_shift_marks()
 	BLOCKS *blocks;
 	MARKS *marks, *sh_marks;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
-	bool was_block = false;
+	bool was_block = false, ok;
 	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ];
 	int used_wid;
 
@@ -2106,12 +2105,12 @@ static void make_shift_marks()
 	if (ss_item) {
 		tv_to_buf(&(sharesummary->lastshare), cd_buf, sizeof(cd_buf));
 		tv_to_buf(&(sharesummary->createdate), cd_buf2, sizeof(cd_buf2));
-		LOGDEBU2("%s() last sharesummary %s/%s/%"PRId64"/%s/%s",
+		LOGDEBUG("%s() last sharesummary %s/%s/%"PRId64"/%s/%s",
 			 __func__, sharesummary->complete,
 			 sharesummary->workername,
 			 ss_age_wid, cd_buf, cd_buf2);
 	}
-	LOGDEBU2("%s() age sharesummary limit wid %"PRId64, __func__, ss_age_wid);
+	LOGDEBUG("%s() age sharesummary limit wid %"PRId64, __func__, ss_age_wid);
 
 	// Find the last CURRENT mark, the shift starts after this
 	K_RLOCK(marks_free);
@@ -2173,28 +2172,28 @@ static void make_shift_marks()
 
 	if (m_item) {
 		last_marks_wid = marks->workinfoid;
-		LOGDEBU2("%s() last mark %"PRId64"/%s/%s/%s/%s",
+		LOGDEBUG("%s() last mark %"PRId64"/%s/%s/%s/%s",
 			 __func__, marks->workinfoid,
 			 marks_marktype(marks->marktype),
 			 marks->status, marks->description,
 			 marks->extra);
 	} else {
 		last_marks_wid = 0;
-		LOGDEBU2("%s() no last mark", __func__);
+		LOGDEBUG("%s() no last mark", __func__);
 	}
 
 	if (m_sh_item) {
 		if (m_sh_item == m_item)
-			LOGDEBU2("%s() last shift mark = last mark", __func__);
+			LOGDEBUG("%s() last shift mark = last mark", __func__);
 		else {
-			LOGDEBU2("%s() last shift mark %"PRId64"/%s/%s/%s/%s",
+			LOGDEBUG("%s() last shift mark %"PRId64"/%s/%s/%s/%s",
 				 __func__, sh_marks->workinfoid,
 				 marks_marktype(sh_marks->marktype),
 				 sh_marks->status, sh_marks->description,
 				 sh_marks->extra);
 		}
 	} else
-		LOGDEBU2("%s() no last shift mark", __func__);
+		LOGDEBUG("%s() no last shift mark", __func__);
 
 	if (m_item) {
 		/* First block after the last mark
@@ -2213,14 +2212,14 @@ static void make_shift_marks()
 
 	if (b_item) {
 		tv_to_buf(&(blocks->createdate), cd_buf, sizeof(cd_buf));
-		LOGDEBU2("%s() block after last mark %"PRId32"/%"PRId64"/%s",
+		LOGDEBUG("%s() block after last mark %"PRId32"/%"PRId64"/%s",
 			 __func__, blocks->height, blocks->workinfoid,
 			 blocks_confirmed(blocks->confirmed));
 	} else {
 		if (!m_item)
-			LOGDEBU2("%s() no last mark = no last block", __func__);
+			LOGDEBUG("%s() no last mark = no last block", __func__);
 		else
-			LOGDEBU2("%s() no block since last mark", __func__);
+			LOGDEBUG("%s() no block since last mark", __func__);
 	}
 
 	INIT_WORKINFO(&wi_look);
@@ -2244,7 +2243,7 @@ static void make_shift_marks()
 			 *  for now limit it to BEFORE ss_age_wid
 			 * This will mean the shifts are created ~30s later */
 			if (workinfo->workinfoid >= ss_age_wid) {
-				LOGDEBU2("%s() not enough aged workinfos (%d)",
+				LOGDEBUG("%s() not enough aged workinfos (%d)",
 					 __func__, used_wid);
 				return;
 			}
@@ -2254,7 +2253,7 @@ static void make_shift_marks()
 			if (prev_wid > 0 &&
 			    (workinfo->workinfoid - prev_wid) > 6) {
 				marks_wid = prev_wid;
-				LOGDEBU2("%s() OK shift stops at pool restart"
+				LOGDEBUG("%s() OK shift stops at pool restart"
 					 " count %d(%d) workinfoid %"PRId64
 					 " next wid %"PRId64,
 					 __func__, used_wid, WID_PER_SHIFT,
@@ -2264,7 +2263,7 @@ static void make_shift_marks()
 			prev_wid = workinfo->workinfoid;
 			// Did we hit the next block?
 			if (b_item && workinfo->workinfoid == blocks->workinfoid) {
-				LOGDEBU2("%s() OK shift stops at block limit",
+				LOGDEBUG("%s() OK shift stops at block limit",
 					 __func__);
 				marks_wid = workinfo->workinfoid;
 				was_block = true;
@@ -2299,8 +2298,9 @@ static void make_shift_marks()
 				}
 			}
 			if (++used_wid >= WID_PER_SHIFT) {
+				// We've got a full shift
 				marks_wid = workinfo->workinfoid;
-				LOGDEBU2("%s() OK shift stops at count"
+				LOGDEBUG("%s() OK shift stops at count"
 					 " %d(%d) workinfoid %"PRId64,
 					 __func__, used_wid,
 					 WID_PER_SHIFT, marks_wid);
@@ -2312,7 +2312,7 @@ static void make_shift_marks()
 		K_RUNLOCK(workinfo_free);
 	}
 
-	// Create the shift marker
+	// Create the shift mark
 	if (marks_wid) {
 		char shift[TXT_BIG+1] = { '\0' };
 		char des[TXT_BIG+1] = { '\0' };
@@ -2381,12 +2381,12 @@ static void make_shift_marks()
 			 shiftcode(&(workinfo->createdate)),
 			 shift_words[word]);
 
-		LOGDEBU2("%s() shift='%s'", __func__, shift);
+		LOGDEBUG("%s() shift='%s'", __func__, shift);
 
 		if (!marks_description(des, sizeof(des), shifttype, 0, shift, NULL))
 			return;
 
-		LOGDEBU2("%s() des='%s'", __func__, des);
+		LOGDEBUG("%s() des='%s'", __func__, des);
 
 		if (was_block) {
 			// Put the block description in extra
@@ -2394,16 +2394,36 @@ static void make_shift_marks()
 						blocks->height, NULL, NULL))
 				return;
 
-			LOGDEBU2("%s() extra='%s'", __func__, extra);
+			LOGDEBUG("%s() extra='%s'", __func__, extra);
 		}
 
 		setnow(&now);
-		marks_process(NULL, true, EMPTY, marks_wid, des, extra,
-			      shifttype, status, (char *)by_default,
-			      (char *)__func__, (char *)inet_default,
-			      &now, NULL);
+		ok = marks_process(NULL, true, EMPTY, marks_wid, des, extra,
+				   shifttype, status, (char *)by_default,
+				   (char *)__func__, (char *)inet_default,
+				   &now, NULL);
+
+		if (ok) {
+			LOGWARNING("%s() mark %"PRId64"/%s/%s/%s/%s/",
+				   __func__, marks_wid, shifttype, status,
+				   des, extra);
+		}
 	} else
-		LOGDEBU2("%s() no marks wid", __func__);
+		LOGDEBUG("%s() no marks wid", __func__);
+}
+
+static void make_a_workmarker()
+{
+	char msg[1024] = "";
+	tv_t now;
+	bool ok;
+
+	setnow(&now);
+	ok = workmarkers_generate(NULL, msg, sizeof(msg),
+				  (char *)by_default, (char *)__func__,
+				  (char *)inet_default, &now, NULL, false);
+	if (!ok)
+		LOGERR("%s() ERR %s", __func__, msg);
 }
 
 static void *marker(__maybe_unused void *arg)
@@ -2443,9 +2463,8 @@ static void *marker(__maybe_unused void *arg)
 		if (everyone_die)
 			break;
 		else
-			make_shift_marks();
+			make_a_shift_mark();
 
-#if 0
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
 				sleep(1);
@@ -2455,6 +2474,7 @@ static void *marker(__maybe_unused void *arg)
 		else
 			make_a_workmarker();
 
+#if 0
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
 				sleep(1);
