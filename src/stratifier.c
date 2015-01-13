@@ -2634,9 +2634,9 @@ out_unlock:
 	if (ckp->logshares) {
 		fp = fopen(fname, "ae");
 		if (likely(fp)) {
-			s = json_dumps(val, 0);
+			s = json_dumps(val, JSON_EOL);
 			len = strlen(s);
-			len = fprintf(fp, "%s\n", s);
+			len = fprintf(fp, "%s", s);
 			free(s);
 			fclose(fp);
 			if (unlikely(len < 0))
@@ -3571,8 +3571,8 @@ static void *statsupdate(void *arg)
 					LOGERR("Failed to fopen %s", fname);
 					continue;
 				}
-				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-				fprintf(fp, "%s\n", s);
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
+				fprintf(fp, "%s", s);
 				dealloc(s);
 				json_decref(val);
 				fclose(fp);
@@ -3618,8 +3618,8 @@ static void *statsupdate(void *arg)
 				LOGERR("Failed to fopen %s", fname);
 				continue;
 			}
-			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-			fprintf(fp, "%s\n", s);
+			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
+			fprintf(fp, "%s", s);
 			if (!idle)
 				LOGNOTICE("User %s:%s", instance->username, s);
 			dealloc(s);
