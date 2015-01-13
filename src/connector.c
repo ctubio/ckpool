@@ -236,13 +236,14 @@ static void stratifier_drop_client(ckpool_t *ckp, int64_t id)
  * regularly but keep the instances in a linked list until their ref count
  * drops to zero when we can remove them lazily. Client must hold a reference
  * count. */
-static void invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
+static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
 {
 	client_instance_t *tmp;
+	int ret;
 
-	drop_client(cdata, client);
+	ret = drop_client(cdata, client);
 	if (ckp->passthrough)
-		return;
+		goto out;
 	stratifier_drop_client(ckp, client->id);
 
 	/* Cull old unused clients lazily when there are no more reference
@@ -256,6 +257,9 @@ static void invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *
 		}
 	}
 	ck_wunlock(&cdata->lock);
+
+out:
+	return ret;
 }
 
 static void send_client(cdata_t *cdata, int64_t id, char *buf);
@@ -689,7 +693,7 @@ retry:
 			stratifier_drop_client(ckp, client_id);
 			goto retry;
 		}
-		ret = drop_client(cdata, client);
+		ret = invalidate_client(ckp, cdata, client);
 		dec_instance_ref(cdata, client);
 		if (ret >= 0)
 			LOGINFO("Connector dropped client id: %ld", client_id);
