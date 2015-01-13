@@ -255,6 +255,7 @@ struct stratum_instance {
 	ckpool_t *ckp;
 
 	time_t last_txns; /* Last time this worker requested txn hashes */
+	time_t disconnected_time; /* Time this instance disconnected */
 
 	int64_t suggest_diff; /* Stratum client suggested diff */
 	double best_diff; /* Best share found by this instance */
@@ -1102,6 +1103,14 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int
 	return instance;
 }
 
+/* Add a stratum instance to the dead instances list */
+static void kill_instance(sdata_t *sdata, stratum_instance_t *client)
+{
+	if (client->user_instance)
+		DL_DELETE(client->user_instance->instances, client);
+	LL_PREPEND(sdata->dead_instances, client);
+}
+
 /* Only supports a full ckpool instance sessionid with an 8 byte sessionid */
 static bool disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, int64_t id)
 {
@@ -1116,7 +1125,7 @@ static bool disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid,
 	/* Number is in BE but we don't swap either of them */
 	hex2bin(&session64, sessionid, 8);
 
-	ck_rlock(&sdata->instance_lock);
+	ck_ilock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, instance, tmp) {
 		if (instance->id == id)
 			continue;
@@ -1127,10 +1136,18 @@ static bool disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid,
 	}
 	instance = NULL;
 	HASH_FIND(hh, sdata->disconnected_instances, &session64, sizeof(uint64_t), instance);
-	if (instance)
+	if (instance) {
+		/* If we've found a matching disconnected instance, use it only
+		 * once and discard it */
+		ck_ulock(&sdata->instance_lock);
+		HASH_DEL(sdata->disconnected_instances, instance);
+		kill_instance(sdata, instance);
+		ck_dwilock(&sdata->instance_lock);
+
 		ret = true;
+	}
 out_unlock:
-	ck_runlock(&sdata->instance_lock);
+	ck_uilock(&sdata->instance_lock);
 out:
 	return ret;
 }
@@ -1213,6 +1230,7 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 static void drop_client(sdata_t *sdata, int64_t id)
 {
 	stratum_instance_t *client, *tmp;
+	time_t now_t = time(NULL);
 	bool dec = false;
 
 	LOGINFO("Stratifier dropping client %ld", id);
@@ -1231,13 +1249,11 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		HASH_DEL(sdata->stratum_instances, client);
 		HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
-		if (!client->ckp->proxy && !old_client && client->enonce1_64)
+		if (!client->ckp->proxy && !old_client && client->enonce1_64) {
 			HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
-		else {
-			if (client->user_instance)
-				DL_DELETE(client->user_instance->instances, client);
-			LL_PREPEND(sdata->dead_instances, client);
-		}
+			client->disconnected_time = time(NULL);
+		} else
+			kill_instance(sdata, client);
 	}
 	ck_wunlock(&sdata->instance_lock);
 
@@ -1251,6 +1267,18 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	ck_wlock(&sdata->instance_lock);
 	if (client)
 		__dec_instance_ref(client);
+	/* Old disconnected instances will not have any valid shares so remove
+	 * them from the disconnected instances list if they've been dead for
+	 * more than 10 minutes */
+	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
+		if (now_t - client->disconnected_time < 600)
+			continue;
+		LOGINFO("Discarding aged disconnected instance %ld", client->id);
+		HASH_DEL(sdata->disconnected_instances, client);
+		kill_instance(sdata, client);
+	}
+	/* Discard any dead instances that no longer hold any reference counts,
+	 * freeing up their memory safely */
 	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding instance %ld", client->id);
