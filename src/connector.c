@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Con Kolivas
+ * Copyright 2014-2015 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -618,8 +618,7 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(passthrough_id));
 	} else
 		client_id = client_id64;
-	msg = json_dumps(json_msg, 0);
-	realloc_strcat(&msg, "\n");
+	msg = json_dumps(json_msg, JSON_EOL);
 	send_client(cdata, client_id, msg);
 	json_decref(json_msg);
 }
