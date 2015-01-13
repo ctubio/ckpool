@@ -3618,8 +3618,8 @@ static void *statsupdate(void *arg)
 				LOGERR("Failed to fopen %s", fname);
 				continue;
 			}
-			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
-			fprintf(fp, "%s", s);
+			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+			fprintf(fp, "%s\n", s);
 			if (!idle)
 				LOGNOTICE("User %s:%s", instance->username, s);
 			dealloc(s);
