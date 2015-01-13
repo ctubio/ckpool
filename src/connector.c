@@ -677,6 +677,25 @@ retry:
 	 * so look for them first. */
 	if (likely(buf[0] == '{')) {
 		process_client_msg(cdata, buf);
+	} else if (cmdmatch(buf, "dropclient")) {
+		client_instance_t *client;
+
+		ret = sscanf(buf, "dropclient=%ld", &client_id64);
+		if (ret < 0) {
+			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
+			goto retry;
+		}
+		client_id = client_id64 & 0xffffffffll;
+		client = ref_client_by_id(cdata, client_id);
+		if (unlikely(!client)) {
+			LOGINFO("Connector failed to find client id %ld to drop", client_id);
+			stratifier_drop_client(ckp, client_id);
+			goto retry;
+		}
+		ret = drop_client(cdata, client);
+		dec_instance_ref(cdata, client);
+		if (ret >= 0)
+			LOGINFO("Connector dropped client id: %ld", client_id);
 	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Connector received ping request");
 		send_unix_msg(sockd, "pong");
@@ -690,24 +709,6 @@ retry:
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "shutdown")) {
 		goto out;
-	} else if (cmdmatch(buf, "dropclient")) {
-		client_instance_t *client;
-
-		ret = sscanf(buf, "dropclient=%ld", &client_id64);
-		if (ret < 0) {
-			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
-			goto retry;
-		}
-		client_id = client_id64 & 0xffffffffll;
-		client = ref_client_by_id(cdata, client_id);
-		if (unlikely(!client)) {
-			LOGINFO("Connector failed to find client id %ld to drop", client_id);
-			goto retry;
-		}
-		ret = drop_client(cdata, client);
-		dec_instance_ref(cdata, client);
-		if (ret >= 0)
-			LOGINFO("Connector dropped client id: %ld", client_id);
 	} else if (cmdmatch(buf, "passthrough")) {
 		client_instance_t *client;
 
