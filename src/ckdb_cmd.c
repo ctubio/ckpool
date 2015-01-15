@@ -4105,13 +4105,13 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	char msg[1024] = "";
 	K_ITEM *i_action, *i_workinfoid, *i_marktype, *i_description;
 	K_ITEM *i_height, *i_status, *i_extra, *m_item, *b_item, *w_item;
-	K_ITEM *wm_item, *wm_item_prev;
+	K_ITEM *wm_item, *wm_item_prev, *i_markerid;
 	WORKMARKERS *workmarkers;
 	K_TREE_CTX ctx[1];
 	BLOCKS *blocks;
 	MARKS *marks;
 	char *action;
-	int64_t workinfoid = -1;
+	int64_t workinfoid = -1, markerid = -1;
 	char *marktype;
 	int32_t height = 0;
 	char description[TXT_BIG+1] = { '\0' };
@@ -4396,6 +4396,39 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 		 *  summarise it's sharesummaries into markersummaries
 		 * No parameters */
 		ok = make_markersummaries(true, by, code, inet, cd, trf_root);
+		if (!ok) {
+			snprintf(reply, siz, "%s failed", action);
+			LOGERR("%s.%s", id, reply);
+			return strdup(reply);
+		}
+	} else if (strcasecmp(action, "processed") == 0) {
+		/* Mark a workmarker as processed
+		 * Requires markerid */
+		i_markerid = require_name(trf_root, "markerid", 1, (char *)intpatt, reply, siz);
+		if (!i_markerid)
+			return strdup(reply);
+		TXT_TO_BIGINT("markerid", transfer_data(i_markerid), markerid);
+		K_RLOCK(workmarkers_free);
+		wm_item = find_workmarkerid(markerid, true, '\0');
+		K_RUNLOCK(workmarkers_free);
+		if (!wm_item) {
+			snprintf(reply, siz,
+				 "unknown workmarkers with markerid %"PRId64, markerid);
+			return strdup(reply);
+		}
+		DATA_WORKMARKERS(workmarkers, wm_item);
+		if (WMPROCESSED(workmarkers->status)) {
+			snprintf(reply, siz,
+				 "already processed markerid %"PRId64, markerid);
+			return strdup(reply);
+		}
+		ok = workmarkers_process(NULL, false, true, markerid,
+					 workmarkers->poolinstance,
+					 workmarkers->workinfoidend,
+					 workmarkers->workinfoidstart,
+					 workmarkers->description,
+					 MARKER_PROCESSED_STR,
+					 by, code, inet, cd, trf_root);
 		if (!ok) {
 			snprintf(reply, siz, "%s failed", action);
 			LOGERR("%s.%s", id, reply);

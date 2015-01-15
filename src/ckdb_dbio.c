@@ -5756,7 +5756,9 @@ bool markersummary_fill(PGconn *conn)
 	return ok;
 }
 
-/* Add means create a new one and expire the old one if it exists,
+/* Already means there is a transaction already in progress
+ *  so don't begin or commit/rollback
+ * Add means create a new one and expire the old one if it exists,
  *  otherwise we only expire the old one if it exists
  * Add requires all db fields except markerid, however if markerid
  *  is non-zero, it will be used instead of getting a new one
