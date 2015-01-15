@@ -2904,32 +2904,30 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		ss_item = ss_prev;
 	}
 
-	if (old_sharesummary_store->count == 0)
-		reason = "no sharesummaries";
-	else {
-		if (conn == NULL) {
-			conn = dbconnect();
-			conned = true;
-		}
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
 
-		res = PQexec(conn, "Begin", CKPQ_WRITE);
-		rescode = PQresultStatus(res);
-		PQclear(res);
-		if (!PGOK(rescode)) {
-			PGLOGERR("Begin", rescode, conn);
-			goto flail;
-		}
+	res = PQexec(conn, "Begin", CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Begin", rescode, conn);
+		goto flail;
+	}
 
-		ms_item = new_markersummary_store->head;
-		while (ms_item) {
-			if (!(markersummary_add(conn, ms_item, by, code, inet,
-						cd, trf_root))) {
-				reason = "db error";
-				goto rollback;
-			}
-			ms_item = ms_item->next;
+	ms_item = new_markersummary_store->head;
+	while (ms_item) {
+		if (!(markersummary_add(conn, ms_item, by, code, inet,
+					cd, trf_root))) {
+			reason = "db error";
+			goto rollback;
 		}
+		ms_item = ms_item->next;
+	}
 
+	if (old_sharesummary_store->count > 0) {
 		par = 0;
 		params[par++] = bigint_to_buf(workmarkers->workinfoidstart, NULL, 0);
 		params[par++] = bigint_to_buf(workmarkers->workinfoidend, NULL, 0);
@@ -2958,23 +2956,23 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 			reason = "delete mismatch";
 			goto rollback;
 		}
-
-		ok = workmarkers_process(conn, true, true,
-					 workmarkers->markerid,
-					 workmarkers->poolinstance,
-					 workmarkers->workinfoidend,
-					 workmarkers->workinfoidstart,
-					 workmarkers->description,
-					 MARKER_PROCESSED_STR,
-					 by, code, inet, cd, trf_root);
-rollback:
-		if (ok)
-			res = PQexec(conn, "Commit", CKPQ_WRITE);
-		else
-			res = PQexec(conn, "Rollback", CKPQ_WRITE);
-
-		PQclear(res);
 	}
+
+	ok = workmarkers_process(conn, true, true,
+				 workmarkers->markerid,
+				 workmarkers->poolinstance,
+				 workmarkers->workinfoidend,
+				 workmarkers->workinfoidstart,
+				 workmarkers->description,
+				 MARKER_PROCESSED_STR,
+				 by, code, inet, cd, trf_root);
+rollback:
+	if (ok)
+		res = PQexec(conn, "Commit", CKPQ_WRITE);
+	else
+		res = PQexec(conn, "Rollback", CKPQ_WRITE);
+
+	PQclear(res);
 flail:
 	for (n = 0; n < par; n++)
 		free(params[n]);
