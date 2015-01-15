@@ -4092,7 +4092,7 @@ static char *cmd_userstatus(PGconn *conn, char *cmd, char *id, tv_t *now, char *
 }
 
 /* Socket interface to the functions that will be used later to automatically
- * create marks, workmarkers and process the workmarkers
+ * create marks, workmarkers and process the workmarkers and sharesummaries
  * to generate markersummaries */
 static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 			__maybe_unused tv_t *now, char *by,
@@ -4372,7 +4372,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 			DATA_WORKMARKERS(workmarkers, wm_item);
 			if (CURRENT(&(workmarkers->expirydate)) &&
 			    !WMPROCESSED(workmarkers->status)) {
-				ok = workmarkers_process(conn, false,
+				ok = workmarkers_process(conn, false, false,
 							 workmarkers->markerid,
 							 NULL, 0, 0, NULL, NULL, by,
 							 code, inet, cd, trf_root);
@@ -4390,6 +4390,16 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 				snprintf(msg, sizeof(msg),
 					 "%d workmarkers expunged", count);
 			}
+		}
+	} else if (strcasecmp(action, "sum") == 0) {
+		/* For the last available workmarker,
+		 *  summarise it's sharesummaries into markersummaries
+		 * No parameters */
+		ok = make_markersummaries(true, by, code, inet, cd, trf_root);
+		if (!ok) {
+			snprintf(reply, siz, "%s failed", action);
+			LOGERR("%s.%s", id, reply);
+			return strdup(reply);
 		}
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
