@@ -1252,7 +1252,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	ck_wlock(&sdata->instance_lock);
 	if (client)
 		__dec_instance_ref(client);
-	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
+	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding instance %ld", client->id);
 			LL_DELETE(sdata->dead_instances, client);
