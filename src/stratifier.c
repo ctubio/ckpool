@@ -3517,6 +3517,9 @@ static void *statsupdate(void *arg)
 			worker_instance_t *worker;
 			bool idle = false;
 
+			if (instance->workers < 1)
+				continue;
+
 			/* Decay times per worker */
 			DL_FOREACH(instance->worker_instances, worker) {
 				per_tdiff = tvdiff(&now, &worker->last_share);
