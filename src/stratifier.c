@@ -862,13 +862,8 @@ static void __kill_instance(sdata_t *sdata, stratum_instance_t *client)
 {
 	user_instance_t *instance = client->user_instance;
 
-	if (instance) {
-		worker_instance_t *worker = client->worker_instance;
-
+	if (likely(instance))
 		DL_DELETE(instance->instances, client);
-		if (worker)
-			DL_DELETE(instance->worker_instances, worker);
-	}
 	LL_PREPEND(sdata->dead_instances, client);
 	sdata->stats.dead++;
 }
