@@ -1295,6 +1295,26 @@ static void reconnect_clients(sdata_t *sdata, const char *cmd)
 	stratum_broadcast(sdata, json_msg);
 }
 
+static void reset_bestshares(sdata_t *sdata)
+{
+	user_instance_t *instance, *tmpuser;
+	stratum_instance_t *client, *tmp;
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		client->best_diff = 0;
+	}
+	HASH_ITER(hh, sdata->user_instances, instance, tmpuser) {
+		worker_instance_t *worker;
+
+		instance->best_diff = 0;
+		DL_FOREACH(instance->worker_instances, worker) {
+			worker->best_diff = 0;
+		}
+	}
+	ck_runlock(&sdata->instance_lock);
+}
+
 static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
@@ -1348,6 +1368,7 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 	free(msg);
 
 	LOGWARNING("Solved and confirmed block %d", height);
+	reset_bestshares(sdata);
 }
 
 static void block_reject(sdata_t *sdata, const char *blockhash)
