@@ -1244,17 +1244,18 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 static void drop_client(sdata_t *sdata, int64_t id)
 {
 	stratum_instance_t *client, *tmp;
+	user_instance_t *instance = NULL;
 	time_t now_t = time(NULL);
+	ckpool_t *ckp = NULL;
 	bool dec = false;
 
-	LOGINFO("Stratifier dropping client %ld", id);
+	LOGINFO("Stratifier requested to drop client %ld", id);
 
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
 		stratum_instance_t *old_client = NULL;
 
-		__inc_instance_ref(client);
 		if (client->authorised) {
 			dec = true;
 			client->authorised = false;
@@ -1269,19 +1270,11 @@ static void drop_client(sdata_t *sdata, int64_t id)
 			client->disconnected_time = time(NULL);
 		} else
 			__kill_instance(sdata, client);
+		ckp = client->ckp;
+		instance = client->user_instance;
+		LOGINFO("Stratifer dropped %sauthorised client %ld", dec ? "" : "un", id);
 	}
-	ck_wunlock(&sdata->instance_lock);
 
-	/* Decrease worker count outside of instance_lock to avoid recursive
-	 * locking */
-	if (dec)
-		dec_worker(client->ckp, client->user_instance);
-
-	/* Cull old unused clients lazily when there are no more reference
-	 * counts for them. */
-	ck_wlock(&sdata->instance_lock);
-	if (client)
-		__dec_instance_ref(client);
 	/* Old disconnected instances will not have any valid shares so remove
 	 * them from the disconnected instances list if they've been dead for
 	 * more than 10 minutes */
@@ -1291,8 +1284,9 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		LOGINFO("Discarding aged disconnected instance %ld", client->id);
 		__del_disconnected(sdata, client);
 	}
-	/* Discard any dead instances that no longer hold any reference counts,
-	 * freeing up their memory safely */
+
+	/* Cull old unused clients lazily when there are no more reference
+	 * counts for them. */
 	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding instance %ld", client->id);
@@ -1304,6 +1298,11 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		}
 	}
 	ck_wunlock(&sdata->instance_lock);
+
+	/* Decrease worker count outside of instance_lock to avoid recursive
+	 * locking. ckp and instance are guaranteed to be set if dec is true */
+	if (dec)
+		dec_worker(ckp, instance);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
