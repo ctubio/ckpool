@@ -2935,7 +2935,7 @@ static void parse_method(sdata_t *sdata, const int64_t client_id, json_t *id_val
 		/* Shouldn't happen, sanity check */
 		if (unlikely(!result_val)) {
 			LOGWARNING("parse_subscribe returned NULL result_val");
-			return;
+			goto out;
 		}
 		val = json_object();
 		json_object_set_new_nocheck(val, "result", result_val);
@@ -2990,7 +2990,7 @@ static void parse_method(sdata_t *sdata, const int64_t client_id, json_t *id_val
 
 	if (cmdmatch(method, "mining.suggest")) {
 		suggest_diff(client, method, params_val);
-		return;
+		goto out;
 	}
 
 	/* Covers both get_transactions and get_txnhashes */
