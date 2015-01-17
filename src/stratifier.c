@@ -3513,10 +3513,18 @@ static void *statsupdate(void *arg)
 
 		HASH_ITER(hh, sdata->user_instances, instance, tmpuser) {
 			worker_instance_t *worker;
+			int iterations = 0;
 			bool idle = false;
 
 			/* Decay times per worker */
 			DL_FOREACH(instance->worker_instances, worker) {
+				/* FIXME: This shouldn't happen and is purely a sanity
+				 * breakout till the real issue is found fixed. */
+				if (unlikely(iterations++ > instance->workers)) {
+					LOGWARNING("Statsupdate trying to iterate more than %d existing workers for worker %s",
+						   instance->workers, worker->workername);
+					break;
+				}
 				per_tdiff = tvdiff(&now, &worker->last_share);
 				if (per_tdiff > 60) {
 					decay_time(&worker->dsps1, 0, per_tdiff, 60);
