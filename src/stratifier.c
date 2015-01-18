@@ -2005,8 +2005,9 @@ static int send_recv_auth(stratum_instance_t *client)
 
 		LOGINFO("Got ckdb response: %s", buf);
 		if (unlikely(sscanf(buf, "id.%*d.%s", response) < 1 || strlen(response) < 1 || !strchr(response, '='))) {
-			if (!cmdmatch(response, "failed"))
-				LOGWARNING("Got unparseable ckdb auth response: %s", buf);
+			if (cmdmatch(response, "failed"))
+				goto out;
+			LOGWARNING("Got unparseable ckdb auth response: %s", buf);
 			goto out_fail;
 		}
 		cmd = response;
