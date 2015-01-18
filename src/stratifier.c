@@ -1216,6 +1216,8 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 static void drop_client(sdata_t *sdata, int64_t id)
 {
 	stratum_instance_t *client, *tmp;
+	user_instance_t *instance = NULL;
+	ckpool_t *ckp = NULL;
 	bool dec = false;
 
 	LOGINFO("Stratifier dropping client %ld", id);
@@ -1225,10 +1227,11 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	if (client) {
 		stratum_instance_t *old_client = NULL;
 
-		__inc_instance_ref(client);
 		if (client->authorised) {
 			dec = true;
 			client->authorised = false;
+			ckp = client->ckp;
+			instance = client->user_instance;
 		}
 
 		HASH_DEL(sdata->stratum_instances, client);
@@ -1242,18 +1245,8 @@ static void drop_client(sdata_t *sdata, int64_t id)
 			LL_PREPEND(sdata->dead_instances, client);
 		}
 	}
-	ck_wunlock(&sdata->instance_lock);
-
-	/* Decrease worker count outside of instance_lock to avoid recursive
-	 * locking */
-	if (dec)
-		dec_worker(client->ckp, client->user_instance);
-
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
-	ck_wlock(&sdata->instance_lock);
-	if (client)
-		__dec_instance_ref(client);
 	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding instance %ld", client->id);
@@ -1264,6 +1257,11 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		}
 	}
 	ck_wunlock(&sdata->instance_lock);
+
+	/* Decrease worker count outside of instance_lock to avoid recursive
+	 * locking */
+	if (dec)
+		dec_worker(ckp, instance);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
