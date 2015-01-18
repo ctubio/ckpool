@@ -5278,11 +5278,13 @@ bool workerstats_add(char *poolinstance, char *elapsed, char *username,
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
 	if (!u_item) {
-		char *txt;
-		LOGERR("%s(): unknown user '%s'",
+		char *usr, *wrk;
+		LOGERR("%s(): unknown user '%s' (worker=%s)",
 			__func__,
-			txt = safe_text(username));
-		free(txt);
+			usr = safe_text(username),
+			wrk = safe_text(workername));
+		free(usr);
+		free(wrk);
 		return false;
 	}
 	DATA_USERS(users, u_item);
