@@ -1243,7 +1243,6 @@ static void drop_client(sdata_t *sdata, int64_t id)
 {
 	stratum_instance_t *client, *tmp;
 	user_instance_t *instance = NULL;
-	time_t now_t = time(NULL);
 	ckpool_t *ckp = NULL;
 	bool dec = false;
 
@@ -1252,14 +1251,16 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
-		stratum_instance_t *old_client = NULL;
-
 		if (client->authorised) {
 			dec = true;
 			client->authorised = false;
 		}
 
 		HASH_DEL(sdata->stratum_instances, client);
+#if 0
+		/* Disable resume support till debugged properly */
+		stratum_instance_t *old_client = NULL;
+
 		HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64 && dec) {
@@ -1267,11 +1268,15 @@ static void drop_client(sdata_t *sdata, int64_t id)
 			sdata->stats.disconnected++;
 			client->disconnected_time = time(NULL);
 		} else
+#endif
 			__kill_instance(sdata, client);
 		ckp = client->ckp;
 		instance = client->user_instance;
 		LOGINFO("Stratifer dropped %sauthorised client %ld", dec ? "" : "un", id);
 	}
+
+#if 0
+	time_t now_t = time(NULL);
 
 	/* Old disconnected instances will not have any valid shares so remove
 	 * them from the disconnected instances list if they've been dead for
@@ -1282,6 +1287,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		LOGINFO("Discarding aged disconnected instance %ld", client->id);
 		__del_disconnected(sdata, client);
 	}
+#endif
 
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
