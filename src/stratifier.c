@@ -183,6 +183,8 @@ struct user_instance {
 	double dsps1440;
 	double dsps10080;
 	tv_t last_share;
+
+	bool authorised; /* Has this username ever been authorised? */
 	time_t auth_time;
 };
 
@@ -2116,8 +2118,6 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
 
-	LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
-		  user_instance->username);
 	client->workername = strdup(buf);
 	if (CKP_STANDALONE(ckp))
 		ret = true;
@@ -2139,9 +2139,16 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 			ret = true;
 		}
 	}
-	client->authorised = ret;
-	if (client->authorised)
+	if (ret) {
+		client->authorised = ret;
+		user_instance->authorised = ret;
 		inc_worker(ckp, user_instance);
+		LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
+			  user_instance->username);
+	} else {
+		LOGNOTICE("Client %ld worker %s failed to authorise as user %s", client->id, buf,
+			  user_instance->username);
+	}
 out:
 	return json_boolean(ret);
 }
@@ -3439,6 +3446,9 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 		worker_instance_t *worker;
 		uint8_t cycle_mask;
 
+		if (!user->authorised)
+			continue;
+
 		/* Select users using a mask to return each user's stats once
 		 * every ~10 minutes */
 		cycle_mask = user->id & 0x1f;
@@ -3539,6 +3549,9 @@ static void *statsupdate(void *arg)
 			worker_instance_t *worker;
 			int iterations = 0;
 			bool idle = false;
+
+			if (!instance->authorised)
+				continue;
 
 			/* Decay times per worker */
 			DL_FOREACH(instance->worker_instances, worker) {
