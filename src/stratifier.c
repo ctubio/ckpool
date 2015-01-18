@@ -1982,7 +1982,7 @@ static int send_recv_auth(stratum_instance_t *client)
 		json_msg = ckdb_msg(ckp, val, ID_AUTH);
 	if (unlikely(!json_msg)) {
 		LOGWARNING("Failed to dump json in send_recv_auth");
-		return ret;
+		goto out;
 	}
 
 	/* We want responses from ckdb serialised and not interleaved with
@@ -2002,7 +2002,10 @@ static int send_recv_auth(stratum_instance_t *client)
 		json_t *val = NULL;
 
 		LOGINFO("Got ckdb response: %s", buf);
-		sscanf(buf, "id.%*d.%s", response);
+		if (unlikely(sscanf(buf, "id.%*d.%s", response) < 1 || strlen(response) < 1 || !strchr(response, '='))) {
+			LOGWARNING("Got unparseable ckdb auth response: %s", buf);
+			goto out_fail;
+		}
 		cmd = response;
 		strsep(&cmd, "=");
 		LOGINFO("User %s Worker %s got auth response: %s  cmd: %s",
@@ -2010,7 +2013,7 @@ static int send_recv_auth(stratum_instance_t *client)
 			response, cmd);
 		val = json_loads(cmd, 0, &err_val);
 		if (unlikely(!val))
-			LOGINFO("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
+			LOGWARNING("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
 		else {
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
 			json_get_int(&worker->mindiff, val, "difficultydefault");
@@ -2028,11 +2031,12 @@ static int send_recv_auth(stratum_instance_t *client)
 		}
 		if (likely(val))
 			json_decref(val);
-	} else {
-		ret = -1;
-		LOGWARNING("Got no auth response from ckdb :(");
+		goto out;
 	}
-
+	LOGWARNING("Got no auth response from ckdb :(");
+out_fail:
+	ret = -1;
+out:
 	return ret;
 }
 
