@@ -1621,6 +1621,16 @@ out:
 	return ret;
 }
 
+/* Enter holding workbase_lock */
+static void __fill_enonce1data(workbase_t *wb, stratum_instance_t *client)
+{
+	if (wb->enonce1constlen)
+		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
+	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
+	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
+	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
+}
+
 /* Create a new enonce1 from the 64 bit enonce1_64 value, using only the number
  * of bytes we have to work with when we are proxying with a split nonce2.
  * When the proxy space is less than 32 bits to work with, we look for an
@@ -1669,11 +1679,7 @@ static bool new_enonce1(stratum_instance_t *client)
 	}
 	if (ret)
 		client->enonce1_64 = sdata->enonce1u.u64;
-	if (wb->enonce1constlen)
-		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
-	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
-	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
-	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
+	__fill_enonce1data(wb, client);
 	ck_wunlock(&sdata->workbase_lock);
 
 	if (unlikely(!ret))
@@ -1722,6 +1728,10 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 			if (disconnected_sessionid_exists(sdata, buf, client_id)) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
+
+				ck_rlock(&sdata->workbase_lock);
+				__fill_enonce1data(sdata->current_workbase, client);
+				ck_runlock(&sdata->workbase_lock);
 			}
 		}
 	} else
