@@ -260,6 +260,7 @@ struct stratum_instance {
 	ckpool_t *ckp;
 
 	time_t last_txns; /* Last time this worker requested txn hashes */
+	time_t disconnected_time; /* Time this instance disconnected */
 
 	int64_t suggest_diff; /* Stratum client suggested diff */
 	double best_diff; /* Best share found by this instance */
@@ -860,18 +861,21 @@ static void update_base(ckpool_t *ckp, int prio)
 
 static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 {
+	LOGDEBUG("Adding dead instance %ld", client->id);
 	LL_PREPEND(sdata->dead_instances, client);
 	sdata->stats.dead++;
 }
 
 static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
 {
+	LOGDEBUG("Deleting dead instance %ld", client->id);
 	LL_DELETE(sdata->dead_instances, client);
 	sdata->stats.dead--;
 }
 
 static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 {
+	LOGDEBUG("Deleting disconnected instance %ld", client->id);
 	HASH_DEL(sdata->disconnected_instances, client);
 	sdata->stats.disconnected--;
 	__add_dead(sdata, client);
@@ -1245,6 +1249,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 {
 	stratum_instance_t *client, *tmp, *client_delete = NULL;
 	user_instance_t *instance = NULL;
+	time_t now_t = time(NULL);
 	ckpool_t *ckp = NULL;
 	bool dec = false;
 
@@ -1268,12 +1273,25 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64 && dec) {
+			LOGDEBUG("Adding disconnected instance %ld", client->id);
 			HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 			sdata->stats.disconnected++;
+			client->disconnected_time = time(NULL);
 		} else {
 			__add_dead(sdata, client);
 		}
 	}
+
+	/* Old disconnected instances will not have any valid shares so remove
+	 * them from the disconnected instances list if they've been dead for
+	 * more than 10 minutes */
+	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
+		if (now_t - client->disconnected_time < 600)
+			continue;
+		LOGINFO("Ageing disconnected instance %ld to dead", client->id);
+		__del_disconnected(sdata, client);
+	}
+
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
 	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
@@ -1282,7 +1300,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		 * the next pass through the loop. */
 		dealloc(client_delete);
 		if (!client->ref) {
-			LOGINFO("Stratifier discarding instance %ld", client->id);
+			LOGINFO("Stratifier discarding dead instance %ld", client->id);
 			__del_dead(sdata, client);
 			free(client->workername);
 			free(client->useragent);
