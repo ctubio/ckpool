@@ -864,6 +864,18 @@ static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 	sdata->stats.disconnected--;
 }
 
+static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
+{
+	LL_PREPEND(sdata->dead_instances, client);
+	sdata->stats.dead++;
+}
+
+static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
+{
+	LL_DELETE(sdata->dead_instances, client);
+	sdata->stats.dead--;
+}
+
 static void drop_allclients(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
@@ -873,11 +885,13 @@ static void drop_allclients(ckpool_t *ckp)
 	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		HASH_DEL(sdata->stratum_instances, client);
+		__add_dead(sdata, client);
 		sprintf(buf, "dropclient=%ld", client->id);
 		send_proc(ckp->connector, buf);
 	}
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		__del_disconnected(sdata, client);
+		__add_dead(sdata, client);
 	}
 	sdata->stats.users = sdata->stats.workers = 0;
 	ck_wunlock(&sdata->instance_lock);
@@ -1220,18 +1234,6 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 	if (!--instance->workers)
 		sdata->stats.users--;
 	mutex_unlock(&sdata->stats_lock);
-}
-
-static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
-{
-	LL_PREPEND(sdata->dead_instances, client);
-	sdata->stats.dead++;
-}
-
-static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
-{
-	LL_DELETE(sdata->dead_instances, client);
-	sdata->stats.dead--;
 }
 
 static void drop_client(sdata_t *sdata, int64_t id)
