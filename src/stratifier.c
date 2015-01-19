@@ -1128,33 +1128,34 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int
 	return instance;
 }
 
-/* Only supports a full ckpool instance sessionid with an 8 byte sessionid */
-static bool disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, int64_t id)
+static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, int64_t id)
 {
 	stratum_instance_t *instance, *tmp;
-	uint64_t session64;
-	bool ret = false;
+	uint64_t enonce1_64 = 0, ret = 0;
+	int slen;
 
 	if (!sessionid)
 		goto out;
-	if (strlen(sessionid) != 16)
+	slen = strlen(sessionid) / 2;
+	if (slen < 1 || slen > 8)
 		goto out;
+
 	/* Number is in BE but we don't swap either of them */
-	hex2bin(&session64, sessionid, 8);
+	hex2bin(&enonce1_64, sessionid, slen);
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, instance, tmp) {
 		if (instance->id == id)
 			continue;
-		if (instance->enonce1_64 == session64) {
+		if (instance->enonce1_64 == enonce1_64) {
 			/* Only allow one connected instance per enonce1 */
 			goto out_unlock;
 		}
 	}
 	instance = NULL;
-	HASH_FIND(hh, sdata->disconnected_instances, &session64, sizeof(uint64_t), instance);
+	HASH_FIND(hh, sdata->disconnected_instances, &enonce1_64, sizeof(uint64_t), instance);
 	if (instance)
-		ret = true;
+		ret = enonce1_64;
 out_unlock:
 	ck_runlock(&sdata->instance_lock);
 out:
@@ -1710,7 +1711,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 			buf = json_string_value(json_array_get(params_val, 1));
 			LOGDEBUG("Found old session id %s", buf);
 			/* Add matching here */
-			if (disconnected_sessionid_exists(sdata, buf, client_id)) {
+			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, client_id))) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
 
@@ -1728,11 +1729,11 @@ static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, js
 			client->reject = 2;
 			return json_string("proxy full");
 		}
-		LOGINFO("Set new subscription %ld to new enonce1 %s", client->id,
-			client->enonce1);
+		LOGINFO("Set new subscription %ld to new enonce1 %lx string %s", client->id,
+			client->enonce1_64, client->enonce1);
 	} else {
-		LOGINFO("Set new subscription %ld to old matched enonce1 %s", client->id,
-			 client->enonce1);
+		LOGINFO("Set new subscription %ld to old matched enonce1 %lx string %s",
+			client->id, client->enonce1_64, client->enonce1);
 	}
 
 	ck_rlock(&sdata->workbase_lock);
