@@ -858,12 +858,6 @@ static void update_base(ckpool_t *ckp, int prio)
 	create_pthread(pth, do_update, ur);
 }
 
-static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
-{
-	HASH_DEL(sdata->disconnected_instances, client);
-	sdata->stats.disconnected--;
-}
-
 static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 {
 	LL_PREPEND(sdata->dead_instances, client);
@@ -874,6 +868,13 @@ static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
 {
 	LL_DELETE(sdata->dead_instances, client);
 	sdata->stats.dead--;
+}
+
+static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
+{
+	HASH_DEL(sdata->disconnected_instances, client);
+	sdata->stats.disconnected--;
+	__add_dead(sdata, client);
 }
 
 static void drop_allclients(ckpool_t *ckp)
@@ -891,7 +892,6 @@ static void drop_allclients(ckpool_t *ckp)
 	}
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		__del_disconnected(sdata, client);
-		__add_dead(sdata, client);
 	}
 	sdata->stats.users = sdata->stats.workers = 0;
 	ck_wunlock(&sdata->instance_lock);
@@ -1143,7 +1143,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	/* Number is in BE but we don't swap either of them */
 	hex2bin(&enonce1_64, sessionid, slen);
 
-	ck_rlock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, instance, tmp) {
 		if (instance->id == id)
 			continue;
@@ -1154,10 +1154,14 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	}
 	instance = NULL;
 	HASH_FIND(hh, sdata->disconnected_instances, &enonce1_64, sizeof(uint64_t), instance);
-	if (instance)
+	if (instance) {
+		/* Delete the entry once we are going to use it since there
+		 * will be a new instance with the enonce1_64 */
+		__del_disconnected(sdata, instance);
 		ret = enonce1_64;
+	}
 out_unlock:
-	ck_runlock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 out:
 	return ret;
 }
@@ -1239,7 +1243,7 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 
 static void drop_client(sdata_t *sdata, int64_t id)
 {
-	stratum_instance_t *client, *tmp;
+	stratum_instance_t *client, *tmp, *client_delete = NULL;
 	user_instance_t *instance = NULL;
 	ckpool_t *ckp = NULL;
 	bool dec = false;
@@ -1259,28 +1263,33 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		}
 
 		HASH_DEL(sdata->stratum_instances, client);
+		if (client->user_instance)
+			DL_DELETE(client->user_instance->instances, client);
 		HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64 && dec) {
 			HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 			sdata->stats.disconnected++;
 		} else {
-			if (client->user_instance)
-				DL_DELETE(client->user_instance->instances, client);
 			__add_dead(sdata, client);
 		}
 	}
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
 	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
+		/* We can't delete the ram safely in this loop, even if we can
+		 * safely remove the entry from the linked list so we do it on
+		 * the next pass through the loop. */
+		dealloc(client_delete);
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding instance %ld", client->id);
 			__del_dead(sdata, client);
 			free(client->workername);
 			free(client->useragent);
-			free(client);
+			client_delete = client;
 		}
 	}
+	dealloc(client_delete);
 	ck_wunlock(&sdata->instance_lock);
 
 	/* Decrease worker count outside of instance_lock to avoid recursive
