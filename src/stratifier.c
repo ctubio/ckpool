@@ -1349,6 +1349,8 @@ static void reset_bestshares(sdata_t *sdata)
 	ck_runlock(&sdata->instance_lock);
 }
 
+/* Ram from blocks is NOT freed at all for now, only their entry is removed
+ * from the linked list, leaving a very small leak here and reject. */
 static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
