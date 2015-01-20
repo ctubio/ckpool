@@ -589,7 +589,7 @@ int bind_socket(char *url, char *port)
 		if (sockd > 0)
 			break;
 	}
-	if (sockd < 0) {
+	if (sockd < 0 || p == NULL) {
 		LOGWARNING("Failed to open socket for %s:%s", url, port);
 		goto out;
 	}
