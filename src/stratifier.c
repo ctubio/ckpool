@@ -3023,7 +3023,7 @@ static void parse_method(sdata_t *sdata, const int64_t client_id, json_t *id_val
 		snprintf(buf, 255, "passthrough=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
 		free(client);
-		goto out;
+		return;
 	}
 
 	if (cmdmatch(method, "mining.auth") && client->subscribed) {
