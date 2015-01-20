@@ -647,7 +647,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	wb->network_diff = diff_from_nbits(wb->headerbin + 72);
 
 	len = strlen(ckp->logdir) + 8 + 1 + 16 + 1;
-	wb->logdir = ckalloc(len);
+	wb->logdir = ckzalloc(len);
 
 	/* In proxy mode, the wb->id is received in the notify update and
 	 * we set workbase_id from it. In server mode the stratifier is
