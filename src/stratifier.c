@@ -1301,12 +1301,13 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		/* We can't delete the ram safely in this loop, even if we can
 		 * safely remove the entry from the linked list so we do it on
 		 * the next pass through the loop. */
-		dealloc(client_delete);
+		if (client != client_delete)
+			dealloc(client_delete);
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding dead instance %ld", client->id);
 			__del_dead(sdata, client);
-			free(client->workername);
-			free(client->useragent);
+			dealloc(client->workername);
+			dealloc(client->useragent);
 			client_delete = client;
 		}
 	}
