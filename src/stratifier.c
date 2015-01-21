@@ -3017,7 +3017,8 @@ static void parse_method(sdata_t *sdata, const int64_t client_id, json_t *id_val
 		 * Remove this instance since the client id may well be
 		 * reused */
 		ck_wlock(&sdata->instance_lock);
-		HASH_DEL(sdata->stratum_instances, client);
+		if (likely(__instance_by_id(sdata, client_id)))
+			HASH_DEL(sdata->stratum_instances, client);
 		ck_wunlock(&sdata->instance_lock);
 
 		LOGNOTICE("Adding passthrough client %ld", client->id);
