@@ -1260,7 +1260,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
-	if (client) {
+	if (client && likely(!client->ref)) {
 		stratum_instance_t *old_client = NULL;
 
 		instance = client->user_instance;
@@ -1290,6 +1290,8 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	 * more than 10 minutes */
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		if (now_t - client->disconnected_time < 600)
+			continue;
+		if (unlikely(client->ref))
 			continue;
 		LOGINFO("Ageing disconnected instance %ld to dead", client->id);
 		__del_disconnected(sdata, client);
