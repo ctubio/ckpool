@@ -238,7 +238,7 @@ static void stratifier_drop_client(ckpool_t *ckp, int64_t id)
  * count. */
 static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
 {
-	client_instance_t *tmp;
+	client_instance_t *tmp, *client_delete = NULL;
 	int ret;
 
 	ret = drop_client(cdata, client);
@@ -250,12 +250,15 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	 * counts for them. */
 	ck_wlock(&cdata->lock);
 	LL_FOREACH_SAFE(cdata->dead_clients, client, tmp) {
+		/* Don't free client ram when loop may still access it */
+		dealloc(client_delete);
 		if (!client->ref) {
 			LL_DELETE(cdata->dead_clients, client);
 			LOGINFO("Connector discarding client %ld", client->id);
-			free(client);
+			client_delete = client;
 		}
 	}
+	dealloc(client_delete);
 	ck_wunlock(&cdata->lock);
 
 out:
