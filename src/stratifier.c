@@ -3020,7 +3020,7 @@ static void parse_method(sdata_t *sdata, const int64_t client_id, json_t *id_val
 		HASH_DEL(sdata->stratum_instances, client);
 		ck_wunlock(&sdata->instance_lock);
 
-		LOGINFO("Adding passthrough client %ld", client->id);
+		LOGNOTICE("Adding passthrough client %ld", client->id);
 		snprintf(buf, 255, "passthrough=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
 		free(client);
