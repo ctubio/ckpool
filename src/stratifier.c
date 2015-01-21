@@ -1263,16 +1263,16 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	if (client) {
 		stratum_instance_t *old_client = NULL;
 
+		instance = client->user_instance;
 		if (client->authorised) {
 			dec = true;
 			client->authorised = false;
 			ckp = client->ckp;
-			instance = client->user_instance;
 		}
 
 		HASH_DEL(sdata->stratum_instances, client);
-		if (client->user_instance)
-			DL_DELETE(client->user_instance->instances, client);
+		if (instance)
+			DL_DELETE(instance->instances, client);
 		HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64 && dec) {
