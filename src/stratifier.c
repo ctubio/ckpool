@@ -3019,13 +3019,13 @@ static void parse_method(sdata_t *sdata, const int64_t client_id, json_t *id_val
 		ck_wlock(&sdata->instance_lock);
 		if (likely(__instance_by_id(sdata, client_id)))
 			HASH_DEL(sdata->stratum_instances, client);
+		__add_dead(sdata, client);
 		ck_wunlock(&sdata->instance_lock);
 
 		LOGNOTICE("Adding passthrough client %ld", client->id);
 		snprintf(buf, 255, "passthrough=%ld", client->id);
 		send_proc(client->ckp->connector, buf);
-		free(client);
-		return;
+		goto out;
 	}
 
 	if (cmdmatch(method, "mining.auth") && client->subscribed) {
