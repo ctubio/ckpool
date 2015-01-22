@@ -556,7 +556,6 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf)
 			invalidate_client(ckp, cdata, client);
 		} else {
 			LOGINFO("Connector failed to find client id %ld to send to", id);
-			stratifier_drop_client(ckp, id);
 		}
 		free(buf);
 		return;
@@ -690,7 +689,6 @@ retry:
 		client = ref_client_by_id(cdata, client_id);
 		if (unlikely(!client)) {
 			LOGINFO("Connector failed to find client id %ld to drop", client_id);
-			stratifier_drop_client(ckp, client_id);
 			goto retry;
 		}
 		ret = invalidate_client(ckp, cdata, client);
