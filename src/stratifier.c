@@ -1104,10 +1104,17 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
 }
 
 /* Decrease the reference count of instance. */
-static void __dec_instance_ref(stratum_instance_t *instance)
+static void ___dec_instance_ref(stratum_instance_t *instance, const char *file, const char *func,
+			       const int line)
 {
 	instance->ref--;
+	if (unlikely(instance->ref < 0)) {
+		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
+		instance->ref = 0;
+	}
 }
+
+#define __dec_instance_ref(instance) ___dec_instance_ref(instance, __FILE__, __func__, __LINE__)
 
 static void dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance)
 {
