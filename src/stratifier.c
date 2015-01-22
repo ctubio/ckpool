@@ -1256,7 +1256,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	ckpool_t *ckp = NULL;
 	bool dec = false;
 
-	LOGINFO("Stratifier dropping client %ld", id);
+	LOGINFO("Stratifier asked to drop client %ld", id);
 
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
@@ -1276,11 +1276,15 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 		/* Only keep around one copy of the old client in server mode */
 		if (!client->ckp->proxy && !old_client && client->enonce1_64 && dec) {
-			LOGDEBUG("Adding disconnected instance %ld", client->id);
+			LOGNOTICE("Disconnecting client %ld %s", client->id, client->workername);
 			HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 			sdata->stats.disconnected++;
 			client->disconnected_time = time(NULL);
 		} else {
+			if (client->workername)
+				LOGNOTICE("Dropping client %ld %s", client->id, client->workername);
+			else
+				LOGINFO("Dropping workerless client %ld", client->id);
 			__add_dead(sdata, client);
 		}
 	}
