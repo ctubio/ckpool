@@ -1250,7 +1250,7 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 
 static void drop_client(sdata_t *sdata, int64_t id)
 {
-	stratum_instance_t *client, *tmp, *client_delete = NULL;
+	stratum_instance_t *client, *tmp;
 	user_instance_t *instance = NULL;
 	time_t now_t = time(NULL);
 	ckpool_t *ckp = NULL;
@@ -1304,20 +1304,14 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
 	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
-		/* We can't delete the ram safely in this loop, even if we can
-		 * safely remove the entry from the linked list so we do it on
-		 * the next pass through the loop. */
-		if (client != client_delete)
-			dealloc(client_delete);
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding dead instance %ld", client->id);
 			__del_dead(sdata, client);
 			dealloc(client->workername);
 			dealloc(client->useragent);
-			client_delete = client;
+			dealloc(client);
 		}
 	}
-	dealloc(client_delete);
 	ck_wunlock(&sdata->instance_lock);
 
 	/* Decrease worker count outside of instance_lock to avoid recursive
