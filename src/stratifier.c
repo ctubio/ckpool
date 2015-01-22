@@ -1104,24 +1104,18 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
 }
 
 /* Decrease the reference count of instance. */
-static void ___dec_instance_ref(stratum_instance_t *instance, const char *file, const char *func,
-			       const int line)
+static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance, const char *file,
+			      const char *func, const int line)
 {
-	instance->ref--;
-	if (unlikely(instance->ref < 0)) {
+	ck_wlock(&sdata->instance_lock);
+	if (unlikely(--instance->ref < 0)) {
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
 		instance->ref = 0;
 	}
-}
-
-#define __dec_instance_ref(instance) ___dec_instance_ref(instance, __FILE__, __func__, __LINE__)
-
-static void dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance)
-{
-	ck_wlock(&sdata->instance_lock);
-	__dec_instance_ref(instance);
 	ck_wunlock(&sdata->instance_lock);
 }
+
+#define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
 
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int server)
