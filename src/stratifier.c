@@ -3507,6 +3507,11 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 	time_t now_t;
 	ts_t ts_now;
 
+	if (sdata->ckdb_offline) {
+		LOGDEBUG("Not queueing workerstats due to ckdb offline");
+		return;
+	}
+
 	if (++sdata->stats.userstats_cycle > 0x1f)
 		sdata->stats.userstats_cycle = 0;
 
