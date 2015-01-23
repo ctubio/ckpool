@@ -1117,17 +1117,17 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
-		LOGNOTICE("Disconnecting client %ld %s %s", id, client->workername,
+		LOGNOTICE("Client %ld %s disconnected %s", id, client->workername,
 			  client->dropped ? "lazily" : "");
 		HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		sdata->stats.disconnected++;
 		client->disconnected_time = time(NULL);
 	} else {
-		if (client->workername)
-			LOGNOTICE("Dropping client %ld %s %s", id, client->workername,
+		if (client->workername) {
+			LOGNOTICE("Client %ld %s dropped %s", id, client->workername,
 				  client->dropped ? "lazily" : "");
-		else
-			LOGINFO("Dropping workerless client %ld %s", id, client->dropped ? "lazily" : "");
+		} else
+			LOGINFO("Workerless client %ld dropped %s", id, client->dropped ? "lazily" : "");
 		__add_dead(sdata, client);
 	}
 }
