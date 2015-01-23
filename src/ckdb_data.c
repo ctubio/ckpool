@@ -722,10 +722,10 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
    TODO: combine set_block_share_counters() with this? */
 void workerstatus_ready()
 {
-	K_TREE_CTX ws_ctx[1], us_ctx[1], ss_ctx[1], ms_ctx[1];
+	K_TREE_CTX ws_ctx[1], ss_ctx[1], ms_ctx[1];
 	K_ITEM *ws_item, us_look, ss_look, *us_item, *ss_item;
 	K_ITEM *ms_item, ms_look, *wm_item;
-	USERSTATS lookuserstats, *userstats;
+	USERSTATS *userstats;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	MARKERSUMMARY *markersummary;
 	WORKERSTATUS *workerstatus;
