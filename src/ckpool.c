@@ -349,6 +349,12 @@ retry:
 			}
 			execv(ckp->initial_args[0], (char *const *)ckp->initial_args);
 		}
+	} else if (cmdmatch(buf, "stratifierstats")) {
+		char *msg;
+
+		LOGDEBUG("Listener received stratifierstats request");
+		msg = send_recv_proc(ckp->stratifier, "stats");
+		send_unix_msg(sockd, msg);
 	} else {
 		LOGINFO("Listener received unhandled message: %s", buf);
 		send_unix_msg(sockd, "unknown");

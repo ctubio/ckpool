@@ -302,6 +302,7 @@ struct stratifier_data {
 	/* For the hashtable of all workbases */
 	workbase_t *workbases;
 	workbase_t *current_workbase;
+	int workbases_generated;
 
 	int64_t workbase_id;
 	int64_t blockchange_id;
@@ -322,6 +323,10 @@ struct stratifier_data {
 	stratum_instance_t *stratum_instances;
 	stratum_instance_t *disconnected_instances;
 	stratum_instance_t *dead_instances;
+
+	int stratum_generated;
+	int disconnected_generated;
+	int dead_generated;
 
 	user_instance_t *user_instances;
 
@@ -656,6 +661,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	 * we set workbase_id from it. In server mode the stratifier is
 	 * setting the workbase_id */
 	ck_wlock(&sdata->workbase_lock);
+	sdata->workbases_generated++;
 	if (!ckp->proxy)
 		wb->id = sdata->workbase_id++;
 	else
@@ -867,6 +873,7 @@ static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 	LOGDEBUG("Adding dead instance %ld", client->id);
 	LL_PREPEND(sdata->dead_instances, client);
 	sdata->stats.dead++;
+	sdata->dead_generated++;
 }
 
 static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
@@ -1121,6 +1128,7 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 			  client->dropped ? "lazily" : "");
 		HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		sdata->stats.disconnected++;
+		sdata->disconnected_generated++;
 		client->disconnected_time = time(NULL);
 	} else {
 		if (client->workername) {
@@ -1156,6 +1164,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int
 	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
 	sdata_t *sdata = ckp->data;
 
+	sdata->stratum_generated++;
 	instance->id = id;
 	instance->server = server;
 	instance->diff = instance->old_diff = ckp->startdiff;
@@ -1501,6 +1510,55 @@ static void broadcast_ping(sdata_t *sdata)
 	stratum_broadcast(sdata, json_msg);
 }
 
+#define SAFE_HASH_OVERHEAD(HASHLIST) (HASHLIST ? HASH_OVERHEAD(hh, HASHLIST) : 0)
+
+static char *stratifier_stats(sdata_t *sdata)
+{
+	json_t *val = json_object(), *subval;
+	int objects, generated;
+	int64_t memsize;
+	char *buf;
+
+	ck_rlock(&sdata->workbase_lock);
+	objects = HASH_COUNT(sdata->workbases);
+	memsize = SAFE_HASH_OVERHEAD(sdata->workbases) + sizeof(workbase_t) * objects;
+	generated = sdata->workbases_generated;
+	ck_runlock(&sdata->workbase_lock);
+
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "workbases", subval);
+
+	ck_rlock(&sdata->instance_lock);
+	objects = HASH_COUNT(sdata->user_instances);
+	memsize = SAFE_HASH_OVERHEAD(sdata->user_instances) + sizeof(stratum_instance_t) * objects;
+	JSON_CPACK(subval, "{si,si}", "count", objects, "memory", memsize);
+	json_set_object(val, "users", subval);
+
+	objects = HASH_COUNT(sdata->stratum_instances);
+	memsize = SAFE_HASH_OVERHEAD(sdata->stratum_instances);
+	generated = sdata->stratum_generated;
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "clients", subval);
+
+	objects = sdata->stats.disconnected;
+	generated = sdata->disconnected_generated;
+	memsize = sizeof(stratum_instance_t) * sdata->stats.disconnected;
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "disconnected", subval);
+
+	objects = sdata->stats.dead;
+	generated = sdata->dead_generated;
+	memsize = sizeof(stratum_instance_t) * sdata->stats.dead;
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "dead", subval);
+	ck_runlock(&sdata->instance_lock);
+
+	buf = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+	json_decref(val);
+	LOGNOTICE("Stratifier stats: %s", buf);
+	return buf;
+}
+
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret = 0;
@@ -1563,6 +1621,15 @@ retry:
 	if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Stratifier received ping request");
 		send_unix_msg(sockd, "pong");
+		Close(sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "stats")) {
+		char *msg;
+
+		LOGDEBUG("Stratifier received stats request");
+		msg = stratifier_stats(sdata);
+		send_unix_msg(sockd, msg);
 		Close(sockd);
 		goto retry;
 	}
