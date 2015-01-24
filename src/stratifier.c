@@ -336,6 +336,8 @@ struct stratifier_data {
 	share_t *shares;
 	cklock_t share_lock;
 
+	int64_t shares_generated;
+
 	/* Linked list of block solves, added to during submission, removed on
 	 * accept/reject. It is likely we only ever have one solve on here but
 	 * you never know... */
@@ -1549,9 +1551,19 @@ static char *stratifier_stats(sdata_t *sdata)
 	objects = sdata->stats.dead;
 	generated = sdata->dead_generated;
 	memsize = sizeof(stratum_instance_t) * sdata->stats.dead;
+	ck_runlock(&sdata->instance_lock);
+
 	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 	json_set_object(val, "dead", subval);
-	ck_runlock(&sdata->instance_lock);
+
+	ck_rlock(&sdata->share_lock);
+	generated = sdata->shares_generated;
+	objects = HASH_COUNT(sdata->shares);
+	memsize = SAFE_HASH_OVERHEAD(sdata->shares) + sizeof(share_t) * objects;
+	ck_runlock(&sdata->share_lock);
+
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "shares", subval);
 
 	buf = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 	json_decref(val);
@@ -2599,6 +2611,7 @@ static bool new_share(sdata_t *sdata, const uchar *hash, int64_t  wb_id)
 	share = ckzalloc(sizeof(share_t));
 	memcpy(share->hash, hash, 32);
 	share->workbase_id = wb_id;
+	sdata->shares_generated++;
 	HASH_ADD(hh, sdata->shares, hash, 32, share);
 	ret = true;
 out_unlock:
