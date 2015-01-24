@@ -2995,7 +2995,8 @@ static bool reload_from(tv_t *start)
 	bool finished = false, matched = false, ret = true, ok, apipe = false;
 	char *filename = NULL;
 	uint64_t count, total;
-	tv_t now;
+	tv_t now, begin;
+	double diff;
 	FILE *fp = NULL;
 
 	reload_buf = malloc(MAX_READ);
@@ -3016,6 +3017,7 @@ static bool reload_from(tv_t *start)
 		quithere(1, "Failed to open '%s'", filename);
 
 	setnow(&now);
+	copy_tv(&begin, &now);
 	tvs_to_buf(&now, run, sizeof(run));
 	snprintf(reload_buf, MAX_READ, "reload.%s.s0", run);
 	LOGQUE(reload_buf);
@@ -3099,12 +3101,17 @@ static bool reload_from(tv_t *start)
 
 	PQfinish(conn);
 
+	setnow(&now);
+	diff = tvdiff(&now, &begin);
+	if (diff == 0)
+		diff = 1;
+
 	snprintf(reload_buf, MAX_READ, "reload.%s.%"PRIu64, run, total);
 	LOGQUE(reload_buf);
-	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s",
+	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s %.2f/s",
 		   __func__,
 		   processing, processing == 1 ? "" : "s",
-		   total, total == 1 ? "" : "s");
+		   total, total == 1 ? "" : "s", (total / diff));
 
 	if (everyone_die)
 		return true;
