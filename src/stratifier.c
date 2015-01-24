@@ -1514,6 +1514,21 @@ static void broadcast_ping(sdata_t *sdata)
 
 #define SAFE_HASH_OVERHEAD(HASHLIST) (HASHLIST ? HASH_OVERHEAD(hh, HASHLIST) : 0)
 
+static void ckmsgq_stats(ckmsgq_t *ckmsgq, int size, json_t **val)
+{
+	int objects, generated;
+	int64_t memsize;
+	ckmsg_t *msg;
+
+	mutex_lock(ckmsgq->lock);
+	DL_COUNT(ckmsgq->msgs, msg, objects);
+	generated = ckmsgq->messages;
+	mutex_unlock(ckmsgq->lock);
+
+	memsize = (sizeof(ckmsg_t) + size) * objects;
+	JSON_CPACK(*val, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+}
+
 static char *stratifier_stats(sdata_t *sdata)
 {
 	json_t *val = json_object(), *subval;
@@ -1564,6 +1579,16 @@ static char *stratifier_stats(sdata_t *sdata)
 
 	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 	json_set_object(val, "shares", subval);
+
+	ckmsgq_stats(sdata->ssends, sizeof(smsg_t), &subval);
+	json_set_object(val, "ssends", subval);
+	/* Don't know exactly how big the string is so just count the pointer for now */
+	ckmsgq_stats(sdata->srecvs, sizeof(char *), &subval);
+	json_set_object(val, "srecvs", subval);
+	ckmsgq_stats(sdata->ckdbq, sizeof(char *), &subval);
+	json_set_object(val, "ckdbq", subval);
+	ckmsgq_stats(sdata->stxnq, sizeof(json_params_t), &subval);
+	json_set_object(val, "stxnq", subval);
 
 	buf = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 	json_decref(val);
