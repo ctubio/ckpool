@@ -183,6 +183,7 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 	msg->data = data;
 
 	mutex_lock(ckmsgq->lock);
+	ckmsgq->messages++;
 	DL_APPEND(ckmsgq->msgs, msg);
 	pthread_cond_signal(ckmsgq->cond);
 	mutex_unlock(ckmsgq->lock);
