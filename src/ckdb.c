@@ -1363,18 +1363,6 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 					K_WUNLOCK(transfer_free);
 					return CMD_REPLY;
 				}
-				if (end <= next+1) {
-					LOGERR("JSON '%s' zero length value "
-						"was: %.32s...",
-						transfer->name,
-						tmp = safe_text(was));
-					free(tmp);
-					free(cmdptr);
-					K_WLOCK(transfer_free);
-					k_add_head(transfer_free, item);
-					K_WUNLOCK(transfer_free);
-					return CMD_REPLY;
-				}
 				siz = end - next;
 				end++;
 			} else if (*next == JSON_ARRAY) {

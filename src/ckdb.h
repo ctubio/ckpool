@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "0.9.6"
-#define CKDB_VERSION DB_VERSION"-0.901"
+#define CKDB_VERSION DB_VERSION"-0.902"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
