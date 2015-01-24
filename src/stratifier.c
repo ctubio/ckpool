@@ -873,7 +873,7 @@ static void update_base(ckpool_t *ckp, int prio)
 static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 {
 	LOGDEBUG("Adding dead instance %ld", client->id);
-	LL_PREPEND(sdata->dead_instances, client);
+	DL_APPEND(sdata->dead_instances, client);
 	sdata->stats.dead++;
 	sdata->dead_generated++;
 }
@@ -881,7 +881,7 @@ static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
 {
 	LOGDEBUG("Deleting dead instance %ld", client->id);
-	LL_DELETE(sdata->dead_instances, client);
+	DL_DELETE(sdata->dead_instances, client);
 	sdata->stats.dead--;
 }
 
@@ -1333,7 +1333,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
-	LL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
+	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
 			LOGINFO("Stratifier discarding dead instance %ld", client->id);
 			__del_dead(sdata, client);
