@@ -1761,7 +1761,8 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-static inline bool enonce1_free(sdata_t *sdata, uint64_t enonce1)
+/* Enter holding instance_lock */
+static bool __enonce1_free(sdata_t *sdata, uint64_t enonce1)
 {
 	stratum_instance_t *client, *tmp;
 	bool ret = true;
@@ -1771,14 +1772,12 @@ static inline bool enonce1_free(sdata_t *sdata, uint64_t enonce1)
 		goto out;
 	}
 
-	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->enonce1_64 == enonce1) {
 			ret = false;
 			break;
 		}
 	}
-	ck_runlock(&sdata->instance_lock);
 out:
 	return ret;
 }
@@ -1801,13 +1800,19 @@ static void __fill_enonce1data(workbase_t *wb, stratum_instance_t *client)
 static bool new_enonce1(stratum_instance_t *client)
 {
 	sdata_t *sdata = client->ckp->data;
+	int enonce1varlen, i;
 	bool ret = false;
-	workbase_t *wb;
-	int i;
 
-	ck_wlock(&sdata->workbase_lock);
-	wb = sdata->current_workbase;
-	switch(wb->enonce1varlen) {
+	/* Extract the enonce1varlen from the current workbase which may be
+	 * a different workbase to when we __fill_enonce1data but the value
+	 * will not change and this avoids grabbing recursive locks */
+	ck_rlock(&sdata->workbase_lock);
+	enonce1varlen = sdata->current_workbase->enonce1varlen;
+	ck_runlock(&sdata->workbase_lock);
+
+	/* instance_lock protects sdata->enonce1u */
+	ck_wlock(&sdata->instance_lock);
+	switch(enonce1varlen) {
 		case 8:
 			sdata->enonce1u.u64++;
 			ret = true;
@@ -1823,7 +1828,7 @@ static bool new_enonce1(stratum_instance_t *client)
 		case 2:
 			for (i = 0; i < 65536; i++) {
 				sdata->enonce1u.u16++;
-				ret = enonce1_free(sdata, sdata->enonce1u.u64);
+				ret = __enonce1_free(sdata, sdata->enonce1u.u64);
 				if (ret)
 					break;
 			}
@@ -1831,18 +1836,21 @@ static bool new_enonce1(stratum_instance_t *client)
 		case 1:
 			for (i = 0; i < 256; i++) {
 				sdata->enonce1u.u8++;
-				ret = enonce1_free(sdata, sdata->enonce1u.u64);
+				ret = __enonce1_free(sdata, sdata->enonce1u.u64);
 				if (ret)
 					break;
 			}
 			break;
 		default:
-			quit(0, "Invalid enonce1varlen %d", wb->enonce1varlen);
+			quit(0, "Invalid enonce1varlen %d", enonce1varlen);
 	}
 	if (ret)
 		client->enonce1_64 = sdata->enonce1u.u64;
-	__fill_enonce1data(wb, client);
-	ck_wunlock(&sdata->workbase_lock);
+	ck_wunlock(&sdata->instance_lock);
+
+	ck_rlock(&sdata->workbase_lock);
+	__fill_enonce1data(sdata->current_workbase, client);
+	ck_runlock(&sdata->workbase_lock);
 
 	if (unlikely(!ret))
 		LOGWARNING("Enonce1 space exhausted! Proxy rejecting clients");
