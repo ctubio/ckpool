@@ -633,6 +633,7 @@ static int connector_loop(proc_instance_t *pi, cdata_t *cdata)
 	int64_t client_id64, client_id;
 	unixsock_t *us = &pi->us;
 	ckpool_t *ckp = pi->ckp;
+	uint8_t test_cycle = 0;
 	char *buf = NULL;
 
 	do {
@@ -647,15 +648,18 @@ static int connector_loop(proc_instance_t *pi, cdata_t *cdata)
 	LOGWARNING("%s connector ready", ckp->name);
 
 retry:
-	if (unlikely(!pthread_tryjoin_np(cdata->pth_sender, NULL))) {
-		LOGEMERG("Connector sender thread shutdown, exiting");
-		ret = 1;
-		goto out;
-	}
-	if (unlikely(!pthread_tryjoin_np(cdata->pth_receiver, NULL))) {
-		LOGEMERG("Connector receiver thread shutdown, exiting");
-		ret = 1;
-		goto out;
+	if (!++test_cycle) {
+		/* Test for pthread join every 256 messages */
+		if (unlikely(!pthread_tryjoin_np(cdata->pth_sender, NULL))) {
+			LOGEMERG("Connector sender thread shutdown, exiting");
+			ret = 1;
+			goto out;
+		}
+		if (unlikely(!pthread_tryjoin_np(cdata->pth_receiver, NULL))) {
+			LOGEMERG("Connector receiver thread shutdown, exiting");
+			ret = 1;
+			goto out;
+		}
 	}
 
 	Close(sockd);
