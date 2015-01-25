@@ -524,6 +524,7 @@ static void clear_workbase(workbase_t *wb)
 	free(wb);
 }
 
+/* Remove all shares with a workbase id less than wb_id for block changes */
 static void purge_share_hashtable(sdata_t *sdata, int64_t wb_id)
 {
 	share_t *share, *tmp;
@@ -541,6 +542,26 @@ static void purge_share_hashtable(sdata_t *sdata, int64_t wb_id)
 
 	if (purged)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
+}
+
+/* Remove all shares with a workbase id == wb_id being discarded */
+static void age_share_hashtable(sdata_t *sdata, int64_t wb_id)
+{
+	share_t *share, *tmp;
+	int aged = 0;
+
+	ck_wlock(&sdata->share_lock);
+	HASH_ITER(hh, sdata->shares, share, tmp) {
+		if (share->workbase_id == wb_id) {
+			HASH_DEL(sdata->shares, share);
+			dealloc(share);
+			aged++;
+		}
+	}
+	ck_wunlock(&sdata->share_lock);
+
+	if (aged)
+		LOGINFO("Aged %d shares from share hashtable", aged);
 }
 
 static char *status_chars = "|/-\\";
@@ -712,6 +733,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	 * to prevent taking recursive locks */
 	if (aged) {
 		send_ageworkinfo(ckp, aged->id);
+		age_share_hashtable(sdata, aged->id);
 		clear_workbase(aged);
 	}
 }
