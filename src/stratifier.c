@@ -1512,8 +1512,6 @@ static void broadcast_ping(sdata_t *sdata)
 	stratum_broadcast(sdata, json_msg);
 }
 
-#define SAFE_HASH_OVERHEAD(HASHLIST) (HASHLIST ? HASH_OVERHEAD(hh, HASHLIST) : 0)
-
 static void ckmsgq_stats(ckmsgq_t *ckmsgq, int size, json_t **val)
 {
 	int objects, generated;
