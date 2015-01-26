@@ -1326,6 +1326,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	stratum_instance_t *client, *tmp;
 	user_instance_t *instance = NULL;
 	time_t now_t = time(NULL);
+	int aged = 0, killed = 0;
 	ckpool_t *ckp = NULL;
 	bool dec = false;
 
@@ -1356,7 +1357,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 			continue;
 		if (unlikely(client->ref))
 			continue;
-		LOGINFO("Ageing disconnected instance %ld to dead", client->id);
+		aged++;
 		__del_disconnected(sdata, client);
 	}
 
@@ -1364,7 +1365,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	 * counts for them. */
 	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (!client->ref) {
-			LOGINFO("Stratifier discarding dead instance %ld", client->id);
+			killed++;
 			__del_dead(sdata, client);
 			dealloc(client->workername);
 			dealloc(client->useragent);
@@ -1372,6 +1373,11 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		}
 	}
 	ck_wunlock(&sdata->instance_lock);
+
+	if (aged)
+		LOGINFO("Aged %d disconnected instances to dead", aged);
+	if (killed)
+		LOGINFO("Stratifier discarded %d dead instances", killed);
 
 	/* Decrease worker count outside of instance_lock to avoid recursive
 	 * locking */
