@@ -920,7 +920,7 @@ static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 
 static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
 {
-	DL_DELETE_INIT(sdata->dead_instances, client);
+	DL_DELETE(sdata->dead_instances, client);
 	sdata->stats.dead--;
 }
 
@@ -1169,7 +1169,7 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 
 	HASH_DEL(sdata->stratum_instances, client);
 	if (instance)
-		DL_DELETE_INIT(instance->instances, client);
+		DL_DELETE(instance->instances, client);
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
@@ -1514,7 +1514,7 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 		if (!strcmp(solvehash, blockhash)) {
 			dealloc(solvehash);
 			found = block;
-			DL_DELETE_INIT(sdata->block_solves, block);
+			DL_DELETE(sdata->block_solves, block);
 			break;
 		}
 		dealloc(solvehash);
@@ -1561,7 +1561,7 @@ static void block_reject(sdata_t *sdata, const char *blockhash)
 		if (!strcmp(solvehash, blockhash)) {
 			dealloc(solvehash);
 			found = block;
-			DL_DELETE_INIT(sdata->block_solves, block);
+			DL_DELETE(sdata->block_solves, block);
 			break;
 		}
 		dealloc(solvehash);
