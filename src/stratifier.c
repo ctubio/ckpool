@@ -697,7 +697,6 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 		hex2bin(bin, sdata->lasthash, 32);
 		swap_256(swap, bin);
 		__bin2hex(sdata->lastswaphash, swap, 32);
-		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 		sdata->blockchange_id = wb->id;
 	}
 	if (*new_block && ckp->logshares) {
@@ -726,8 +725,10 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	sdata->current_workbase = wb;
 	ck_wunlock(&sdata->workbase_lock);
 
-	if (*new_block)
+	if (*new_block) {
+		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 		purge_share_hashtable(sdata, wb->id);
+	}
 
 	send_workinfo(ckp, wb);
 
