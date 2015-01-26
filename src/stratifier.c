@@ -1058,7 +1058,7 @@ static void stratum_send_diff(sdata_t *sdata, stratum_instance_t *client);
 
 static void update_diff(ckpool_t *ckp)
 {
-	stratum_instance_t *client;
+	stratum_instance_t *client, *tmp;
 	sdata_t *sdata = ckp->data;
 	double old_diff, diff;
 	json_t *val;
@@ -1097,7 +1097,7 @@ static void update_diff(ckpool_t *ckp)
 	/* If the diff has dropped, iterate over all the clients and check
 	 * they're at or below the new diff, and update it if not. */
 	ck_rlock(&sdata->instance_lock);
-	for (client = sdata->stratum_instances; client != NULL; client = client->hh.next) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->diff > diff) {
 			client->diff = diff;
 			stratum_send_diff(sdata, client);
