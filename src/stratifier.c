@@ -1330,6 +1330,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	if (client) {
 		instance = client->user_instance;
 		if (client->authorised) {
+			client->authorised = false;
 			dec = true;
 			ckp = client->ckp;
 		}
