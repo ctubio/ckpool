@@ -2652,24 +2652,26 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 	return ret;
 }
 
+/* Optimised for the common case where shares are new */
 static bool new_share(sdata_t *sdata, const uchar *hash, int64_t  wb_id)
 {
-	share_t *share, *match = NULL;
-	bool ret = false;
+	share_t *share = ckzalloc(sizeof(share_t)), *match = NULL;
+	bool ret = true;
 
-	ck_wlock(&sdata->share_lock);
-	HASH_FIND(hh, sdata->shares, hash, 32, match);
-	if (match)
-		goto out_unlock;
-	share = ckzalloc(sizeof(share_t));
 	memcpy(share->hash, hash, 32);
 	share->workbase_id = wb_id;
+
+	ck_wlock(&sdata->share_lock);
 	sdata->shares_generated++;
-	HASH_ADD(hh, sdata->shares, hash, 32, share);
-	ret = true;
-out_unlock:
+	HASH_FIND(hh, sdata->shares, hash, 32, match);
+	if (likely(!match))
+		HASH_ADD(hh, sdata->shares, hash, 32, share);
 	ck_wunlock(&sdata->share_lock);
 
+	if (unlikely(match)) {
+		dealloc(share);
+		ret = false;
+	}
 	return ret;
 }
 
