@@ -1140,10 +1140,11 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
 	return instance;
 }
 
-static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *instance,
-			  int64_t id)
+/* Ret = 1 is disconnected, 2 is killed, 3 is workerless killed */
+static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *instance)
 {
 	stratum_instance_t *old_client = NULL;
+	int ret;
 
 	HASH_DEL(sdata->stratum_instances, client);
 	if (instance)
@@ -1151,19 +1152,35 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
-		LOGNOTICE("Client %ld %s disconnected %s", id, client->workername,
-			  client->dropped ? "lazily" : "");
+		ret = 1;
 		HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		sdata->stats.disconnected++;
 		sdata->disconnected_generated++;
 		client->disconnected_time = time(NULL);
 	} else {
-		if (client->workername) {
-			LOGNOTICE("Client %ld %s dropped %s", id, client->workername,
-				  client->dropped ? "lazily" : "");
-		} else
-			LOGINFO("Workerless client %ld dropped %s", id, client->dropped ? "lazily" : "");
+		if (client->workername)
+			ret = 2;
+		else
+			ret = 3;
 		__add_dead(sdata, client);
+	}
+	return ret;
+}
+
+static void client_drop_message(int64_t client_id, int dropped, bool lazily)
+{
+	switch(dropped) {
+		case 0:
+			break;
+		case 1:
+			LOGNOTICE("Client %ld disconnected %s", client_id, lazily ? "lazily" : "");
+			break;
+		case 2:
+			LOGNOTICE("Client %ld dropped %s", client_id, lazily ? "lazily" : "");
+			break;
+		case 3:
+			LOGNOTICE("Workerless client %ld dropped %s", client_id, lazily ? "lazily" : "");
+			break;
 	}
 }
 
@@ -1171,15 +1188,18 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance, const char *file,
 			      const char *func, const int line)
 {
-	int ref;
+	int64_t client_id = instance->id;
+	int dropped = 0, ref;
 
 	ck_wlock(&sdata->instance_lock);
 	ref = --instance->ref;
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(instance->dropped && !ref))
-		__drop_client(sdata, instance, instance->user_instance, instance->id);
+		dropped = __drop_client(sdata, instance, instance->user_instance);
 	ck_wunlock(&sdata->instance_lock);
+
+	client_drop_message(client_id, dropped, true);
 
 	/* This should never happen */
 	if (unlikely(ref < 0))
@@ -1323,10 +1343,10 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 
 static void drop_client(sdata_t *sdata, int64_t id)
 {
+	int dropped = 0, aged = 0, killed = 0;
 	stratum_instance_t *client, *tmp;
 	user_instance_t *instance = NULL;
 	time_t now_t = time(NULL);
-	int aged = 0, killed = 0;
 	ckpool_t *ckp = NULL;
 	bool dec = false;
 
@@ -1337,16 +1357,16 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	if (client) {
 		instance = client->user_instance;
 		if (client->authorised) {
-			client->authorised = false;
 			dec = true;
 			ckp = client->ckp;
 		}
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (likely(!client->ref))
-			__drop_client(sdata, client, instance, id);
+			dropped = __drop_client(sdata, client, instance);
 		else
 			client->dropped = true;
+		client->authorised = false;
 	}
 
 	/* Old disconnected instances will not have any valid shares so remove
@@ -1374,6 +1394,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	}
 	ck_wunlock(&sdata->instance_lock);
 
+	client_drop_message(id, dropped, false);
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
 	if (killed)
