@@ -1226,7 +1226,6 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int
 	instance->diff = instance->old_diff = ckp->startdiff;
 	instance->ckp = ckp;
 	tv_time(&instance->ldc);
-	LOGINFO("Stratifier added instance %ld server %d", id, server);
 	HASH_ADD_I64(sdata->stratum_instances, id, instance);
 	return instance;
 }
@@ -3305,6 +3304,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 {
 	sdata_t *sdata = ckp->data;
 	stratum_instance_t *client;
+	bool added = false;
 	smsg_t *msg;
 	json_t *val;
 	int server;
@@ -3351,10 +3351,15 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, msg->client_id);
 	/* If client_id instance doesn't exist yet, create one */
-	if (unlikely(!client))
+	if (unlikely(!client)) {
 		client = __stratum_add_instance(ckp, msg->client_id, server);
+		added = true;
+	}
 	__inc_instance_ref(client);
 	ck_wunlock(&sdata->instance_lock);
+
+	if (added)
+		LOGINFO("Stratifier added instance %ld server %d", client->id, server);
 
 	parse_instance_msg(sdata, msg, client);
 	dec_instance_ref(sdata, client);
