@@ -1171,16 +1171,19 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance, const char *file,
 			      const char *func, const int line)
 {
+	int ref;
+
 	ck_wlock(&sdata->instance_lock);
-	if (unlikely(--instance->ref < 0)) {
-		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
-		instance->ref = 0;
-	}
+	ref = --instance->ref;
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
-	if (unlikely(instance->dropped && !instance->ref))
+	if (unlikely(instance->dropped && !ref))
 		__drop_client(sdata, instance, instance->user_instance, instance->id);
 	ck_wunlock(&sdata->instance_lock);
+
+	/* This should never happen */
+	if (unlikely(ref < 0))
+		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
