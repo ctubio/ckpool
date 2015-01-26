@@ -4173,10 +4173,11 @@ int stratifier(proc_instance_t *pi)
 	threads = threads / 2 ? : 1;
 	sdata->srecvs = create_ckmsgqs(ckp, "sreceiver", &srecv_process, threads);
 	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
-	sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
-	if (!CKP_STANDALONE(ckp))
+	if (!CKP_STANDALONE(ckp)) {
+		sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
+	}
 
 	cklock_init(&sdata->workbase_lock);
 	if (!ckp->proxy)
