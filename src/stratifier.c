@@ -897,7 +897,6 @@ static void update_base(ckpool_t *ckp, int prio)
 
 static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 {
-	LOGDEBUG("Adding dead instance %ld", client->id);
 	DL_APPEND(sdata->dead_instances, client);
 	sdata->stats.dead++;
 	sdata->dead_generated++;
