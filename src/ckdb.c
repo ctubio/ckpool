@@ -170,14 +170,6 @@ const char *hashpatt = "^[A-Fa-f0-9]*$";
  * bitcoind is used to fully validate them when required */
 const char *addrpatt = "^[13][A-HJ-NP-Za-km-z1-9]*$";
 
-/* These are included in cmd_homepage
- *  to help identify when ckpool locks up (or dies) */
-tv_t last_heartbeat;
-tv_t last_workinfo;
-tv_t last_share;
-tv_t last_auth;
-cklock_t last_lock;
-
 // So the records below have the same 'name' as the klist
 const char Transfer[] = "Transfer";
 
@@ -294,6 +286,7 @@ tv_t last_heartbeat;
 tv_t last_workinfo;
 tv_t last_share;
 tv_t last_auth;
+cklock_t last_lock;
 
 static cklock_t fpm_lock;
 static char *first_pool_message;
