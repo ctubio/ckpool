@@ -1289,6 +1289,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 {
 	stratum_instance_t *instance, *tmp;
 	ckmsg_t *bulk_send = NULL;
+	ckmsgq_t *ssends;
 
 	if (unlikely(!val)) {
 		LOGERR("Sent null json to stratum_broadcast");
@@ -1316,13 +1317,15 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 	if (!bulk_send)
 		return;
 
+	ssends = sdata->ssends;
+
 	mutex_lock(sdata->ssends->lock);
-	if (sdata->ssends->msgs)
-		DL_CONCAT(sdata->ssends->msgs, bulk_send);
+	if (ssends->msgs)
+		DL_CONCAT(ssends->msgs, bulk_send);
 	else
-		sdata->ssends->msgs = bulk_send;
-	pthread_cond_signal(sdata->ssends->cond);
-	mutex_unlock(sdata->ssends->lock);
+		ssends->msgs = bulk_send;
+	pthread_cond_signal(ssends->cond);
+	mutex_unlock(ssends->lock);
 }
 
 static void stratum_add_send(sdata_t *sdata, json_t *val, int64_t client_id)
