@@ -713,6 +713,8 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	HASH_ITER(hh, sdata->workbases, tmp, tmpa) {
 		if (HASH_COUNT(sdata->workbases) < 3)
 			break;
+		if (wb == tmp)
+			continue;
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime.tv_sec < wb->gentime.tv_sec - 600) {
 			HASH_DEL(sdata->workbases, tmp);
