@@ -366,10 +366,18 @@ typedef struct stratifier_data sdata_t;
 
 typedef struct json_entry json_entry_t;
 
-struct json_entry{
+struct json_entry {
 	json_entry_t *next;
 	json_entry_t *prev;
 	json_t *val;
+};
+
+typedef struct char_entry char_entry_t;
+
+struct char_entry {
+	char_entry_t *next;
+	char_entry_t *prev;
+	char *buf;
 };
 
 /* Priority levels for generator messages */
@@ -3798,6 +3806,7 @@ static void *statsupdate(void *arg)
 		double tdiff, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
+		char_entry_t *char_list = NULL, *char_t, *chartmp_t;
 		user_instance_t *instance, *tmpuser;
 		stratum_instance_t *client, *tmp;
 		double sps1, sps5, sps15, sps60;
@@ -3926,13 +3935,23 @@ static void *statsupdate(void *arg)
 			}
 			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 			fprintf(fp, "%s\n", s);
-			if (!idle)
-				LOGNOTICE("User %s:%s", instance->username, s);
+			if (!idle) {
+				char_t = ckalloc(sizeof(char_entry_t));
+				ASPRINTF(&char_t->buf, "User %s:%s", instance->username, s);
+				DL_APPEND(char_list, char_t);
+			}
 			dealloc(s);
 			json_decref(val);
 			fclose(fp);
 		}
 		ck_runlock(&sdata->instance_lock);
+
+		DL_FOREACH_SAFE(char_list, char_t, chartmp_t) {
+			LOGNOTICE("%s", char_t->buf);
+			DL_DELETE(char_list, char_t);
+			free(char_t->buf);
+			dealloc(char_t);
+		}
 
 		ghs1 = stats->dsps1 * nonces;
 		suffix_string(ghs1, suffix1, 16, 0);
