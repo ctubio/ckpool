@@ -905,14 +905,12 @@ static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 
 static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
 {
-	LOGDEBUG("Deleting dead instance %ld", client->id);
 	DL_DELETE_INIT(sdata->dead_instances, client);
 	sdata->stats.dead--;
 }
 
 static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 {
-	LOGDEBUG("Deleting disconnected instance %ld", client->id);
 	HASH_DEL(sdata->disconnected_instances, client);
 	sdata->stats.disconnected--;
 	__add_dead(sdata, client);
@@ -921,21 +919,29 @@ static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 static void drop_allclients(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
+	int disconnects = 0, kills = 0;
 	sdata_t *sdata = ckp->data;
 	char buf[128];
 
 	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		HASH_DEL(sdata->stratum_instances, client);
+		kills++;
 		__add_dead(sdata, client);
 		sprintf(buf, "dropclient=%ld", client->id);
 		send_proc(ckp->connector, buf);
 	}
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
+		disconnects++;
 		__del_disconnected(sdata, client);
 	}
 	sdata->stats.users = sdata->stats.workers = 0;
 	ck_wunlock(&sdata->instance_lock);
+
+	if (disconnects)
+		LOGNOTICE("Disconnected %d instances", disconnects);
+	if (kills)
+		LOGNOTICE("Dropped %d instances", kills);
 }
 
 static void update_subscribe(ckpool_t *ckp)
@@ -1229,6 +1235,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 {
 	stratum_instance_t *instance, *tmp;
 	uint64_t enonce1_64 = 0, ret = 0;
+	int64_t old_id = 0;
 	int slen;
 
 	if (!sessionid)
@@ -1257,12 +1264,15 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	if (instance) {
 		/* Delete the entry once we are going to use it since there
 		 * will be a new instance with the enonce1_64 */
+		old_id = instance->id;
 		__del_disconnected(sdata, instance);
 		ret = enonce1_64;
 	}
 out_unlock:
 	ck_wunlock(&sdata->instance_lock);
 out:
+	if (ret)
+		LOGNOTICE("Reconnecting old instance %ld to instance %ld", old_id, id);
 	return ret;
 }
 
