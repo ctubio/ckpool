@@ -3010,20 +3010,20 @@ out:
 }
 
 /* Must enter with workbase_lock held */
-static json_t *__stratum_notify(sdata_t *sdata, bool clean)
+static json_t *__stratum_notify(const workbase_t *wb, const bool clean)
 {
 	json_t *val;
 
 	JSON_CPACK(val, "{s:[ssssosssb],s:o,s:s}",
 			"params",
-			sdata->current_workbase->idstring,
-			sdata->current_workbase->prevhash,
-			sdata->current_workbase->coinb1,
-			sdata->current_workbase->coinb2,
-			json_deep_copy(sdata->current_workbase->merkle_array),
-			sdata->current_workbase->bbversion,
-			sdata->current_workbase->nbit,
-			sdata->current_workbase->ntime,
+			wb->idstring,
+			wb->prevhash,
+			wb->coinb1,
+			wb->coinb2,
+			json_deep_copy(wb->merkle_array),
+			wb->bbversion,
+			wb->nbit,
+			wb->ntime,
 			clean,
 			"id", json_null(),
 			"method", "mining.notify");
@@ -3035,7 +3035,7 @@ static void stratum_broadcast_update(sdata_t *sdata, bool clean)
 	json_t *json_msg;
 
 	ck_rlock(&sdata->workbase_lock);
-	json_msg = __stratum_notify(sdata, clean);
+	json_msg = __stratum_notify(sdata->current_workbase, clean);
 	ck_runlock(&sdata->workbase_lock);
 
 	stratum_broadcast(sdata, json_msg);
@@ -3047,7 +3047,7 @@ static void stratum_send_update(sdata_t *sdata, int64_t client_id, bool clean)
 	json_t *json_msg;
 
 	ck_rlock(&sdata->workbase_lock);
-	json_msg = __stratum_notify(sdata, clean);
+	json_msg = __stratum_notify(sdata->current_workbase, clean);
 	ck_runlock(&sdata->workbase_lock);
 
 	stratum_add_send(sdata, json_msg, client_id);
