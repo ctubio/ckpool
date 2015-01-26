@@ -2187,6 +2187,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	ckpool_t *ckp = client->ckp;
 	sdata_t *sdata = ckp->data;
 	char *buf = NULL, *json_msg;
+	bool contended = false;
 	char cdfield[64];
 	int ret = 1;
 	json_t *val;
@@ -2222,7 +2223,8 @@ static int send_recv_auth(stratum_instance_t *client)
 	if (likely(!mutex_timedlock(&sdata->ckdb_lock, 3))) {
 		buf = ckdb_msg_call(ckp, json_msg);
 		mutex_unlock(&sdata->ckdb_lock);
-	}
+	} else
+		contended = true;
 
 	free(json_msg);
 	if (likely(buf)) {
@@ -2266,7 +2268,10 @@ static int send_recv_auth(stratum_instance_t *client)
 			json_decref(val);
 		goto out;
 	}
-	LOGWARNING("Got no auth response from ckdb :(");
+	if (contended)
+		LOGWARNING("Prolonged lock contention for ckdb while trying to authorise");
+	else
+		LOGWARNING("Got no auth response from ckdb :(");
 out_fail:
 	ret = -1;
 out:
