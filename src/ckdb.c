@@ -1240,7 +1240,7 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 	char reply[1024] = "";
 	TRANSFER *transfer;
 	K_TREE_CTX ctx[1];
-	K_ITEM *item;
+	K_ITEM *item = NULL;
 	char *cmdptr, *idptr, *next, *eq, *end, *was;
 	char *data = NULL, *tmp;
 	bool noid = false;
@@ -1462,9 +1462,11 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 				JSON_END, tmp = safe_text(next));
 			free(tmp);
 			free(cmdptr);
-			K_WLOCK(transfer_free);
-			k_add_head(transfer_free, item);
-			K_WUNLOCK(transfer_free);
+			if (item) {
+				K_WLOCK(transfer_free);
+				k_add_head(transfer_free, item);
+				K_WUNLOCK(transfer_free);
+			}
 			return CMD_REPLY;
 		}
 	} else {
