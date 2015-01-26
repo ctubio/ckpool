@@ -2036,6 +2036,7 @@ static double dsps_from_key(json_t *val, const char *key)
 	return ret;
 }
 
+/* Enter holding a reference count */
 static void read_userstats(ckpool_t *ckp, user_instance_t *instance)
 {
 	char s[512];
@@ -2075,6 +2076,7 @@ static void read_userstats(ckpool_t *ckp, user_instance_t *instance)
 	json_decref(val);
 }
 
+/* Enter holding a reference count */
 static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
 {
 	char s[512];
@@ -2120,10 +2122,10 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 				      const char *workername)
 {
 	char *base_username = strdupa(workername), *username;
+	bool new_instance = false, new_worker = false;
 	sdata_t *sdata = ckp->data;
 	user_instance_t *instance;
 	stratum_instance_t *tmp;
-	bool new = false;
 	int len;
 
 	username = strsep(&base_username, "._");
@@ -2139,12 +2141,9 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		/* New user instance. Secondary user id will be NULL */
 		instance = ckzalloc(sizeof(user_instance_t));
 		strcpy(instance->username, username);
-		new = true;
-
+		new_instance = true;
 		instance->id = sdata->user_instance_id++;
 		HASH_ADD_STR(sdata->user_instances, username, instance);
-		if (CKP_STANDALONE(ckp))
-			read_userstats(ckp, instance);
 	}
 	DL_FOREACH(instance->instances, tmp) {
 		if (!safecmp(workername, tmp->workername)) {
@@ -2160,15 +2159,19 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		worker->workername = strdup(workername);
 		worker->instance = instance;
 		DL_APPEND(instance->worker_instances, worker);
-		if (CKP_STANDALONE(ckp))
-			read_workerstats(ckp, worker);
+		new_worker = true;
 		worker->start_time = time(NULL);
 		client->worker_instance = worker;
 	}
 	DL_APPEND(instance->instances, client);
 	ck_wunlock(&sdata->instance_lock);
 
-	if (new && !ckp->proxy) {
+	if (CKP_STANDALONE(ckp) && new_instance)
+		read_userstats(ckp, instance);
+	if (CKP_STANDALONE(ckp) && new_worker)
+		read_workerstats(ckp, client->worker_instance);
+
+	if (new_instance && !ckp->proxy) {
 		/* Is this a btc address based username? */
 		if (len > 26 && len < 35)
 			instance->btcaddress = test_address(ckp, username);
