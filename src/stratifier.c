@@ -336,7 +336,7 @@ struct stratifier_data {
 	cklock_t instance_lock;
 
 	share_t *shares;
-	cklock_t share_lock;
+	pthread_mutex_t share_lock;
 
 	int64_t shares_generated;
 
@@ -548,7 +548,7 @@ static void purge_share_hashtable(sdata_t *sdata, int64_t wb_id)
 	share_t *share, *tmp;
 	int purged = 0;
 
-	ck_wlock(&sdata->share_lock);
+	mutex_lock(&sdata->share_lock);
 	HASH_ITER(hh, sdata->shares, share, tmp) {
 		if (share->workbase_id < wb_id) {
 			HASH_DEL(sdata->shares, share);
@@ -556,7 +556,7 @@ static void purge_share_hashtable(sdata_t *sdata, int64_t wb_id)
 			purged++;
 		}
 	}
-	ck_wunlock(&sdata->share_lock);
+	mutex_unlock(&sdata->share_lock);
 
 	if (purged)
 		LOGINFO("Cleared %d shares from share hashtable", purged);
@@ -568,7 +568,7 @@ static void age_share_hashtable(sdata_t *sdata, int64_t wb_id)
 	share_t *share, *tmp;
 	int aged = 0;
 
-	ck_wlock(&sdata->share_lock);
+	mutex_lock(&sdata->share_lock);
 	HASH_ITER(hh, sdata->shares, share, tmp) {
 		if (share->workbase_id == wb_id) {
 			HASH_DEL(sdata->shares, share);
@@ -576,7 +576,7 @@ static void age_share_hashtable(sdata_t *sdata, int64_t wb_id)
 			aged++;
 		}
 	}
-	ck_wunlock(&sdata->share_lock);
+	mutex_unlock(&sdata->share_lock);
 
 	if (aged)
 		LOGINFO("Aged %d shares from share hashtable", aged);
@@ -1671,11 +1671,11 @@ static char *stratifier_stats(sdata_t *sdata)
 	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 	json_set_object(val, "dead", subval);
 
-	ck_rlock(&sdata->share_lock);
+	mutex_lock(&sdata->share_lock);
 	generated = sdata->shares_generated;
 	objects = HASH_COUNT(sdata->shares);
 	memsize = SAFE_HASH_OVERHEAD(sdata->shares) + sizeof(share_t) * objects;
-	ck_runlock(&sdata->share_lock);
+	mutex_unlock(&sdata->share_lock);
 
 	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 	json_set_object(val, "shares", subval);
@@ -2765,12 +2765,12 @@ static bool new_share(sdata_t *sdata, const uchar *hash, int64_t  wb_id)
 	memcpy(share->hash, hash, 32);
 	share->workbase_id = wb_id;
 
-	ck_wlock(&sdata->share_lock);
+	mutex_lock(&sdata->share_lock);
 	sdata->shares_generated++;
 	HASH_FIND(hh, sdata->shares, hash, 32, match);
 	if (likely(!match))
 		HASH_ADD(hh, sdata->shares, hash, 32, share);
-	ck_wunlock(&sdata->share_lock);
+	mutex_unlock(&sdata->share_lock);
 
 	if (unlikely(match)) {
 		dealloc(share);
@@ -4240,7 +4240,7 @@ int stratifier(proc_instance_t *pi)
 	mutex_init(&sdata->stats_lock);
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
 
-	cklock_init(&sdata->share_lock);
+	mutex_init(&sdata->share_lock);
 	mutex_init(&sdata->block_lock);
 
 	LOGWARNING("%s stratifier ready", ckp->name);
