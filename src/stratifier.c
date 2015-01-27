@@ -1296,7 +1296,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	}
 	instance = NULL;
 	HASH_FIND(hh, sdata->disconnected_instances, &enonce1_64, sizeof(uint64_t), instance);
-	if (instance) {
+	if (instance && !instance->ref) {
 		/* Delete the entry once we are going to use it since there
 		 * will be a new instance with the enonce1_64 */
 		old_id = instance->id;
