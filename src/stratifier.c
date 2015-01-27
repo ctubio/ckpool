@@ -2130,7 +2130,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	char *base_username = strdupa(workername), *username;
 	bool new_instance = false, new_worker = false;
 	sdata_t *sdata = ckp->data;
-	stratum_instance_t *tmp;
+	worker_instance_t *tmp;
 	user_instance_t *user;
 	int len;
 
@@ -2151,9 +2151,9 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		user->id = sdata->user_instance_id++;
 		HASH_ADD_STR(sdata->user_instances, username, user);
 	}
-	DL_FOREACH(user->instances, tmp) {
+	DL_FOREACH(user->worker_instances, tmp) {
 		if (!safecmp(workername, tmp->workername)) {
-			client->worker_instance = tmp->worker_instance;
+			client->worker_instance = tmp;
 			break;
 		}
 	}
