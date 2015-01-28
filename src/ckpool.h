@@ -187,7 +187,7 @@ struct ckpool_instance {
 #ifdef USE_CKDB
 #define CKP_STANDALONE(CKP) ((CKP)->standalone == true)
 #else
-#define CKP_STANDALONE(CKP) (true)
+#define CKP_STANDALONE(CKP) ((CKP) == (CKP)) /* Always true, silences unused warn */
 #endif
 
 #define SAFE_HASH_OVERHEAD(HASHLIST) (HASHLIST ? HASH_OVERHEAD(hh, HASHLIST) : 0)
