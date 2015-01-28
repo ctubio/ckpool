@@ -301,26 +301,26 @@ function pgtop($info, $dotop, $user, $douser)
 		$lsn = $info['now'] - $info['lastsh'];
 		$lhn = $info['now'] - $info['lasthb'];
 		$lwn = $info['now'] - $info['lastwi'];
-		if ($lsn < 2)
-			$lsc = 'green.gif';
+		if ($lsn < 8)
+			$lsc = 'green.png';
 		else
 		{
-			if ($lsn < 4)
+			if ($lsn < 10)
 				$lsc = 'orange.png';
 			else
 				$lsc = 'red.png';
 		}
-		if ($lhn < 3)
-			$lhc = 'green.gif';
+		if ($lhn < 5)
+			$lhc = 'green.png';
 		else
 		{
-			if ($lhn < 6)
+			if ($lhn < 10)
 				$lhc = 'orange.png';
 			else
 				$lhc = 'red.png';
 		}
 		if ($lwn < 36)
-			$lwc = 'green.gif';
+			$lwc = 'green.png';
 		else
 		{
 			if ($lwn < 46)
