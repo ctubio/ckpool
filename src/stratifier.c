@@ -1135,16 +1135,16 @@ static void update_diff(ckpool_t *ckp)
 /* Enter with instance_lock held */
 static stratum_instance_t *__instance_by_id(sdata_t *sdata, int64_t id)
 {
-	stratum_instance_t *instance;
+	stratum_instance_t *client;
 
-	HASH_FIND_I64(sdata->stratum_instances, &id, instance);
-	return instance;
+	HASH_FIND_I64(sdata->stratum_instances, &id, client);
+	return client;
 }
 
 /* Increase the reference count of instance */
-static void __inc_instance_ref(stratum_instance_t *instance)
+static void __inc_instance_ref(stratum_instance_t *client)
 {
-	instance->ref++;
+	client->ref++;
 }
 
 /* Find an __instance_by_id and increase its reference count allowing us to
@@ -1152,15 +1152,15 @@ static void __inc_instance_ref(stratum_instance_t *instance)
  * dereferenced. */
 static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
 {
-	stratum_instance_t *instance;
+	stratum_instance_t *client;
 
 	ck_wlock(&sdata->instance_lock);
-	instance = __instance_by_id(sdata, id);
-	if (instance)
-		__inc_instance_ref(instance);
+	client = __instance_by_id(sdata, id);
+	if (client)
+		__inc_instance_ref(client);
 	ck_wunlock(&sdata->instance_lock);
 
-	return instance;
+	return client;
 }
 
 /* Has this client_id already been used and is now in one of the dropped lists */
@@ -1227,18 +1227,18 @@ static void client_drop_message(int64_t client_id, int dropped, bool lazily)
 }
 
 /* Decrease the reference count of instance. */
-static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance, const char *file,
+static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
 {
-	int64_t client_id = instance->id;
+	int64_t client_id = client->id;
 	int dropped = 0, ref;
 
 	ck_wlock(&sdata->instance_lock);
-	ref = --instance->ref;
+	ref = --client->ref;
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
-	if (unlikely(instance->dropped && !ref))
-		dropped = __drop_client(sdata, instance, instance->user_instance);
+	if (unlikely(client->dropped && !ref))
+		dropped = __drop_client(sdata, client, client->user_instance);
 	ck_wunlock(&sdata->instance_lock);
 
 	client_drop_message(client_id, dropped, true);
@@ -1253,22 +1253,22 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *instance, cons
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int server)
 {
-	stratum_instance_t *instance = ckzalloc(sizeof(stratum_instance_t));
+	stratum_instance_t *client = ckzalloc(sizeof(stratum_instance_t));
 	sdata_t *sdata = ckp->data;
 
 	sdata->stratum_generated++;
-	instance->id = id;
-	instance->server = server;
-	instance->diff = instance->old_diff = ckp->startdiff;
-	instance->ckp = ckp;
-	tv_time(&instance->ldc);
-	HASH_ADD_I64(sdata->stratum_instances, id, instance);
-	return instance;
+	client->id = id;
+	client->server = server;
+	client->diff = client->old_diff = ckp->startdiff;
+	client->ckp = ckp;
+	tv_time(&client->ldc);
+	HASH_ADD_I64(sdata->stratum_instances, id, client);
+	return client;
 }
 
 static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, int64_t id)
 {
-	stratum_instance_t *instance, *tmp;
+	stratum_instance_t *client, *tmp;
 	uint64_t enonce1_64 = 0, ret = 0;
 	int64_t old_id = 0;
 	int slen;
@@ -1286,21 +1286,21 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	hex2bin(&enonce1_64, sessionid, slen);
 
 	ck_wlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, instance, tmp) {
-		if (instance->id == id)
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->id == id)
 			continue;
-		if (instance->enonce1_64 == enonce1_64) {
+		if (client->enonce1_64 == enonce1_64) {
 			/* Only allow one connected instance per enonce1 */
 			goto out_unlock;
 		}
 	}
-	instance = NULL;
-	HASH_FIND(hh, sdata->disconnected_instances, &enonce1_64, sizeof(uint64_t), instance);
-	if (instance && !instance->ref) {
+	client = NULL;
+	HASH_FIND(hh, sdata->disconnected_instances, &enonce1_64, sizeof(uint64_t), client);
+	if (client && !client->ref) {
 		/* Delete the entry once we are going to use it since there
 		 * will be a new instance with the enonce1_64 */
-		old_id = instance->id;
-		__del_disconnected(sdata, instance);
+		old_id = client->id;
+		__del_disconnected(sdata, client);
 		ret = enonce1_64;
 	}
 out_unlock:
@@ -1316,7 +1316,7 @@ out:
  * locks. */
 static void stratum_broadcast(sdata_t *sdata, json_t *val)
 {
-	stratum_instance_t *instance, *tmp;
+	stratum_instance_t *client, *tmp;
 	ckmsg_t *bulk_send = NULL;
 	ckmsgq_t *ssends;
 
@@ -1326,16 +1326,16 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 	}
 
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, instance, tmp) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		ckmsg_t *client_msg;
 		smsg_t *msg;
 
-		if (!instance->authorised)
+		if (!client->authorised)
 			continue;
 		client_msg = ckalloc(sizeof(ckmsg_t));
 		msg = ckzalloc(sizeof(smsg_t));
 		msg->json_msg = json_deep_copy(val);
-		msg->client_id = instance->id;
+		msg->client_id = client->id;
 		client_msg->data = msg;
 		DL_APPEND(bulk_send, client_msg);
 	}
