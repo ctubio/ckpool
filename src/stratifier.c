@@ -3486,13 +3486,12 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	free_smsg(msg);
 }
 
-static void discard_json_params(json_params_t **jp)
+static void discard_json_params(json_params_t *jp)
 {
-	json_decref((*jp)->method);
-	json_decref((*jp)->params);
-	json_decref((*jp)->id_val);
-	free(*jp);
-	*jp = NULL;
+	json_decref(jp->method);
+	json_decref(jp->params);
+	json_decref(jp->id_val);
+	free(jp);
 }
 
 static void sshare_process(ckpool_t *ckp, json_params_t *jp)
@@ -3522,7 +3521,7 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 out_decref:
 	dec_instance_ref(sdata, client);
 out:
-	discard_json_params(&jp);
+	discard_json_params(jp);
 }
 
 static void sauth_process(ckpool_t *ckp, json_params_t *jp)
@@ -3574,7 +3573,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 out:
 	if (client)
 		dec_instance_ref(sdata, client);
-	discard_json_params(&jp);
+	discard_json_params(jp);
 
 }
 
@@ -3768,9 +3767,9 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 out_send:
 	stratum_add_send(sdata, val, jp->client_id);
 out:
-	discard_json_params(&jp);
 	if (client)
 		dec_instance_ref(sdata, client);
+	discard_json_params(jp);
 }
 
 /* Called 32 times per min, we send the updated stats to ckdb of those users
