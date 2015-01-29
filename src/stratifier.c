@@ -3145,7 +3145,7 @@ static json_params_t
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
 
-	jp->method = json_copy(method);
+	jp->method = json_deep_copy(method);
 	jp->params = json_deep_copy(params);
 	jp->id_val = json_deep_copy(id_val);
 	jp->client_id = client_id;
