@@ -167,7 +167,7 @@ struct user_instance {
 	bool btcaddress;
 
 	/* A linked list of all connected instances of this user */
-	stratum_instance_t *instances;
+	stratum_instance_t *clients;
 
 	/* A linked list of all connected workers of this user */
 	worker_instance_t *worker_instances;
@@ -1190,7 +1190,7 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 
 	HASH_DEL(sdata->stratum_instances, client);
 	if (instance)
-		DL_DELETE(instance->instances, client);
+		DL_DELETE(instance->clients, client);
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
@@ -2193,7 +2193,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		worker->start_time = time(NULL);
 		client->worker_instance = worker;
 	}
-	DL_APPEND(user->instances, client);
+	DL_APPEND(user->clients, client);
 	ck_wunlock(&sdata->instance_lock);
 
 	if (CKP_STANDALONE(ckp) && new_instance)
@@ -3186,7 +3186,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	 * if we can. Otherwise it will only act as a clamp on next share
 	 * submission. */
 	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(instance->instances, client) {
+	DL_FOREACH(instance->clients, client) {
 		if (client->worker_instance != worker)
 			continue;
 		/* Per connection suggest diff overrides worker mindiff ugh */
