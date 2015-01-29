@@ -3467,13 +3467,6 @@ out:
 	free(buf);
 }
 
-static void discard_stratum_msg(smsg_t **msg)
-{
-	json_decref((*msg)->json_msg);
-	free(*msg);
-	*msg = NULL;
-}
-
 static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 {
 	char *s;
@@ -3490,7 +3483,7 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	s = json_dumps(msg->json_msg, 0);
 	send_proc(ckp->connector, s);
 	free(s);
-	discard_stratum_msg(&msg);
+	free_smsg(msg);
 }
 
 static void discard_json_params(json_params_t **jp)
