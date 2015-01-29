@@ -191,7 +191,7 @@ struct user_instance {
 
 /* Combined data from workers with the same workername */
 struct worker_instance {
-	user_instance_t *instance;
+	user_instance_t *user_instance;
 	char *workername;
 
 	worker_instance_t *next;
@@ -2187,7 +2187,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		worker_instance_t *worker = ckzalloc(sizeof(worker_instance_t));
 
 		worker->workername = strdup(workername);
-		worker->instance = user;
+		worker->user_instance = user;
 		DL_APPEND(user->worker_instances, worker);
 		new_worker = true;
 		worker->start_time = time(NULL);
