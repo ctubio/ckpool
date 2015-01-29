@@ -1183,14 +1183,14 @@ out:
 }
 
 /* Ret = 1 is disconnected, 2 is killed, 3 is workerless killed */
-static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *instance)
+static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
 {
 	stratum_instance_t *old_client = NULL;
 	int ret;
 
 	HASH_DEL(sdata->stratum_instances, client);
-	if (instance)
-		DL_DELETE(instance->clients, client);
+	if (user)
+		DL_DELETE(user->clients, client);
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
