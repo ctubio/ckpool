@@ -1393,7 +1393,7 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 
 static void drop_client(sdata_t *sdata, int64_t id)
 {
-	int dropped = 0, aged = 0, killed = 0;
+	int dropped = 0, aged = 0, killed = 0, disref = 0, deadref = 0;
 	stratum_instance_t *client, *tmp;
 	user_instance_t *user = NULL;
 	time_t now_t = time(NULL);
@@ -1412,7 +1412,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		}
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
-		if (likely(!client->ref))
+		if (!client->ref)
 			dropped = __drop_client(sdata, client, user);
 		else
 			client->dropped = true;
@@ -1425,8 +1425,10 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		if (now_t - client->disconnected_time < 600)
 			continue;
-		if (unlikely(client->ref))
+		if (unlikely(client->ref)) {
+			disref++;
 			continue;
+		}
 		aged++;
 		__del_disconnected(sdata, client);
 	}
@@ -1436,8 +1438,10 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
 		if (now_t - client->died_time < 60)
 			continue;
-		if (unlikely(client->ref))
+		if (unlikely(client->ref)) {
+			deadref++;
 			continue;
+		}
 		killed++;
 		__del_dead(sdata, client);
 		free(client->workername);
@@ -1447,6 +1451,14 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	ck_wunlock(&sdata->instance_lock);
 
 	client_drop_message(id, dropped, false);
+	if (unlikely(disref)) {
+		LOGNOTICE("%d referenced disconnected %s", disref,
+			  disref > 1 ? "clients exist" : "client exists");
+	}
+	if (unlikely(deadref)) {
+		LOGNOTICE("%d referenced dead %s", deadref,
+			  deadref > 1 ? "clients exist" : "client exists");
+	}
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
 	if (killed)
