@@ -412,7 +412,7 @@ static const char *ckdb_ids[] = {
 	"heartbeat"
 };
 
-static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
+static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 {
 	uint64_t *u64, g64, d64 = 0;
 	sdata_t *sdata = ckp->data;
@@ -544,7 +544,7 @@ static void clear_workbase(workbase_t *wb)
 }
 
 /* Remove all shares with a workbase id less than wb_id for block changes */
-static void purge_share_hashtable(sdata_t *sdata, int64_t wb_id)
+static void purge_share_hashtable(sdata_t *sdata, const int64_t wb_id)
 {
 	share_t *share, *tmp;
 	int purged = 0;
@@ -564,7 +564,7 @@ static void purge_share_hashtable(sdata_t *sdata, int64_t wb_id)
 }
 
 /* Remove all shares with a workbase id == wb_id being discarded */
-static void age_share_hashtable(sdata_t *sdata, int64_t wb_id)
+static void age_share_hashtable(sdata_t *sdata, const int64_t wb_id)
 {
 	share_t *share, *tmp;
 	int aged = 0;
@@ -642,7 +642,7 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 
 #define ckdbq_add(ckp, idtype, val) _ckdbq_add(ckp, idtype, val, __FILE__, __func__, __LINE__)
 
-static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
+static void send_workinfo(ckpool_t *ckp, const workbase_t *wb)
 {
 	char cdfield[64];
 	json_t *val;
@@ -668,7 +668,7 @@ static void send_workinfo(ckpool_t *ckp, workbase_t *wb)
 	ckdbq_add(ckp, ID_WORKINFO, val);
 }
 
-static void send_ageworkinfo(ckpool_t *ckp, int64_t id)
+static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
 {
 	char cdfield[64];
 	ts_t ts_now;
@@ -763,7 +763,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 /* Mandatory send_recv to the generator which sets the message priority if this
  * message is higher priority. Races galore on gen_priority mean this might
  * read the wrong priority but occasional wrong values are harmless. */
-static char *__send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
+static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->data;
 	char *buf = NULL;
@@ -786,7 +786,7 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
 /* Conditionally send_recv a message only if it's equal or higher priority than
  * any currently being serviced. NULL is returned if the request is not
  * processed for priority reasons, "failed" for an actual failure. */
-static char *send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
+static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->data;
 	char *buf = NULL;
@@ -796,7 +796,7 @@ static char *send_recv_generator(ckpool_t *ckp, const char *msg, int prio)
 	return buf;
 }
 
-static void send_generator(ckpool_t *ckp, const char *msg, int prio)
+static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->data;
 	bool set;
@@ -903,7 +903,7 @@ out:
 	return NULL;
 }
 
-static void update_base(ckpool_t *ckp, int prio)
+static void update_base(ckpool_t *ckp, const int prio)
 {
 	struct update_req *ur = ckalloc(sizeof(struct update_req));
 	pthread_t *pth = ckalloc(sizeof(pthread_t));
@@ -1082,7 +1082,7 @@ static void update_notify(ckpool_t *ckp)
 	stratum_broadcast_update(sdata, new_block | clean);
 }
 
-static void stratum_send_diff(sdata_t *sdata, stratum_instance_t *client);
+static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
 
 static void update_diff(ckpool_t *ckp)
 {
@@ -1135,7 +1135,7 @@ static void update_diff(ckpool_t *ckp)
 }
 
 /* Enter with instance_lock held */
-static stratum_instance_t *__instance_by_id(sdata_t *sdata, int64_t id)
+static stratum_instance_t *__instance_by_id(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client;
 
@@ -1152,7 +1152,7 @@ static void __inc_instance_ref(stratum_instance_t *client)
 /* Find an __instance_by_id and increase its reference count allowing us to
  * use this instance outside of instance_lock without fear of it being
  * dereferenced. Does not return dropped clients still on the list. */
-static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
+static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client;
 
@@ -1170,7 +1170,7 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
 }
 
 /* Has this client_id already been used and is now in one of the dropped lists */
-static bool __dropped_instance(sdata_t *sdata, int64_t id)
+static bool __dropped_instance(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
 	bool ret = true;
@@ -1215,7 +1215,7 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 	return ret;
 }
 
-static void client_drop_message(int64_t client_id, int dropped, bool lazily)
+static void client_drop_message(const int64_t client_id, const int dropped, const bool lazily)
 {
 	switch(dropped) {
 		case 0:
@@ -1257,7 +1257,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
 
 /* Enter with write instance_lock held */
-static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int server)
+static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id, const int server)
 {
 	stratum_instance_t *client = ckzalloc(sizeof(stratum_instance_t));
 	sdata_t *sdata = ckp->data;
@@ -1272,7 +1272,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, int
 	return client;
 }
 
-static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, int64_t id)
+static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
 	uint64_t enonce1_64 = 0, ret = 0;
@@ -1363,7 +1363,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 	mutex_unlock(ssends->lock);
 }
 
-static void stratum_add_send(sdata_t *sdata, json_t *val, int64_t client_id)
+static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id)
 {
 	smsg_t *msg;
 
@@ -1395,7 +1395,7 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 	mutex_unlock(&sdata->stats_lock);
 }
 
-static void drop_client(sdata_t *sdata, int64_t id)
+static void drop_client(sdata_t *sdata, const int64_t id)
 {
 	int dropped = 0, aged = 0, killed = 0, disref = 0, deadref = 0;
 	stratum_instance_t *client, *tmp;
@@ -1634,7 +1634,7 @@ static void broadcast_ping(sdata_t *sdata)
 	stratum_broadcast(sdata, json_msg);
 }
 
-static void ckmsgq_stats(ckmsgq_t *ckmsgq, int size, json_t **val)
+static void ckmsgq_stats(ckmsgq_t *ckmsgq, const int size, json_t **val)
 {
 	int objects, generated;
 	int64_t memsize;
@@ -1864,7 +1864,7 @@ static void *blockupdate(void *arg)
 }
 
 /* Enter holding instance_lock */
-static bool __enonce1_free(sdata_t *sdata, uint64_t enonce1)
+static bool __enonce1_free(sdata_t *sdata, const uint64_t enonce1)
 {
 	stratum_instance_t *client, *tmp;
 	bool ret = true;
@@ -1885,7 +1885,7 @@ out:
 }
 
 /* Enter holding workbase_lock */
-static void __fill_enonce1data(workbase_t *wb, stratum_instance_t *client)
+static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
 {
 	if (wb->enonce1constlen)
 		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
@@ -1960,11 +1960,11 @@ static bool new_enonce1(stratum_instance_t *client)
 	return ret;
 }
 
-static void stratum_send_message(sdata_t *sdata, stratum_instance_t *client, const char *msg);
+static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *client, const char *msg);
 
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
-static json_t *parse_subscribe(stratum_instance_t *client, int64_t client_id, json_t *params_val)
+static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
 {
 	sdata_t *sdata = client->ckp->data;
 	bool old_match = false;
@@ -2339,7 +2339,7 @@ out:
  * these clients while ckdb is offline, based on an existing client of the
  * same username already having been authorised. Needs to be entered with
  * client holding a ref count. */
-static void queue_delayed_auth(stratum_instance_t *client)
+static void queue_delayed_auth(const stratum_instance_t *client)
 {
 	ckpool_t *ckp = client->ckp;
 	char cdfield[64];
@@ -2365,7 +2365,7 @@ static void queue_delayed_auth(stratum_instance_t *client)
 }
 
 /* Needs to be entered with client holding a ref count. */
-static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val,
+static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val, json_t **err_val,
 			       const char *address, int *errnum)
 {
 	user_instance_t *user;
@@ -2462,7 +2462,7 @@ out:
 }
 
 /* Needs to be entered with client holding a ref count. */
-static void stratum_send_diff(sdata_t *sdata, stratum_instance_t *client)
+static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client)
 {
 	json_t *json_msg;
 
@@ -2472,7 +2472,7 @@ static void stratum_send_diff(sdata_t *sdata, stratum_instance_t *client)
 }
 
 /* Needs to be entered with client holding a ref count. */
-static void stratum_send_message(sdata_t *sdata, stratum_instance_t *client, const char *msg)
+static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *client, const char *msg)
 {
 	json_t *json_msg;
 
@@ -2481,7 +2481,7 @@ static void stratum_send_message(sdata_t *sdata, stratum_instance_t *client, con
 	stratum_add_send(sdata, json_msg, client->id);
 }
 
-static double time_bias(double tdiff, double period)
+static double time_bias(const double tdiff, const double period)
 {
 	double dexp = tdiff / period;
 
@@ -2502,8 +2502,8 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 }
 
 /* Needs to be entered with client holding a ref count. */
-static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool valid,
-		       bool submit)
+static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const int diff, const bool valid,
+		       const bool submit)
 {
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
@@ -2634,8 +2634,9 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 /* We should already be holding the workbase_lock. Needs to be entered with
  * client holding a ref count. */
 static void
-test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, const uchar *hash,
-		double diff, const char *coinbase, int cblen, const char *nonce2, const char *nonce)
+test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uchar *data,
+		const uchar *hash, const double diff, const char *coinbase, int cblen,
+		const char *nonce2, const char *nonce)
 {
 	int transactions = wb->transactions + 1;
 	char hexcoinbase[1024], blockhash[68];
@@ -2718,8 +2719,8 @@ test_blocksolve(stratum_instance_t *client, workbase_t *wb, const uchar *data, c
 }
 
 /* Needs to be entered with client holding a ref count. */
-static double submission_diff(stratum_instance_t *client, workbase_t *wb, const char *nonce2,
-			      uint32_t ntime32, const char *nonce, uchar *hash)
+static double submission_diff(const stratum_instance_t *client, const workbase_t *wb, const char *nonce2,
+			      const uint32_t ntime32, const char *nonce, uchar *hash)
 {
 	unsigned char merkle_root[32], merkle_sha[64];
 	uint32_t *data32, *swap32, benonce32;
@@ -2779,7 +2780,7 @@ static double submission_diff(stratum_instance_t *client, workbase_t *wb, const 
 }
 
 /* Optimised for the common case where shares are new */
-static bool new_share(sdata_t *sdata, const uchar *hash, int64_t  wb_id)
+static bool new_share(sdata_t *sdata, const uchar *hash, const int64_t wb_id)
 {
 	share_t *share = ckzalloc(sizeof(share_t)), *match = NULL;
 	bool ret = true;
@@ -2803,8 +2804,8 @@ static bool new_share(sdata_t *sdata, const uchar *hash, int64_t  wb_id)
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held.
  * Needs to be entered with client holding a ref count. */
-static void submit_share(stratum_instance_t *client, int64_t jobid, const char *nonce2,
-			 const char *ntime, const char *nonce, int msg_id)
+static void submit_share(stratum_instance_t *client, const int64_t jobid, const char *nonce2,
+			 const char *ntime, const char *nonce, const int msg_id)
 {
 	ckpool_t *ckp = client->ckp;
 	json_t *json_msg;
@@ -2825,7 +2826,7 @@ static void submit_share(stratum_instance_t *client, int64_t jobid, const char *
 
 /* Needs to be entered with client holding a ref count. */
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
-			    json_t *params_val, json_t **err_val)
+			    const json_t *params_val, json_t **err_val)
 {
 	bool share = false, result = false, invalid = true, submit = false;
 	user_instance_t *user = client->user_instance;
@@ -3101,7 +3102,7 @@ static json_t *__stratum_notify(const workbase_t *wb, const bool clean)
 	return val;
 }
 
-static void stratum_broadcast_update(sdata_t *sdata, bool clean)
+static void stratum_broadcast_update(sdata_t *sdata, const bool clean)
 {
 	json_t *json_msg;
 
@@ -3113,7 +3114,7 @@ static void stratum_broadcast_update(sdata_t *sdata, bool clean)
 }
 
 /* For sending a single stratum template update */
-static void stratum_send_update(sdata_t *sdata, int64_t client_id, bool clean)
+static void stratum_send_update(sdata_t *sdata, const int64_t client_id, const bool clean)
 {
 	json_t *json_msg;
 
@@ -3124,7 +3125,7 @@ static void stratum_send_update(sdata_t *sdata, int64_t client_id, bool clean)
 	stratum_add_send(sdata, json_msg, client_id);
 }
 
-static void send_json_err(sdata_t *sdata, int64_t client_id, json_t *id_val, const char *err_msg)
+static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_val, const char *err_msg)
 {
 	json_t *val;
 
@@ -3133,14 +3134,14 @@ static void send_json_err(sdata_t *sdata, int64_t client_id, json_t *id_val, con
 }
 
 /* Needs to be entered with client holding a ref count. */
-static void update_client(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id)
+static void update_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id)
 {
 	stratum_send_update(sdata, client_id, true);
 	stratum_send_diff(sdata, client);
 }
 
 static json_params_t
-*create_json_params(const int64_t client_id, json_t *method, const json_t *params,
+*create_json_params(const int64_t client_id, const json_t *method, const json_t *params,
 		    const json_t *id_val, const char *address)
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
@@ -3223,7 +3224,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 /* Implement support for the diff in the params as well as the originally
  * documented form of placing diff within the method. Needs to be entered with
  * client holding a ref count. */
-static void suggest_diff(stratum_instance_t *client, const char *method, json_t *params_val)
+static void suggest_diff(stratum_instance_t *client, const char *method, const json_t *params_val)
 {
 	json_t *arr_val = json_array_get(params_val, 0);
 	sdata_t *sdata = client->ckp->data;
@@ -3253,7 +3254,7 @@ static void suggest_diff(stratum_instance_t *client, const char *method, json_t 
 
 /* Enter with client holding ref count */
 static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
-			 json_t *id_val, json_t *method_val, json_t *params_val, char *address)
+			 json_t *id_val, json_t *method_val, json_t *params_val, const char *address)
 {
 	const char *method;
 	char buf[256];
@@ -3670,7 +3671,7 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 	}
 }
 
-static int transactions_by_jobid(sdata_t *sdata, int64_t id)
+static int transactions_by_jobid(sdata_t *sdata, const int64_t id)
 {
 	workbase_t *wb;
 	int ret = -1;
@@ -3684,7 +3685,7 @@ static int transactions_by_jobid(sdata_t *sdata, int64_t id)
 	return ret;
 }
 
-static json_t *txnhashes_by_jobid(sdata_t *sdata, int64_t id)
+static json_t *txnhashes_by_jobid(sdata_t *sdata, const int64_t id)
 {
 	json_t *ret = NULL;
 	workbase_t *wb;
