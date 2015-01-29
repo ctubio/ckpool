@@ -3488,9 +3488,12 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 
 static void discard_json_params(json_params_t *jp)
 {
-	json_decref(jp->method);
-	json_decref(jp->params);
-	json_decref(jp->id_val);
+	if (likely(jp->method))
+		json_decref(jp->method);
+	if (likely(jp->params))
+		json_decref(jp->params);
+	if (likely(jp->id_val))
+		json_decref(jp->id_val);
 	free(jp);
 }
 
