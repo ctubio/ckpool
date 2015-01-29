@@ -1393,7 +1393,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 {
 	int dropped = 0, aged = 0, killed = 0;
 	stratum_instance_t *client, *tmp;
-	user_instance_t *instance = NULL;
+	user_instance_t *user = NULL;
 	time_t now_t = time(NULL);
 	ckpool_t *ckp = NULL;
 	bool dec = false;
@@ -1403,7 +1403,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
-		instance = client->user_instance;
+		user = client->user_instance;
 		if (client->authorised) {
 			dec = true;
 			ckp = client->ckp;
@@ -1411,7 +1411,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (likely(!client->ref))
-			dropped = __drop_client(sdata, client, instance);
+			dropped = __drop_client(sdata, client, user);
 		else
 			client->dropped = true;
 		client->authorised = false;
@@ -1451,7 +1451,7 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	/* Decrease worker count outside of instance_lock to avoid recursive
 	 * locking */
 	if (dec)
-		dec_worker(ckp, instance);
+		dec_worker(ckp, user);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
@@ -1487,18 +1487,18 @@ static void reconnect_clients(sdata_t *sdata, const char *cmd)
 
 static void reset_bestshares(sdata_t *sdata)
 {
-	user_instance_t *instance, *tmpuser;
+	user_instance_t *user, *tmpuser;
 	stratum_instance_t *client, *tmp;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		client->best_diff = 0;
 	}
-	HASH_ITER(hh, sdata->user_instances, instance, tmpuser) {
+	HASH_ITER(hh, sdata->user_instances, user, tmpuser) {
 		worker_instance_t *worker;
 
-		instance->best_diff = 0;
-		DL_FOREACH(instance->worker_instances, worker) {
+		user->best_diff = 0;
+		DL_FOREACH(user->worker_instances, worker) {
 			worker->best_diff = 0;
 		}
 	}
@@ -2066,42 +2066,42 @@ static double dsps_from_key(json_t *val, const char *key)
 }
 
 /* Enter holding a reference count */
-static void read_userstats(ckpool_t *ckp, user_instance_t *instance)
+static void read_userstats(ckpool_t *ckp, user_instance_t *user)
 {
 	char s[512];
 	json_t *val;
 	FILE *fp;
 	int ret;
 
-	snprintf(s, 511, "%s/users/%s", ckp->logdir, instance->username);
+	snprintf(s, 511, "%s/users/%s", ckp->logdir, user->username);
 	fp = fopen(s, "re");
 	if (!fp) {
-		LOGINFO("User %s does not have a logfile to read", instance->username);
+		LOGINFO("User %s does not have a logfile to read", user->username);
 		return;
 	}
 	memset(s, 0, 512);
 	ret = fread(s, 1, 511, fp);
 	fclose(fp);
 	if (ret < 1) {
-		LOGINFO("Failed to read user %s logfile", instance->username);
+		LOGINFO("Failed to read user %s logfile", user->username);
 		return;
 	}
 	val = json_loads(s, 0, NULL);
 	if (!val) {
-		LOGINFO("Failed to json decode user %s logfile: %s", instance->username, s);
+		LOGINFO("Failed to json decode user %s logfile: %s", user->username, s);
 		return;
 	}
 
-	tv_time(&instance->last_share);
-	instance->dsps1 = dsps_from_key(val, "hashrate1m");
-	instance->dsps5 = dsps_from_key(val, "hashrate5m");
-	instance->dsps60 = dsps_from_key(val, "hashrate1hr");
-	instance->dsps1440 = dsps_from_key(val, "hashrate1d");
-	instance->dsps10080 = dsps_from_key(val, "hashrate7d");
-	json_get_double(&instance->best_diff, val, "bestshare");
-	LOGINFO("Successfully read user %s stats %f %f %f %f %f %f", instance->username,
-		instance->dsps1, instance->dsps5, instance->dsps60, instance->dsps1440,
-		instance->dsps10080, instance->best_diff);
+	tv_time(&user->last_share);
+	user->dsps1 = dsps_from_key(val, "hashrate1m");
+	user->dsps5 = dsps_from_key(val, "hashrate5m");
+	user->dsps60 = dsps_from_key(val, "hashrate1hr");
+	user->dsps1440 = dsps_from_key(val, "hashrate1d");
+	user->dsps10080 = dsps_from_key(val, "hashrate7d");
+	json_get_double(&user->best_diff, val, "bestshare");
+	LOGINFO("Successfully read user %s stats %f %f %f %f %f %f", user->username,
+		user->dsps1, user->dsps5, user->dsps60, user->dsps1440,
+		user->dsps10080, user->best_diff);
 	json_decref(val);
 }
 
@@ -2151,7 +2151,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 				      const char *workername)
 {
 	char *base_username = strdupa(workername), *username;
-	bool new_instance = false, new_worker = false;
+	bool new_user = false, new_worker = false;
 	sdata_t *sdata = ckp->data;
 	worker_instance_t *tmp;
 	user_instance_t *user;
@@ -2171,7 +2171,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		user = ckzalloc(sizeof(user_instance_t));
 		user->auth_backoff = 3; /* Set initial backoff to 3 seconds */
 		strcpy(user->username, username);
-		new_instance = true;
+		new_user = true;
 		user->id = sdata->user_instance_id++;
 		HASH_ADD_STR(sdata->user_instances, username, user);
 	}
@@ -2196,12 +2196,12 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	DL_APPEND(user->clients, client);
 	ck_wunlock(&sdata->instance_lock);
 
-	if (CKP_STANDALONE(ckp) && new_instance)
+	if (CKP_STANDALONE(ckp) && new_user)
 		read_userstats(ckp, user);
 	if (CKP_STANDALONE(ckp) && new_worker)
 		read_workerstats(ckp, client->worker_instance);
 
-	if (new_instance && !ckp->proxy) {
+	if (new_user && !ckp->proxy) {
 		/* Is this a btc address based username? */
 		if (len > 26 && len < 35)
 			user->btcaddress = test_address(ckp, username);
@@ -2219,7 +2219,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
  * entered with client holding a ref count. */
 static int send_recv_auth(stratum_instance_t *client)
 {
-	user_instance_t *user_instance = client->user_instance;
+	user_instance_t *user = client->user_instance;
 	ckpool_t *ckp = client->ckp;
 	sdata_t *sdata = ckp->data;
 	char *buf = NULL, *json_msg;
@@ -2233,7 +2233,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
 
 	val = json_object();
-	json_set_string(val, "username", user_instance->username);
+	json_set_string(val, "username", user->username);
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "poolinstance", ckp->name);
 	json_set_string(val, "useragent", client->useragent);
@@ -2244,7 +2244,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	json_set_string(val, "createby", "code");
 	json_set_string(val, "createcode", __func__);
 	json_set_string(val, "createinet", client->address);
-	if (user_instance->btcaddress)
+	if (user->btcaddress)
 		json_msg = ckdb_msg(ckp, val, ID_ADDRAUTH);
 	else
 		json_msg = ckdb_msg(ckp, val, ID_AUTH);
@@ -2280,7 +2280,7 @@ static int send_recv_auth(stratum_instance_t *client)
 		cmd = response;
 		strsep(&cmd, "=");
 		LOGINFO("User %s Worker %s got auth response: %s  cmd: %s",
-			user_instance->username, client->workername,
+			user->username, client->workername,
 			response, cmd);
 		val = json_loads(cmd, 0, &err_val);
 		if (unlikely(!val))
@@ -2289,13 +2289,13 @@ static int send_recv_auth(stratum_instance_t *client)
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
 			json_get_int(&worker->mindiff, val, "difficultydefault");
 			client->suggest_diff = worker->mindiff;
-			if (!user_instance->auth_time)
-				user_instance->auth_time = time(NULL);
+			if (!user->auth_time)
+				user->auth_time = time(NULL);
 		}
 		if (secondaryuserid && (!safecmp(response, "ok.authorise") ||
 					!safecmp(response, "ok.addrauth"))) {
-			if (!user_instance->secondaryuserid)
-				user_instance->secondaryuserid = secondaryuserid;
+			if (!user->secondaryuserid)
+				user->secondaryuserid = secondaryuserid;
 			else
 				dealloc(secondaryuserid);
 			ret = 0;
@@ -2348,7 +2348,7 @@ static void queue_delayed_auth(stratum_instance_t *client)
 static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, json_t **err_val,
 			       const char *address, int *errnum)
 {
-	user_instance_t *user_instance;
+	user_instance_t *user;
 	ckpool_t *ckp = client->ckp;
 	bool ret = false;
 	const char *buf;
@@ -2385,16 +2385,16 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		*err_val = json_string("Invalid character in username");
 		goto out;
 	}
-	user_instance = client->user_instance = generate_user(ckp, client, buf);
-	client->user_id = user_instance->id;
+	user = client->user_instance = generate_user(ckp, client, buf);
+	client->user_id = user->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
 	client->workername = strdup(buf);
-	if (user_instance->failed_authtime) {
+	if (user->failed_authtime) {
 		time_t now_t = time(NULL);
 
-		if (now_t < user_instance->failed_authtime + user_instance->auth_backoff) {
+		if (now_t < user->failed_authtime + user->auth_backoff) {
 			LOGNOTICE("Client %ld worker %s rate limited due to failed auth attempts",
 				  client->id, buf);
 			client->dropped = true;
@@ -2407,13 +2407,13 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 		/* Preauth workers for the first 10 minutes after the user is
 		 * first authorised by ckdb to avoid floods of worker auths.
 		 * *errnum is implied zero already so ret will be set true */
-		if (user_instance->auth_time && time(NULL) - user_instance->auth_time < 600)
+		if (user->auth_time && time(NULL) - user->auth_time < 600)
 			queue_delayed_auth(client);
 		else
 			*errnum = send_recv_auth(client);
 		if (!*errnum)
 			ret = true;
-		else if (*errnum < 0 && user_instance->secondaryuserid) {
+		else if (*errnum < 0 && user->secondaryuserid) {
 			/* This user has already been authorised but ckdb is
 			 * offline so we assume they already exist but add the
 			 * auth request to the queued messages. */
@@ -2423,19 +2423,19 @@ static json_t *parse_authorise(stratum_instance_t *client, json_t *params_val, j
 	}
 	if (ret) {
 		client->authorised = ret;
-		user_instance->authorised = ret;
-		inc_worker(ckp, user_instance);
+		user->authorised = ret;
+		inc_worker(ckp, user);
 		LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
-			  user_instance->username);
-		user_instance->auth_backoff = 3; /* Reset auth backoff time */
+			  user->username);
+		user->auth_backoff = 3; /* Reset auth backoff time */
 	} else {
 		LOGNOTICE("Client %ld worker %s failed to authorise as user %s", client->id, buf,
-			  user_instance->username);
-		user_instance->failed_authtime = time(NULL);
-		user_instance->auth_backoff <<= 1;
+			  user->username);
+		user->failed_authtime = time(NULL);
+		user->auth_backoff <<= 1;
 		/* Cap backoff time to 10 mins */
-		if (user_instance->auth_backoff > 600)
-			user_instance->auth_backoff = 600;
+		if (user->auth_backoff > 600)
+			user->auth_backoff = 600;
 	}
 out:
 	return json_boolean(ret);
@@ -2487,7 +2487,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 {
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
-	user_instance_t *instance = client->user_instance;
+	user_instance_t *user = client->user_instance;
 	int64_t next_blockid, optimal;
 	sdata_t *sdata = ckp->data;
 	tv_t now_t;
@@ -2535,13 +2535,13 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, int diff, bool
 	copy_tv(&worker->last_share, &now_t);
 	worker->idle = false;
 
-	tdiff = sane_tdiff(&now_t, &instance->last_share);
-	decay_time(&instance->dsps1, diff, tdiff, 60);
-	decay_time(&instance->dsps5, diff, tdiff, 300);
-	decay_time(&instance->dsps60, diff, tdiff, 3600);
-	decay_time(&instance->dsps1440, diff, tdiff, 86400);
-	decay_time(&instance->dsps10080, diff, tdiff, 604800);
-	copy_tv(&instance->last_share, &now_t);
+	tdiff = sane_tdiff(&now_t, &user->last_share);
+	decay_time(&user->dsps1, diff, tdiff, 60);
+	decay_time(&user->dsps5, diff, tdiff, 300);
+	decay_time(&user->dsps60, diff, tdiff, 3600);
+	decay_time(&user->dsps1440, diff, tdiff, 86400);
+	decay_time(&user->dsps10080, diff, tdiff, 604800);
+	copy_tv(&user->last_share, &now_t);
 	client->idle = false;
 
 	client->ssdc++;
@@ -2808,10 +2808,10 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    json_t *params_val, json_t **err_val)
 {
 	bool share = false, result = false, invalid = true, submit = false;
-	user_instance_t *user_instance = client->user_instance;
+	user_instance_t *user = client->user_instance;
 	double diff = client->diff, wdiff = 0, sdiff = -1;
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
-	const char *user, *job_id, *ntime, *nonce;
+	const char *workername, *job_id, *ntime, *nonce;
 	char *fname = NULL, *s, *nonce2;
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
@@ -2841,8 +2841,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = JSON_ERR(err);
 		goto out;
 	}
-	user = json_string_value(json_array_get(params_val, 0));
-	if (unlikely(!user || !strlen(user))) {
+	workername = json_string_value(json_array_get(params_val, 0));
+	if (unlikely(!workername || !strlen(workername))) {
 		err = SE_NO_USERNAME;
 		*err_val = JSON_ERR(err);
 		goto out;
@@ -2871,7 +2871,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = JSON_ERR(err);
 		goto out;
 	}
-	if (safecmp(user, client->workername)) {
+	if (safecmp(workername, client->workername)) {
 		err = SE_WORKER_MISMATCH;
 		*err_val = JSON_ERR(err);
 		goto out;
@@ -2913,12 +2913,12 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		worker_instance_t *worker = client->worker_instance;
 
 		client->best_diff = sdiff;
-		LOGINFO("User %s worker %s client %ld new best diff %lf", user_instance->username,
+		LOGINFO("User %s worker %s client %ld new best diff %lf", user->username,
 			worker->workername, client->id, sdiff);
 		if (sdiff > worker->best_diff)
 			worker->best_diff = sdiff;
-		if (sdiff > user_instance->best_diff)
-			user_instance->best_diff = sdiff;
+		if (sdiff > user->best_diff)
+			user->best_diff = sdiff;
 	}
 	bswap_256(sharehash, hash);
 	__bin2hex(hexhash, sharehash, 32);
@@ -2985,7 +2985,7 @@ out_unlock:
 	json_set_int(val, "clientid", client->id);
 	json_set_string(val, "enonce1", client->enonce1);
 	if (!CKP_STANDALONE(ckp))
-		json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
+		json_set_string(val, "secondaryuserid", user->secondaryuserid);
 	json_set_string(val, "nonce2", nonce2);
 	json_set_string(val, "nonce", nonce);
 	json_set_string(val, "ntime", ntime);
@@ -3001,7 +3001,7 @@ out_unlock:
 	json_set_string(val, "createcode", __func__);
 	json_set_string(val, "createinet", ckp->serverurl[client->server]);
 	json_set_string(val, "workername", client->workername);
-	json_set_string(val, "username", user_instance->username);
+	json_set_string(val, "username", user->username);
 
 	if (ckp->logshares) {
 		fp = fopen(fname, "ae");
@@ -3042,11 +3042,11 @@ out:
 		val = json_object();
 		json_set_int(val, "clientid", client->id);
 		if (!CKP_STANDALONE(ckp))
-			json_set_string(val, "secondaryuserid", user_instance->secondaryuserid);
+			json_set_string(val, "secondaryuserid", user->secondaryuserid);
 		json_set_string(val, "enonce1", client->enonce1);
 		json_set_int(val, "workinfoid", sdata->current_workbase->id);
 		json_set_string(val, "workername", client->workername);
-		json_set_string(val, "username", user_instance->username);
+		json_set_string(val, "username", user->username);
 		json_object_set(val, "error", *err_val);
 		json_set_int(val, "errn", err);
 		json_set_string(val, "createdate", cdfield);
@@ -3137,7 +3137,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 {
 	worker_instance_t *worker = NULL, *tmp;
 	char *username = strdupa(workername), *ignore;
-	user_instance_t *instance = NULL;
+	user_instance_t *user = NULL;
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
 
@@ -3146,18 +3146,18 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 
 	/* Find the user first */
 	ck_rlock(&sdata->instance_lock);
-	HASH_FIND_STR(sdata->user_instances, username, instance);
+	HASH_FIND_STR(sdata->user_instances, username, user);
 	ck_runlock(&sdata->instance_lock);
 
 	/* They may just have not connected yet */
-	if (!instance) {
+	if (!user) {
 		LOGINFO("Failed to find user %s in set_worker_mindiff", username);
 		return;
 	}
 
-	/* Then find the matching worker instance */
+	/* Then find the matching worker user */
 	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(instance->worker_instances, tmp) {
+	DL_FOREACH(user->worker_instances, tmp) {
 		if (!safecmp(workername, tmp->workername)) {
 			worker = tmp;
 			break;
@@ -3186,7 +3186,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	 * if we can. Otherwise it will only act as a clamp on next share
 	 * submission. */
 	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(instance->clients, client) {
+	DL_FOREACH(user->clients, client) {
 		if (client->worker_instance != worker)
 			continue;
 		/* Per connection suggest diff overrides worker mindiff ugh */
@@ -3861,7 +3861,7 @@ static void *statsupdate(void *arg)
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
 		char_entry_t *char_list = NULL, *char_t, *chartmp_t;
-		user_instance_t *instance, *tmpuser;
+		user_instance_t *user, *tmpuser;
 		stratum_instance_t *client, *tmp;
 		double sps1, sps5, sps15, sps60;
 		int idle_workers = 0;
@@ -3898,15 +3898,15 @@ static void *statsupdate(void *arg)
 			}
 		}
 
-		HASH_ITER(hh, sdata->user_instances, instance, tmpuser) {
+		HASH_ITER(hh, sdata->user_instances, user, tmpuser) {
 			worker_instance_t *worker;
 			bool idle = false;
 
-			if (!instance->authorised)
+			if (!user->authorised)
 				continue;
 
 			/* Decay times per worker */
-			DL_FOREACH(instance->worker_instances, worker) {
+			DL_FOREACH(user->worker_instances, worker) {
 				per_tdiff = tvdiff(&now, &worker->last_share);
 				if (per_tdiff > 60) {
 					decay_time(&worker->dsps1, 0, per_tdiff, 60);
@@ -3948,28 +3948,28 @@ static void *statsupdate(void *arg)
 			}
 
 			/* Decay times per user */
-			per_tdiff = tvdiff(&now, &instance->last_share);
+			per_tdiff = tvdiff(&now, &user->last_share);
 			if (per_tdiff > 60) {
-				decay_time(&instance->dsps1, 0, per_tdiff, 60);
-				decay_time(&instance->dsps5, 0, per_tdiff, 300);
-				decay_time(&instance->dsps60, 0, per_tdiff, 3600);
-				decay_time(&instance->dsps1440, 0, per_tdiff, 86400);
-				decay_time(&instance->dsps10080, 0, per_tdiff, 604800);
+				decay_time(&user->dsps1, 0, per_tdiff, 60);
+				decay_time(&user->dsps5, 0, per_tdiff, 300);
+				decay_time(&user->dsps60, 0, per_tdiff, 3600);
+				decay_time(&user->dsps1440, 0, per_tdiff, 86400);
+				decay_time(&user->dsps10080, 0, per_tdiff, 604800);
 				idle = true;
 			}
-			ghs = instance->dsps1 * nonces;
+			ghs = user->dsps1 * nonces;
 			suffix_string(ghs, suffix1, 16, 0);
 
-			ghs = instance->dsps5 * nonces;
+			ghs = user->dsps5 * nonces;
 			suffix_string(ghs, suffix5, 16, 0);
 
-			ghs = instance->dsps60 * nonces;
+			ghs = user->dsps60 * nonces;
 			suffix_string(ghs, suffix60, 16, 0);
 
-			ghs = instance->dsps1440 * nonces;
+			ghs = user->dsps1440 * nonces;
 			suffix_string(ghs, suffix1440, 16, 0);
 
-			ghs = instance->dsps10080 * nonces;
+			ghs = user->dsps10080 * nonces;
 			suffix_string(ghs, suffix10080, 16, 0);
 
 			JSON_CPACK(val, "{ss,ss,ss,ss,ss,si,sf}",
@@ -3978,10 +3978,10 @@ static void *statsupdate(void *arg)
 					"hashrate1hr", suffix60,
 					"hashrate1d", suffix1440,
 					"hashrate7d", suffix10080,
-					"workers", instance->workers,
-					"bestshare", instance->best_diff);
+					"workers", user->workers,
+					"bestshare", user->best_diff);
 
-			snprintf(fname, 511, "%s/users/%s", ckp->logdir, instance->username);
+			snprintf(fname, 511, "%s/users/%s", ckp->logdir, user->username);
 			fp = fopen(fname, "we");
 			if (unlikely(!fp)) {
 				LOGERR("Failed to fopen %s", fname);
@@ -3991,7 +3991,7 @@ static void *statsupdate(void *arg)
 			fprintf(fp, "%s\n", s);
 			if (!idle) {
 				char_t = ckalloc(sizeof(char_entry_t));
-				ASPRINTF(&char_t->buf, "User %s:%s", instance->username, s);
+				ASPRINTF(&char_t->buf, "User %s:%s", user->username, s);
 				DL_APPEND(char_list, char_t);
 			}
 			dealloc(s);
