@@ -264,6 +264,7 @@ struct stratum_instance {
 
 	time_t last_txns; /* Last time this worker requested txn hashes */
 	time_t disconnected_time; /* Time this instance disconnected */
+	time_t died_time;
 
 	int64_t suggest_diff; /* Stratum client suggested diff */
 	double best_diff; /* Best share found by this instance */
@@ -915,6 +916,7 @@ static void update_base(ckpool_t *ckp, int prio)
 
 static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
 {
+	client->died_time = time(NULL);
 	DL_APPEND(sdata->dead_instances, client);
 	sdata->stats.dead++;
 	sdata->dead_generated++;
@@ -1432,13 +1434,15 @@ static void drop_client(sdata_t *sdata, int64_t id)
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
 	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
-		if (!client->ref) {
-			killed++;
-			__del_dead(sdata, client);
-			dealloc(client->workername);
-			dealloc(client->useragent);
-			dealloc(client);
-		}
+		if (now_t - client->died_time < 60)
+			continue;
+		if (unlikely(client->ref))
+			continue;
+		killed++;
+		__del_dead(sdata, client);
+		free(client->workername);
+		free(client->useragent);
+		free(client);
 	}
 	ck_wunlock(&sdata->instance_lock);
 
