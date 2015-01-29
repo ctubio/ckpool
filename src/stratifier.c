@@ -3577,7 +3577,7 @@ out:
 
 }
 
-static void parse_ckdb_cmd(ckpool_t __maybe_unused *ckp, const char *cmd)
+static void parse_ckdb_cmd(ckpool_t *ckp, const char *cmd)
 {
 	json_t *val, *res_val, *arr_val;
 	json_error_t err_val;
