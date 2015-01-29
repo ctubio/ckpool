@@ -1151,15 +1151,19 @@ static void __inc_instance_ref(stratum_instance_t *client)
 
 /* Find an __instance_by_id and increase its reference count allowing us to
  * use this instance outside of instance_lock without fear of it being
- * dereferenced. */
+ * dereferenced. Does not return dropped clients still on the list. */
 static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, int64_t id)
 {
 	stratum_instance_t *client;
 
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
-	if (client)
-		__inc_instance_ref(client);
+	if (client) {
+		if (unlikely(client->dropped))
+			client = NULL;
+		else
+			__inc_instance_ref(client);
+	}
 	ck_wunlock(&sdata->instance_lock);
 
 	return client;
