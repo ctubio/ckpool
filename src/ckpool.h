@@ -49,6 +49,7 @@ struct proc_instance {
 	char *processname;
 	char *sockname;
 	int pid;
+	int oldpid;
 	int (*process)(proc_instance_t *);
 };
 
