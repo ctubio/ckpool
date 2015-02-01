@@ -986,14 +986,26 @@ static void update_subscribe(ckpool_t *ckp)
 	sdata->proxy_base.enonce1constlen = strlen(sdata->proxy_base.enonce1) / 2;
 	hex2bin(sdata->proxy_base.enonce1bin, sdata->proxy_base.enonce1, sdata->proxy_base.enonce1constlen);
 	sdata->proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
-	if (sdata->proxy_base.nonce2len > 7)
-		sdata->proxy_base.enonce1varlen = 4;
-	else if (sdata->proxy_base.nonce2len > 5)
-		sdata->proxy_base.enonce1varlen = 2;
-	else
-		sdata->proxy_base.enonce1varlen = 1;
+	if (ckp->clientsvspeed) {
+		if (sdata->proxy_base.nonce2len > 5)
+			sdata->proxy_base.enonce1varlen = 4;
+		else if (sdata->proxy_base.nonce2len > 3)
+			sdata->proxy_base.enonce1varlen = 2;
+		else
+			sdata->proxy_base.enonce1varlen = 1;
+	} else {
+		if (sdata->proxy_base.nonce2len > 7)
+			sdata->proxy_base.enonce1varlen = 4;
+		else if (sdata->proxy_base.nonce2len > 5)
+			sdata->proxy_base.enonce1varlen = 2;
+		else
+			sdata->proxy_base.enonce1varlen = 1;
+	}
 	sdata->proxy_base.enonce2varlen = sdata->proxy_base.nonce2len - sdata->proxy_base.enonce1varlen;
 	ck_wunlock(&sdata->workbase_lock);
+
+	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %lld",
+		  sdata->proxy_base.nonce2len, 1ll << (sdata->proxy_base.enonce1varlen * 8));
 
 	json_decref(val);
 	drop_allclients(ckp);
