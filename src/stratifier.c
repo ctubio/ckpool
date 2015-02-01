@@ -2828,6 +2828,8 @@ static bool new_share(sdata_t *sdata, const uchar *hash, const int64_t wb_id)
 	return ret;
 }
 
+static void update_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id);
+
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held.
  * Needs to be entered with client holding a ref count. */
 static void submit_share(stratum_instance_t *client, const int64_t jobid, const char *nonce2,
@@ -3075,8 +3077,8 @@ out:
 			client->reject = 2;
 		} else if (client->first_invalid && client->first_invalid < now_t - 60) {
 			if (!client->reject) {
-				LOGINFO("Client %ld rejecting for 60s, sending diff", client->id);
-				stratum_send_diff(sdata, client);
+				LOGINFO("Client %ld rejecting for 60s, sending update", client->id);
+				update_client(sdata, client, client->id);
 				client->reject = 1;
 			}
 		}
