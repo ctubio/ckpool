@@ -3285,13 +3285,6 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	const char *method;
 	char buf[256];
 
-	if (unlikely(client->reject == 2)) {
-		LOGINFO("Dropping client %"PRId64" tagged for lazy invalidation", client_id);
-		snprintf(buf, 255, "dropclient=%ld", client_id);
-		send_proc(client->ckp->connector, buf);
-		return;
-	}
-
 	/* Random broken clients send something not an integer as the id so we copy
 	 * the json item for id_val as is for the response. */
 	method = json_string_value(method_val);
@@ -3383,6 +3376,14 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 {
 	json_t *val = msg->json_msg, *id_val, *method, *params;
 	int64_t client_id = msg->client_id;
+	char buf[256];
+
+	if (unlikely(client->reject == 2)) {
+		LOGINFO("Dropping client %"PRId64" tagged for lazy invalidation", client_id);
+		snprintf(buf, 255, "dropclient=%ld", client_id);
+		send_proc(client->ckp->connector, buf);
+		goto out;
+	}
 
 	/* Return back the same id_val even if it's null or not existent. */
 	id_val = json_object_get(val, "id");
