@@ -1902,7 +1902,7 @@ out:
 	return ret;
 }
 
-/* Enter holding workbase_lock */
+/* Enter holding workbase_lock and client a ref count. */
 static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
 {
 	if (wb->enonce1constlen)
