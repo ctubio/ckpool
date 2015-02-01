@@ -1465,7 +1465,7 @@ static void kill_proxy(ckpool_t *ckp, proxy_instance_t *proxi)
 	if (!proxi) // This shouldn't happen
 		return;
 
-	LOGNOTICE("Killing proxy");
+	LOGNOTICE("Killing proxy connection to %s", proxi->si->url);
 	cs = proxi->cs;
 	Close(cs->fd);
 	empty_buffer(cs);
