@@ -3285,12 +3285,25 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	const char *method;
 	char buf[256];
 
-	/* Random broken clients send something not an integer as the id so we copy
-	 * the json item for id_val as is for the response. */
+	/* Random broken clients send something not an integer as the id so we
+	 * copy the json item for id_val as is for the response. By far the
+	 * most common messages will be shares so look for those first */
 	method = json_string_value(method_val);
-	if (cmdmatch(method, "mining.subscribe")) {
-		json_t *val, *result_val = parse_subscribe(client, client_id, params_val);
+	if (likely(cmdmatch(method, "mining.submit") && client->authorised)) {
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
 
+		ckmsgq_add(sdata->sshareq, jp);
+		return;
+	}
+
+	if (cmdmatch(method, "mining.subscribe")) {
+		json_t *val, *result_val;
+
+		if (unlikely(client->subscribed)) {
+			LOGNOTICE("Client %ld trying to subscribe twice", client_id);
+			return;
+		}
+		result_val = parse_subscribe(client, client_id, params_val);
 		/* Shouldn't happen, sanity check */
 		if (unlikely(!result_val)) {
 			LOGWARNING("parse_subscribe returned NULL result_val");
@@ -3323,9 +3336,22 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		return;
 	}
 
-	if (cmdmatch(method, "mining.auth") && client->subscribed) {
-		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
+	/* We should only accept subscribed requests from here on */
+	if (!client->subscribed) {
+		LOGINFO("Dropping unsubscribed client %ld", client_id);
+		snprintf(buf, 255, "dropclient=%ld", client_id);
+		send_proc(client->ckp->connector, buf);
+		return;
+	}
 
+	if (cmdmatch(method, "mining.auth")) {
+		json_params_t *jp;
+
+		if (unlikely(client->authorised)) {
+			LOGNOTICE("Client %ld trying to authorise twice", client_id);
+			return;
+		}
+		jp = create_json_params(client_id, method_val, params_val, id_val, address);
 		ckmsgq_add(sdata->sauthq, jp);
 		return;
 	}
@@ -3338,13 +3364,6 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		LOGINFO("Dropping unauthorised client %ld", client_id);
 		snprintf(buf, 255, "dropclient=%ld", client_id);
 		send_proc(client->ckp->connector, buf);
-		return;
-	}
-
-	if (cmdmatch(method, "mining.submit")) {
-		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
-
-		ckmsgq_add(sdata->sshareq, jp);
 		return;
 	}
 
