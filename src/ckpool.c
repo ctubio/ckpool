@@ -354,10 +354,12 @@ retry:
 		LOGDEBUG("Listener received stratifierstats request");
 		msg = send_recv_proc(ckp->stratifier, "stats");
 		send_unix_msg(sockd, msg);
+		dealloc(msg);
 	} else if (cmdmatch(buf, "connectorstats")) {
 		LOGDEBUG("Listener received connectorstats request");
 		msg = send_recv_proc(ckp->connector, "stats");
 		send_unix_msg(sockd, msg);
+		dealloc(msg);
 	} else {
 		LOGINFO("Listener received unhandled message: %s", buf);
 		send_unix_msg(sockd, "unknown");
