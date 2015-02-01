@@ -2001,6 +2001,8 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	}
 
 	arr_size = json_array_size(params_val);
+	/* NOTE useragent is NULL prior to this so should not be used in code
+	 * till after this point */
 	if (arr_size > 0) {
 		const char *buf;
 
@@ -2432,6 +2434,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
+	/* NOTE workername is NULL prior to this so should not be used in code
+	 * till after this point */
 	client->workername = strdup(buf);
 	if (user->failed_authtime) {
 		time_t now_t = time(NULL);
