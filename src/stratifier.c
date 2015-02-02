@@ -1401,18 +1401,14 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
 	ckpool_t *ckp = NULL;
-	bool dec = false;
 
 	LOGINFO("Stratifier asked to drop client %ld", id);
 
 	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
-	if (client) {
+	if (client && !client->dropped) {
 		user = client->user_instance;
-		if (client->authorised) {
-			dec = true;
-			ckp = client->ckp;
-		}
+		ckp = client->ckp;
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (!client->ref)
@@ -1439,7 +1435,7 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 
 	/* Decrease worker count outside of instance_lock to avoid recursive
 	 * locking */
-	if (dec)
+	if (user)
 		dec_worker(ckp, user);
 }
 
@@ -2391,6 +2387,9 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 			goto out;
 		}
 	}
+	/* NOTE worker count incremented here for any client put onto user's
+	 * list until it's dropped */
+	inc_worker(ckp, user);
 	if (CKP_STANDALONE(ckp))
 		ret = true;
 	else {
@@ -2414,7 +2413,6 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	if (ret) {
 		client->authorised = ret;
 		user->authorised = ret;
-		inc_worker(ckp, user);
 		LOGNOTICE("Authorised client %ld worker %s as user %s", client->id, buf,
 			  user->username);
 		user->auth_backoff = 3; /* Reset auth backoff time */
