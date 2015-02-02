@@ -42,7 +42,6 @@ struct pool_stats {
 	int workers;
 	int users;
 	int disconnected;
-	int dead;
 
 	/* Absolute shares stats */
 	int64_t unaccounted_shares;
@@ -325,11 +324,9 @@ struct stratifier_data {
 	 * is sorted by enonce1_64. */
 	stratum_instance_t *stratum_instances;
 	stratum_instance_t *disconnected_instances;
-	stratum_instance_t *dead_instances;
 
 	int stratum_generated;
 	int disconnected_generated;
-	int dead_generated;
 
 	user_instance_t *user_instances;
 
@@ -914,24 +911,18 @@ static void update_base(ckpool_t *ckp, const int prio)
 	create_pthread(pth, do_update, ur);
 }
 
-static void __add_dead(sdata_t *sdata, stratum_instance_t *client)
+static void __kill_instance(stratum_instance_t *client)
 {
-	DL_APPEND(sdata->dead_instances, client);
-	sdata->stats.dead++;
-	sdata->dead_generated++;
-}
-
-static void __del_dead(sdata_t *sdata, stratum_instance_t *client)
-{
-	DL_DELETE(sdata->dead_instances, client);
-	sdata->stats.dead--;
+	free(client->workername);
+	free(client->useragent);
+	free(client);
 }
 
 static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 {
 	HASH_DEL(sdata->disconnected_instances, client);
 	sdata->stats.disconnected--;
-	__add_dead(sdata, client);
+	__kill_instance(client);
 }
 
 static void drop_allclients(ckpool_t *ckp)
@@ -944,8 +935,8 @@ static void drop_allclients(ckpool_t *ckp)
 	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		HASH_DEL(sdata->stratum_instances, client);
+		__kill_instance(client);
 		kills++;
-		__add_dead(sdata, client);
 		sprintf(buf, "dropclient=%ld", client->id);
 		send_proc(ckp->connector, buf);
 	}
@@ -1196,12 +1187,6 @@ static bool __dropped_instance(sdata_t *sdata, const int64_t id)
 			goto out;
 		}
 	}
-	DL_FOREACH(sdata->dead_instances, client) {
-		if (unlikely(client->id == id)) {
-			ret = true;
-			goto out;
-		}
-	}
 out:
 	return ret;
 }
@@ -1228,7 +1213,7 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 			ret = 2;
 		else
 			ret = 3;
-		__add_dead(sdata, client);
+		__kill_instance(client);
 	}
 	return ret;
 }
@@ -1417,9 +1402,9 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 
 static void drop_client(sdata_t *sdata, const int64_t id)
 {
-	int dropped = 0, aged = 0, killed = 0;
 	stratum_instance_t *client, *tmp;
 	user_instance_t *user = NULL;
+	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
 	ckpool_t *ckp = NULL;
 	bool dec = false;
@@ -1452,23 +1437,11 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 		aged++;
 		__del_disconnected(sdata, client);
 	}
-
-	/* Cull old unused clients lazily when there are no more reference
-	 * counts for them. */
-	DL_FOREACH_SAFE(sdata->dead_instances, client, tmp) {
-		killed++;
-		__del_dead(sdata, client);
-		free(client->workername);
-		free(client->useragent);
-		free(client);
-	}
 	ck_wunlock(&sdata->instance_lock);
 
 	client_drop_message(id, dropped, false);
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
-	if (killed)
-		LOGINFO("Stratifier discarded %d dead instances", killed);
 
 	/* Decrease worker count outside of instance_lock to avoid recursive
 	 * locking */
@@ -1684,14 +1657,7 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 	memsize = sizeof(stratum_instance_t) * sdata->stats.disconnected;
 	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 	json_set_object(val, "disconnected", subval);
-
-	objects = sdata->stats.dead;
-	generated = sdata->dead_generated;
-	memsize = sizeof(stratum_instance_t) * sdata->stats.dead;
 	ck_runlock(&sdata->instance_lock);
-
-	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
-	json_set_object(val, "dead", subval);
 
 	mutex_lock(&sdata->share_lock);
 	generated = sdata->shares_generated;
@@ -3314,7 +3280,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		ck_wlock(&sdata->instance_lock);
 		if (likely(__instance_by_id(sdata, client_id)))
 			HASH_DEL(sdata->stratum_instances, client);
-		__add_dead(sdata, client);
+		__kill_instance(client);
 		ck_wunlock(&sdata->instance_lock);
 
 		snprintf(buf, 255, "passthrough=%ld", client_id);
@@ -4088,13 +4054,12 @@ static void *statsupdate(void *arg)
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
 
-		JSON_CPACK(val, "{si,si,si,si,si,si}",
+		JSON_CPACK(val, "{si,si,si,si,si}",
 				"runtime", diff.tv_sec,
 				"Users", stats->users,
 				"Workers", stats->workers,
 				"Idle", idle_workers,
-				"Disconnected", stats->disconnected,
-				"Dead", stats->dead);
+				"Disconnected", stats->disconnected);
 		s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 		json_decref(val);
 		LOGNOTICE("Pool:%s", s);
