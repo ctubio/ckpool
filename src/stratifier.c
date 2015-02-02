@@ -319,7 +319,6 @@ struct stratifier_data {
 	ckmsgq_t *stxnq;	// Transaction requests
 
 	int64_t user_instance_id;
-	int64_t highest_client_id; /* Highest known client id */
 
 	/* Stratum_instances hashlist is stored by id, whereas disconnected_instances
 	 * is sorted by enonce1_64. */
@@ -1178,10 +1177,6 @@ static bool __dropped_instance(sdata_t *sdata, const int64_t id)
 	stratum_instance_t *client, *tmp;
 	bool ret = false;
 
-	/* Avoid iterating over all the instances if we haven't seen an id this high
-	 * before as the value only ever increases */
-	if (id > sdata->highest_client_id)
-		goto out;
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		if (unlikely(client->id == id)) {
 			ret = true;
@@ -1268,8 +1263,6 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 
 	sdata->stratum_generated++;
 	client->id = id;
-	if (id > sdata->highest_client_id)
-		sdata->highest_client_id = id;
 	client->server = server;
 	client->diff = client->old_diff = ckp->startdiff;
 	client->ckp = ckp;
@@ -3455,8 +3448,8 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 
 	if (unlikely(dropped)) {
 		/* Client may be NULL here */
-		LOGNOTICE("Stratifier skipped dropped instance %ld message server %d",
-				msg->client_id, server);
+		LOGNOTICE("Stratifier skipped dropped instance %ld message from server %d",
+			  msg->client_id, server);
 		free_smsg(msg);
 		goto out;
 	}
