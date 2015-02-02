@@ -244,6 +244,7 @@ struct stratum_instance {
 
 	char address[INET6_ADDRSTRLEN];
 	bool subscribed;
+	bool authorising; /* In progress, protected by instance_lock */
 	bool authorised;
 	bool dropped;
 	bool idle;
@@ -2433,6 +2434,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		if (user->auth_backoff > 600)
 			user->auth_backoff = 600;
 	}
+	/* We can set this outside of lock safely */
+	client->authorising = false;
 out:
 	return json_boolean(ret);
 }
@@ -3523,6 +3526,27 @@ out:
 	discard_json_params(jp);
 }
 
+/* As ref_instance_by_id but only returns clients not authorising or authorised,
+ * and sets the authorising flag */
+static stratum_instance_t *preauth_ref_instance_by_id(sdata_t *sdata, const int64_t id)
+{
+	stratum_instance_t *client;
+
+	ck_wlock(&sdata->instance_lock);
+	client = __instance_by_id(sdata, id);
+	if (client) {
+		if (client->dropped || client->authorising || client->authorised)
+			client = NULL;
+		else {
+			__inc_instance_ref(client);
+			client->authorising = true;
+		}
+	}
+	ck_wunlock(&sdata->instance_lock);
+
+	return client;
+}
+
 static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
@@ -3533,12 +3557,12 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 
 	client_id = jp->client_id;
 
-	client = ref_instance_by_id(sdata, client_id);
-
+	client = preauth_ref_instance_by_id(sdata, client_id);
 	if (unlikely(!client)) {
 		LOGINFO("Authoriser failed to find client id %ld in hashtable!", client_id);
 		goto out;
 	}
+
 	result_val = parse_authorise(client, jp->params, &err_val, jp->address, &errnum);
 	if (json_is_true(result_val)) {
 		char *buf;
