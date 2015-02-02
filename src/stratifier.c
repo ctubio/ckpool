@@ -3647,8 +3647,8 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 	if (test_and_clear(&sdata->ckdb_offline, &sdata->ckdb_lock))
 		LOGWARNING("Successfully resumed talking to ckdb");
 
-	/* TODO: Process any requests from ckdb that are heartbeat responses
-	 * with specific requests. */
+	/* Process any requests from ckdb that are heartbeat responses with
+	 * specific requests. */
 	if (likely(buf)) {
 		char response[PAGESIZE] = {};
 
