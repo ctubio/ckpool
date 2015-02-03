@@ -2422,10 +2422,9 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	else {
 		/* Preauth workers for the first 10 minutes after the user is
 		 * first authorised by ckdb to avoid floods of worker auths.
-		 * *errnum is implied zero already so ret will be set true */
-		if (user->auth_time && time(NULL) - user->auth_time < 600)
-			queue_delayed_auth(client);
-		else
+		 * *errnum is implied zero already so ret will be set true. We
+		 * don't send any auth information to ckdb from these. */
+		if (user->auth_time && time(NULL) - user->auth_time > 600)
 			*errnum = send_recv_auth(client);
 		if (!*errnum)
 			ret = true;
