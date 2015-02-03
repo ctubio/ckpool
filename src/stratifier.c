@@ -4362,8 +4362,8 @@ int stratifier(proc_instance_t *pi)
 	if (!CKP_STANDALONE(ckp)) {
 		sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
-	} else
-		read_poolstats(ckp);
+	}
+	read_poolstats(ckp);
 
 	cklock_init(&sdata->workbase_lock);
 	if (!ckp->proxy)
