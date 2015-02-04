@@ -377,8 +377,9 @@ reparse:
 void *receiver(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
-	int ret, epfd, i, serverfds;
 	struct epoll_event event;
+	uint64_t serverfds, i;
+	int ret, epfd;
 
 	rename_proc("creceiver");
 
@@ -421,7 +422,7 @@ void *receiver(void *arg)
 			/* Nothing to service, still very unlikely */
 			continue;
 		}
-		if (event.data.u64 < (uint64_t)serverfds) {
+		if (event.data.u64 < serverfds) {
 			ret = accept_client(cdata, epfd, event.data.u64);
 			if (unlikely(ret < 0)) {
 				LOGEMERG("FATAL: Failed to accept_client in receiver");
