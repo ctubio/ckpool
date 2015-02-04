@@ -411,7 +411,7 @@ void *receiver(void *arg)
 		client_instance_t *client;
 
 		while (unlikely(!cdata->accept))
-			cksleep_ms(100);
+			cksleep_ms(10);
 		ret = epoll_wait(epfd, &event, 1, 1000);
 		if (unlikely(ret < 1)) {
 			if (unlikely(ret == -1)) {
