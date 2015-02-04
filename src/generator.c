@@ -1457,8 +1457,8 @@ static void kill_proxy(ckpool_t *ckp, proxy_instance_t *proxi)
 	notify_instance_t *ni, *tmp;
 	connsock_t *cs;
 
+	send_proc(ckp->stratifier, "reconnect");
 	send_proc(ckp->connector, "reject");
-	send_proc(ckp->stratifier, "dropall");
 
 	if (!proxi) // This shouldn't happen
 		return;

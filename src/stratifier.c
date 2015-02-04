@@ -1465,6 +1465,7 @@ static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
 static void reconnect_clients(sdata_t *sdata, const char *cmd)
 {
 	char *port = strdupa(cmd), *url = NULL;
+	stratum_instance_t *client, *tmp;
 	json_t *json_msg;
 
 	strsep(&port, ":");
@@ -1480,6 +1481,14 @@ static void reconnect_clients(sdata_t *sdata, const char *cmd)
 		JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
 	stratum_broadcast(sdata, json_msg);
+
+	/* Tag all existing clients as dropped now so they can be removed
+	 * lazily */
+	ck_wlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		client->dropped = true;
+	}
+	ck_wunlock(&sdata->instance_lock);
 }
 
 static void reset_bestshares(sdata_t *sdata)
