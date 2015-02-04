@@ -45,7 +45,7 @@ typedef struct notify_instance notify_instance_t;
 
 struct share_msg {
 	UT_hash_handle hh;
-	int id; // Our own id for submitting upstream
+	int64_t id; // Our own id for submitting upstream
 
 	int client_id;
 	int msg_id; // Stratum message id from client
@@ -90,8 +90,6 @@ struct proxy_instance {
 	tv_t last_message;
 
 	double diff;
-	int absolute_shares;
-	int diff_shares;
 	tv_t last_share;
 
 	int id; /* Message id for sending stratum messages */
@@ -116,7 +114,7 @@ struct proxy_instance {
 
 	pthread_mutex_t share_lock;
 	share_msg_t *shares;
-	int share_id;
+	int64_t share_id;
 
 	ckmsgq_t *passsends;	// passthrough sends
 };
@@ -1097,7 +1095,7 @@ static void submit_share(proxy_instance_t *proxi, json_t *val)
 	/* Add new share entry to the share hashtable */
 	mutex_lock(&proxi->share_lock);
 	share->id = proxi->share_id++;
-	HASH_ADD_INT(proxi->shares, id, share);
+	HASH_ADD_I64(proxi->shares, id, share);
 	mutex_unlock(&proxi->share_lock);
 
 	json_object_set_nocheck(val, "id", json_integer(share->id));
@@ -1123,7 +1121,7 @@ static bool parse_share(proxy_instance_t *proxi, const char *buf)
 	json_t *val = NULL, *idval;
 	share_msg_t *share;
 	bool ret = false;
-	int id;
+	int64_t id;
 
 	val = json_loads(buf, 0, NULL);
 	if (!val) {
@@ -1138,7 +1136,7 @@ static bool parse_share(proxy_instance_t *proxi, const char *buf)
 	id = json_integer_value(idval);
 
 	mutex_lock(&proxi->share_lock);
-	HASH_FIND_INT(proxi->shares, &id, share);
+	HASH_FIND_I64(proxi->shares, &id, share);
 	if (share)
 		HASH_DEL(proxi->shares, share);
 	mutex_unlock(&proxi->share_lock);
