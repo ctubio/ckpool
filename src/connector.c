@@ -241,7 +241,7 @@ static void stratifier_drop_client(ckpool_t *ckp, int64_t id)
 {
 	char buf[256];
 
-	sprintf(buf, "dropclient=%ld", id);
+	sprintf(buf, "dropclient=%"PRId64, id);
 	send_proc(ckp->stratifier, buf);
 }
 
@@ -265,7 +265,7 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	DL_FOREACH_SAFE(cdata->dead_clients, client, tmp) {
 		if (!client->ref) {
 			DL_DELETE(cdata->dead_clients, client);
-			LOGINFO("Connector discarding client %ld", client->id);
+			LOGINFO("Connector discarding client %"PRId64, client->id);
 			dealloc(client);
 		}
 	}
@@ -337,7 +337,7 @@ reparse:
 	if (!(val = json_loads(msg, 0, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
-		LOGINFO("Client id %ld sent invalid json message %s", client->id, msg);
+		LOGINFO("Client id %"PRId64" sent invalid json message %s", client->id, msg);
 		send_client(cdata, client->id, buf);
 		invalidate_client(ckp, cdata, client);
 		return;
@@ -517,7 +517,7 @@ void *sender(void *arg)
 		ret = wait_write_select(fd, 0);
 		if (ret < 1) {
 			if (ret < 0) {
-				LOGINFO("Client id %ld fd %d interrupted", client->id, fd);
+				LOGINFO("Client id %"PRId64" fd %d interrupted", client->id, fd);
 				invalidate_client(ckp, cdata, client);
 				goto contfree;
 			}
@@ -534,7 +534,7 @@ void *sender(void *arg)
 		while (sender_send->len) {
 			ret = send(fd, sender_send->buf + ofs, sender_send->len , 0);
 			if (unlikely(ret < 0)) {
-				LOGINFO("Client id %ld fd %d disconnected", client->id, fd);
+				LOGINFO("Client id %"PRId64" fd %d disconnected", client->id, fd);
 				invalidate_client(ckp, cdata, client);
 				break;
 			}
@@ -586,10 +586,10 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf)
 
 		if (client) {
 			/* This shouldn't happen */
-			LOGWARNING("Client id %ld disconnected but fd already invalidated!", id);
+			LOGWARNING("Client id %"PRId64" disconnected but fd already invalidated!", id);
 			invalidate_client(ckp, cdata, client);
 		} else {
-			LOGINFO("Connector failed to find client id %ld to send to", id);
+			LOGINFO("Connector failed to find client id %"PRId64" to send to", id);
 		}
 		free(buf);
 		return;
@@ -780,7 +780,7 @@ retry:
 	} else if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
 
-		ret = sscanf(buf, "dropclient=%ld", &client_id64);
+		ret = sscanf(buf, "dropclient=%"PRId64, &client_id64);
 		if (ret < 0) {
 			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
 			goto retry;
@@ -788,13 +788,13 @@ retry:
 		client_id = client_id64 & 0xffffffffll;
 		client = ref_client_by_id(cdata, client_id);
 		if (unlikely(!client)) {
-			LOGINFO("Connector failed to find client id %ld to drop", client_id);
+			LOGINFO("Connector failed to find client id %"PRId64" to drop", client_id);
 			goto retry;
 		}
 		ret = invalidate_client(ckp, cdata, client);
 		dec_instance_ref(cdata, client);
 		if (ret >= 0)
-			LOGINFO("Connector dropped client id: %ld", client_id);
+			LOGINFO("Connector dropped client id: %"PRId64, client_id);
 	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Connector received ping request");
 		send_unix_msg(sockd, "pong");
@@ -817,14 +817,14 @@ retry:
 	} else if (cmdmatch(buf, "passthrough")) {
 		client_instance_t *client;
 
-		ret = sscanf(buf, "passthrough=%ld", &client_id);
+		ret = sscanf(buf, "passthrough=%"PRId64, &client_id);
 		if (ret < 0) {
 			LOGDEBUG("Connector failed to parse passthrough command: %s", buf);
 			goto retry;
 		}
 		client = ref_client_by_id(cdata, client_id);
 		if (unlikely(!client)) {
-			LOGINFO("Connector failed to find client id %ld to pass through", client_id);
+			LOGINFO("Connector failed to find client id %"PRId64" to pass through", client_id);
 			goto retry;
 		}
 		passthrough_client(cdata, client);
