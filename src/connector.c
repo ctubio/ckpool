@@ -214,10 +214,12 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	int64_t client_id = 0;
 	int fd;
 
-	ck_wlock(&cdata->lock);
+	ck_ilock(&cdata->lock);
 	fd = client->fd;
 	if (fd != -1) {
 		client_id = client->id;
+
+		ck_ulock(&cdata->lock);
 		Close(client->fd);
 		HASH_DEL(cdata->clients, client);
 		DL_APPEND(cdata->dead_clients, client);
@@ -225,8 +227,9 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 		 * epoll list. */
 		__dec_instance_ref(client);
 		cdata->dead_generated++;
+		ck_dwilock(&cdata->lock);
 	}
-	ck_wunlock(&cdata->lock);
+	ck_uilock(&cdata->lock);
 
 	if (fd > -1)
 		LOGINFO("Connector dropped client %"PRId64" fd %d", client_id, fd);
@@ -559,10 +562,10 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf)
 	ck_ilock(&cdata->lock);
 	HASH_FIND_I64(cdata->clients, &id, client);
 	if (likely(client)) {
-		ck_ulock(&cdata->lock);
 		fd = client->fd;
 		/* Grab a reference to this client until the sender_send has
 		 * completed processing. */
+		ck_ulock(&cdata->lock);
 		__inc_instance_ref(client);
 		ck_dwilock(&cdata->lock);
 	}
