@@ -936,8 +936,11 @@ static void drop_allclients(ckpool_t *ckp)
 
 	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		HASH_DEL(sdata->stratum_instances, client);
-		__kill_instance(client);
+		if (!client->ref) {
+			HASH_DEL(sdata->stratum_instances, client);
+			__kill_instance(client);
+		} else
+			client->dropped = true;
 		kills++;
 		sprintf(buf, "dropclient=%"PRId64, client->id);
 		send_proc(ckp->connector, buf);
