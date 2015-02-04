@@ -182,7 +182,6 @@ struct ckpool_instance {
 	char **proxyurl;
 	char **proxyauth;
 	char **proxypass;
-	server_instance_t *btcdbackup;
 
 	/* Private data for each process */
 	void *data;

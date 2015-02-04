@@ -1556,14 +1556,7 @@ retry:
 	} else if (cmdmatch(buf, "reconnect")) {
 		goto reconnect;
 	} else if (cmdmatch(buf, "submitblock:")) {
-		if (ckp->btcdbackup) {
-			LOGWARNING("Submitting block data locally!");
-			if (submit_block(&ckp->btcdbackup->cs, buf + 12))
-				LOGWARNING("Block accepted locally!");
-			else
-				LOGWARNING("Block rejected locally.");
-		} else
-			LOGNOTICE("No backup btcd to send block to ourselves");
+		LOGNOTICE("Submitting likely block solve share to upstream pool");
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ping")) {
@@ -1615,41 +1608,6 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 	return ret;
 }
 
-static bool alive_btcd(server_instance_t *si)
-{
-	connsock_t *cs = &si->cs;
-	char *userpass = NULL;
-	gbtbase_t gbt;
-
-	if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
-		LOGWARNING("Failed to extract address from btcd %s", si->url);
-		return false;
-	}
-	userpass = strdup(si->auth);
-	realloc_strcat(&userpass, ":");
-	realloc_strcat(&userpass, si->pass);
-	cs->auth = http_base64(userpass);
-	dealloc(userpass);
-	if (!cs->auth) {
-		LOGWARNING("Failed to create base64 auth from btcd %s", userpass);
-		return false;
-	}
-	if (cs->fd < 0) {
-		LOGWARNING("Failed to connect socket to btcd %s:%s !", cs->url, cs->port);
-		return false;
-	}
-	keep_sockalive(cs->fd);
-	/* Test we can authorise by getting a gbt, but we won't be using it. */
-	memset(&gbt, 0, sizeof(gbtbase_t));
-	if (!gen_gbtbase(cs, &gbt)) {
-		LOGINFO("Failed to get test block template from btcd %s:%s!",
-			cs->url, cs->port);
-		return false;
-	}
-	clear_gbtbase(&gbt);
-	return true;
-}
-
 static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
 	proxy_instance_t *proxi;
@@ -1674,23 +1632,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		proxi->cs = &si->cs;
 		mutex_init(&proxi->notify_lock);
 		mutex_init(&proxi->share_lock);
-	}
-
-	if (ckp->btcds) {
-		/* If we also have btcds set up in proxy mode, try to talk to
-		 * one of them as a way to submit blocks if we find them when
-		 * submitting them upstream. */
-		si = ckp->btcdbackup = ckzalloc(sizeof(server_instance_t));
-		si->url = ckp->btcdurl[0];
-		si->auth = ckp->btcdauth[0];
-		si->pass = ckp->btcdpass[0];
-		if (alive_btcd(si))
-			LOGNOTICE("Backup btcd %s:%s alive", si->cs.url, si->cs.port);
-		else {
-			LOGNOTICE("Backup btcd %s:%s failed!", si->cs.url, si->cs.port);
-			ckp->btcdbackup = NULL;
-			free(si);
-		}
 	}
 
 	LOGWARNING("%s generator ready", ckp->name);
