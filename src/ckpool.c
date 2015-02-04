@@ -979,7 +979,7 @@ bool json_get_int64(int64_t *store, const json_t *val, const char *res)
 		goto out;
 	}
 	*store = json_integer_value(entry);
-	LOGDEBUG("Json found entry %s: %ld", res, *store);
+	LOGDEBUG("Json found entry %s: %"PRId64, res, *store);
 	ret = true;
 out:
 	return ret;
