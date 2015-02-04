@@ -22,7 +22,6 @@
 #include "utlist.h"
 
 #define MAX_MSGSIZE 1024
-#define SOI (sizeof(int))
 
 struct client_instance {
 	/* For clients hashtable */
