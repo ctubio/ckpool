@@ -413,12 +413,14 @@ void *receiver(void *arg)
 		while (unlikely(!cdata->accept))
 			cksleep_ms(100);
 		ret = epoll_wait(epfd, &event, 1, 1000);
-		if (unlikely(ret == -1)) {
-			LOGEMERG("FATAL: Failed to epoll_wait in receiver");
-			break;
-		}
-		if (unlikely(!ret))
+		if (unlikely(ret < 1)) {
+			if (unlikely(ret == -1)) {
+				LOGEMERG("FATAL: Failed to epoll_wait in receiver");
+				break;
+			}
+			/* Nothing to service, still very unlikely */
 			continue;
+		}
 		if (event.data.u64 < (uint64_t)serverfds) {
 			ret = accept_client(cdata, epfd, event.data.u64);
 			if (unlikely(ret < 0)) {
