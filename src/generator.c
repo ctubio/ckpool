@@ -1673,6 +1673,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		proxi->ckp = ckp;
 		proxi->cs = &si->cs;
 		mutex_init(&proxi->notify_lock);
+		mutex_init(&proxi->share_lock);
 	}
 
 	if (ckp->btcds) {
