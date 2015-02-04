@@ -380,8 +380,10 @@ reparse:
 void *receiver(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
+	bool dropped_backlog = false;
 	struct epoll_event event;
 	uint64_t serverfds, i;
+	time_t start_t;
 	int ret, epfd;
 
 	rename_proc("creceiver");
@@ -403,17 +405,25 @@ void *receiver(void *arg)
 			LOGEMERG("FATAL: Failed to add epfd %d to epoll_ctl", epfd);
 			return NULL;
 		}
-		/* When we first start we listen to as many connections as
-		 * possible. Once we start polling we drop the listen to the
-		 * minimum to effectively ratelimit how fast we can receive
-		 * connections. */
-		LOGDEBUG("Dropping listen backlog to 0");
-		listen(cdata->serverfd[i], 0);
 	}
+
+	while (!cdata->accept)
+		cksleep_ms(1);
+	start_t = time(NULL);
 
 	while (42) {
 		client_instance_t *client;
 
+		if (unlikely(!dropped_backlog && time(NULL) - start_t > 90)) {
+			/* When we first start we listen to as many connections
+			 * as possible. After the first minute we drop the
+			 * listen to the minimum to effectively ratelimit how
+			 * fast we can receive new connections. */
+			dropped_backlog = true;
+			LOGNOTICE("Dropping server listen backlog to 0");
+			for (i = 0; i < serverfds; i++)
+				listen(cdata->serverfd[i], 0);
+		}
 		while (unlikely(!cdata->accept))
 			cksleep_ms(10);
 		ret = epoll_wait(epfd, &event, 1, 1000);
