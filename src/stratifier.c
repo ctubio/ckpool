@@ -927,6 +927,15 @@ static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 	__kill_instance(client);
 }
 
+/* Removes a client instance we know is on the stratum_instances list and from
+ * the user client list if it's been placed on it */
+static void __del_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
+{
+	HASH_DEL(sdata->stratum_instances, client);
+	if (user)
+		DL_DELETE(user->clients, client);
+}
+
 static void drop_allclients(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
@@ -936,13 +945,15 @@ static void drop_allclients(ckpool_t *ckp)
 
 	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		int64_t client_id = client->id;
+
 		if (!client->ref) {
-			HASH_DEL(sdata->stratum_instances, client);
+			__del_client(sdata, client, client->user_instance);
 			__kill_instance(client);
 		} else
 			client->dropped = true;
 		kills++;
-		sprintf(buf, "dropclient=%"PRId64, client->id);
+		sprintf(buf, "dropclient=%"PRId64, client_id);
 		send_proc(ckp->connector, buf);
 	}
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
@@ -1202,9 +1213,7 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 	stratum_instance_t *old_client = NULL;
 	int ret;
 
-	HASH_DEL(sdata->stratum_instances, client);
-	if (user)
-		DL_DELETE(user->clients, client);
+	__del_client(sdata, client, user);
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
