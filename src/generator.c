@@ -1747,7 +1747,7 @@ static void server_watchdog(ckpool_t *ckp, server_instance_t *cursi)
 	last_t = now_t;
 
 	/* Is this the highest priority server already? */
-	if (cursi == ckp->servers[0])
+	if (cursi == ckp->servers[ckp->chosen_server])
 		return;
 
 	if (ckp->proxy)
