@@ -65,6 +65,14 @@ struct connsock {
 
 typedef struct connsock connsock_t;
 
+typedef struct char_entry char_entry_t;
+
+struct char_entry {
+	char_entry_t *next;
+	char_entry_t *prev;
+	char *buf;
+};
+
 struct server_instance {
 	/* Hash table data */
 	UT_hash_handle hh;

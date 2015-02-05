@@ -374,14 +374,6 @@ struct json_entry {
 	json_t *val;
 };
 
-typedef struct char_entry char_entry_t;
-
-struct char_entry {
-	char_entry_t *next;
-	char_entry_t *prev;
-	char *buf;
-};
-
 /* Priority levels for generator messages */
 #define GEN_LAX 0
 #define GEN_NORMAL 1
