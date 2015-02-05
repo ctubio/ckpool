@@ -1475,16 +1475,16 @@ out:
 /* Cycle through the available proxies and find the first alive one */
 static proxy_instance_t *live_proxy(ckpool_t *ckp)
 {
+	int i, start_from = ckp->chosen_server;
 	proxy_instance_t *alive = NULL;
 	connsock_t *cs;
-	int i;
 
 	LOGDEBUG("Attempting to connect to proxy");
 retry:
 	if (!ping_main(ckp))
 		goto out;
 
-	for (i = ckp->chosen_server; i < ckp->proxies; i++) {
+	for (i = start_from; i < ckp->proxies; i++) {
 		proxy_instance_t *proxi;
 		server_instance_t *si;
 
@@ -1499,13 +1499,13 @@ retry:
 	if (!alive) {
 		send_proc(ckp->connector, "reject");
 		send_proc(ckp->stratifier, "dropall");
-		if (!ckp->chosen_server) {
+		if (!start_from) {
 			LOGWARNING("Failed to connect to any servers as proxy, retrying in 5s!");
 			sleep(5);
 		}
 		goto retry;
 	}
-	ckp->chosen_server = 0;
+	start_from = 0;
 	cs = alive->cs;
 	LOGNOTICE("Connected to upstream server %s:%s as proxy%s", cs->url, cs->port,
 		  ckp->passthrough ? " in passthrough mode" : "");
