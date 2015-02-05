@@ -895,6 +895,7 @@ int connector(proc_instance_t *pi)
 			goto out;
 		}
 		cdata->serverfd[0] = sockd;
+		ckp->serverurls = 1;
 	} else {
 		for (i = 0; i < ckp->serverurls; i++) {
 			char oldurl[INET6_ADDRSTRLEN], oldport[8];
