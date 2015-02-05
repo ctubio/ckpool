@@ -554,7 +554,7 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 retry:
 	parsed = true;
 	if (!(buf = new_proxy_line(cs))) {
-		LOGWARNING("Proxy %d:%s failed to receive line in parse_subscribe",
+		LOGNOTICE("Proxy %d:%s failed to receive line in parse_subscribe",
 			   proxi->id, proxi->si->url);
 		goto out;
 	}
@@ -587,8 +587,8 @@ retry:
 			buf = NULL;
 			goto retry;
 		}
-		LOGWARNING("Proxy %d:%s failed to parse subscribe response in parse_subscribe",
-			   proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%s failed to parse subscribe response in parse_subscribe",
+			  proxi->id, proxi->si->url);
 		goto out;
 	}
 
@@ -631,9 +631,11 @@ retry:
 		goto out;
 	}
 	if (size == 3 || (size == 4 && proxi->ckp->clientsvspeed))
-		LOGWARNING("Nonce2 length %d means proxied clients can't be >5TH each", size);
+		LOGWARNING("Proxy %d:%s Nonce2 length %d means proxied clients can't be >5TH each",
+			   proxi->id, proxi->si->url, size);
 	else if (size < 3) {
-		LOGWARNING("Nonce2 length %d too small to be able to proxy", size);
+		LOGWARNING("Proxy %d:%s Nonce2 length %d too small to be able to proxy",
+			   proxi->id, proxi->si->url, size);
 		goto out;
 	}
 	proxi->nonce2len = size;
@@ -677,7 +679,7 @@ retry:
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
-		LOGWARNING("Proxy %d:%s failed to send message in subscribe_stratum",
+		LOGNOTICE("Proxy %d:%s failed to send message in subscribe_stratum",
 			   proxi->id, proxi->si->url);
 		goto out;
 	}
@@ -686,23 +688,23 @@ retry:
 		goto out;
 
 	if (proxi->no_params) {
-		LOGWARNING("Proxy %d:%s failed all subscription options in subscribe_stratum",
+		LOGNOTICE("Proxy %d:%s failed all subscription options in subscribe_stratum",
 			   proxi->id, proxi->si->url);
 		goto out;
 	}
 	if (proxi->sessionid) {
-		LOGNOTICE("Proxy %d:%s failed sessionid reconnect in subscribe_stratum, retrying without",
-			  proxi->id, proxi->si->url);
+		LOGINFO("Proxy %d:%s failed sessionid reconnect in subscribe_stratum, retrying without",
+			proxi->id, proxi->si->url);
 		proxi->no_sessionid = true;
 		dealloc(proxi->sessionid);
 	} else {
-		LOGNOTICE("Proxy %d:%s failed connecting with parameters in subscribe_stratum, retrying without",
-			  proxi->id, proxi->si->url);
+		LOGINFO("Proxy %d:%s failed connecting with parameters in subscribe_stratum, retrying without",
+			proxi->id, proxi->si->url);
 		proxi->no_params = true;
 	}
 	ret = connect_proxy(cs);
 	if (!ret) {
-		LOGWARNING("Proxy %d:%s failed to reconnect in subscribe_stratum",
+		LOGNOTICE("Proxy %d:%s failed to reconnect in subscribe_stratum",
 			   proxi->id, proxi->si->url);
 		goto out;
 	}
@@ -1046,7 +1048,8 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
-		LOGWARNING("Failed to send message in auth_stratum");
+		LOGNOTICE("Proxy %d:%s failed to send message in auth_stratum",
+			  proxi->id, proxi->si->url);
 		Close(cs->fd);
 		goto out;
 	}
@@ -1057,7 +1060,8 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		free(buf);
 		buf = next_proxy_line(cs, proxi);
 		if (!buf) {
-			LOGWARNING("Failed to receive line in auth_stratum");
+			LOGNOTICE("Proxy %d:%s failed to receive line in auth_stratum",
+				  proxi->id, proxi->si->url);
 			ret = false;
 			goto out;
 		}
@@ -1066,25 +1070,28 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 
 	val = json_msg_result(buf, &res_val, &err_val);
 	if (!val) {
-		LOGWARNING("Failed to get a json result in auth_stratum, got: %s", buf);
+		LOGWARNING("Proxy %d:%s failed to get a json result in auth_stratum, got: %s",
+			   proxi->id, proxi->si->url, buf);
 		goto out;
 	}
 
 	if (err_val && !json_is_null(err_val)) {
-		LOGWARNING("Failed to authorise in auth_stratum due to err_val, got: %s", buf);
+		LOGWARNING("Proxy %d:%s failed to authorise in auth_stratum due to err_val, got: %s",
+			   proxi->id, proxi->si->url, buf);
 		goto out;
 	}
 	if (res_val) {
 		ret = json_is_true(res_val);
 		if (!ret) {
-			LOGWARNING("Failed to authorise in auth_stratum");
+			LOGWARNING("Proxy %d:%s failed to authorise in auth_stratum",
+				   proxi->id, proxi->si->url);
 			goto out;
 		}
 	} else {
 		/* No result and no error but successful val means auth success */
 		ret = true;
 	}
-	LOGINFO("Auth success in auth_stratum");
+	LOGINFO("Proxy %d:%s auth success in auth_stratum", proxi->id, proxi->si->url);
 out:
 	if (val)
 		json_decref(val);
@@ -1461,8 +1468,8 @@ static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *
 	/* Test we can connect, authorise and get stratum information */
 	if (!subscribe_stratum(cs, proxi)) {
 		if (!pinging) {
-			LOGINFO("Failed initial subscribe to %s:%s !",
-				cs->url, cs->port);
+			LOGWARNING("Failed initial subscribe to %s:%s !",
+				   cs->url, cs->port);
 		}
 		goto out;
 	}
