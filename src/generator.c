@@ -549,7 +549,8 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 retry:
 	parsed = true;
 	if (!(buf = new_proxy_line(cs))) {
-		LOGWARNING("Failed to receive line in parse_subscribe");
+		LOGWARNING("Proxy %d:%s failed to receive line in parse_subscribe",
+			   proxi->id, proxi->si->url);
 		goto out;
 	}
 	LOGDEBUG("parse_subscribe received %s", buf);
@@ -581,7 +582,8 @@ retry:
 			buf = NULL;
 			goto retry;
 		}
-		LOGWARNING("Failed to parse subscribe response in parse_subscribe");
+		LOGWARNING("Proxy %d:%s failed to parse subscribe response in parse_subscribe",
+			   proxi->id, proxi->si->url);
 		goto out;
 	}
 
@@ -623,7 +625,7 @@ retry:
 		LOGWARNING("Invalid nonce2len %d in parse_subscribe", size);
 		goto out;
 	}
-	if (size == 3)
+	if (size == 3 || (size == 4 && proxi->ckp->clientsvspeed))
 		LOGWARNING("Nonce2 length %d means proxied clients can't be >5TH each", size);
 	else if (size < 3) {
 		LOGWARNING("Nonce2 length %d too small to be able to proxy", size);
@@ -670,7 +672,8 @@ retry:
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
-		LOGWARNING("Failed to send message in subscribe_stratum");
+		LOGWARNING("Proxy %d:%s failed to send message in subscribe_stratum",
+			   proxi->id, proxi->si->url);
 		goto out;
 	}
 	ret = parse_subscribe(cs, proxi);
@@ -678,20 +681,24 @@ retry:
 		goto out;
 
 	if (proxi->no_params) {
-		LOGWARNING("Failed all subscription options in subscribe_stratum");
+		LOGWARNING("Proxy %d:%s failed all subscription options in subscribe_stratum",
+			   proxi->id, proxi->si->url);
 		goto out;
 	}
 	if (proxi->sessionid) {
-		LOGNOTICE("Failed sessionid reconnect in subscribe_stratum, retrying without");
+		LOGNOTICE("Proxy %d:%s failed sessionid reconnect in subscribe_stratum, retrying without",
+			  proxi->id, proxi->si->url);
 		proxi->no_sessionid = true;
 		dealloc(proxi->sessionid);
 	} else {
-		LOGNOTICE("Failed connecting with parameters in subscribe_stratum, retrying without");
+		LOGNOTICE("Proxy %d:%s failed connecting with parameters in subscribe_stratum, retrying without",
+			  proxi->id, proxi->si->url);
 		proxi->no_params = true;
 	}
 	ret = connect_proxy(cs);
 	if (!ret) {
-		LOGWARNING("Failed to reconnect in subscribe_stratum");
+		LOGWARNING("Proxy %d:%s failed to reconnect in subscribe_stratum",
+			   proxi->id, proxi->si->url);
 		goto out;
 	}
 	goto retry;
