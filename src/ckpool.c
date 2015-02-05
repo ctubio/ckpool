@@ -822,7 +822,6 @@ static void launch_process(proc_instance_t *pi)
 		sigaction(SIGUSR1, &handler, NULL);
 		sigaction(SIGTERM, &handler, NULL);
 		signal(SIGINT, SIG_IGN);
-		signal(SIGQUIT, SIG_IGN);
 
 		rename_proc(pi->processname);
 		write_namepid(pi);
