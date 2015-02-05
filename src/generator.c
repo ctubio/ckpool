@@ -1079,11 +1079,13 @@ out:
 	if (ret) {
 		/* Now parse any cached responses so there are none in the
 		 * queue and they can be managed one at a time from now on. */
-		do {
+		while(42) {
 			dealloc(buf);
 			buf = cached_proxy_line(proxi);
+			if (!buf)
+				break;
 			parse_method(proxi, buf);
-		} while (buf);
+		};
 	}
 	return ret;
 }
