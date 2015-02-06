@@ -1116,29 +1116,57 @@ out:
 	return ret;
 }
 
-static void send_subscribe(proxy_instance_t *proxi, int *sockd)
+static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 {
+	proxy_instance_t *proxi;
+
+	mutex_lock(&gdata->lock);
+	HASH_FIND_INT(gdata->proxies, &id, proxi);
+	mutex_unlock(&gdata->lock);
+
+	return proxi;
+}
+
+static void send_subscribe(gdata_t *gdata, proxy_instance_t *cproxy, int *sockd, const char *buf)
+{
+	proxy_instance_t *proxi;
 	json_t *json_msg;
+	int id = 0;
 	char *msg;
 
-	JSON_CPACK(json_msg, "{sisssi}",
+	sscanf(buf, "getsubscribe=%d", &id);
+	proxi = proxy_by_id(gdata, id);
+	if (unlikely(!proxi || !proxi->nonce2len)) {
+		ASPRINTF(&msg, "notready");
+		goto out_send;
+	}
+	JSON_CPACK(json_msg, "{sisssisb}",
 			     "proxy", proxi->id,
 			     "enonce1", proxi->enonce1,
-			     "nonce2len", proxi->nonce2len);
+			     "nonce2len", proxi->nonce2len,
+			     "reconnect", proxi == cproxy ? true : false);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
+out_send:
 	send_unix_msg(*sockd, msg);
 	free(msg);
 	_Close(sockd);
 }
 
-static void send_notify(proxy_instance_t *proxi, int *sockd)
+static void send_notify(gdata_t *gdata, int *sockd, const char *buf)
 {
 	json_t *json_msg, *merkle_arr;
+	proxy_instance_t *proxi;
 	notify_instance_t *ni;
+	int i, id = 0;
 	char *msg;
-	int i;
 
+	sscanf(buf, "getnotify=%d", &id);
+	proxi = proxy_by_id(gdata, id);
+	if (unlikely(!proxi)) {
+		ASPRINTF(&msg, "notready");
+		goto out_send;
+	}
 	merkle_arr = json_array();
 
 	mutex_lock(&proxi->notify_lock);
@@ -1618,7 +1646,9 @@ reconnect:
 			LOGWARNING("Successfully connected to %s:%s as proxy",
 				cs->url, cs->port);
 			/* Sending subscribe implies stratifier will also do a notify */
-			send_proc(ckp->stratifier, "subscribe");
+			dealloc(buf);
+			ASPRINTF(&buf, "subscribe=%d", proxi->id);
+			send_proc(ckp->stratifier, buf);
 			proxi->notified = false;
 		}
 	}
@@ -1656,9 +1686,9 @@ retry:
 		ret = 0;
 		goto out;
 	} else if (cmdmatch(buf, "getsubscribe")) {
-		send_subscribe(proxi, &sockd);
+		send_subscribe(gdata, proxi, &sockd, buf);
 	} else if (cmdmatch(buf, "getnotify")) {
-		send_notify(proxi, &sockd);
+		send_notify(gdata, &sockd, buf);
 	} else if (cmdmatch(buf, "getdiff")) {
 		send_diff(proxi, &sockd);
 	} else if (cmdmatch(buf, "reconnect")) {

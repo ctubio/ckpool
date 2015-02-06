@@ -1006,24 +1006,32 @@ static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 	return proxy;
 }
 
-static void update_notify(ckpool_t *ckp);
 static void reconnect_clients(sdata_t *sdata, const char *cmd);
+static void _update_notify(ckpool_t *ckp, const int id);
 
-static void update_subscribe(ckpool_t *ckp)
+static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data;
+	bool reconnect = true;
+	char *buf, *msg;
 	proxy_t *proxy;
 	json_t *val;
 	int id = 0;
-	char *buf;
 
-	buf = send_recv_proc(ckp->generator, "getsubscribe");
+	sscanf(cmd, "subscribe=%d", &id);
+	ASPRINTF(&msg, "getsubscribe=%d", id);
+	buf = send_recv_proc(ckp->generator, msg);
+	dealloc(msg);
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get subscribe from generator in update_subscribe");
 		drop_allclients(ckp);
 		return;
 	}
 	LOGDEBUG("Update subscribe: %s", buf);
+	if (unlikely(!safecmp(buf, "notready"))) {
+		LOGNOTICE("Generator not ready to send subscribe for proxy %d", id);
+		return;
+	}
 	val = json_loads(buf, 0, NULL);
 	free(buf);
 	if (unlikely(!val)) {
@@ -1031,8 +1039,8 @@ static void update_subscribe(ckpool_t *ckp)
 		return;
 	}
 
-	json_get_int(&id, val, "proxy");
 	proxy = proxy_by_id(sdata, id);
+	json_get_bool(&reconnect, val, "reconnect");
 
 	mutex_lock(&sdata->proxy_lock);
 	if (sdata->proxy != proxy)
@@ -1070,12 +1078,13 @@ static void update_subscribe(ckpool_t *ckp)
 
 	json_decref(val);
 	/* Notify implied required now too */
-	update_notify(ckp);
-	reconnect_clients(sdata, "");
+	_update_notify(ckp, id);
+	if (reconnect)
+		reconnect_clients(sdata, "");
 }
 
 static void update_diff(ckpool_t *ckp);
-
+#if 0
 static proxy_t *current_proxy(sdata_t *sdata)
 {
 	proxy_t *proxy;
@@ -1086,31 +1095,34 @@ static proxy_t *current_proxy(sdata_t *sdata)
 
 	return proxy;
 }
+#endif
 
-static void update_notify(ckpool_t *ckp)
+static void _update_notify(ckpool_t *ckp, const int id)
 {
 	bool new_block = false, clean;
 	sdata_t *sdata = ckp->data;
 	char header[228];
+	char *buf, *msg;
 	proxy_t *proxy;
 	workbase_t *wb;
 	json_t *val;
-	char *buf;
 	int i;
 
-	buf = send_recv_proc(ckp->generator, "getnotify");
+	proxy = proxy_by_id(sdata, id);
+	if (unlikely(!proxy->subscribed)) {
+		LOGINFO("No valid proxy subscription to update notify yet");
+		return;
+	}
+
+	ASPRINTF(&msg, "getnotify=%d", id);
+	buf = send_recv_proc(ckp->generator, msg);
+	dealloc(msg);
 	if (unlikely(!buf)) {
 		LOGWARNING("Failed to get notify from generator in update_notify");
 		return;
 	}
 	if (unlikely(!safecmp(buf, "notready"))) {
 		LOGNOTICE("Generator not ready to send notify to stratifier");
-		return;
-	}
-
-	proxy = current_proxy(sdata);
-	if (unlikely(!proxy || !proxy->subscribed)) {
-		LOGINFO("No valid proxy subscription to update notify yet");
 		return;
 	}
 
@@ -1171,6 +1183,14 @@ static void update_notify(ckpool_t *ckp)
 	add_base(ckp, wb, &new_block);
 
 	stratum_broadcast_update(sdata, new_block | clean);
+}
+
+static void update_notify(ckpool_t *ckp, const char *cmd)
+{
+	int id = 0;
+
+	sscanf(cmd, "notify=%d", &id);
+	_update_notify(ckp, id);
 }
 
 static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
@@ -1866,10 +1886,10 @@ retry:
 		update_base(ckp, GEN_PRIORITY);
 	} else if (cmdmatch(buf, "subscribe")) {
 		/* Proxifier has a new subscription */
-		update_subscribe(ckp);
+		update_subscribe(ckp, buf);
 	} else if (cmdmatch(buf, "notify")) {
 		/* Proxifier has a new notify ready */
-		update_notify(ckp);
+		update_notify(ckp, buf);
 	} else if (cmdmatch(buf, "diff")) {
 		update_diff(ckp);
 	} else if (cmdmatch(buf, "dropclient")) {

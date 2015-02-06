@@ -1024,7 +1024,7 @@ out:
 	return ret;
 }
 
-static bool json_get_bool(bool *store, const json_t *val, const char *res)
+bool json_get_bool(bool *store, const json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
 	bool ret = false;
