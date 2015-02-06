@@ -1103,6 +1103,10 @@ static void update_notify(ckpool_t *ckp)
 		LOGWARNING("Failed to get notify from generator in update_notify");
 		return;
 	}
+	if (unlikely(!safecmp(buf, "notready"))) {
+		LOGNOTICE("Generator not ready to send notify to stratifier");
+		return;
+	}
 
 	proxy = current_proxy(sdata);
 	if (unlikely(!proxy || !proxy->subscribed)) {

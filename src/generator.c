@@ -1145,7 +1145,8 @@ static void send_notify(proxy_instance_t *proxi, int *sockd)
 	ni = proxi->current_notify;
 	if (unlikely(!ni)) {
 		mutex_unlock(&proxi->notify_lock);
-		goto out_close;
+		ASPRINTF(&msg, "notready");
+		goto out_send;
 	}
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
@@ -1160,9 +1161,9 @@ static void send_notify(proxy_instance_t *proxi, int *sockd)
 
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
+out_send:
 	send_unix_msg(*sockd, msg);
 	free(msg);
-out_close:
 	_Close(sockd);
 }
 
