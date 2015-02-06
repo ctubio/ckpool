@@ -1633,6 +1633,7 @@ retry:
 
 	if (unlikely(proxi->cs->fd < 0)) {
 		LOGWARNING("Upstream socket invalidated, will attempt failover");
+		proxi = NULL;
 		goto reconnect;
 	}
 
