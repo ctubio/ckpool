@@ -1334,11 +1334,13 @@ static void *proxy_send(void *arg)
 			ret = send_json_msg(cs, val);
 			json_decref(val);
 		} else
-			LOGWARNING("Failed to find matching jobid in proxysend");
+			LOGNOTICE("Proxy %d:%s failed to find matching jobid in proxysend",
+				  proxi->id, proxi->si->url);
 		json_decref(msg->json_msg);
 		free(msg);
 		if (!ret && cs->fd > 0) {
-			LOGWARNING("Failed to send msg in proxy_send, dropping to reconnect");
+			LOGWARNING("Proxy %d:%s failed to send msg in proxy_send, dropping to reconnect",
+				   proxi->id, proxi->si->url);
 			Close(cs->fd);
 		}
 	}
