@@ -1483,7 +1483,7 @@ static void *passthrough_recv(void *arg)
 	return NULL;
 }
 
-static proxy_instance_t *current_proxy(ckpool_t *ckp, gdata_t *gdata);
+static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata);
 
 /* For receiving messages from the upstream proxy, also responsible for setting
  * up the connection and testing it's alive. */
@@ -1520,7 +1520,7 @@ static void *proxy_recv(void *arg)
 		}
 		/* Wait 90 seconds before declaring this upstream pool alive
 		 * to prevent switching to unstable pools. */
-		if (!proxi->alive && (!current_proxy(ckp, ckp->data) ||
+		if (!proxi->alive && (!best_proxy(ckp, ckp->data) ||
 		    time(NULL) - proxi->reconnect_time > 90)) {
 			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->si->url);
 			proxi->alive = true;
@@ -1625,7 +1625,7 @@ static void setup_proxies(ckpool_t *ckp, gdata_t *gdata)
 	}
 }
 
-static proxy_instance_t *current_proxy(ckpool_t *ckp, gdata_t *gdata)
+static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata)
 {
 	proxy_instance_t *ret = NULL, *proxi, *tmp;
 
@@ -1668,7 +1668,7 @@ static int proxy_loop(proc_instance_t *pi)
 reconnect:
 	/* This does not necessarily mean we reconnect, but a change has
 	 * occurred and we need to reexamine the proxies. */
-	cproxy = current_proxy(ckp, gdata);
+	cproxy = best_proxy(ckp, gdata);
 	if (!cproxy)
 		goto out;
 	if (proxi != cproxy) {
