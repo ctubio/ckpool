@@ -1520,6 +1520,7 @@ static void *proxy_recv(void *arg)
 		 * to prevent switching to unstable pools. */
 		if (!proxi->alive && (!current_proxy(ckp, ckp->data) ||
 		    time(NULL) - proxi->reconnect_time > 90)) {
+			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->si->url);
 			proxi->alive = true;
 			proxi->reconnect_time = 0;
 			send_proc(ckp->generator, "reconnect");
