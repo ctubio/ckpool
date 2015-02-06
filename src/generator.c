@@ -1562,8 +1562,10 @@ static void *proxy_recv(void *arg)
 		} while (ret == 0 && ++retries < 120);
 
 		if (ret < 1) {
-			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
-				   proxi->id, proxi->si->url);
+			if (proxi->alive) {
+				LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
+					   proxi->id, proxi->si->url);
+			}
 			continue;
 		}
 		if (parse_method(proxi, cs->buf)) {
