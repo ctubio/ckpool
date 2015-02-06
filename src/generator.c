@@ -98,7 +98,6 @@ struct proxy_instance {
 	double diff;
 	tv_t last_share;
 
-	int msg_id; /* Message id for sending stratum messages */
 	bool no_sessionid; /* Doesn't support session id resume on subscribe */
 	bool no_params; /* Doesn't want any parameters on subscribe */
 
@@ -660,19 +659,19 @@ retry:
 	/* Attempt to reconnect if the pool supports resuming */
 	if (proxi->sessionid) {
 		JSON_CPACK(req, "{s:i,s:s,s:[s,s]}",
-				"id", proxi->msg_id++,
+				"id", 0,
 				"method", "mining.subscribe",
 				"params", PACKAGE"/"VERSION, proxi->sessionid);
 	/* Then attempt to connect with just the client description */
 	} else if (!proxi->no_params) {
 		JSON_CPACK(req, "{s:i,s:s,s:[s]}",
-				"id", proxi->msg_id++,
+				"id", 0,
 				"method", "mining.subscribe",
 				"params", PACKAGE"/"VERSION);
 	/* Then try without any parameters */
 	} else {
 		JSON_CPACK(req, "{s:i,s:s,s:[]}",
-				"id", proxi->msg_id++,
+				"id", 0,
 				"method", "mining.subscribe",
 				"params");
 	}
@@ -1042,7 +1041,7 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	bool ret;
 
 	JSON_CPACK(req, "{s:i,s:s,s:[s,s]}",
-			"id", proxi->msg_id++,
+			"id", 42,
 			"method", "mining.authorize",
 			"params", proxi->auth, proxi->pass);
 	ret = send_json_msg(cs, req);
