@@ -1367,18 +1367,6 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 	ckmsgq_add(proxi->passsends, pm);
 }
 
-static int current_proxy_id(gdata_t *gdata)
-{
-	int ret = 0;
-
-	mutex_lock(&gdata->lock);
-	if (gdata->proxy)
-		ret = gdata->proxy->id;
-	mutex_unlock(&gdata->lock);
-
-	return ret;
-}
-
 static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
 			connsock_t *cs, bool pinging)
 {
@@ -1428,17 +1416,12 @@ out:
 		/* Close and invalidate the file handle */
 		Close(cs->fd);
 	} else {
-		keep_sockalive(cs->fd);
-		/* If this isn't a new higher priority proxy we won't be
-		 * issuing a reconnect so tell the stratifier to get the
-		 * subscription and notification data without reconnecting. */
-		if (proxi->id > current_proxy_id(ckp->data)) {
-			char *msg;
+		char msg[128];
 
-			ASPRINTF(&msg, "subscribe=%d", proxi->id);
-			send_proc(ckp->stratifier, msg);
-			free(msg);
-		}
+		keep_sockalive(cs->fd);
+		snprintf(msg, 127, "subscribe=%d", proxi->id);
+		send_proc(ckp->stratifier, msg);
+		proxi->notified = false;
 	}
 	return ret;
 }
@@ -1672,11 +1655,7 @@ reconnect:
 			connsock_t *cs = proxi->cs;
 			LOGWARNING("Successfully connected to %s:%s as proxy",
 				cs->url, cs->port);
-			/* Sending subscribe implies stratifier will also do a notify */
-			dealloc(buf);
-			ASPRINTF(&buf, "subscribe=%d", proxi->id);
-			send_proc(ckp->stratifier, buf);
-			proxi->notified = false;
+			send_proc(ckp->stratifier, "reconnect");
 		}
 	}
 retry:
