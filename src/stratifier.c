@@ -1039,6 +1039,8 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		return;
 	}
 
+	LOGNOTICE("Got updated subscribe for proxy %d", id);
+
 	proxy = proxy_by_id(sdata, id);
 	json_get_bool(&reconnect, val, "reconnect");
 
@@ -1121,12 +1123,13 @@ static void _update_notify(ckpool_t *ckp, const int id)
 		LOGWARNING("Failed to get notify from generator in update_notify");
 		return;
 	}
+	LOGDEBUG("Update notify: %s", buf);
 	if (unlikely(!safecmp(buf, "notready"))) {
 		LOGNOTICE("Generator not ready to send notify to stratifier");
 		return;
 	}
 
-	LOGDEBUG("Update notify: %s", buf);
+	LOGINFO("Got updated notify for proxy %d", id);
 	wb = ckzalloc(sizeof(workbase_t));
 	val = json_loads(buf, 0, NULL);
 	dealloc(buf);
