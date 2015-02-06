@@ -1009,6 +1009,17 @@ static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 static void reconnect_clients(sdata_t *sdata, const char *cmd);
 static void _update_notify(ckpool_t *ckp, const int id);
 
+static proxy_t *current_proxy(sdata_t *sdata)
+{
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = sdata->proxy;
+	mutex_unlock(&sdata->proxy_lock);
+
+	return proxy;
+}
+
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data;
@@ -1081,23 +1092,11 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_decref(val);
 	/* Notify implied required now too */
 	_update_notify(ckp, id);
-	if (reconnect)
+	if (reconnect || proxy == current_proxy(sdata))
 		reconnect_clients(sdata, "");
 }
 
 static void update_diff(ckpool_t *ckp);
-#if 0
-static proxy_t *current_proxy(sdata_t *sdata)
-{
-	proxy_t *proxy;
-
-	mutex_lock(&sdata->proxy_lock);
-	proxy = sdata->proxy;
-	mutex_unlock(&sdata->proxy_lock);
-
-	return proxy;
-}
-#endif
 
 static void _update_notify(ckpool_t *ckp, const int id)
 {
