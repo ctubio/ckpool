@@ -1113,7 +1113,9 @@ static void send_subscribe(proxy_instance_t *proxi, int *sockd)
 	json_t *json_msg;
 	char *msg;
 
-	JSON_CPACK(json_msg, "{sssi}", "enonce1", proxi->enonce1,
+	JSON_CPACK(json_msg, "{sisssi}",
+			     "proxy", proxi->id,
+			     "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
@@ -1140,7 +1142,7 @@ static void send_notify(proxy_instance_t *proxi, int *sockd)
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
-	JSON_CPACK(json_msg, "{si,ss,si,ss,ss,so,ss,ss,ss,sb}",
+	JSON_CPACK(json_msg, "{si,si,ss,si,ss,ss,so,ss,ss,ss,sb}", "proxy", proxi->id,
 			     "jobid", ni->id, "prevhash", ni->prevhash, "coinb1len", ni->coinb1len,
 			     "coinbase1", ni->coinbase1, "coinbase2", ni->coinbase2,
 			     "merklehash", merkle_arr, "bbversion", ni->bbversion,
@@ -1546,13 +1548,10 @@ out:
 	return alive;
 }
 
-static void kill_proxy(ckpool_t *ckp, proxy_instance_t *proxi)
+static void kill_proxy(proxy_instance_t *proxi)
 {
 	notify_instance_t *ni, *tmp;
 	connsock_t *cs;
-
-	send_proc(ckp->stratifier, "reconnect");
-	send_proc(ckp->connector, "reject");
 
 	if (!proxi) // This shouldn't happen
 		return;
@@ -1586,7 +1585,7 @@ static int proxy_loop(proc_instance_t *pi)
 
 reconnect:
 	if (proxi) {
-		kill_proxy(ckp, proxi);
+		kill_proxy(proxi);
 		reconnecting = true;
 	}
 	proxi = live_proxy(ckp);
@@ -1671,7 +1670,7 @@ retry:
 	Close(sockd);
 	goto retry;
 out:
-	kill_proxy(ckp, proxi);
+	kill_proxy(proxi);
 	Close(sockd);
 	return ret;
 }
