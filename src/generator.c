@@ -1472,6 +1472,7 @@ static void *passthrough_recv(void *arg)
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
 				   proxi->id, proxi->si->url);
 			proxi->alive = false;
+			send_proc(ckp->generator, "reconnect");
 			continue;
 		}
 		/* Simply forward the message on, as is, to the connector to
@@ -1561,7 +1562,6 @@ static void *proxy_recv(void *arg)
 		} while (ret == 0 && ++retries < 120);
 
 		if (ret < 1) {
-			/* Send ourselves a reconnect message */
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
 				   proxi->id, proxi->si->url);
 			continue;
@@ -1577,12 +1577,10 @@ static void *proxy_recv(void *arg)
 				proxi->diffed = false;
 			}
 			if (proxi->reconnect) {
-				proxi->alive = false;
 				proxi->reconnect = false;
 				LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 					   proxi->id, proxi->si->url);
 				Close(cs->fd);
-				send_proc(ckp->generator, "reconnect");
 				break;
 			}
 			continue;
@@ -1677,7 +1675,9 @@ reconnect:
 			connsock_t *cs = proxi->cs;
 			LOGWARNING("Successfully connected to %s:%s as proxy",
 				cs->url, cs->port);
-			send_proc(ckp->stratifier, "reconnect");
+			dealloc(buf);
+			ASPRINTF(&buf, "proxy=%d", proxi->id);
+			send_proc(ckp->stratifier, buf);
 		}
 	}
 retry:

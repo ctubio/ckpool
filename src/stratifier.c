@@ -987,21 +987,26 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 }
 
 /* Find proxy by id number, generate one if none exist yet by that id */
+static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
+{
+	proxy_t *proxy;
+
+	HASH_FIND_INT(sdata->proxies, &id, proxy);
+	if (unlikely(!proxy)) {
+		proxy = __generate_proxy(sdata, id);
+		LOGINFO("Stratifier added new proxy %d", id);
+	}
+
+	return proxy;
+}
+
 static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 {
-	bool new_proxy = false;
 	proxy_t *proxy;
 
 	mutex_lock(&sdata->proxy_lock);
-	HASH_FIND_INT(sdata->proxies, &id, proxy);
-	if (unlikely(!proxy)) {
-		new_proxy = true;
-		proxy = __generate_proxy(sdata, id);
-	}
+	proxy = __proxy_by_id(sdata, id);
 	mutex_unlock(&sdata->proxy_lock);
-
-	if (unlikely(new_proxy))
-		LOGINFO("Stratifier added new proxy %d", id);
 
 	return proxy;
 }
@@ -1055,11 +1060,6 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	proxy = proxy_by_id(sdata, id);
 	json_get_bool(&reconnect, val, "reconnect");
 
-	mutex_lock(&sdata->proxy_lock);
-	if (sdata->proxy != proxy)
-		sdata->proxy = proxy;
-	mutex_unlock(&sdata->proxy_lock);
-
 	ck_wlock(&sdata->workbase_lock);
 	proxy->subscribed = true;
 	proxy->diff = ckp->startdiff;
@@ -1092,7 +1092,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_decref(val);
 	/* Notify implied required now too */
 	_update_notify(ckp, id);
-	if (reconnect || proxy == current_proxy(sdata))
+	if (reconnect)
 		reconnect_clients(sdata, "");
 }
 
@@ -1112,6 +1112,10 @@ static void _update_notify(ckpool_t *ckp, const int id)
 	proxy = proxy_by_id(sdata, id);
 	if (unlikely(!proxy->subscribed)) {
 		LOGINFO("No valid proxy subscription to update notify yet");
+		return;
+	}
+	if (proxy != current_proxy(sdata)) {
+		LOGINFO("Notify from backup proxy");
 		return;
 	}
 
@@ -1809,6 +1813,22 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 	return buf;
 }
 
+/* Sets the currently active proxy */
+static void set_proxy(sdata_t *sdata, const char *buf)
+{
+	proxy_t *proxy;
+	int id = 0;
+
+	sscanf(buf, "proxy=%d", &id);
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __proxy_by_id(sdata, id);
+	sdata->proxy = proxy;
+	mutex_unlock(&sdata->proxy_lock);
+
+	reconnect_clients(sdata, "");
+}
+
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret = 0;
@@ -1915,6 +1935,8 @@ retry:
 		block_reject(sdata, buf + 8);
 	} else if (cmdmatch(buf, "reconnect")) {
 		reconnect_clients(sdata, buf);
+	} else if (cmdmatch(buf, "proxy")) {
+		set_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else
