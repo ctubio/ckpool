@@ -941,7 +941,7 @@ static void connector_drop_client(ckpool_t *ckp, const int64_t id)
 {
 	char buf[256];
 
-	LOGWARNING("Stratifier requesting connector drop client %"PRId64, id);
+	LOGDEBUG("Stratifier requesting connector drop client %"PRId64, id);
 	snprintf(buf, 255, "dropclient=%"PRId64, id);
 	send_proc(ckp->connector, buf);
 }
