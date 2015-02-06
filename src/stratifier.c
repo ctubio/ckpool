@@ -279,6 +279,25 @@ struct share {
 
 typedef struct share share_t;
 
+struct proxy_base {
+	UT_hash_handle hh;
+	int id;
+
+	double diff;
+
+	char enonce1[32];
+	uchar enonce1bin[16];
+	int enonce1constlen;
+	int enonce1varlen;
+
+	int nonce2len;
+	int enonce2varlen;
+
+	bool subscribed;
+};
+
+typedef struct proxy_base proxy_t;
+
 struct stratifier_data {
 	char pubkeytxnbin[25];
 	char donkeytxnbin[25];
@@ -349,19 +368,9 @@ struct stratifier_data {
 	/* Generator message priority */
 	int gen_priority;
 
-	struct {
-		double diff;
-
-		char enonce1[32];
-		uchar enonce1bin[16];
-		int enonce1constlen;
-		int enonce1varlen;
-
-		int nonce2len;
-		int enonce2varlen;
-
-		bool subscribed;
-	} proxy_base;
+	proxy_t *proxy; /* Current proxy in use */
+	proxy_t *proxies; /* Hashlist of all proxies */
+	pthread_mutex_t proxy_lock; /* Protects all proxy data */
 };
 
 typedef struct stratifier_data sdata_t;
@@ -978,33 +987,33 @@ static void update_subscribe(ckpool_t *ckp)
 	free(buf);
 
 	ck_wlock(&sdata->workbase_lock);
-	sdata->proxy_base.subscribed = true;
-	sdata->proxy_base.diff = ckp->startdiff;
+	sdata->proxy->subscribed = true;
+	sdata->proxy->diff = ckp->startdiff;
 	/* Length is checked by generator */
-	strcpy(sdata->proxy_base.enonce1, json_string_value(json_object_get(val, "enonce1")));
-	sdata->proxy_base.enonce1constlen = strlen(sdata->proxy_base.enonce1) / 2;
-	hex2bin(sdata->proxy_base.enonce1bin, sdata->proxy_base.enonce1, sdata->proxy_base.enonce1constlen);
-	sdata->proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
+	strcpy(sdata->proxy->enonce1, json_string_value(json_object_get(val, "enonce1")));
+	sdata->proxy->enonce1constlen = strlen(sdata->proxy->enonce1) / 2;
+	hex2bin(sdata->proxy->enonce1bin, sdata->proxy->enonce1, sdata->proxy->enonce1constlen);
+	sdata->proxy->nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
 	if (ckp->clientsvspeed) {
-		if (sdata->proxy_base.nonce2len > 5)
-			sdata->proxy_base.enonce1varlen = 4;
-		else if (sdata->proxy_base.nonce2len > 3)
-			sdata->proxy_base.enonce1varlen = 2;
+		if (sdata->proxy->nonce2len > 5)
+			sdata->proxy->enonce1varlen = 4;
+		else if (sdata->proxy->nonce2len > 3)
+			sdata->proxy->enonce1varlen = 2;
 		else
-			sdata->proxy_base.enonce1varlen = 1;
+			sdata->proxy->enonce1varlen = 1;
 	} else {
-		if (sdata->proxy_base.nonce2len > 7)
-			sdata->proxy_base.enonce1varlen = 4;
-		else if (sdata->proxy_base.nonce2len > 5)
-			sdata->proxy_base.enonce1varlen = 2;
+		if (sdata->proxy->nonce2len > 7)
+			sdata->proxy->enonce1varlen = 4;
+		else if (sdata->proxy->nonce2len > 5)
+			sdata->proxy->enonce1varlen = 2;
 		else
-			sdata->proxy_base.enonce1varlen = 1;
+			sdata->proxy->enonce1varlen = 1;
 	}
-	sdata->proxy_base.enonce2varlen = sdata->proxy_base.nonce2len - sdata->proxy_base.enonce1varlen;
+	sdata->proxy->enonce2varlen = sdata->proxy->nonce2len - sdata->proxy->enonce1varlen;
 	ck_wunlock(&sdata->workbase_lock);
 
 	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %lld",
-		  sdata->proxy_base.nonce2len, 1ll << (sdata->proxy_base.enonce1varlen * 8));
+		  sdata->proxy->nonce2len, 1ll << (sdata->proxy->enonce1varlen * 8));
 
 	json_decref(val);
 	drop_allclients(ckp);
@@ -1028,7 +1037,7 @@ static void update_notify(ckpool_t *ckp)
 		return;
 	}
 
-	if (unlikely(!sdata->proxy_base.subscribed)) {
+	if (unlikely(!sdata->proxy->subscribed)) {
 		LOGINFO("No valid proxy subscription to update notify yet");
 		return;
 	}
@@ -1079,12 +1088,12 @@ static void update_notify(ckpool_t *ckp)
 	update_diff(ckp);
 
 	ck_rlock(&sdata->workbase_lock);
-	strcpy(wb->enonce1const, sdata->proxy_base.enonce1);
-	wb->enonce1constlen = sdata->proxy_base.enonce1constlen;
-	memcpy(wb->enonce1constbin, sdata->proxy_base.enonce1bin, wb->enonce1constlen);
-	wb->enonce1varlen = sdata->proxy_base.enonce1varlen;
-	wb->enonce2varlen = sdata->proxy_base.enonce2varlen;
-	wb->diff = sdata->proxy_base.diff;
+	strcpy(wb->enonce1const, sdata->proxy->enonce1);
+	wb->enonce1constlen = sdata->proxy->enonce1constlen;
+	memcpy(wb->enonce1constbin, sdata->proxy->enonce1bin, wb->enonce1constlen);
+	wb->enonce1varlen = sdata->proxy->enonce1varlen;
+	wb->enonce2varlen = sdata->proxy->enonce2varlen;
+	wb->diff = sdata->proxy->diff;
 	ck_runlock(&sdata->workbase_lock);
 
 	add_base(ckp, wb, &new_block);
@@ -1125,8 +1134,8 @@ static void update_diff(ckpool_t *ckp)
 		diff = 1;
 
 	ck_wlock(&sdata->workbase_lock);
-	old_diff = sdata->proxy_base.diff;
-	sdata->current_workbase->diff = sdata->proxy_base.diff = diff;
+	old_diff = sdata->proxy->diff;
+	sdata->current_workbase->diff = sdata->proxy->diff = diff;
 	ck_wunlock(&sdata->workbase_lock);
 
 	if (old_diff < diff)
@@ -4330,6 +4339,7 @@ static void read_poolstats(ckpool_t *ckp)
 int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
+	proxy_t *proxy, *tmpproxy;
 	ckpool_t *ckp = pi->ckp;
 	int ret = 1, threads;
 	int64_t randomiser;
@@ -4399,6 +4409,13 @@ int stratifier(proc_instance_t *pi)
 	cklock_init(&sdata->workbase_lock);
 	if (!ckp->proxy)
 		create_pthread(&pth_blockupdate, blockupdate, ckp);
+	else {
+		/* Generate one proxy for now */
+		proxy = ckzalloc(sizeof(proxy_t));
+		mutex_init(&sdata->proxy_lock);
+		sdata->proxy = proxy;
+		HASH_ADD_INT(sdata->proxies, id, proxy);
+	}
 
 	mutex_init(&sdata->stats_lock);
 	create_pthread(&pth_statsupdate, statsupdate, ckp);
@@ -4410,6 +4427,14 @@ int stratifier(proc_instance_t *pi)
 
 	ret = stratum_loop(ckp, pi);
 out:
+	if (ckp->proxy) {
+		mutex_lock(&sdata->proxy_lock);
+		HASH_ITER(hh, sdata->proxies, proxy, tmpproxy) {
+			HASH_DEL(sdata->proxies, proxy);
+			dealloc(proxy);
+		}
+		mutex_unlock(&sdata->proxy_lock);
+	}
 	dealloc(ckp->data);
 	return process_exit(ckp, pi, ret);
 }
