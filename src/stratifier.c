@@ -1006,6 +1006,7 @@ static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 	return proxy;
 }
 
+static void update_notify(ckpool_t *ckp);
 static void reconnect_clients(sdata_t *sdata, const char *cmd);
 
 static void update_subscribe(ckpool_t *ckp)
@@ -1068,6 +1069,8 @@ static void update_subscribe(ckpool_t *ckp)
 		  proxy->nonce2len, 1ll << (proxy->enonce1varlen * 8));
 
 	json_decref(val);
+	/* Notify implied required now too */
+	update_notify(ckp);
 	reconnect_clients(sdata, "");
 }
 
