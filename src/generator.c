@@ -1485,6 +1485,17 @@ static void *passthrough_recv(void *arg)
 
 static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata);
 
+static proxy_instance_t *current_proxy(gdata_t *gdata)
+{
+	proxy_instance_t *ret;
+
+	mutex_lock(&gdata->lock);
+	ret = gdata->proxy;
+	mutex_unlock(&gdata->lock);
+
+	return ret;
+}
+
 /* For receiving messages from the upstream proxy, also responsible for setting
  * up the connection and testing it's alive. */
 static void *proxy_recv(void *arg)
@@ -1493,6 +1504,7 @@ static void *proxy_recv(void *arg)
 	server_instance_t *si = proxi->si;
 	connsock_t *cs = proxi->cs;
 	ckpool_t *ckp = proxi->ckp;
+	gdata_t *gdata = ckp->data;
 
 	rename_proc("proxyrecv");
 
@@ -1520,7 +1532,7 @@ static void *proxy_recv(void *arg)
 		}
 		/* Wait 90 seconds before declaring this upstream pool alive
 		 * to prevent switching to unstable pools. */
-		if (!proxi->alive && (!best_proxy(ckp, ckp->data) ||
+		if (!proxi->alive && (!best_proxy(ckp, gdata) ||
 		    time(NULL) - proxi->reconnect_time > 90)) {
 			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->si->url);
 			proxi->alive = true;
@@ -1569,7 +1581,7 @@ static void *proxy_recv(void *arg)
 			continue;
 		}
 		if (parse_method(proxi, cs->buf)) {
-			if (proxi->notified) {
+			if (proxi->notified && proxi == current_proxy(gdata)) {
 				snprintf(buf, 127, "notify=%d", proxi->id);
 				send_proc(ckp->stratifier, buf);
 				proxi->notified = false;
