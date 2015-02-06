@@ -1471,6 +1471,7 @@ static void *passthrough_recv(void *arg)
 		if (ret < 1) {
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
 				   proxi->id, proxi->si->url);
+			proxi->alive = false;
 			continue;
 		}
 		/* Simply forward the message on, as is, to the connector to
@@ -1576,9 +1577,11 @@ static void *proxy_recv(void *arg)
 				proxi->diffed = false;
 			}
 			if (proxi->reconnect) {
+				proxi->alive = false;
 				proxi->reconnect = false;
 				LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 					   proxi->id, proxi->si->url);
+				Close(cs->fd);
 				send_proc(ckp->generator, "reconnect");
 				break;
 			}
@@ -1689,6 +1692,7 @@ retry:
 
 	if (unlikely(proxi->cs->fd < 0)) {
 		LOGWARNING("Upstream socket invalidated, will attempt failover");
+		proxi->alive = false;
 		proxi = NULL;
 		goto reconnect;
 	}
