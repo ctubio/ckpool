@@ -952,6 +952,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->si = newsi;
 	newproxi->ckp = ckp;
 	newproxi->cs = &newsi->cs;
+	newproxi->cs->ckp = ckp;
 	newproxi->id = newsi->id;
 	HASH_ADD_INT(gdata->proxies, id, proxi);
 	HASH_ADD_INT(gdata->proxies, id, newproxi);
@@ -1468,7 +1469,8 @@ static void *passthrough_recv(void *arg)
 		} while (ret == 0);
 
 		if (ret < 1) {
-			LOGWARNING("Failed to read_socket_line in proxy_recv, attempting reconnect");
+			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
+				   proxi->id, proxi->si->url);
 			continue;
 		}
 		/* Simply forward the message on, as is, to the connector to
@@ -1558,7 +1560,8 @@ static void *proxy_recv(void *arg)
 
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
-			LOGWARNING("Failed to read_socket_line in proxy_recv, attempting reconnect");
+			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
+				   proxi->id, proxi->si->url);
 			continue;
 		}
 		if (parse_method(proxi, cs->buf)) {
@@ -1791,6 +1794,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		proxi->si = si;
 		proxi->ckp = ckp;
 		proxi->cs = &si->cs;
+		proxi->cs->ckp = ckp;
 		mutex_init(&proxi->notify_lock);
 		mutex_init(&proxi->share_lock);
 	}

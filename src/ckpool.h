@@ -19,7 +19,6 @@
 #include "libckpool.h"
 #include "uthash.h"
 
-struct ckpool_instance;
 typedef struct ckpool_instance ckpool_t;
 
 struct ckmsg {
@@ -61,6 +60,7 @@ struct connsock {
 	char *buf;
 	int bufofs;
 	int buflen;
+	ckpool_t *ckp;
 };
 
 typedef struct connsock connsock_t;

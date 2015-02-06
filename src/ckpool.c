@@ -424,8 +424,12 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		if (ret < 1) {
 			if (!ret)
 				LOGDEBUG("Select timed out in read_socket_line");
-			else
-				LOGERR("Select failed in read_socket_line");
+			else {
+				if (cs->ckp->proxy)
+					LOGNOTICE("Select failed in read_socket_line");
+				else
+					LOGERR("Select failed in read_socket_line");
+			}
 			goto out;
 		}
 		ret = recv(fd, readbuf, PAGESIZE - 4, 0);
@@ -433,7 +437,10 @@ int read_socket_line(connsock_t *cs, const int timeout)
 			/* Closed socket after valid message */
 			if (!ret && eom)
 				break;
-			LOGERR("Failed to recv in read_socket_line");
+			if (cs->ckp->proxy)
+				LOGNOTICE("Failed to recv in read_socket_line");
+			else
+				LOGERR("Failed to recv in read_socket_line");
 			ret = -1;
 			goto out;
 		}
