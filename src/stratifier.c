@@ -1814,7 +1814,7 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 }
 
 /* Sets the currently active proxy */
-static void set_proxy(sdata_t *sdata, const char *buf)
+static void set_proxy(ckpool_t *ckp, sdata_t *sdata, const char *buf)
 {
 	proxy_t *proxy;
 	int id = 0;
@@ -1826,6 +1826,7 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
+	_update_notify(ckp, id);
 	reconnect_clients(sdata, "");
 }
 
@@ -1936,7 +1937,7 @@ retry:
 	} else if (cmdmatch(buf, "reconnect")) {
 		reconnect_clients(sdata, buf);
 	} else if (cmdmatch(buf, "proxy")) {
-		set_proxy(sdata, buf);
+		set_proxy(ckp, sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else
