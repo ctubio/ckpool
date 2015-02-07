@@ -1409,7 +1409,8 @@ out:
 		Close(cs->fd);
 	} else {
 		keep_sockalive(cs->fd);
-		send_subscribe(ckp, proxi);
+		if (!ckp->passthrough)
+			send_subscribe(ckp, proxi);
 	}
 	return ret;
 }
