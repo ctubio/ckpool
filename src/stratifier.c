@@ -1824,6 +1824,10 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	proxy = __proxy_by_id(sdata, id);
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
+
+	/* We will receive a notification immediately after this and it should
+	 * be the flag to reconnect clients. */
+	proxy->notified = false;
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
