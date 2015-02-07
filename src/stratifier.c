@@ -1534,13 +1534,13 @@ static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 	client = __instance_by_id(sdata, id);
 	/* Upgrade to write lock */
 	ck_ulock(&sdata->instance_lock);
-	if (client && !client->dropped) {
-		user = client->user_instance;
+	if (client) {
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
-		if (!client->ref)
+		if (!client->ref) {
+			user = client->user_instance;
 			dropped = __drop_client(sdata, client, user);
-		else
+		} else
 			client->dropped = true;
 	}
 
