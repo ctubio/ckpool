@@ -419,9 +419,9 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		char *newbuf;
 
 		ret = wait_read_select(fd, eom ? 0 : timeout);
-		if (eom && !ret)
-			break;
 		if (ret < 1) {
+			if (eom)
+				break;
 			if (!ret)
 				LOGDEBUG("Select timed out in read_socket_line");
 			else
@@ -431,7 +431,7 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		ret = recv(fd, readbuf, PAGESIZE - 4, 0);
 		if (ret < 1) {
 			/* Closed socket after valid message */
-			if (!ret && eom)
+			if (eom)
 				break;
 			LOGERR("Failed to recv in read_socket_line");
 			ret = -1;
