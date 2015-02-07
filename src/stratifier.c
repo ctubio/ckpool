@@ -1521,13 +1521,12 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 	mutex_unlock(&sdata->stats_lock);
 }
 
-static void drop_client(sdata_t *sdata, const int64_t id)
+static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
 	user_instance_t *user = NULL;
 	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
-	ckpool_t *ckp = NULL;
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
 
@@ -1537,7 +1536,6 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	ck_ulock(&sdata->instance_lock);
 	if (client && !client->dropped) {
 		user = client->user_instance;
-		ckp = client->ckp;
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (!client->ref)
@@ -1927,7 +1925,7 @@ retry:
 		if (ret < 0)
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
-			drop_client(sdata, client_id);
+			drop_client(ckp, sdata, client_id);
 	} else if (cmdmatch(buf, "dropall")) {
 		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
