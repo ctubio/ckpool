@@ -1097,8 +1097,6 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_decref(val);
 }
 
-static void update_diff(ckpool_t *ckp);
-
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	bool new_block = false, clean;
@@ -1114,7 +1112,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Zero length string passed to update_notify");
 		return;
 	}
-	buf = cmd + 7;
+	buf = cmd + 7; /* "notify=" */
 	LOGDEBUG("Update notify: %s", buf);
 
 	val = json_loads(buf, 0, NULL);
@@ -1180,9 +1178,6 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	hex2bin(wb->headerbin, header, 112);
 	wb->txn_hashes = ckzalloc(1);
 
-	/* Check diff on each notify */
-	update_diff(ckp);
-
 	ck_rlock(&sdata->workbase_lock);
 	strcpy(wb->enonce1const, proxy->enonce1);
 	wb->enonce1constlen = proxy->enonce1constlen;
@@ -1201,30 +1196,43 @@ out:
 
 static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
 
-static void update_diff(ckpool_t *ckp)
+static void update_diff(ckpool_t *ckp, const char *cmd)
 {
 	stratum_instance_t *client, *tmp;
 	sdata_t *sdata = ckp->data;
 	double old_diff, diff;
+	const char *buf;
+	proxy_t *proxy;
 	json_t *val;
-	char *buf;
+	int id = 0;
 
 	if (unlikely(!sdata->current_workbase)) {
 		LOGINFO("No current workbase to update diff yet");
 		return;
 	}
 
-	buf = send_recv_proc(ckp->generator, "getdiff");
-	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get diff from generator in update_diff");
+	if (unlikely(strlen(cmd) < 6)) {
+		LOGWARNING("Zero length string passed to update_diff");
 		return;
 	}
-
+	buf = cmd + 5; /* "diff=" */
 	LOGDEBUG("Update diff: %s", buf);
+
 	val = json_loads(buf, 0, NULL);
-	dealloc(buf);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to json decode in update_diff");
+		return;
+	}
+	json_get_int(&id, val, "proxy");
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
+
+	LOGNOTICE("Got updated diff for proxy %d", id);
+	proxy = proxy_by_id(sdata, id);
+	if (proxy != current_proxy(sdata)) {
+		LOGINFO("Diff from backup proxy");
+		return;
+	}
 
 	/* We only really care about integer diffs so clamp the lower limit to
 	 * 1 or it will round down to zero. */
@@ -1919,7 +1927,7 @@ retry:
 		/* Proxifier has a new notify ready */
 		update_notify(ckp, buf);
 	} else if (cmdmatch(buf, "diff")) {
-		update_diff(ckp);
+		update_diff(ckp, buf);
 	} else if (cmdmatch(buf, "dropclient")) {
 		int64_t client_id;
 

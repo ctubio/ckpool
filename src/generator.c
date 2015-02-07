@@ -101,7 +101,6 @@ struct proxy_instance {
 	bool no_params; /* Doesn't want any parameters on subscribe */
 
 	bool notified; /* Received new template for work */
-	bool diffed; /* Received new diff */
 	bool reconnect; /* We need to drop and reconnect */
 	bool alive;
 
@@ -838,7 +837,6 @@ static bool parse_diff(proxy_instance_t *proxi, json_t *val)
 	if (diff == 0 || diff == proxi->diff)
 		return true;
 	proxi->diff = diff;
-	proxi->diffed = true;
 	return true;
 }
 
@@ -963,7 +961,23 @@ out:
 	return ret;
 }
 
-static bool parse_method(proxy_instance_t *proxi, const char *msg)
+static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
+{
+	json_t *json_msg;
+	char *msg, *buf;
+
+	JSON_CPACK(json_msg, "{sisf}",
+		   "proxy", proxi->id,
+		   "diff", proxi->diff);
+	msg = json_dumps(json_msg, JSON_NO_UTF8);
+	json_decref(json_msg);
+	ASPRINTF(&buf, "diff=%s", msg);
+	free(msg);
+	send_proc(ckp->stratifier, buf);
+	free(buf);
+}
+
+static bool parse_method(ckpool_t *ckp, proxy_instance_t *proxi, const char *msg)
 {
 	json_t *val = NULL, *method, *err_val, *params;
 	json_error_t err;
@@ -1018,6 +1032,8 @@ static bool parse_method(proxy_instance_t *proxi, const char *msg)
 
 	if (cmdmatch(buf, "mining.set_difficulty")) {
 		ret = parse_diff(proxi, params);
+		if (likely(ret))
+			send_diff(ckp, proxi);
 		goto out;
 	}
 
@@ -1046,7 +1062,7 @@ out:
 	return ret;
 }
 
-static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
+static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *val = NULL, *res_val, *req, *err_val;
 	char *buf = NULL;
@@ -1076,7 +1092,7 @@ static bool auth_stratum(connsock_t *cs, proxy_instance_t *proxi)
 			ret = false;
 			goto out;
 		}
-		ret = parse_method(proxi, buf);
+		ret = parse_method(ckp, proxi, buf);
 	} while (ret);
 
 	val = json_msg_result(buf, &res_val, &err_val);
@@ -1114,7 +1130,7 @@ out:
 			buf = cached_proxy_line(proxi);
 			if (!buf)
 				break;
-			parse_method(proxi, buf);
+			parse_method(ckp, proxi, buf);
 		};
 	}
 	return ret;
@@ -1183,19 +1199,6 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 	free(msg);
 	send_proc(ckp->stratifier, buf);
 	free(buf);
-}
-
-static void send_diff(proxy_instance_t *proxi, int *sockd)
-{
-	json_t *json_msg;
-	char *msg;
-
-	JSON_CPACK(json_msg, "{sf}", "diff", proxi->diff);
-	msg = json_dumps(json_msg, JSON_NO_UTF8);
-	json_decref(json_msg);
-	send_unix_msg(*sockd, msg);
-	free(msg);
-	_Close(sockd);
 }
 
 static void submit_share(proxy_instance_t *proxi, json_t *val)
@@ -1394,7 +1397,7 @@ static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *
 		}
 		goto out;
 	}
-	if (!auth_stratum(cs, proxi)) {
+	if (!auth_stratum(ckp, cs, proxi)) {
 		if (!pinging) {
 			LOGWARNING("Failed initial authorise to %s:%s with %s:%s !",
 				   cs->url, cs->port, si->auth, si->pass);
@@ -1562,14 +1565,10 @@ static void *proxy_recv(void *arg)
 			}
 			continue;
 		}
-		if (parse_method(proxi, cs->buf)) {
+		if (parse_method(ckp, proxi, cs->buf)) {
 			if (proxi->notified && proxi == current_proxy(gdata)) {
 				send_notify(ckp, proxi);
 				proxi->notified = false;
-			}
-			if (proxi->diffed) {
-				send_proc(ckp->stratifier, "diff");
-				proxi->diffed = false;
 			}
 			if (proxi->reconnect) {
 				/* Call this proxy dead to allow us to fail
@@ -1718,8 +1717,6 @@ retry:
 	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
-	} else if (cmdmatch(buf, "getdiff")) {
-		send_diff(proxi, &sockd);
 	} else if (cmdmatch(buf, "reconnect")) {
 		goto reconnect;
 	} else if (cmdmatch(buf, "submitblock:")) {
