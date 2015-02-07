@@ -1120,6 +1120,7 @@ out:
 	return ret;
 }
 
+#if 0
 static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 {
 	proxy_instance_t *proxi;
@@ -1130,20 +1131,17 @@ static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 
 	return proxi;
 }
-
-static proxy_instance_t *current_proxy(gdata_t *gdata);
+#endif
 
 static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 {
-	gdata_t *gdata = ckp->data;
 	json_t *json_msg;
 	char *msg, *buf;
 
-	JSON_CPACK(json_msg, "{sisssisb}",
+	JSON_CPACK(json_msg, "{sisssi}",
 			     "proxy", proxi->id,
 			     "enonce1", proxi->enonce1,
-			     "nonce2len", proxi->nonce2len,
-			     "reconnect", proxi == current_proxy(gdata) ? true : false);
+			     "nonce2len", proxi->nonce2len);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
 	ASPRINTF(&buf, "subscribe=%s", msg);
@@ -1152,28 +1150,21 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	free(buf);
 }
 
-static void send_notify(gdata_t *gdata, int *sockd, const char *buf)
+static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 {
 	json_t *json_msg, *merkle_arr;
-	proxy_instance_t *proxi;
 	notify_instance_t *ni;
-	int i, id = 0;
-	char *msg;
+	char *msg, *buf;
+	int i;
 
-	sscanf(buf, "getnotify=%d", &id);
-	proxi = proxy_by_id(gdata, id);
-	if (unlikely(!proxi)) {
-		ASPRINTF(&msg, "notready");
-		goto out_send;
-	}
 	merkle_arr = json_array();
 
 	mutex_lock(&proxi->notify_lock);
 	ni = proxi->current_notify;
 	if (unlikely(!ni)) {
 		mutex_unlock(&proxi->notify_lock);
-		ASPRINTF(&msg, "notready");
-		goto out_send;
+		LOGNOTICE("Proxi %d not ready to send notify", proxi->id);
+		return;
 	}
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
@@ -1188,10 +1179,10 @@ static void send_notify(gdata_t *gdata, int *sockd, const char *buf)
 
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
-out_send:
-	send_unix_msg(*sockd, msg);
+	ASPRINTF(&buf, "notify=%s", msg);
 	free(msg);
-	_Close(sockd);
+	send_proc(ckp->stratifier, buf);
+	free(buf);
 }
 
 static void send_diff(proxy_instance_t *proxi, int *sockd)
@@ -1511,7 +1502,6 @@ static void *proxy_recv(void *arg)
 		notify_instance_t *ni, *tmp;
 		share_msg_t *share, *tmpshare;
 		int retries = 0, ret;
-		char buf[128];
 		time_t now;
 
 		while (!proxy_alive(ckp, si, proxi, cs, true)) {
@@ -1574,8 +1564,7 @@ static void *proxy_recv(void *arg)
 		}
 		if (parse_method(proxi, cs->buf)) {
 			if (proxi->notified && proxi == current_proxy(gdata)) {
-				snprintf(buf, 127, "notify=%d", proxi->id);
-				send_proc(ckp->stratifier, buf);
+				send_notify(ckp, proxi);
 				proxi->notified = false;
 			}
 			if (proxi->diffed) {
@@ -1689,6 +1678,9 @@ reconnect:
 			dealloc(buf);
 			ASPRINTF(&buf, "proxy=%d", proxi->id);
 			send_proc(ckp->stratifier, buf);
+			/* Send a notify for the new chosen proxy or the
+			 * stratifier won't be able to switch. */
+			send_notify(ckp, proxi);
 		}
 	}
 retry:
@@ -1726,8 +1718,6 @@ retry:
 	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
-	} else if (cmdmatch(buf, "getnotify")) {
-		send_notify(gdata, &sockd, buf);
 	} else if (cmdmatch(buf, "getdiff")) {
 		send_diff(proxi, &sockd);
 	} else if (cmdmatch(buf, "reconnect")) {

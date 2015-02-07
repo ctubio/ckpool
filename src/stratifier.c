@@ -297,6 +297,7 @@ struct proxy_base {
 	int enonce2varlen;
 
 	bool subscribed;
+	bool notified;
 };
 
 typedef struct proxy_base proxy_t;
@@ -1027,8 +1028,6 @@ static void reconnect_clients(sdata_t *sdata)
 	ck_runlock(&sdata->instance_lock);
 }
 
-static void _update_notify(ckpool_t *ckp, const int id);
-
 static proxy_t *current_proxy(sdata_t *sdata)
 {
 	proxy_t *proxy;
@@ -1043,7 +1042,6 @@ static proxy_t *current_proxy(sdata_t *sdata)
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data;
-	bool reconnect = true;
 	const char *buf;
 	proxy_t *proxy;
 	json_t *val;
@@ -1055,10 +1053,6 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	}
 	buf = cmd + 10;
 	LOGDEBUG("Update subscribe: %s", buf);
-	if (unlikely(!safecmp(buf, "notready"))) {
-		LOGNOTICE("Generator not ready to send subscribe for proxy %d", id);
-		return;
-	}
 	val = json_loads(buf, 0, NULL);
 	if (unlikely(!val)) {
 		LOGWARNING("Failed to json decode subscribe response in update_subscribe");
@@ -1069,7 +1063,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	LOGNOTICE("Got updated subscribe for proxy %d", id);
 
 	proxy = proxy_by_id(sdata, id);
-	json_get_bool(&reconnect, val, "reconnect");
+	proxy->notified = false; /* Reset this */
 
 	ck_wlock(&sdata->workbase_lock);
 	proxy->subscribed = true;
@@ -1101,52 +1095,54 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		  proxy->nonce2len, 1ll << (proxy->enonce1varlen * 8));
 
 	json_decref(val);
-	/* Notify implied required now too */
-	_update_notify(ckp, id);
-	if (reconnect)
-		reconnect_clients(sdata);
 }
 
 static void update_diff(ckpool_t *ckp);
 
-static void _update_notify(ckpool_t *ckp, const int id)
+static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	bool new_block = false, clean;
 	sdata_t *sdata = ckp->data;
 	char header[228];
-	char *buf, *msg;
+	const char *buf;
 	proxy_t *proxy;
 	workbase_t *wb;
+	int i, id = 0;
 	json_t *val;
-	int i;
 
+	if (unlikely(strlen(cmd) < 8)) {
+		LOGWARNING("Zero length string passed to update_notify");
+		return;
+	}
+	buf = cmd + 7;
+	LOGDEBUG("Update notify: %s", buf);
+
+	val = json_loads(buf, 0, NULL);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to json decode in update_notify");
+		return;
+	}
+	json_get_int(&id, val, "proxy");
 	proxy = proxy_by_id(sdata, id);
 	if (unlikely(!proxy->subscribed)) {
-		LOGINFO("No valid proxy subscription to update notify yet");
-		return;
+		LOGNOTICE("No valid proxy %d subscription to update notify yet", id);
+		goto out;
 	}
+	LOGNOTICE("Got updated notify for proxy %d", id);
 	if (proxy != current_proxy(sdata)) {
 		LOGINFO("Notify from backup proxy");
-		return;
+		goto out;
 	}
 
-	ASPRINTF(&msg, "getnotify=%d", id);
-	buf = send_recv_proc(ckp->generator, msg);
-	dealloc(msg);
-	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get notify from generator in update_notify");
-		return;
-	}
-	LOGDEBUG("Update notify: %s", buf);
-	if (unlikely(!safecmp(buf, "notready"))) {
-		LOGNOTICE("Generator not ready to send notify to stratifier");
-		return;
+	if (!proxy->notified) {
+		/* This is the first notification from the current proxy, tell
+		 * clients now to reconnect since we have enough information to
+		 * switch. */
+		proxy->notified = true;
+		reconnect_clients(sdata);
 	}
 
-	LOGINFO("Got updated notify for proxy %d", id);
 	wb = ckzalloc(sizeof(workbase_t));
-	val = json_loads(buf, 0, NULL);
-	dealloc(buf);
 	wb->ckp = ckp;
 	wb->proxy = true;
 
@@ -1173,7 +1169,6 @@ static void _update_notify(ckpool_t *ckp, const int id)
 	json_strcpy(wb->ntime, val, "ntime");
 	sscanf(wb->ntime, "%x", &wb->ntime32);
 	clean = json_is_true(json_object_get(val, "clean"));
-	json_decref(val);
 	ts_realtime(&wb->gentime);
 	snprintf(header, 225, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
@@ -1200,14 +1195,8 @@ static void _update_notify(ckpool_t *ckp, const int id)
 	add_base(ckp, wb, &new_block);
 
 	stratum_broadcast_update(sdata, new_block | clean);
-}
-
-static void update_notify(ckpool_t *ckp, const char *cmd)
-{
-	int id = 0;
-
-	sscanf(cmd, "notify=%d", &id);
-	_update_notify(ckp, id);
+out:
+	json_decref(val);
 }
 
 static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
@@ -1822,8 +1811,9 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 	return buf;
 }
 
-/* Sets the currently active proxy */
-static void set_proxy(ckpool_t *ckp, sdata_t *sdata, const char *buf)
+/* Sets the currently active proxy. Clients will be told to reconnect once the
+ * first notify data comes from this proxy. */
+static void set_proxy(sdata_t *sdata, const char *buf)
 {
 	proxy_t *proxy;
 	int id = 0;
@@ -1834,9 +1824,6 @@ static void set_proxy(ckpool_t *ckp, sdata_t *sdata, const char *buf)
 	proxy = __proxy_by_id(sdata, id);
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
-
-	_update_notify(ckp, id);
-	reconnect_clients(sdata);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -1946,7 +1933,7 @@ retry:
 	} else if (cmdmatch(buf, "reconnect")) {
 		request_reconnect(sdata, buf);
 	} else if (cmdmatch(buf, "proxy")) {
-		set_proxy(ckp, sdata, buf);
+		set_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else
