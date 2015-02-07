@@ -1736,8 +1736,8 @@ retry:
 		/* Anything remaining should be share submissions */
 		json_t *val = json_loads(buf, 0, NULL);
 
-		if (!val)
-			LOGWARNING("Received unrecognised message: %s", buf);
+		if (unlikely(!val))
+			LOGWARNING("Generator received unrecognised message: %s", buf);
 		else
 			submit_share(proxi, val);
 	}
