@@ -1133,11 +1133,11 @@ static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 
 static proxy_instance_t *current_proxy(gdata_t *gdata);
 
-static char *get_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
+static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 {
 	gdata_t *gdata = ckp->data;
 	json_t *json_msg;
-	char *msg;
+	char *msg, *buf;
 
 	JSON_CPACK(json_msg, "{sisssisb}",
 			     "proxy", proxi->id,
@@ -1146,7 +1146,10 @@ static char *get_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 			     "reconnect", proxi == current_proxy(gdata) ? true : false);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
-	return msg;
+	ASPRINTF(&buf, "subscribe=%s", msg);
+	free(msg);
+	send_proc(ckp->stratifier, buf);
+	free(buf);
 }
 
 static void send_notify(gdata_t *gdata, int *sockd, const char *buf)
@@ -1413,14 +1416,8 @@ out:
 		/* Close and invalidate the file handle */
 		Close(cs->fd);
 	} else {
-		char *msg, *buf;
-
 		keep_sockalive(cs->fd);
-		msg = get_subscribe(ckp, proxi);
-		ASPRINTF(&buf, "subscribe=%s", msg);
-		free(msg);
-		send_proc(ckp->stratifier, buf);
-		free(buf);
+		send_subscribe(ckp, proxi);
 		proxi->notified = false;
 	}
 	return ret;
