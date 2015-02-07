@@ -1131,30 +1131,22 @@ static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 	return proxi;
 }
 
-static void send_subscribe(gdata_t *gdata, proxy_instance_t *cproxy, int *sockd, const char *buf)
+static proxy_instance_t *current_proxy(gdata_t *gdata);
+
+static char *get_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 {
-	proxy_instance_t *proxi;
+	gdata_t *gdata = ckp->data;
 	json_t *json_msg;
-	int id = 0;
 	char *msg;
 
-	sscanf(buf, "getsubscribe=%d", &id);
-	proxi = proxy_by_id(gdata, id);
-	if (unlikely(!proxi || !proxi->nonce2len)) {
-		ASPRINTF(&msg, "notready");
-		goto out_send;
-	}
 	JSON_CPACK(json_msg, "{sisssisb}",
 			     "proxy", proxi->id,
 			     "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len,
-			     "reconnect", proxi == cproxy ? true : false);
+			     "reconnect", proxi == current_proxy(gdata) ? true : false);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
-out_send:
-	send_unix_msg(*sockd, msg);
-	free(msg);
-	_Close(sockd);
+	return msg;
 }
 
 static void send_notify(gdata_t *gdata, int *sockd, const char *buf)
@@ -1421,11 +1413,14 @@ out:
 		/* Close and invalidate the file handle */
 		Close(cs->fd);
 	} else {
-		char msg[128];
+		char *msg, *buf;
 
 		keep_sockalive(cs->fd);
-		snprintf(msg, 127, "subscribe=%d", proxi->id);
-		send_proc(ckp->stratifier, msg);
+		msg = get_subscribe(ckp, proxi);
+		ASPRINTF(&buf, "subscribe=%s", msg);
+		free(msg);
+		send_proc(ckp->stratifier, buf);
+		free(buf);
 		proxi->notified = false;
 	}
 	return ret;
@@ -1734,8 +1729,6 @@ retry:
 	if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
-	} else if (cmdmatch(buf, "getsubscribe")) {
-		send_subscribe(gdata, proxi, &sockd, buf);
 	} else if (cmdmatch(buf, "getnotify")) {
 		send_notify(gdata, &sockd, buf);
 	} else if (cmdmatch(buf, "getdiff")) {

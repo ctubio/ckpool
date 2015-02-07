@@ -1044,31 +1044,27 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data;
 	bool reconnect = true;
-	char *buf, *msg;
+	const char *buf;
 	proxy_t *proxy;
 	json_t *val;
 	int id = 0;
 
-	sscanf(cmd, "subscribe=%d", &id);
-	ASPRINTF(&msg, "getsubscribe=%d", id);
-	buf = send_recv_proc(ckp->generator, msg);
-	dealloc(msg);
-	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get subscribe from generator in update_subscribe");
-		drop_allclients(ckp);
+	if (unlikely(strlen(cmd) < 11)) {
+		LOGWARNING("Received zero length string for subscribe in update_subscribe");
 		return;
 	}
+	buf = cmd + 10;
 	LOGDEBUG("Update subscribe: %s", buf);
 	if (unlikely(!safecmp(buf, "notready"))) {
 		LOGNOTICE("Generator not ready to send subscribe for proxy %d", id);
 		return;
 	}
 	val = json_loads(buf, 0, NULL);
-	free(buf);
 	if (unlikely(!val)) {
-		LOGWARNING("Failed to json decode getsubscribe response in update_subscribe");
+		LOGWARNING("Failed to json decode subscribe response in update_subscribe");
 		return;
 	}
+	json_get_int(&id, val, "proxy");
 
 	LOGNOTICE("Got updated subscribe for proxy %d", id);
 
