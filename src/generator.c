@@ -1591,7 +1591,12 @@ static void *proxy_recv(void *arg)
 				proxi->diffed = false;
 			}
 			if (proxi->reconnect) {
+				/* Call this proxy dead to allow us to fail
+				 * over to a backup pool until the reconnect
+				 * pool is up */
 				proxi->reconnect = false;
+				proxi->alive = false;
+				send_proc(ckp->generator, "reconnect");
 				LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 					   proxi->id, proxi->si->url);
 				Close(cs->fd);
