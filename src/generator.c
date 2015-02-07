@@ -1692,8 +1692,8 @@ reconnect:
 		proxi = cproxy;
 		if (!ckp->passthrough) {
 			connsock_t *cs = proxi->cs;
-			LOGWARNING("Successfully connected to %s:%s as proxy",
-				cs->url, cs->port);
+			LOGWARNING("Successfully connected to proxy %d %s:%s as proxy",
+				   proxi->id, cs->url, cs->port);
 			dealloc(buf);
 			ASPRINTF(&buf, "proxy=%d", proxi->id);
 			send_proc(ckp->stratifier, buf);
@@ -1710,7 +1710,8 @@ retry:
 	} while (selret < 1);
 
 	if (unlikely(proxi->cs->fd < 0)) {
-		LOGWARNING("Upstream socket invalidated, will attempt failover");
+		LOGWARNING("Upstream proxy %d:%s socket invalidated, will attempt failover",
+			   proxi->id, proxi->cs->url);
 		proxi->alive = false;
 		proxi = NULL;
 		goto reconnect;
