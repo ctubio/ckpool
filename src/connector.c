@@ -495,10 +495,6 @@ void *sender(void *arg)
 		fd = client->fd;
 		ck_runlock(&cdata->lock);
 
-		if (fd == -1) {
-			LOGDEBUG("Discarding message sent to invalidated client");
-			goto contfree;
-		}
 		/* If this socket is not ready to receive data from us, put the
 		 * send back on the tail of the list and decrease the timeout
 		 * to poll to either look for a client that is ready or poll
