@@ -1165,7 +1165,6 @@ static void parse_config(ckpool_t *ckp)
 		if (arr_size)
 			parse_proxies(ckp, arr_val, arr_size);
 	}
-	json_get_bool(&ckp->clientsvspeed, json_conf, "clientsvspeed");
 	json_decref(json_conf);
 }
 

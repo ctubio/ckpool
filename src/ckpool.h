@@ -148,9 +148,6 @@ struct ckpool_instance {
 	/* Are we running as a proxy */
 	bool proxy;
 
-	/* Do we prefer more proxy clients over support for >5TH clients */
-	bool clientsvspeed;
-
 	/* Are we running without ckdb */
 	bool standalone;
 

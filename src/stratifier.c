@@ -126,7 +126,9 @@ struct workbase {
 	char *logdir;
 
 	ckpool_t *ckp;
-	bool proxy;
+	bool proxy; /* This workbase is proxied work */
+	int proxyid; /* The id of the proxy the workbase is from */
+	int subproxyid; /* The id of the subproxy the worbase is from */
 };
 
 typedef struct workbase workbase_t;
@@ -1077,21 +1079,12 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	proxy->enonce1constlen = strlen(proxy->enonce1) / 2;
 	hex2bin(proxy->enonce1bin, proxy->enonce1, proxy->enonce1constlen);
 	proxy->nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
-	if (ckp->clientsvspeed) {
-		if (proxy->nonce2len > 5)
-			proxy->enonce1varlen = 4;
-		else if (proxy->nonce2len > 3)
-			proxy->enonce1varlen = 2;
-		else
-			proxy->enonce1varlen = 1;
-	} else {
-		if (proxy->nonce2len > 7)
-			proxy->enonce1varlen = 4;
-		else if (proxy->nonce2len > 5)
-			proxy->enonce1varlen = 2;
-		else
-			proxy->enonce1varlen = 1;
-	}
+	if (proxy->nonce2len > 7)
+		proxy->enonce1varlen = 4;
+	else if (proxy->nonce2len > 5)
+		proxy->enonce1varlen = 2;
+	else
+		proxy->enonce1varlen = 1;
 	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
 	ck_wunlock(&sdata->workbase_lock);
 
@@ -1105,11 +1098,11 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	bool new_block = false, clean;
 	sdata_t *sdata = ckp->data;
+	int i, id = 0, subid = 0;
 	char header[228];
 	const char *buf;
 	proxy_t *proxy;
 	workbase_t *wb;
-	int i, id = 0;
 	json_t *val;
 
 	if (unlikely(strlen(cmd) < 8)) {
@@ -1125,6 +1118,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		return;
 	}
 	json_get_int(&id, val, "proxy");
+	json_get_int(&subid, val, "subproxy");
 	proxy = proxy_by_id(sdata, id);
 	if (unlikely(!proxy->subscribed)) {
 		LOGNOTICE("No valid proxy %d subscription to update notify yet", id);
@@ -1147,6 +1141,8 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
 	wb->proxy = true;
+	wb->proxyid = id;
+	wb->subproxyid = subid;
 
 	json_int64cpy(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
