@@ -976,8 +976,13 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_t *json_msg;
 	char *msg, *buf;
 
-	JSON_CPACK(json_msg, "{sisf}",
-		   "proxy", proxi->id,
+	/* Master proxy, we don't use this for work */
+	if (proxi == proxi->proxy)
+		return;
+
+	JSON_CPACK(json_msg, "{sisisf}",
+		   "proxy", proxi->proxy->id,
+		   "subproxy", proxi->id,
 		   "diff", proxi->diff);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
@@ -994,6 +999,10 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 	char *msg, *buf;
 	int i;
 
+	/* Master proxy, we don't use this for work */
+	if (proxi == proxi->proxy)
+		return;
+
 	merkle_arr = json_array();
 
 	mutex_lock(&proxi->notify_lock);
@@ -1006,7 +1015,8 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
-	JSON_CPACK(json_msg, "{si,si,ss,si,ss,ss,so,ss,ss,ss,sb}", "proxy", proxi->id,
+	JSON_CPACK(json_msg, "{sisisisssisssssosssssssb}",
+			     "proxy", proxi->proxy->id, "subproxy", proxi->id,
 			     "jobid", ni->id, "prevhash", ni->prevhash, "coinb1len", ni->coinb1len,
 			     "coinbase1", ni->coinbase1, "coinbase2", ni->coinbase2,
 			     "merklehash", merkle_arr, "bbversion", ni->bbversion,
@@ -1198,8 +1208,13 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_t *json_msg;
 	char *msg, *buf;
 
-	JSON_CPACK(json_msg, "{sisssi}",
-			     "proxy", proxi->id,
+	/* Master proxy, we don't use this for work */
+	if (proxi == proxi->proxy)
+		return;
+
+	JSON_CPACK(json_msg, "{sisisssi}",
+			     "proxy", proxi->proxy->id,
+			     "subproxy", proxi->id,
 			     "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
@@ -1584,9 +1599,9 @@ static void *proxy_recv(void *arg)
 	}
 
 	while (42) {
-		notify_instance_t *ni, *tmp;
+		proxy_instance_t *subproxy = proxi;
 		share_msg_t *share, *tmpshare;
-		proxy_instance_t *subproxy;
+		notify_instance_t *ni, *tmp;
 		time_t now;
 		int ret;
 
@@ -1640,28 +1655,28 @@ static void *proxy_recv(void *arg)
 			ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
-			if (proxi->alive) {
+			if (subproxy->alive) {
 				LOGWARNING("Proxy %d:%s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
-					   proxi->id, proxi->si->url);
+					   subproxy->id, subproxy->si->url);
 			}
 			continue;
 		}
-		if (parse_method(ckp, proxi, cs->buf)) {
-			if (proxi->reconnect) {
+		if (parse_method(ckp, subproxy, cs->buf)) {
+			if (subproxy->reconnect) {
 				/* Call this proxy dead to allow us to fail
 				 * over to a backup pool until the reconnect
 				 * pool is up */
-				proxi->reconnect = false;
-				proxi->alive = false;
+				subproxy->reconnect = false;
+				subproxy->alive = false;
 				send_proc(ckp->generator, "reconnect");
 				LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
-					   proxi->id, proxi->si->url);
+					   subproxy->id, subproxy->si->url);
 				Close(cs->fd);
 				break;
 			}
 			continue;
 		}
-		if (parse_share(proxi, cs->buf)) {
+		if (parse_share(subproxy, cs->buf)) {
 			continue;
 		}
 		/* If it's not a method it should be a share result */
@@ -1756,9 +1771,6 @@ reconnect:
 			dealloc(buf);
 			ASPRINTF(&buf, "proxy=%d", proxi->id);
 			send_proc(ckp->stratifier, buf);
-			/* Send a notify for the new chosen proxy or the
-			 * stratifier won't be able to switch. */
-			send_notify(ckp, proxi);
 		}
 	}
 retry:
