@@ -287,6 +287,14 @@ struct share {
 
 typedef struct share share_t;
 
+/* Variable length enonce1 always refers back to a u64 */
+typedef union {
+	uint64_t u64;
+	uint32_t u32;
+	uint16_t u16;
+	uint8_t u8;
+} enonce1_t;
+
 struct proxy_base {
 	UT_hash_handle hh;
 	int id;
@@ -304,6 +312,10 @@ struct proxy_base {
 
 	bool subscribed;
 	bool notified;
+
+	int64_t clients;
+	int64_t max_clients;
+	enonce1_t enonce1u;
 };
 
 typedef struct proxy_base proxy_t;
@@ -321,13 +333,7 @@ struct stratifier_data {
 
 	bool ckdb_offline;
 
-	/* Variable length enonce1 always refers back to a u64 */
-	union {
-		uint64_t u64;
-		uint32_t u32;
-		uint16_t u16;
-		uint8_t u8;
-	} enonce1u;
+	enonce1_t enonce1u;
 
 	/* For protecting the hashtable data */
 	cklock_t workbase_lock;
@@ -1083,13 +1089,16 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		proxy->enonce1varlen = 4;
 	else if (proxy->nonce2len > 5)
 		proxy->enonce1varlen = 2;
-	else
+	else if (proxy->nonce2len > 3)
 		proxy->enonce1varlen = 1;
+	else
+		proxy->enonce1varlen = 0;
 	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
+	proxy->max_clients = 1ll << (proxy->enonce1varlen * 8);
 	ck_wunlock(&sdata->workbase_lock);
 
-	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %lld",
-		  proxy->nonce2len, 1ll << (proxy->enonce1varlen * 8));
+	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %"PRId64,
+		  proxy->nonce2len, proxy->max_clients);
 
 	json_decref(val);
 }
@@ -1985,34 +1994,15 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-/* Enter holding instance_lock */
-static bool __enonce1_free(sdata_t *sdata, const uint64_t enonce1)
-{
-	stratum_instance_t *client, *tmp;
-	bool ret = true;
-
-	if (unlikely(!enonce1)) {
-		ret = false;
-		goto out;
-	}
-
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->enonce1_64 == enonce1) {
-			ret = false;
-			break;
-		}
-	}
-out:
-	return ret;
-}
-
 /* Enter holding workbase_lock and client a ref count. */
 static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
 {
 	if (wb->enonce1constlen)
 		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
-	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
-	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
+	if (wb->enonce1varlen) {
+		memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
+		__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
+	}
 	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
 }
 
@@ -2023,17 +2013,28 @@ static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
  * Needs to be entered with client holding a ref count. */
 static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 {
-	int enonce1varlen, i;
+	proxy_t *proxy = NULL;
+	enonce1_t *enonce1u;
+	int enonce1varlen;
 	bool ret = false;
 
 	if (client->ckp->proxy) {
 		if (!sdata->proxy)
 			return false;
+
 		mutex_lock(&sdata->proxy_lock);
-		client->proxyid = sdata->proxy->id;
-		client->subproxyid = sdata->proxy->subid;
+		proxy = sdata->proxy;
+		enonce1u = &proxy->enonce1u;
+		client->proxyid = proxy->id;
+		client->subproxyid = proxy->subid;
 		mutex_unlock(&sdata->proxy_lock);
-	}
+
+		if (proxy->clients >= proxy->max_clients) {
+			LOGWARNING("Proxy reached max clients %"PRId64, proxy->max_clients);
+			return false;
+		}
+	} else
+		enonce1u = &sdata->enonce1u;
 
 	/* Extract the enonce1varlen from the current workbase which may be
 	 * a different workbase to when we __fill_enonce1data but the value
@@ -2042,42 +2043,42 @@ static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 	enonce1varlen = sdata->current_workbase->enonce1varlen;
 	ck_runlock(&sdata->workbase_lock);
 
-	/* instance_lock protects sdata->enonce1u */
+	/* instance_lock protects enonce1u. Recruiting extra proxies should
+	 * prevent these ever locking out.*/
 	ck_wlock(&sdata->instance_lock);
 	switch(enonce1varlen) {
 		case 8:
-			sdata->enonce1u.u64++;
+			enonce1u->u64++;
 			ret = true;
 			break;
 		case 7:
 		case 6:
 		case 5:
 		case 4:
-			sdata->enonce1u.u32++;
+			enonce1u->u32++;
 			ret = true;
 			break;
 		case 3:
 		case 2:
-			for (i = 0; i < 65536; i++) {
-				sdata->enonce1u.u16++;
-				ret = __enonce1_free(sdata, sdata->enonce1u.u64);
-				if (ret)
-					break;
-			}
+			enonce1u->u16++;
+			ret = true;
 			break;
 		case 1:
-			for (i = 0; i < 256; i++) {
-				sdata->enonce1u.u8++;
-				ret = __enonce1_free(sdata, sdata->enonce1u.u64);
-				if (ret)
-					break;
-			}
+			enonce1u->u8++;
+			ret = true;
+			break;
+		case 0:
+			/* Only one client/enonce1 used on this proxy */
+			ret = true;
 			break;
 		default:
 			quit(0, "Invalid enonce1varlen %d", enonce1varlen);
 	}
-	if (ret)
-		client->enonce1_64 = sdata->enonce1u.u64;
+	if (ret) {
+		if (proxy)
+			proxy->clients++;
+		client->enonce1_64 = enonce1u->u64;
+	}
 	ck_wunlock(&sdata->instance_lock);
 
 	ck_rlock(&sdata->workbase_lock);
