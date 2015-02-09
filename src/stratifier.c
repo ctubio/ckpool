@@ -2026,13 +2026,14 @@ static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 	int enonce1varlen, i;
 	bool ret = false;
 
-	if (!sdata->proxy)
-		return false;
-
-	mutex_lock(&sdata->proxy_lock);
-	client->proxyid = sdata->proxy->id;
-	client->subproxyid = sdata->proxy->subid;
-	mutex_unlock(&sdata->proxy_lock);
+	if (client->ckp->proxy) {
+		if (!sdata->proxy)
+			return false;
+		mutex_lock(&sdata->proxy_lock);
+		client->proxyid = sdata->proxy->id;
+		client->subproxyid = sdata->proxy->subid;
+		mutex_unlock(&sdata->proxy_lock);
+	}
 
 	/* Extract the enonce1varlen from the current workbase which may be
 	 * a different workbase to when we __fill_enonce1data but the value
