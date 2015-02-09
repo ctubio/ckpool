@@ -1199,7 +1199,6 @@ out:
 	return ret;
 }
 
-#if 0
 static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 {
 	proxy_instance_t *proxi;
@@ -1210,7 +1209,6 @@ static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 
 	return proxi;
 }
-#endif
 
 static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 {
@@ -1234,10 +1232,38 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	free(buf);
 }
 
-static void submit_share(proxy_instance_t *proxi, json_t *val)
+static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int id)
 {
+	proxy_instance_t *subproxy;
+
+	mutex_lock(&proxy->proxy_lock);
+	HASH_FIND_INT(proxy->subproxies, &id, subproxy);
+	mutex_unlock(&proxy->proxy_lock);
+
+	return subproxy;
+}
+
+static void submit_share(gdata_t *gdata, json_t *val)
+{
+	proxy_instance_t *proxy, *proxi;
 	stratum_msg_t *msg;
 	share_msg_t *share;
+	int id, subid;
+
+	json_get_int(&id, val, "proxy");
+	json_object_del(val, "proxy");
+	proxy = proxy_by_id(gdata, id);
+	if (unlikely(!proxy)) {
+		LOGWARNING("Failed to find proxy %d to send share to", id);
+		return json_decref(val);
+	}
+	json_get_int(&subid, val, "subproxy");
+	json_object_del(val, "subproxy");
+	proxi = subproxy_by_id(proxy, subid);
+	if (unlikely(!proxi)) {
+		LOGWARNING("Failed to find subproxy %d to send share to", subid);
+		return json_decref(val);
+	}
 
 	msg = ckzalloc(sizeof(stratum_msg_t));
 	share = ckzalloc(sizeof(share_msg_t));
@@ -1309,17 +1335,6 @@ out:
 	if (val)
 		json_decref(val);
 	return ret;
-}
-
-static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int id)
-{
-	proxy_instance_t *subproxy;
-
-	mutex_lock(&proxy->proxy_lock);
-	HASH_FIND_INT(proxy->subproxies, &id, subproxy);
-	mutex_unlock(&proxy->proxy_lock);
-
-	return subproxy;
 }
 
 /* For processing and sending shares. proxy refers to parent proxy here */
@@ -1501,6 +1516,7 @@ static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
 	subproxy->auth = proxi->auth;
 	subproxy->pass = proxi->pass;
 	subproxy->proxy = proxi;
+	mutex_init(&subproxy->share_lock);
 	return subproxy;
 }
 
@@ -1854,7 +1870,7 @@ retry:
 		if (unlikely(!val))
 			LOGWARNING("Generator received unrecognised message: %s", buf);
 		else
-			submit_share(proxi, val);
+			submit_share(gdata, val);
 	}
 	Close(sockd);
 	goto retry;
