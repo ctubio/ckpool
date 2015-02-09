@@ -272,6 +272,9 @@ struct stratum_instance {
 
 	int64_t suggest_diff; /* Stratum client suggested diff */
 	double best_diff; /* Best share found by this instance */
+
+	int proxyid; /* Which proxy this is bound to in proxy mode */
+	int subproxyid; /* Which subproxy */
 };
 
 struct share {
@@ -285,6 +288,7 @@ typedef struct share share_t;
 struct proxy_base {
 	UT_hash_handle hh;
 	int id;
+	int subid;
 
 	double diff;
 
@@ -2021,11 +2025,18 @@ static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
  * When the proxy space is less than 32 bits to work with, we look for an
  * unused enonce1 value and reject clients instead if there is no space left.
  * Needs to be entered with client holding a ref count. */
-static bool new_enonce1(stratum_instance_t *client)
+static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 {
-	sdata_t *sdata = client->ckp->data;
 	int enonce1varlen, i;
 	bool ret = false;
+
+	if (!sdata->proxy)
+		return false;
+
+	mutex_lock(&sdata->proxy_lock);
+	client->proxyid = sdata->proxy->id;
+	client->subproxyid = sdata->proxy->subid;
+	mutex_unlock(&sdata->proxy_lock);
 
 	/* Extract the enonce1varlen from the current workbase which may be
 	 * a different workbase to when we __fill_enonce1data but the value
@@ -2134,7 +2145,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		client->useragent = ckzalloc(1);
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
-		if (!new_enonce1(client)) {
+		if (!new_enonce1(sdata, client)) {
 			stratum_send_message(sdata, client, "Pool full of clients");
 			client->reject = 2;
 			return json_string("proxy full");
@@ -2977,9 +2988,10 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	JSON_CPACK(json_msg, "{sisssssssIsi}", "jobid", jobid, "nonce2", enonce2,
+	JSON_CPACK(json_msg, "{sisssssssIsisisi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
-			     "msg_id", msg_id);
+			     "msg_id", msg_id, "proxy", client->proxyid,
+			     "subproxy", client->subproxyid);
 	msg = json_dumps(json_msg, 0);
 	json_decref(json_msg);
 	send_generator(ckp, msg, GEN_LAX);
