@@ -297,6 +297,8 @@ typedef union {
 
 typedef struct proxy_base proxy_t;
 
+typedef struct stratifier_data sdata_t;
+
 struct proxy_base {
 	UT_hash_handle hh;
 	int id;
@@ -320,6 +322,7 @@ struct proxy_base {
 	enonce1_t enonce1u;
 
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
+	sdata_t *sdata; /* Unique stratifer data for each subproxy */
 };
 
 struct stratifier_data {
@@ -390,8 +393,6 @@ struct stratifier_data {
 	proxy_t *proxies; /* Hashlist of all proxies */
 	pthread_mutex_t proxy_lock; /* Protects all proxy data */
 };
-
-typedef struct stratifier_data sdata_t;
 
 typedef struct json_entry json_entry_t;
 
@@ -995,12 +996,26 @@ static void drop_allclients(ckpool_t *ckp)
 		LOGNOTICE("Dropped %d instances", kills);
 }
 
+/* Copy only the relevant parts of the master sdata for each subproxy */
+static sdata_t *duplicate_sdata(const sdata_t *sdata)
+{
+	sdata_t *dsdata = ckzalloc(sizeof(sdata_t));
+	int64_t randomiser;
+
+	memcpy(dsdata->pubkeytxnbin, sdata->pubkeytxnbin, 25);
+	memcpy(dsdata->donkeytxnbin, sdata->donkeytxnbin, 25);
+	randomiser = ((int64_t)time(NULL)) << 32;
+	dsdata->blockchange_id = dsdata->workbase_id = randomiser;
+	return dsdata;
+}
+
 static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
 
 	proxy->id = id;
 	HASH_ADD_INT(sdata->proxies, id, proxy);
+	proxy->sdata = duplicate_sdata(sdata);
 	return proxy;
 }
 
@@ -1010,6 +1025,7 @@ static proxy_t *__generate_subproxy(proxy_t *proxy, const int id)
 
 	subproxy->id = id;
 	HASH_ADD_INT(proxy->subproxies, id, subproxy);
+	subproxy->sdata = proxy->sdata;
 	return subproxy;
 }
 
@@ -1060,15 +1076,17 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 	return subproxy;
 }
 
-/* Iterates over all clients and sets the reconnect bool for the message
- * to be sent lazily next time they speak to us. */
-static void reconnect_clients(sdata_t *sdata)
+/* Iterates over all clients in proxy mode and sets the reconnect bool for the
+ * message to be sent lazily next time they speak to us if they're not bound
+ * to the requested proxy id */
+static void reconnect_clients_to(sdata_t *sdata, const int id)
 {
 	stratum_instance_t *client, *tmp;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		client->reconnect = true;
+		if (client->proxyid != id)
+			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 }
@@ -1177,7 +1195,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		 * clients now to reconnect since we have enough information to
 		 * switch. */
 		proxy->notified = true;
-		reconnect_clients(sdata);
+		reconnect_clients_to(sdata, id);
 	}
 
 	wb = ckzalloc(sizeof(workbase_t));
