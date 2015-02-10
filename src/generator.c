@@ -1512,7 +1512,7 @@ static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
 	subproxy->ckp = proxi->ckp;
 	subproxy->cs = ckzalloc(sizeof(connsock_t));
 	subproxy->si = proxi->si;
-	subproxy->id = proxi->subproxy_count++;
+	subproxy->id = proxi->subproxy_count;
 	subproxy->auth = proxi->auth;
 	subproxy->pass = proxi->pass;
 	subproxy->proxy = proxi;
@@ -1532,6 +1532,7 @@ static bool recruit_subproxy(proxy_instance_t *proxi, int epfd)
 	}
 
 	mutex_lock(&proxi->proxy_lock);
+	proxi->subproxy_count++;
 	HASH_ADD_INT(proxi->subproxies, id, subproxy);
 	proxi->client_headroom += proxi->clients_per_proxy;
 	mutex_unlock(&proxi->proxy_lock);
@@ -1808,11 +1809,13 @@ reconnect:
 	if (proxi != cproxy) {
 		proxi = cproxy;
 		if (!ckp->passthrough) {
+			proxy_instance_t *proxy = proxi->proxy;
+
 			connsock_t *cs = proxi->cs;
 			LOGWARNING("Successfully connected to proxy %d %s:%s as proxy",
 				   proxi->id, cs->url, cs->port);
 			dealloc(buf);
-			ASPRINTF(&buf, "proxy=%d", proxi->id);
+			ASPRINTF(&buf, "proxy=%d:%d", proxy->id, proxi->id);
 			send_proc(ckp->stratifier, buf);
 		}
 	}
