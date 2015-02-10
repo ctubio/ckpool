@@ -707,10 +707,12 @@ static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
 	ckdbq_add(ckp, ID_AGEWORKINFO, val);
 }
 
-static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
+/* Add a new workbase to the table of workbases. Sdata is the global data in
+ * pool mode but unique to each subproxy in proxy mode */
+static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_block)
 {
 	workbase_t *tmp, *tmpa, *aged = NULL;
-	sdata_t *sdata = ckp->data;
+	sdata_t *ckp_sdata = ckp->data;
 	int len, ret;
 
 	ts_realtime(&wb->gentime);
@@ -723,7 +725,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	 * we set workbase_id from it. In server mode the stratifier is
 	 * setting the workbase_id */
 	ck_wlock(&sdata->workbase_lock);
-	sdata->workbases_generated++;
+	ckp_sdata->workbases_generated++;
 	if (!ckp->proxy)
 		wb->id = sdata->workbase_id++;
 	else
@@ -905,7 +907,7 @@ static void *do_update(void *arg)
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
-	add_base(ckp, wb, &new_block);
+	add_base(ckp, sdata, wb, &new_block);
 
 	stratum_broadcast_update(sdata, new_block);
 	ret = true;
@@ -1254,7 +1256,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	wb->diff = proxy->diff;
 	ck_runlock(&dsdata->workbase_lock);
 
-	add_base(ckp, wb, &new_block);
+	add_base(ckp, dsdata, wb, &new_block);
 
 	/* FIXME: Goes to everyone, separate by proxy only */
 	stratum_broadcast_update(sdata, new_block | clean);
