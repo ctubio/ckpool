@@ -295,6 +295,8 @@ typedef union {
 	uint8_t u8;
 } enonce1_t;
 
+typedef struct proxy_base proxy_t;
+
 struct proxy_base {
 	UT_hash_handle hh;
 	int id;
@@ -316,9 +318,9 @@ struct proxy_base {
 	int64_t clients;
 	int64_t max_clients;
 	enonce1_t enonce1u;
-};
 
-typedef struct proxy_base proxy_t;
+	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
+};
 
 struct stratifier_data {
 	char pubkeytxnbin[25];
@@ -1002,6 +1004,15 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	return proxy;
 }
 
+static proxy_t *__generate_subproxy(proxy_t *proxy, const int id)
+{
+	proxy_t *subproxy = ckzalloc(sizeof(proxy_t));
+
+	subproxy->id = id;
+	HASH_ADD_INT(proxy->subproxies, id, subproxy);
+	return subproxy;
+}
+
 /* Find proxy by id number, generate one if none exist yet by that id */
 static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 {
@@ -1016,6 +1027,16 @@ static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 	return proxy;
 }
 
+static proxy_t *__subproxy_by_id(proxy_t *proxy, const int id)
+{
+	proxy_t *subproxy;
+
+	HASH_FIND_INT(proxy->subproxies, &id, subproxy);
+	if (!subproxy)
+		subproxy = __generate_subproxy(proxy, id);
+	return subproxy;
+}
+
 static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy;
@@ -1025,6 +1046,18 @@ static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 	mutex_unlock(&sdata->proxy_lock);
 
 	return proxy;
+}
+
+static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
+{
+	proxy_t *proxy, *subproxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __proxy_by_id(sdata, id);
+	subproxy = __subproxy_by_id(proxy, subid);
+	mutex_unlock(&sdata->proxy_lock);
+
+	return subproxy;
 }
 
 /* Iterates over all clients and sets the reconnect bool for the message
