@@ -321,6 +321,7 @@ struct proxy_base {
 	int64_t max_clients;
 	enonce1_t enonce1u;
 
+	proxy_t *parent; /* Parent proxy - set to NULL on parent itself */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
 };
@@ -1027,6 +1028,7 @@ static proxy_t *__generate_subproxy(proxy_t *proxy, const int id)
 	subproxy->id = id;
 	HASH_ADD_INT(proxy->subproxies, id, subproxy);
 	subproxy->sdata = proxy->sdata;
+	subproxy->parent = proxy;
 	return subproxy;
 }
 
@@ -1105,7 +1107,7 @@ static proxy_t *current_proxy(sdata_t *sdata)
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->data, *dsdata;
 	int id = 0, subid = 0;
 	const char *buf;
 	proxy_t *proxy;
@@ -1129,9 +1131,9 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 
 	proxy = subproxy_by_id(sdata, id, subid);
 	proxy->notified = false; /* Reset this */
-	sdata = proxy->sdata;
+	dsdata = proxy->sdata;
 
-	ck_wlock(&sdata->workbase_lock);
+	ck_wlock(&dsdata->workbase_lock);
 	proxy->subscribed = true;
 	proxy->diff = ckp->startdiff;
 	/* Length is checked by generator */
@@ -1149,7 +1151,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		proxy->enonce1varlen = 0;
 	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
 	proxy->max_clients = 1ll << (proxy->enonce1varlen * 8);
-	ck_wunlock(&sdata->workbase_lock);
+	ck_wunlock(&dsdata->workbase_lock);
 
 	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %"PRId64,
 		  proxy->nonce2len, proxy->max_clients);
@@ -1159,8 +1161,8 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
+	sdata_t *sdata = ckp->data, *dsdata;
 	bool new_block = false, clean;
-	sdata_t *sdata = ckp->data;
 	int i, id = 0, subid = 0;
 	char header[228];
 	const char *buf;
@@ -1182,13 +1184,13 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	}
 	json_get_int(&id, val, "proxy");
 	json_get_int(&subid, val, "subproxy");
-	proxy = proxy_by_id(sdata, id);
+	proxy = subproxy_by_id(sdata, id, subid);
 	if (unlikely(!proxy->subscribed)) {
-		LOGNOTICE("No valid proxy %d subscription to update notify yet", id);
+		LOGNOTICE("No valid proxy %d:%d subscription to update notify yet", id, subid);
 		goto out;
 	}
 	LOGNOTICE("Got updated notify for proxy %d", id);
-	if (proxy != current_proxy(sdata)) {
+	if (proxy->parent != current_proxy(sdata)) {
 		LOGINFO("Notify from backup proxy");
 		goto out;
 	}
@@ -1241,17 +1243,20 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	hex2bin(wb->headerbin, header, 112);
 	wb->txn_hashes = ckzalloc(1);
 
-	ck_rlock(&sdata->workbase_lock);
+	dsdata = proxy->sdata;
+
+	ck_rlock(&dsdata->workbase_lock);
 	strcpy(wb->enonce1const, proxy->enonce1);
 	wb->enonce1constlen = proxy->enonce1constlen;
 	memcpy(wb->enonce1constbin, proxy->enonce1bin, wb->enonce1constlen);
 	wb->enonce1varlen = proxy->enonce1varlen;
 	wb->enonce2varlen = proxy->enonce2varlen;
 	wb->diff = proxy->diff;
-	ck_runlock(&sdata->workbase_lock);
+	ck_runlock(&dsdata->workbase_lock);
 
 	add_base(ckp, wb, &new_block);
 
+	/* FIXME: Goes to everyone, separate by proxy only */
 	stratum_broadcast_update(sdata, new_block | clean);
 out:
 	json_decref(val);
@@ -1261,13 +1266,13 @@ static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
 
 static void update_diff(ckpool_t *ckp, const char *cmd)
 {
+	sdata_t *sdata = ckp->data, *dsdata;
 	stratum_instance_t *client, *tmp;
-	sdata_t *sdata = ckp->data;
 	double old_diff, diff;
+	int id = 0, subid = 0;
 	const char *buf;
 	proxy_t *proxy;
 	json_t *val;
-	int id = 0;
 
 	if (unlikely(!sdata->current_workbase)) {
 		LOGINFO("No current workbase to update diff yet");
@@ -1287,12 +1292,13 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 		return;
 	}
 	json_get_int(&id, val, "proxy");
+	json_get_int(&subid, val, "subproxy");
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
 
 	LOGNOTICE("Got updated diff for proxy %d", id);
-	proxy = proxy_by_id(sdata, id);
-	if (proxy != current_proxy(sdata)) {
+	proxy = subproxy_by_id(sdata, id, subid);
+	if (proxy->parent != current_proxy(sdata)) {
 		LOGINFO("Diff from backup proxy");
 		return;
 	}
@@ -1302,10 +1308,12 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	if (unlikely(diff < 1))
 		diff = 1;
 
-	ck_wlock(&sdata->workbase_lock);
-	old_diff = sdata->proxy->diff;
-	sdata->current_workbase->diff = sdata->proxy->diff = diff;
-	ck_wunlock(&sdata->workbase_lock);
+	dsdata = proxy->sdata;
+
+	ck_wlock(&dsdata->workbase_lock);
+	old_diff = proxy->diff;
+	dsdata->current_workbase->diff = dsdata->proxy->diff = diff;
+	ck_wunlock(&dsdata->workbase_lock);
 
 	if (old_diff < diff)
 		return;
@@ -1314,6 +1322,8 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	 * they're at or below the new diff, and update it if not. */
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->proxyid != id)
+			continue;
 		if (client->diff > diff) {
 			client->diff = diff;
 			stratum_send_diff(sdata, client);
@@ -1894,7 +1904,7 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	mutex_lock(&sdata->proxy_lock);
 	proxy = __proxy_by_id(sdata, id);
 	subproxy = __subproxy_by_id(proxy, subid);
-	sdata->proxy = subproxy;
+	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
 	/* We will receive a notification immediately after this and it should
