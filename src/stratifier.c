@@ -1032,17 +1032,16 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 
 	proxy->id = id;
 	HASH_ADD_INT(sdata->proxies, id, proxy);
-	proxy->sdata = duplicate_sdata(sdata);
 	return proxy;
 }
 
-static proxy_t *__generate_subproxy(proxy_t *proxy, const int id)
+static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int id)
 {
 	proxy_t *subproxy = ckzalloc(sizeof(proxy_t));
 
 	subproxy->id = id;
 	HASH_ADD_INT(proxy->subproxies, id, subproxy);
-	subproxy->sdata = proxy->sdata;
+	proxy->sdata = duplicate_sdata(sdata);
 	subproxy->parent = proxy;
 	return subproxy;
 }
@@ -1061,13 +1060,13 @@ static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 	return proxy;
 }
 
-static proxy_t *__subproxy_by_id(proxy_t *proxy, const int id)
+static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int id)
 {
 	proxy_t *subproxy;
 
 	HASH_FIND_INT(proxy->subproxies, &id, subproxy);
 	if (!subproxy)
-		subproxy = __generate_subproxy(proxy, id);
+		subproxy = __generate_subproxy(sdata, proxy, id);
 	return subproxy;
 }
 
@@ -1088,7 +1087,7 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 
 	mutex_lock(&sdata->proxy_lock);
 	proxy = __proxy_by_id(sdata, id);
-	subproxy = __subproxy_by_id(proxy, subid);
+	subproxy = __subproxy_by_id(sdata, proxy, subid);
 	mutex_unlock(&sdata->proxy_lock);
 
 	return subproxy;
@@ -1924,7 +1923,7 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 
 	mutex_lock(&sdata->proxy_lock);
 	proxy = __proxy_by_id(sdata, id);
-	subproxy = __subproxy_by_id(proxy, subid);
+	subproxy = __subproxy_by_id(sdata, proxy, subid);
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
@@ -2179,23 +2178,39 @@ static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 
 static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *client, const char *msg);
 
+/* Choose the stratifier data for a new client. Use the main ckp_sdata except
+ * in proxy mode where we find a subproxy based on the current proxy with room
+ * for more clients. Signal the generator to recruit more subproxies if we are
+ * running out of room. */
+static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
+{
+	if (!ckp->proxy || ckp->passthrough)
+		return ckp_sdata;
+	if (!ckp_sdata->proxy)
+		return NULL;
+	/* FIXME: Choose a subproxy, not the parent proxy */
+	return ckp_sdata->proxy->sdata;
+}
+
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
 {
-	sdata_t *sdata = client->ckp->data;
+	ckpool_t *ckp = client->ckp;
+	sdata_t *sdata, *ckp_sdata = ckp->data;
 	bool old_match = false;
 	int arr_size;
 	json_t *ret;
 	int n2len;
 
 	if (unlikely(!json_is_array(params_val))) {
-		stratum_send_message(sdata, client, "Invalid json: params not an array");
+		stratum_send_message(ckp_sdata, client, "Invalid json: params not an array");
 		return json_string("params not an array");
 	}
 
-	if (unlikely(!sdata->current_workbase)) {
-		stratum_send_message(sdata, client, "Pool Initialising");
+	sdata = select_sdata(ckp, ckp_sdata);
+	if (unlikely(!sdata || !sdata->current_workbase)) {
+		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
 
