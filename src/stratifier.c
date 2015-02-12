@@ -2241,11 +2241,9 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			client->id, client->enonce1_64, client->enonce1);
 	}
 
+	/* Workbases will exist if sdata->current_workbase is not NULL */
 	ck_rlock(&sdata->workbase_lock);
-	if (likely(sdata->workbases))
-		n2len = sdata->workbases->enonce2varlen;
-	else
-		n2len = 8;
+	n2len = sdata->workbases->enonce2varlen;
 	JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
 			n2len);
 	ck_runlock(&sdata->workbase_lock);
