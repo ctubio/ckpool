@@ -214,6 +214,8 @@ struct worker_instance {
 	bool notified_idle;
 };
 
+typedef struct stratifier_data sdata_t;
+
 /* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
@@ -275,6 +277,7 @@ struct stratum_instance {
 	int64_t suggest_diff; /* Stratum client suggested diff */
 	double best_diff; /* Best share found by this instance */
 
+	sdata_t *sdata; /* Which sdata this client is bound to */
 	int proxyid; /* Which proxy this is bound to in proxy mode */
 	int subproxyid; /* Which subproxy */
 };
@@ -296,8 +299,6 @@ typedef union {
 } enonce1_t;
 
 typedef struct proxy_base proxy_t;
-
-typedef struct stratifier_data sdata_t;
 
 struct proxy_base {
 	UT_hash_handle hh;
@@ -1456,7 +1457,8 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
 
 /* Enter with write instance_lock held */
-static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id, const int server)
+static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id,
+						  const int server)
 {
 	stratum_instance_t *client = ckzalloc(sizeof(stratum_instance_t));
 	sdata_t *sdata = ckp->data;
@@ -1468,6 +1470,9 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	client->ckp = ckp;
 	tv_time(&client->ldc);
 	HASH_ADD_I64(sdata->stratum_instances, id, client);
+	/* Points to ckp sdata in ckpool mode, but is changed later in proxy
+	 * mode . */
+	client->sdata = sdata;
 	return client;
 }
 
