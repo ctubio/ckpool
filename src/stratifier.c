@@ -819,7 +819,7 @@ static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 	return buf;
 }
 
-static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
+static void send_generator(const ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->data;
 	bool set;
@@ -1070,6 +1070,7 @@ static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int id)
 	return subproxy;
 }
 
+#if 0
 static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy;
@@ -1080,6 +1081,7 @@ static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
 
 	return proxy;
 }
+#endif
 
 static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 {
@@ -2184,12 +2186,37 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
  * running out of room. */
 static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 {
+	proxy_t *proxy, *subproxy, *best = NULL, *tmp;
+	int64_t headroom = 0, most_headroom = 0;
+
 	if (!ckp->proxy || ckp->passthrough)
 		return ckp_sdata;
-	if (!ckp_sdata->proxy)
+	proxy = ckp_sdata->proxy;
+	if (!proxy) {
+		LOGWARNING("No proxy available yet to generate subscribes");
 		return NULL;
-	/* FIXME: Choose a subproxy, not the parent proxy */
-	return ckp_sdata->proxy->sdata;
+	}
+	mutex_lock(&ckp_sdata->proxy_lock);
+	HASH_ITER(hh, proxy->subproxies, subproxy, tmp) {
+		int64_t subproxy_headroom = subproxy->max_clients - subproxy->clients;
+
+		headroom += subproxy_headroom;
+		if (subproxy_headroom > most_headroom) {
+			best = subproxy;
+			most_headroom = subproxy_headroom;
+		}
+	}
+	mutex_unlock(&ckp_sdata->proxy_lock);
+
+	if (headroom < 42) {
+		LOGNOTICE("Stratifer requesting more proxies from generator");
+		send_generator(ckp, "recruit", GEN_PRIORITY);
+	}
+	if (!best) {
+		LOGWARNING("Insufficient subproxies to accept more clients");
+		return NULL;
+	}
+	return best->sdata;
 }
 
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref

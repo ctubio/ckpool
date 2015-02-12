@@ -125,6 +125,8 @@ struct proxy_instance {
 
 	time_t reconnect_time;
 
+	int epfd; /* Epoll fd used by the parent proxy */
+
 	pthread_mutex_t proxy_lock; /* Lock protecting hashlist of proxies */
 	int64_t clients_per_proxy; /* How many clients can connect to each subproxy */
 	int64_t client_headroom; /* How many more clients can we connect */
@@ -1427,7 +1429,7 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 	ckmsgq_add(proxi->passsends, pm);
 }
 
-static bool recruit_subproxy(proxy_instance_t *proxi, int epfd);
+static bool recruit_subproxy(proxy_instance_t *proxi);
 
 static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
 			connsock_t *cs, bool pinging, int epfd)
@@ -1488,9 +1490,11 @@ out:
 		if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, cs->fd, &event) == -1))
 			quit(1, "FATAL: Failed to add epfd to epoll_ctl in proxy_alive");
 		if (!ckp->passthrough && proxi->proxy == proxi) {
+			/* We recruit enough proxies to begin with and then
+			 * recruit extra when asked by the stratifier. */
 			while (proxi->client_headroom < 42) {
 				/* Note recursive call of proxy_alive here */
-				if (!recruit_subproxy(proxi, epfd)) {
+				if (!recruit_subproxy(proxi)) {
 					LOGWARNING("Unable to recruit extra subproxies after just %"PRId64,
 						   proxi->client_headroom);
 					break;
@@ -1520,9 +1524,10 @@ static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
 	return subproxy;
 }
 
-static bool recruit_subproxy(proxy_instance_t *proxi, int epfd)
+static bool recruit_subproxy(proxy_instance_t *proxi)
 {
 	proxy_instance_t *subproxy = create_subproxy(proxi);
+	int epfd = proxi->epfd;
 
 	if (!proxy_alive(subproxy->ckp, subproxy->si, subproxy, subproxy->cs, false, epfd)) {
 		LOGNOTICE("Subproxy failed proxy_alive testing");
@@ -1553,7 +1558,7 @@ static void *passthrough_recv(void *arg)
 
 	rename_proc("passrecv");
 
-	epfd = epoll_create1(EPOLL_CLOEXEC);
+	proxi->epfd = epfd = epoll_create1(EPOLL_CLOEXEC);
 	if (epfd < 0){
 		LOGEMERG("FATAL: Failed to create epoll in passrecv");
 		return NULL;
@@ -1863,6 +1868,8 @@ retry:
 	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
+	} else if (cmdmatch(buf, "recruit")) {
+		recruit_subproxy(proxi);
 	} else if (ckp->passthrough) {
 		/* Anything remaining should be stratum messages */
 		passthrough_add_send(proxi, buf);
