@@ -1006,8 +1006,20 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	sdata_t *dsdata = ckzalloc(sizeof(sdata_t));
 	int64_t randomiser;
 
+	/* Copy the transaction binaries for workbase creation */
 	memcpy(dsdata->pubkeytxnbin, sdata->pubkeytxnbin, 25);
 	memcpy(dsdata->donkeytxnbin, sdata->donkeytxnbin, 25);
+
+	/* Use the same work queues for all subproxies */
+	dsdata->ssends = sdata->ssends;
+	dsdata->srecvs = sdata->srecvs;
+	dsdata->ckdbq = sdata->ckdbq;
+	dsdata->sshareq = sdata->sshareq;
+	dsdata->sauthq = sdata->sauthq;
+	dsdata->stxnq = sdata->stxnq;
+
+	/* Give the sbuproxy a unique workbase id and its own workbase list
+	 * and lock */
 	randomiser = ((int64_t)time(NULL)) << 32;
 	dsdata->blockchange_id = dsdata->workbase_id = randomiser;
 	cklock_init(&dsdata->workbase_lock);
@@ -1533,7 +1545,7 @@ static inline bool client_active(stratum_instance_t *client)
 
 /* For creating a list of sends without locking that can then be concatenated
  * to the stratum_sends list. Minimises locking and avoids taking recursive
- * locks. */
+ * locks. Sends only to sdata bound clients (everyone in ckpool) */
 static void stratum_broadcast(sdata_t *sdata, json_t *val)
 {
 	stratum_instance_t *client, *tmp;
@@ -1550,6 +1562,8 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		ckmsg_t *client_msg;
 		smsg_t *msg;
 
+		if (client->sdata != sdata)
+			continue;
 		if (!client_active(client))
 			continue;
 		client_msg = ckalloc(sizeof(ckmsg_t));
