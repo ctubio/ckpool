@@ -328,6 +328,8 @@ struct proxy_base {
 };
 
 struct stratifier_data {
+	ckpool_t *ckp;
+
 	char pubkeytxnbin[25];
 	char donkeytxnbin[25];
 
@@ -1006,6 +1008,8 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	sdata_t *dsdata = ckzalloc(sizeof(sdata_t));
 	int64_t randomiser;
 
+	dsdata->ckp = sdata->ckp;
+
 	/* Copy the transaction binaries for workbase creation */
 	memcpy(dsdata->pubkeytxnbin, sdata->pubkeytxnbin, 25);
 	memcpy(dsdata->donkeytxnbin, sdata->donkeytxnbin, 25);
@@ -1272,7 +1276,6 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	add_base(ckp, dsdata, wb, &new_block);
 
-	/* FIXME: Goes to everyone, separate by proxy only */
 	stratum_broadcast_update(sdata, new_block | clean);
 out:
 	json_decref(val);
@@ -1549,6 +1552,7 @@ static inline bool client_active(stratum_instance_t *client)
  * locks. Sends only to sdata bound clients (everyone in ckpool) */
 static void stratum_broadcast(sdata_t *sdata, json_t *val)
 {
+	sdata_t *ckp_sdata = sdata->ckp->data;
 	stratum_instance_t *client, *tmp;
 	ckmsg_t *bulk_send = NULL;
 	ckmsgq_t *ssends;
@@ -1563,7 +1567,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		ckmsg_t *client_msg;
 		smsg_t *msg;
 
-		if (client->sdata != sdata)
+		if (sdata != ckp_sdata && client->sdata != sdata)
 			continue;
 		if (!client_active(client))
 			continue;
@@ -4630,6 +4634,7 @@ int stratifier(proc_instance_t *pi)
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
 	ckp->data = sdata;
+	sdata->ckp = ckp;
 
 	/* Wait for the generator to have something for us */
 	do {
