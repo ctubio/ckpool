@@ -2098,23 +2098,23 @@ static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
  * When the proxy space is less than 32 bits to work with, we look for an
  * unused enonce1 value and reject clients instead if there is no space left.
  * Needs to be entered with client holding a ref count. */
-static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
+static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, stratum_instance_t *client)
 {
 	proxy_t *proxy = NULL;
 	enonce1_t *enonce1u;
 	int enonce1varlen;
 	bool ret = false;
 
-	if (client->ckp->proxy) {
-		if (!sdata->proxy)
+	if (ckp->proxy) {
+		if (!ckp_sdata->proxy)
 			return false;
 
-		mutex_lock(&sdata->proxy_lock);
-		proxy = sdata->proxy;
+		mutex_lock(&ckp_sdata->proxy_lock);
+		proxy = ckp_sdata->proxy;
 		enonce1u = &proxy->enonce1u;
 		client->proxyid = proxy->id;
 		client->subproxyid = proxy->subid;
-		mutex_unlock(&sdata->proxy_lock);
+		mutex_unlock(&ckp_sdata->proxy_lock);
 
 		if (proxy->clients >= proxy->max_clients) {
 			LOGWARNING("Proxy reached max clients %"PRId64, proxy->max_clients);
@@ -2132,7 +2132,7 @@ static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 
 	/* instance_lock protects enonce1u. Recruiting extra proxies should
 	 * prevent these ever locking out.*/
-	ck_wlock(&sdata->instance_lock);
+	ck_wlock(&ckp_sdata->instance_lock);
 	switch(enonce1varlen) {
 		case 8:
 			enonce1u->u64++;
@@ -2166,7 +2166,7 @@ static bool new_enonce1(sdata_t *sdata, stratum_instance_t *client)
 			proxy->clients++;
 		client->enonce1_64 = enonce1u->u64;
 	}
-	ck_wunlock(&sdata->instance_lock);
+	ck_wunlock(&ckp_sdata->instance_lock);
 
 	ck_rlock(&sdata->workbase_lock);
 	__fill_enonce1data(sdata->current_workbase, client);
@@ -2271,7 +2271,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		client->useragent = ckzalloc(1);
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
-		if (!new_enonce1(sdata, client)) {
+		if (!new_enonce1(ckp, ckp_sdata, sdata, client)) {
 			stratum_send_message(sdata, client, "Pool full of clients");
 			client->reject = 2;
 			return json_string("proxy full");
