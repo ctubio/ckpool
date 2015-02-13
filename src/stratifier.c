@@ -1312,10 +1312,6 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 
 	LOGNOTICE("Got updated diff for proxy %d", id);
 	proxy = subproxy_by_id(sdata, id, subid);
-	if (proxy->parent != current_proxy(sdata)) {
-		LOGINFO("Diff from backup proxy");
-		return;
-	}
 
 	/* We only really care about integer diffs so clamp the lower limit to
 	 * 1 or it will round down to zero. */
@@ -1337,6 +1333,8 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id)
+			continue;
+		if (client->subproxyid != subid)
 			continue;
 		if (client->diff > diff) {
 			client->diff = diff;
