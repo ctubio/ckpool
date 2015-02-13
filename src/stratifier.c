@@ -127,8 +127,6 @@ struct workbase {
 
 	ckpool_t *ckp;
 	bool proxy; /* This workbase is proxied work */
-	int proxyid; /* The id of the proxy the workbase is from */
-	int subproxyid; /* The id of the subproxy the worbase is from */
 };
 
 typedef struct workbase workbase_t;
@@ -1039,12 +1037,13 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	return proxy;
 }
 
-static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int id)
+static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int subid)
 {
 	proxy_t *subproxy = ckzalloc(sizeof(proxy_t));
 
-	subproxy->id = id;
-	HASH_ADD_INT(proxy->subproxies, id, subproxy);
+	subproxy->id = proxy->id;
+	subproxy->subid = subid;
+	HASH_ADD_INT(proxy->subproxies, subid, subproxy);
 	proxy->sdata = duplicate_sdata(sdata);
 	subproxy->parent = proxy;
 	return subproxy;
@@ -1064,13 +1063,13 @@ static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 	return proxy;
 }
 
-static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int id)
+static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid)
 {
 	proxy_t *subproxy;
 
-	HASH_FIND_INT(proxy->subproxies, &id, subproxy);
+	HASH_FIND_INT(proxy->subproxies, &subid, subproxy);
 	if (!subproxy)
-		subproxy = __generate_subproxy(sdata, proxy, id);
+		subproxy = __generate_subproxy(sdata, proxy, subid);
 	return subproxy;
 }
 
@@ -1210,24 +1209,10 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		goto out;
 	}
 	LOGNOTICE("Got updated notify for proxy %d", id);
-	if (proxy->parent != current_proxy(sdata)) {
-		LOGINFO("Notify from backup proxy");
-		goto out;
-	}
-
-	if (!proxy->notified) {
-		/* This is the first notification from the current proxy, tell
-		 * clients now to reconnect since we have enough information to
-		 * switch. */
-		proxy->notified = true;
-		reconnect_clients_to(sdata, id);
-	}
 
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
 	wb->proxy = true;
-	wb->proxyid = id;
-	wb->subproxyid = subid;
 
 	json_int64cpy(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
@@ -1276,7 +1261,14 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	add_base(ckp, dsdata, wb, &new_block);
 
-	stratum_broadcast_update(sdata, new_block | clean);
+	if (proxy->parent == current_proxy(sdata) && !proxy->notified) {
+		/* This is the first notification from the current proxy, tell
+		 * clients now to reconnect since we have enough information to
+		 * switch. */
+		proxy->notified = true;
+		reconnect_clients_to(sdata, id);
+	}
+	stratum_broadcast_update(dsdata, new_block | clean);
 out:
 	json_decref(val);
 }
@@ -1922,14 +1914,13 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
  * first notify data comes from this proxy. */
 static void set_proxy(sdata_t *sdata, const char *buf)
 {
-	proxy_t *proxy, *subproxy;
-	int id = 0, subid = 0;
+	proxy_t *proxy;
+	int id = 0;
 
-	sscanf(buf, "proxy=%d:%d", &id, &subid);
+	sscanf(buf, "proxy=%d", &id);
 
 	mutex_lock(&sdata->proxy_lock);
 	proxy = __proxy_by_id(sdata, id);
-	subproxy = __subproxy_by_id(sdata, proxy, subid);
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
