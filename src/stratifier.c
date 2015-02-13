@@ -394,6 +394,7 @@ struct stratifier_data {
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
 	pthread_mutex_t proxy_lock; /* Protects all proxy data */
+	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 };
 
 typedef struct json_entry json_entry_t;
@@ -1028,6 +1029,7 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	return dsdata;
 }
 
+/* Note that proxies don't have unique sdata, only the subproxies do */
 static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
@@ -1044,7 +1046,8 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	subproxy->id = proxy->id;
 	subproxy->subid = subid;
 	HASH_ADD_INT(proxy->subproxies, subid, subproxy);
-	proxy->sdata = duplicate_sdata(sdata);
+	subproxy->sdata = duplicate_sdata(sdata);
+	subproxy->sdata->subproxy = subproxy;
 	subproxy->parent = proxy;
 	return subproxy;
 }
@@ -2105,7 +2108,7 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 			return false;
 
 		mutex_lock(&ckp_sdata->proxy_lock);
-		proxy = ckp_sdata->proxy;
+		proxy = sdata->subproxy;
 		enonce1u = &proxy->enonce1u;
 		client->proxyid = proxy->id;
 		client->subproxyid = proxy->subid;
