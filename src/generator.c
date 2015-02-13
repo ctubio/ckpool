@@ -895,6 +895,16 @@ static bool send_pong(proxy_instance_t *proxi, json_t *val)
 }
 
 static void prepare_proxy(proxy_instance_t *proxi);
+static proxy_instance_t *create_subproxy(proxy_instance_t *proxi);
+
+static void add_subproxy(proxy_instance_t *proxi, proxy_instance_t *subproxy)
+{
+	mutex_lock(&proxi->proxy_lock);
+	proxi->subproxy_count++;
+	HASH_ADD_INT(proxi->subproxies, id, subproxy);
+	proxi->client_headroom += proxi->clients_per_proxy;
+	mutex_unlock(&proxi->proxy_lock);
+}
 
 static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 {
@@ -945,6 +955,13 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	LOGINFO("Processing reconnect request to %s", url);
 
 	ret = true;
+	/* If this isn't a parent proxy, add a new subproxy to the parent */
+	if (proxi != proxi->proxy) {
+		newproxi = create_subproxy(proxi);
+		add_subproxy(proxi, newproxi);
+		goto out;
+	}
+
 	newsi = ckzalloc(sizeof(server_instance_t));
 
 	mutex_lock(&gdata->lock);
@@ -1545,11 +1562,7 @@ static bool recruit_subproxy(proxy_instance_t *proxi)
 		return false;
 	}
 
-	mutex_lock(&proxi->proxy_lock);
-	proxi->subproxy_count++;
-	HASH_ADD_INT(proxi->subproxies, id, subproxy);
-	proxi->client_headroom += proxi->clients_per_proxy;
-	mutex_unlock(&proxi->proxy_lock);
+	add_subproxy(proxi, subproxy);
 
 	return true;
 }
