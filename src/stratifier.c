@@ -2802,8 +2802,8 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const int diff
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	user_instance_t *user = client->user_instance;
+	sdata_t *sdata = client->sdata;
 	int64_t next_blockid, optimal;
-	sdata_t *sdata = ckp->data;
 	tv_t now_t;
 
 	mutex_lock(&sdata->stats_lock);
@@ -2934,10 +2934,10 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 {
 	int transactions = wb->transactions + 1;
 	char hexcoinbase[1024], blockhash[68];
+	sdata_t *sdata = client->sdata;
 	json_t *val = NULL, *val_copy;
 	char *gbt_block, varint[12];
 	ckpool_t *ckp = wb->ckp;
-	sdata_t *sdata = ckp->data;
 	ckmsg_t *block_ckmsg;
 	char cdfield[64];
 	uchar swap[32];
@@ -3131,9 +3131,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
 	const char *workername, *job_id, *ntime, *nonce;
 	char *fname = NULL, *s, *nonce2;
+	sdata_t *sdata = client->sdata;
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
-	sdata_t *sdata = ckp->data;
 	char idstring[20] = {};
 	workbase_t *wb = NULL;
 	uint32_t ntime32;
@@ -3202,6 +3202,8 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_I64(sdata->workbases, &id, wb);
 	if (unlikely(!wb)) {
+		if (!sdata->current_workbase)
+			return json_boolean(false);
 		id = sdata->current_workbase->id;
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
