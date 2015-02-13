@@ -1288,11 +1288,6 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	proxy_t *proxy;
 	json_t *val;
 
-	if (unlikely(!sdata->current_workbase)) {
-		LOGINFO("No current workbase to update diff yet");
-		return;
-	}
-
 	if (unlikely(strlen(cmd) < 6)) {
 		LOGWARNING("Zero length string passed to update_diff");
 		return;
@@ -1319,6 +1314,11 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 		diff = 1;
 
 	dsdata = proxy->sdata;
+
+	if (unlikely(!dsdata->current_workbase)) {
+		LOGINFO("No current workbase to update diff yet");
+		return;
+	}
 
 	ck_wlock(&dsdata->workbase_lock);
 	old_diff = proxy->diff;

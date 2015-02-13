@@ -1285,10 +1285,10 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	json_object_set_nocheck(val, "id", json_integer(share->id));
 
 	/* Add the new message to the psend list */
-	mutex_lock(&proxi->psend_lock);
-	DL_APPEND(proxi->psends, msg);
-	pthread_cond_signal(&proxi->psend_cond);
-	mutex_unlock(&proxi->psend_lock);
+	mutex_lock(&proxy->psend_lock);
+	DL_APPEND(proxy->psends, msg);
+	pthread_cond_signal(&proxy->psend_cond);
+	mutex_unlock(&proxy->psend_lock);
 }
 
 static void clear_notify(notify_instance_t *ni)
