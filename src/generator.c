@@ -986,6 +986,10 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 	if (proxi == proxy)
 		return;
 
+	/* Not set yet */
+	if (!proxi->diff)
+		return;
+
 	JSON_CPACK(json_msg, "{sisisf}",
 		   "proxy", proxy->id,
 		   "subproxy", proxi->id,
