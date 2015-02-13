@@ -1468,6 +1468,8 @@ static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *
 		}
 		goto out;
 	}
+	if (!ckp->passthrough)
+		send_subscribe(ckp, proxi);
 	if (!auth_stratum(ckp, cs, proxi)) {
 		if (!pinging) {
 			LOGWARNING("Failed initial authorise to %s:%s with %s:%s !",
@@ -1482,8 +1484,6 @@ out:
 		Close(cs->fd);
 	} else {
 		keep_sockalive(cs->fd);
-		if (!ckp->passthrough)
-			send_subscribe(ckp, proxi);
 		event.events = EPOLLIN;
 		event.data.ptr = proxi;
 		/* Add this connsock_t to the epoll list */
