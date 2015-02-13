@@ -1322,7 +1322,7 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 
 	ck_wlock(&dsdata->workbase_lock);
 	old_diff = proxy->diff;
-	dsdata->current_workbase->diff = dsdata->proxy->diff = diff;
+	dsdata->current_workbase->diff = proxy->diff = diff;
 	ck_wunlock(&dsdata->workbase_lock);
 
 	if (old_diff < diff)
