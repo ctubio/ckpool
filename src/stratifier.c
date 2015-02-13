@@ -2236,6 +2236,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
+	client->sdata = sdata;
 
 	arr_size = json_array_size(params_val);
 	/* NOTE useragent is NULL prior to this so should not be used in code
@@ -3095,7 +3096,7 @@ static bool new_share(sdata_t *sdata, const uchar *hash, const int64_t wb_id)
 	return ret;
 }
 
-static void update_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id);
+static void update_client(const stratum_instance_t *client, const int64_t client_id);
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held.
  * Needs to be entered with client holding a ref count. */
@@ -3346,7 +3347,7 @@ out:
 		} else if (client->first_invalid && client->first_invalid < now_t - 60) {
 			if (!client->reject) {
 				LOGINFO("Client %"PRId64" rejecting for 60s, sending update", client->id);
-				update_client(sdata, client, client->id);
+				update_client(client, client->id);
 				client->reject = 1;
 			}
 		}
@@ -3414,6 +3415,11 @@ static void stratum_send_update(sdata_t *sdata, const int64_t client_id, const b
 {
 	json_t *json_msg;
 
+	if (unlikely(!sdata->current_workbase)) {
+		LOGWARNING("No current workbase to send stratum update");
+		return;
+	}
+
 	ck_rlock(&sdata->workbase_lock);
 	json_msg = __stratum_notify(sdata->current_workbase, clean);
 	ck_runlock(&sdata->workbase_lock);
@@ -3430,8 +3436,10 @@ static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_va
 }
 
 /* Needs to be entered with client holding a ref count. */
-static void update_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id)
+static void update_client(const stratum_instance_t *client, const int64_t client_id)
 {
+	sdata_t *sdata = client->sdata;
+
 	stratum_send_update(sdata, client_id, true);
 	stratum_send_diff(sdata, client);
 }
@@ -3584,7 +3592,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_object_set_new_nocheck(val, "error", json_null());
 		stratum_add_send(sdata, val, client_id);
 		if (likely(client->subscribed))
-			update_client(sdata, client, client_id);
+			update_client(client, client_id);
 		return;
 	}
 
