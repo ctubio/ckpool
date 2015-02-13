@@ -1281,7 +1281,6 @@ static void submit_share(gdata_t *gdata, json_t *val)
 		return json_decref(val);
 	}
 	json_get_int(&subid, val, "subproxy");
-	json_object_del(val, "subproxy");
 	proxi = subproxy_by_id(proxy, subid);
 	if (unlikely(!proxi)) {
 		LOGWARNING("Failed to find subproxy %d to send share to", subid);
@@ -1390,6 +1389,7 @@ static void *proxy_send(void *arg)
 			continue;
 
 		json_get_int(&subid, msg->json_msg, "subproxy");
+		json_object_del(msg->json_msg, "subproxy");
 		json_uintcpy(&id, msg->json_msg, "jobid");
 
 		mutex_lock(&proxy->notify_lock);
