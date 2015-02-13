@@ -1511,6 +1511,7 @@ out:
 			}
 		}
 	}
+	proxi->alive = ret;
 	return ret;
 }
 
@@ -1520,8 +1521,8 @@ static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
 {
 	proxy_instance_t *subproxy = ckzalloc(sizeof(proxy_instance_t));
 
-	subproxy->ckp = proxi->ckp;
 	subproxy->cs = ckzalloc(sizeof(connsock_t));
+	subproxy->cs->ckp = subproxy->ckp = proxi->ckp;
 	subproxy->si = proxi->si;
 	subproxy->id = proxi->subproxy_count;
 	subproxy->auth = proxi->auth;
@@ -1562,6 +1563,7 @@ static void *passthrough_recv(void *arg)
 	connsock_t *cs = proxi->cs;
 	ckpool_t *ckp = proxi->ckp;
 	struct epoll_event event;
+	bool alive;
 	int epfd;
 
 	rename_proc("passrecv");
@@ -1573,26 +1575,24 @@ static void *passthrough_recv(void *arg)
 	}
 
 	if (proxy_alive(ckp, si, proxi, cs, false, epfd)) {
-		proxi->alive = true;
 		send_proc(ckp->generator, "reconnect");
 		LOGWARNING("Proxy %d:%s connection established",
 			   proxi->id, proxi->si->url);
 	}
+	alive = proxi->alive;
 
 	while (42) {
 		int ret;
 
 		while (!proxy_alive(ckp, si, proxi, cs, true, epfd)) {
-			if (proxi->alive) {
-				proxi->alive = false;
+			if (alive) {
+				alive = false;
 				send_proc(ckp->generator, "reconnect");
 			}
 			sleep(5);
 		}
-		if (!proxi->alive) {
-			proxi->alive = true;
+		if (!alive)
 			send_proc(ckp->generator, "reconnect");
-		}
 
 		/* Make sure we receive a line within 90 seconds */
 		ret = epoll_wait(epfd, &event, 1, 90000);
@@ -1601,7 +1601,7 @@ static void *passthrough_recv(void *arg)
 		if (ret < 1) {
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in proxy_recv, attempting reconnect",
 				   proxi->id, proxi->si->url);
-			proxi->alive = false;
+			alive = proxi->alive = false;
 			send_proc(ckp->generator, "reconnect");
 			continue;
 		}
@@ -1638,6 +1638,7 @@ static void *proxy_recv(void *arg)
 	ckpool_t *ckp = proxi->ckp;
 	gdata_t *gdata = ckp->data;
 	struct epoll_event event;
+	bool alive;
 	int epfd;
 
 	rename_proc("proxyrecv");
@@ -1649,11 +1650,11 @@ static void *proxy_recv(void *arg)
 	}
 
 	if (proxy_alive(ckp, si, proxi, cs, false, epfd)) {
-		proxi->alive = true;
 		send_proc(ckp->generator, "reconnect");
 		LOGWARNING("Proxy %d:%s connection established",
 			   proxi->id, proxi->si->url);
 	}
+	alive = proxi->alive;
 
 	while (42) {
 		proxy_instance_t *subproxy = proxi;
@@ -1663,8 +1664,8 @@ static void *proxy_recv(void *arg)
 		int ret;
 
 		while (!proxy_alive(ckp, si, proxi, proxi->cs, true, epfd)) {
-			if (proxi->alive) {
-				proxi->alive = false;
+			if (alive) {
+				alive = false;
 				send_proc(ckp->generator, "reconnect");
 			}
 			sleep(5);
@@ -1672,13 +1673,13 @@ static void *proxy_recv(void *arg)
 		}
 		/* Wait 90 seconds before declaring this upstream pool alive
 		 * to prevent switching to unstable pools. */
-		if (!proxi->alive && (!best_proxy(ckp, gdata) ||
+		if (!alive && (!best_proxy(ckp, gdata) ||
 		    time(NULL) - proxi->reconnect_time > 90)) {
 			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->si->url);
-			proxi->alive = true;
 			proxi->reconnect_time = 0;
 			send_proc(ckp->generator, "reconnect");
 		}
+		alive = true;
 
 		now = time(NULL);
 
@@ -1712,7 +1713,8 @@ static void *proxy_recv(void *arg)
 			ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
-			if (subproxy->alive) {
+			if (alive) {
+				alive = false;
 				LOGWARNING("Proxy %d:%s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
 					   subproxy->id, subproxy->si->url);
 			}
@@ -1724,7 +1726,7 @@ static void *proxy_recv(void *arg)
 				 * over to a backup pool until the reconnect
 				 * pool is up */
 				subproxy->reconnect = false;
-				subproxy->alive = false;
+				alive = subproxy->alive = false;
 				send_proc(ckp->generator, "reconnect");
 				LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 					   subproxy->id, subproxy->si->url);
