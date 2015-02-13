@@ -1487,8 +1487,11 @@ out:
 		event.events = EPOLLIN;
 		event.data.ptr = proxi;
 		/* Add this connsock_t to the epoll list */
-		if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, cs->fd, &event) == -1))
-			quit(1, "FATAL: Failed to add epfd to epoll_ctl in proxy_alive");
+		if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, cs->fd, &event) == -1)) {
+			LOGERR("Failed to add fd %d to epfd %d to epoll_ctl in proxy_alive",
+			       cs->fd, epfd);
+			return false;
+		}
 		if (!ckp->passthrough && proxi->proxy == proxi) {
 			/* We recruit enough proxies to begin with and then
 			 * recruit extra when asked by the stratifier. */
@@ -1520,6 +1523,7 @@ static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
 	subproxy->auth = proxi->auth;
 	subproxy->pass = proxi->pass;
 	subproxy->proxy = proxi;
+	subproxy->epfd = proxi->epfd;
 	mutex_init(&subproxy->share_lock);
 	return subproxy;
 }
@@ -1634,7 +1638,7 @@ static void *proxy_recv(void *arg)
 
 	rename_proc("proxyrecv");
 
-	epfd = epoll_create1(EPOLL_CLOEXEC);
+	proxi->epfd = epfd = epoll_create1(EPOLL_CLOEXEC);
 	if (epfd < 0){
 		LOGEMERG("FATAL: Failed to create epoll in proxyrecv");
 		return NULL;
