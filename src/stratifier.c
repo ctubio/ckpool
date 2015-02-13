@@ -1271,6 +1271,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		proxy->notified = true;
 		reconnect_clients_to(sdata, id);
 	}
+	LOGINFO("Broadcast updated stratum notify");
 	stratum_broadcast_update(dsdata, new_block | clean);
 out:
 	json_decref(val);
