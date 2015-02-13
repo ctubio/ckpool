@@ -1818,13 +1818,11 @@ reconnect:
 	if (proxi != cproxy) {
 		proxi = cproxy;
 		if (!ckp->passthrough) {
-			proxy_instance_t *proxy = proxi->proxy;
-
 			connsock_t *cs = proxi->cs;
 			LOGWARNING("Successfully connected to proxy %d %s:%s as proxy",
 				   proxi->id, cs->url, cs->port);
 			dealloc(buf);
-			ASPRINTF(&buf, "proxy=%d:%d", proxy->id, proxi->id);
+			ASPRINTF(&buf, "proxy=%d", proxi->id);
 			send_proc(ckp->stratifier, buf);
 		}
 	}
