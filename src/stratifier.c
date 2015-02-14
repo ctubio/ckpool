@@ -1269,7 +1269,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	add_base(ckp, dsdata, wb, &new_block);
 
-	if (proxy->parent == current_proxy(sdata) && !proxy->notified) {
+	if (proxy == current_proxy(sdata) && !proxy->notified) {
 		/* This is the first notification from the current proxy, tell
 		 * clients now to reconnect since we have enough information to
 		 * switch. */
