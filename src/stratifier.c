@@ -278,6 +278,7 @@ struct stratum_instance {
 	sdata_t *sdata; /* Which sdata this client is bound to */
 	int proxyid; /* Which proxy this is bound to in proxy mode */
 	int subproxyid; /* Which subproxy */
+	int64_t notify_id; /* Which notify_id from the subproxy did we join */
 };
 
 struct share {
@@ -316,6 +317,7 @@ struct proxy_base {
 
 	bool subscribed;
 	bool notified;
+	int64_t notify_id; /* What ID was the first notify from this proxy */
 
 	int64_t clients;
 	int64_t max_clients;
@@ -1110,13 +1112,14 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 
 /* Iterates over all clients in proxy mode and sets the reconnect bool for the
  * message to be sent lazily next time they speak to us */
-static void reconnect_clients(sdata_t *sdata)
+static void reconnect_clients(sdata_t *sdata, const int proxyid, const int64_t notify_id)
 {
 	stratum_instance_t *client, *tmp;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		client->reconnect = true;
+		if (client->proxyid != proxyid || client->notify_id != notify_id)
+			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 }
@@ -1157,7 +1160,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	LOGNOTICE("Got updated subscribe for proxy %d:%d", id, subid);
 
 	proxy = subproxy_by_id(sdata, id, subid);
-	proxy->notified = false; /* Reset this */
+	proxy->notify_id = -1; /* Reset this */
 	dsdata = proxy->sdata;
 
 	ck_wlock(&dsdata->workbase_lock);
@@ -1184,6 +1187,11 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		  proxy->nonce2len, proxy->max_clients);
 
 	json_decref(val);
+}
+
+static inline bool parent_proxy(const proxy_t *proxy)
+{
+	return (proxy->parent == proxy);
 }
 
 static void update_notify(ckpool_t *ckp, const char *cmd)
@@ -1269,12 +1277,14 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	add_base(ckp, dsdata, wb, &new_block);
 
-	if (proxy == current_proxy(sdata) && !proxy->notified) {
+	if (parent_proxy(proxy) && proxy->notify_id == -1) {
 		/* This is the first notification from the current proxy, tell
 		 * clients now to reconnect since we have enough information to
 		 * switch. */
-		proxy->notified = true;
-		reconnect_clients(sdata);
+		proxy->notify_id = wb->id;
+		LOGINFO("Setting reconnect to proxy %d notifyid %"PRId64, proxy->id, proxy->notify_id);
+		if (proxy == current_proxy(sdata))
+			reconnect_clients(sdata, proxy->id, proxy->notify_id);
 	}
 	LOGINFO("Broadcast updated stratum notify");
 	stratum_broadcast_update(dsdata, new_block | clean);
@@ -1933,10 +1943,6 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	mutex_unlock(&sdata->proxy_lock);
 
 	LOGNOTICE("Stratifier setting active proxy to %d", id);
-
-	/* We will receive a notification immediately after this and it should
-	 * be the flag to reconnect clients. */
-	proxy->notified = false;
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -2119,6 +2125,7 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 		enonce1u = &proxy->enonce1u;
 		client->proxyid = proxy->id;
 		client->subproxyid = proxy->subid;
+		client->notify_id = proxy->parent->notify_id;
 		mutex_unlock(&ckp_sdata->proxy_lock);
 
 		if (proxy->clients >= proxy->max_clients) {
