@@ -1608,9 +1608,11 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 		/* Recycle an old proxy instance if one exists */
 		subproxy = gdata->dead_proxies;
 		DL_DELETE(gdata->dead_proxies, subproxy);
+		subproxy->disabled = false;
 	} else {
 		subproxy = ckzalloc(sizeof(proxy_instance_t));
 		subproxy->cs = ckzalloc(sizeof(connsock_t));
+		mutex_init(&subproxy->share_lock);
 	}
 	mutex_unlock(&gdata->lock);
 
@@ -1621,7 +1623,6 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 	subproxy->pass = proxi->pass;
 	subproxy->proxy = proxi;
 	subproxy->epfd = proxi->epfd;
-	mutex_init(&subproxy->share_lock);
 	return subproxy;
 }
 
