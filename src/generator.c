@@ -76,7 +76,8 @@ typedef struct proxy_instance proxy_instance_t;
 
 /* Per proxied pool instance data */
 struct proxy_instance {
-	UT_hash_handle hh;
+	UT_hash_handle hh; /* Proxy list */
+	UT_hash_handle sh; /* Subproxy list */
 	proxy_instance_t *next; /* For dead proxy list */
 	proxy_instance_t *prev; /* For dead proxy list */
 
@@ -84,7 +85,8 @@ struct proxy_instance {
 	connsock_t *cs;
 	server_instance_t *si;
 	bool passthrough;
-	int id; /* Proxy server id, or subproxy id if this is a subproxy */
+	int id; /* Proxy server id*/
+	int subid; /* Subproxy id */
 
 	const char *auth;
 	const char *pass;
@@ -914,16 +916,16 @@ static void add_subproxy(proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
 	mutex_lock(&proxi->proxy_lock);
 	proxi->subproxy_count++;
-	HASH_ADD_INT(proxi->subproxies, id, subproxy);
+	HASH_ADD(sh, proxi->subproxies, subid, sizeof(int), subproxy);
 	proxi->client_headroom += proxi->clients_per_proxy;
 	mutex_unlock(&proxi->proxy_lock);
 }
 
-static proxy_instance_t *__subproxy_by_id(proxy_instance_t *proxy, const int id)
+static proxy_instance_t *__subproxy_by_id(proxy_instance_t *proxy, const int subid)
 {
 	proxy_instance_t *subproxy;
 
-	HASH_FIND_INT(proxy->subproxies, &id, subproxy);
+	HASH_FIND(sh, proxy->subproxies, &subid, sizeof(int), subproxy);
 	return subproxy;
 }
 
@@ -1005,7 +1007,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 
 	ret = true;
 	/* If this isn't a parent proxy, add a new subproxy to the parent */
-	if (proxi != proxi->proxy) {
+	if (!parent_proxy(proxi)) {
 		newproxi = create_subproxy(gdata, proxi);
 		add_subproxy(proxi, newproxi);
 		goto out;
@@ -1016,8 +1018,6 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	mutex_lock(&gdata->lock);
 	HASH_DEL(gdata->proxies, proxi);
 	newsi->id = si->id; /* Inherit the old connection's id */
-	si->id = ckp->proxies++; /* Give the old connection the lowest id */
-	ckp->servers = realloc(ckp->servers, sizeof(server_instance_t *) * ckp->proxies);
 	ckp->servers[newsi->id] = newsi;
 	newsi->url = url;
 	newsi->auth = strdup(si->auth);
@@ -1033,7 +1033,6 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->cs = &newsi->cs;
 	newproxi->cs->ckp = ckp;
 	newproxi->id = newsi->id;
-	HASH_ADD_INT(gdata->proxies, id, proxi);
 	HASH_ADD_INT(gdata->proxies, id, newproxi);
 	mutex_unlock(&gdata->lock);
 
@@ -1611,7 +1610,7 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 
 	subproxy->cs->ckp = subproxy->ckp = proxi->ckp;
 	subproxy->si = proxi->si;
-	subproxy->id = proxi->subproxy_count;
+	subproxy->subid = proxi->subproxy_count;
 	subproxy->auth = proxi->auth;
 	subproxy->pass = proxi->pass;
 	subproxy->proxy = proxi;
@@ -1893,11 +1892,7 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 		mutex_lock(&gdata->lock);
 		HASH_ITER(hh, gdata->proxies, proxi, tmp) {
 			if (proxi->alive) {
-				if (!ret) {
-					ret = proxi;
-					continue;
-				}
-				if (proxi->id < ret->id)
+				if (!ret || proxi->id < ret->id)
 					ret = proxi;
 			}
 		}
