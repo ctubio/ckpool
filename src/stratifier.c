@@ -1116,6 +1116,8 @@ static void reconnect_clients(sdata_t *sdata, const int proxyid, const int64_t n
 {
 	stratum_instance_t *client, *tmp;
 
+	LOGINFO("Setting reconnect to proxy %d notifyid %"PRId64, proxyid, notify_id);
+
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != proxyid || client->notify_id != notify_id)
@@ -1282,7 +1284,6 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		 * clients now to reconnect since we have enough information to
 		 * switch. */
 		proxy->notify_id = wb->id;
-		LOGINFO("Setting reconnect to proxy %d notifyid %"PRId64, proxy->id, proxy->notify_id);
 		if (proxy == current_proxy(sdata))
 			reconnect_clients(sdata, proxy->id, proxy->notify_id);
 	}
@@ -1943,6 +1944,8 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	mutex_unlock(&sdata->proxy_lock);
 
 	LOGNOTICE("Stratifier setting active proxy to %d", id);
+	if (proxy->notify_id != -1)
+		reconnect_clients(sdata, proxy->id, proxy->notify_id);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
