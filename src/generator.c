@@ -78,6 +78,7 @@ typedef struct proxy_instance proxy_instance_t;
 struct proxy_instance {
 	UT_hash_handle hh;
 	proxy_instance_t *next; /* For dead proxy list */
+	proxy_instance_t *prev; /* For dead proxy list */
 
 	ckpool_t *ckp;
 	connsock_t *cs;
@@ -899,8 +900,8 @@ static bool send_pong(proxy_instance_t *proxi, json_t *val)
 }
 
 static void prepare_proxy(proxy_instance_t *proxi);
-static proxy_instance_t *create_subproxy(proxy_instance_t *proxi);
-static bool recruit_subproxy(proxy_instance_t *proxi);
+static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi);
+static bool recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi);
 
 static void add_subproxy(proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
@@ -919,22 +920,32 @@ static proxy_instance_t *__subproxy_by_id(proxy_instance_t *proxy, const int id)
 	return subproxy;
 }
 
-/* Remove the subproxy from the proxi list. Do not remove its ram in case of
- * dangling references */
+/* Add to the dead list to be recycled if possible */
+static void store_proxy(gdata_t *gdata, proxy_instance_t *proxy)
+{
+	mutex_lock(&gdata->lock);
+	DL_APPEND(gdata->dead_proxies, proxy);
+	mutex_unlock(&gdata->lock);
+}
+
+/* Remove the subproxy from the proxi list and put it on the dead list */
 static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
 	mutex_lock(&proxi->proxy_lock);
 	subproxy->disabled = true;
 	/* Make sure subproxy is still in the list */
-	if (__subproxy_by_id(proxi, subproxy->id)) {
+	subproxy = __subproxy_by_id(proxi, subproxy->id);
+	if (subproxy) {
 		HASH_DEL(proxi->subproxies, subproxy);
 		proxi->client_headroom -= proxi->clients_per_proxy;
-		LL_PREPEND(gdata->dead_proxies, subproxy);
 	}
 	mutex_unlock(&proxi->proxy_lock);
 
+	if (subproxy)
+		store_proxy(gdata, subproxy);
+
 	if (proxi->client_headroom < 42 && proxi->alive)
-		recruit_subproxy(proxi);
+		recruit_subproxy(gdata, proxi);
 }
 
 static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
@@ -988,7 +999,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	ret = true;
 	/* If this isn't a parent proxy, add a new subproxy to the parent */
 	if (proxi != proxi->proxy) {
-		newproxi = create_subproxy(proxi);
+		newproxi = create_subproxy(gdata, proxi);
 		add_subproxy(proxi, newproxi);
 		goto out;
 	}
@@ -1508,6 +1519,7 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
 			connsock_t *cs, bool pinging, int epfd)
 {
+	gdata_t *gdata = ckp->data;
 	struct epoll_event event;
 	bool ret = false;
 
@@ -1571,7 +1583,7 @@ out:
 			 * recruit extra when asked by the stratifier. */
 			while (proxi->client_headroom < 42) {
 				/* Note recursive call of proxy_alive here */
-				if (!recruit_subproxy(proxi)) {
+				if (!recruit_subproxy(gdata, proxi)) {
 					LOGWARNING("Unable to recruit extra subproxies after just %"PRId64,
 						   proxi->client_headroom);
 					break;
@@ -1587,11 +1599,21 @@ out:
 
 /* Creates a duplicate instance or proxi to be used as a subproxy, ignoring
  * fields we don't use in the subproxy. */
-static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
+static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
 {
-	proxy_instance_t *subproxy = ckzalloc(sizeof(proxy_instance_t));
+	proxy_instance_t *subproxy;
 
-	subproxy->cs = ckzalloc(sizeof(connsock_t));
+	mutex_lock(&gdata->lock);
+	if (gdata->dead_proxies) {
+		/* Recycle an old proxy instance if one exists */
+		subproxy = gdata->dead_proxies;
+		DL_DELETE(gdata->dead_proxies, subproxy);
+	} else {
+		subproxy = ckzalloc(sizeof(proxy_instance_t));
+		subproxy->cs = ckzalloc(sizeof(connsock_t));
+	}
+	mutex_unlock(&gdata->lock);
+
 	subproxy->cs->ckp = subproxy->ckp = proxi->ckp;
 	subproxy->si = proxi->si;
 	subproxy->id = proxi->subproxy_count;
@@ -1603,15 +1625,14 @@ static proxy_instance_t *create_subproxy(proxy_instance_t *proxi)
 	return subproxy;
 }
 
-static bool recruit_subproxy(proxy_instance_t *proxi)
+static bool recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
 {
-	proxy_instance_t *subproxy = create_subproxy(proxi);
+	proxy_instance_t *subproxy = create_subproxy(gdata, proxi);
 	int epfd = proxi->epfd;
 
 	if (!proxy_alive(subproxy->ckp, subproxy->si, subproxy, subproxy->cs, false, epfd)) {
 		LOGNOTICE("Subproxy failed proxy_alive testing");
-		free(subproxy->cs);
-		free(subproxy);
+		store_proxy(gdata, subproxy);
 		return false;
 	}
 
@@ -1943,7 +1964,7 @@ retry:
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
 	} else if (cmdmatch(buf, "recruit")) {
-		recruit_subproxy(proxi);
+		recruit_subproxy(gdata, proxi);
 	} else if (ckp->passthrough) {
 		/* Anything remaining should be stratum messages */
 		passthrough_add_send(proxi, buf);
