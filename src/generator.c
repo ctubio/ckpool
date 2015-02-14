@@ -945,6 +945,7 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	/* Make sure subproxy is still in the list */
 	subproxy = __subproxy_by_id(proxi, subproxy->id);
 	if (subproxy) {
+		Close(subproxy->cs->fd);
 		HASH_DEL(proxi->subproxies, subproxy);
 		proxi->client_headroom -= proxi->clients_per_proxy;
 	}
@@ -1510,6 +1511,20 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 	ckmsgq_add(proxi->passsends, pm);
 }
 
+/* If the parent is dead, we shouldn't use any of the child subproxies to be
+ * used. */
+static void drop_subproxies(proxy_instance_t *proxi)
+{
+	proxy_instance_t *subproxy, *tmp;
+
+	mutex_lock(&proxi->proxy_lock);
+	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
+		if (!parent_proxy(subproxy))
+			Close(subproxy->cs->fd);
+	}
+	mutex_unlock(&proxi->proxy_lock);
+}
+
 static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
 			connsock_t *cs, bool pinging, int epfd)
 {
@@ -1588,6 +1603,8 @@ out:
 		}
 	}
 	proxi->alive = ret;
+	if (!ret && parent_proxy(proxi))
+		drop_subproxies(proxi);
 	return ret;
 }
 
