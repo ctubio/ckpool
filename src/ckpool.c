@@ -1051,6 +1051,16 @@ out:
 	return ret;
 }
 
+bool json_getdel_int(int *store, json_t *val, const char *res)
+{
+	bool ret;
+
+	ret = json_get_int(store, val, res);
+	if (ret)
+		json_object_del(val, res);
+	return ret;
+}
+
 static void parse_btcds(ckpool_t *ckp, const json_t *arr_val, const int arr_size)
 {
 	json_t *val;
