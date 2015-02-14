@@ -1006,12 +1006,12 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	LOGINFO("Processing reconnect request to %s", url);
 
 	ret = true;
-	/* If this isn't a parent proxy, add a new subproxy to the parent */
-	if (!parent_proxy(proxi)) {
-		newproxi = create_subproxy(gdata, proxi);
-		add_subproxy(proxi, newproxi);
+	proxi->reconnect = true;
+
+	/* If this isn't a parent proxy, simply set the reconnect bool allowing
+	 * it to be disabled. More will be recruited if necessary */
+	if (!parent_proxy(proxi))
 		goto out;
-	}
 
 	newsi = ckzalloc(sizeof(server_instance_t));
 
@@ -1811,7 +1811,8 @@ static void *proxy_recv(void *arg)
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 						subproxy->id, subproxy->si->url);
 					break;
-				}
+				} else
+					disable_subproxy(gdata, proxi, subproxy);
 			}
 			continue;
 		}
