@@ -1102,16 +1102,14 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 }
 
 /* Iterates over all clients in proxy mode and sets the reconnect bool for the
- * message to be sent lazily next time they speak to us if they're not bound
- * to the requested proxy id */
-static void reconnect_clients_to(sdata_t *sdata, const int id)
+ * message to be sent lazily next time they speak to us */
+static void reconnect_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmp;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->proxyid != id)
-			client->reconnect = true;
+		client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 }
@@ -1269,7 +1267,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		 * clients now to reconnect since we have enough information to
 		 * switch. */
 		proxy->notified = true;
-		reconnect_clients_to(sdata, id);
+		reconnect_clients(sdata);
 	}
 	LOGINFO("Broadcast updated stratum notify");
 	stratum_broadcast_update(dsdata, new_block | clean);
@@ -1913,7 +1911,8 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 }
 
 /* Sets the currently active proxy. Clients will be told to reconnect once the
- * first notify data comes from this proxy. */
+ * first notify data comes from this proxy. Even if we are already bound to
+ * this proxy we are only given this message if all clients must move. */
 static void set_proxy(sdata_t *sdata, const char *buf)
 {
 	proxy_t *proxy;

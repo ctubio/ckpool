@@ -105,6 +105,7 @@ struct proxy_instance {
 
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
+	bool reconnecting; /* Parsed reconnect, need to reconnect clients */
 	bool alive;
 
 	pthread_mutex_t notify_lock;
@@ -1805,13 +1806,17 @@ static void *proxy_recv(void *arg)
 				/* Call this proxy dead to allow us to fail
 				 * over to a backup pool until the reconnect
 				 * pool is up */
-				subproxy->reconnect = false;
-				alive = subproxy->alive = false;
-				send_proc(ckp->generator, "reconnect");
-				LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
-					   subproxy->id, subproxy->si->url);
 				Close(cs->fd);
-				break;
+				subproxy->reconnect = false;
+				subproxy->reconnecting = true;
+				subproxy->alive = false;
+				if (parent_proxy(subproxy)) {
+					alive = false;
+					send_proc(ckp->generator, "reconnect");
+					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
+						subproxy->id, subproxy->si->url);
+					break;
+				}
 			}
 			continue;
 		}
@@ -1902,7 +1907,8 @@ reconnect:
 	cproxy = best_proxy(ckp, gdata);
 	if (!cproxy)
 		goto out;
-	if (proxi != cproxy) {
+	if (proxi != cproxy || cproxy->reconnecting) {
+		cproxy->reconnecting = false;
 		proxi = cproxy;
 		if (!ckp->passthrough) {
 			connsock_t *cs = proxi->cs;
