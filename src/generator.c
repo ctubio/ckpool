@@ -1694,7 +1694,27 @@ static void *passthrough_recv(void *arg)
 	return NULL;
 }
 
-static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata);
+static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata)
+{
+	proxy_instance_t *ret = NULL, *proxi, *tmp;
+
+	mutex_lock(&gdata->lock);
+	HASH_ITER(hh, gdata->proxies, proxi, tmp) {
+		if (proxi->alive) {
+			if (!ret) {
+				ret = proxi;
+				continue;
+			}
+			if (proxi->id < ret->id)
+				ret = proxi;
+		}
+	}
+	gdata->proxy = ret;
+	mutex_unlock(&gdata->lock);
+
+	send_proc(ckp->connector, ret ? "accept" : "reject");
+	return ret;
+}
 
 #if 0
 static proxy_instance_t *current_proxy(gdata_t *gdata)
@@ -1862,7 +1882,7 @@ static void setup_proxies(ckpool_t *ckp, gdata_t *gdata)
 	}
 }
 
-static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata)
+static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 {
 	proxy_instance_t *ret = NULL, *proxi, *tmp;
 
@@ -1886,6 +1906,7 @@ static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata)
 
 		if (ret)
 			break;
+		send_proc(ckp->connector, "reject");
 		sleep(1);
 	}
 	send_proc(ckp->connector, ret ? "accept" : "reject");
@@ -1905,7 +1926,7 @@ static int proxy_loop(proc_instance_t *pi)
 reconnect:
 	/* This does not necessarily mean we reconnect, but a change has
 	 * occurred and we need to reexamine the proxies. */
-	cproxy = best_proxy(ckp, gdata);
+	cproxy = wait_best_proxy(ckp, gdata);
 	if (!cproxy)
 		goto out;
 	if (proxi != cproxy || cproxy->reconnecting) {
