@@ -558,6 +558,11 @@ out:
 	return buf;
 }
 
+static inline bool parent_proxy(proxy_instance_t *proxy)
+{
+	return (proxy->proxy == proxy);
+}
+
 static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *val = NULL, *res_val, *notify_val, *tmp;
@@ -651,7 +656,7 @@ retry:
 		goto out;
 	}
 	proxi->nonce2len = size;
-	if (proxi->proxy == proxi) {
+	if (parent_proxy(proxi)) {
 		/* Set the number of clients per proxy on the parent proxy */
 		proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
 		LOGNOTICE("Proxy %d:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
@@ -1042,7 +1047,7 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 	char *msg, *buf;
 
 	/* Master proxy, we don't use this for work */
-	if (proxi == proxy)
+	if (parent_proxy(proxi))
 		return;
 
 	/* Not set yet */
@@ -1070,7 +1075,7 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 	int i;
 
 	/* Master proxy, we don't use this for work */
-	if (proxi == proxy)
+	if (parent_proxy(proxi))
 		return;
 
 	merkle_arr = json_array();
@@ -1281,7 +1286,7 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	char *msg, *buf;
 
 	/* Master proxy, we don't use this for work */
-	if (proxi == proxi->proxy)
+	if (parent_proxy(proxi))
 		return;
 
 	JSON_CPACK(json_msg, "{sisisssi}",
@@ -1578,7 +1583,7 @@ out:
 			       cs->fd, epfd);
 			return false;
 		}
-		if (!ckp->passthrough && proxi->proxy == proxi) {
+		if (!ckp->passthrough && parent_proxy(proxi)) {
 			/* We recruit enough proxies to begin with and then
 			 * recruit extra when asked by the stratifier. */
 			while (proxi->client_headroom < 42) {
