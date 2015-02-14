@@ -1693,29 +1693,6 @@ static void *passthrough_recv(void *arg)
 	return NULL;
 }
 
-static proxy_instance_t *best_proxy(ckpool_t *ckp, gdata_t *gdata)
-{
-	proxy_instance_t *ret = NULL, *proxi, *tmp;
-
-	mutex_lock(&gdata->lock);
-	HASH_ITER(hh, gdata->proxies, proxi, tmp) {
-		if (proxi->alive) {
-			if (!ret) {
-				ret = proxi;
-				continue;
-			}
-			if (proxi->id < ret->id)
-				ret = proxi;
-		}
-	}
-	gdata->proxy = ret;
-	mutex_unlock(&gdata->lock);
-
-	send_proc(ckp->connector, ret ? "accept" : "reject");
-	return ret;
-}
-
-#if 0
 static proxy_instance_t *current_proxy(gdata_t *gdata)
 {
 	proxy_instance_t *ret;
@@ -1726,7 +1703,6 @@ static proxy_instance_t *current_proxy(gdata_t *gdata)
 
 	return ret;
 }
-#endif
 
 /* For receiving messages from the upstream proxy, also responsible for setting
  * up the connection and testing it's alive. */
@@ -1773,8 +1749,7 @@ static void *proxy_recv(void *arg)
 		}
 		/* Wait 90 seconds before declaring this upstream pool alive
 		 * to prevent switching to unstable pools. */
-		if (!alive && (!best_proxy(ckp, gdata) ||
-		    time(NULL) - proxi->reconnect_time > 90)) {
+		if (!alive && (!current_proxy(gdata) || time(NULL) - proxi->reconnect_time > 90)) {
 			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->si->url);
 			proxi->reconnect_time = 0;
 			send_proc(ckp->generator, "reconnect");
