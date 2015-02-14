@@ -1273,8 +1273,7 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	share_msg_t *share;
 	int id, subid;
 
-	json_get_int(&id, val, "proxy");
-	json_object_del(val, "proxy");
+	json_getdel_int(&id, val, "proxy");
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
 		LOGWARNING("Failed to find proxy %d to send share to", id);
@@ -1290,10 +1289,8 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	msg = ckzalloc(sizeof(stratum_msg_t));
 	share = ckzalloc(sizeof(share_msg_t));
 	share->submit_time = time(NULL);
-	share->client_id = json_integer_value(json_object_get(val, "client_id"));
-	share->msg_id = json_integer_value(json_object_get(val, "msg_id"));
-	json_object_del(val, "client_id");
-	json_object_del(val, "msg_id");
+	json_getdel_int(&share->client_id, val, "client_id");
+	json_getdel_int(&share->msg_id, val, "msg_id");
 	msg->json_msg = val;
 
 	/* Add new share entry to the share hashtable */
@@ -1388,8 +1385,7 @@ static void *proxy_send(void *arg)
 		if (unlikely(!msg))
 			continue;
 
-		json_get_int(&subid, msg->json_msg, "subproxy");
-		json_object_del(msg->json_msg, "subproxy");
+		json_getdel_int(&subid, msg->json_msg, "subproxy");
 		json_uintcpy(&id, msg->json_msg, "jobid");
 
 		mutex_lock(&proxy->notify_lock);
