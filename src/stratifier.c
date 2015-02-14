@@ -3414,7 +3414,11 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 		if (res_val) {
 			const char *result = json_string_value(res_val);
 
-			LOGDEBUG("Received spurious response %s", result ? result : "");
+			if (!safecmp(result, "pong"))
+				LOGDEBUG("Received pong from client %"PRId64, client_id);
+			else
+				LOGDEBUG("Received spurious response %s from client %"PRId64,
+					 result ? result : "", client_id);
 			goto out;
 		}
 		send_json_err(sdata, client_id, id_val, "-3:method not found");
