@@ -346,8 +346,7 @@ reparse:
 		char *s;
 
 		if (client->passthrough) {
-			passthrough_id = json_integer_value(json_object_get(val, "client_id"));
-			json_object_del(val, "client_id");
+			json_getdel_int64(&passthrough_id, val, "client_id");
 			passthrough_id = (client->id << 32) | passthrough_id;
 			json_object_set_new_nocheck(val, "client_id", json_integer(passthrough_id));
 		} else
@@ -641,8 +640,7 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 	}
 
 	/* Extract the client id from the json message and remove its entry */
-	client_id64 = json_integer_value(json_object_get(json_msg, "client_id"));
-	json_object_del(json_msg, "client_id");
+	json_getdel_int64(&client_id64, json_msg, "client_id");
 	if (client_id64 > 0xffffffffll) {
 		int64_t passthrough_id;
 
