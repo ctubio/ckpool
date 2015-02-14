@@ -1054,7 +1054,7 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 
 	JSON_CPACK(json_msg, "{sisisf}",
 		   "proxy", proxy->id,
-		   "subproxy", proxi->id,
+		   "subproxy", proxi->subid,
 		   "diff", proxi->diff);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
@@ -1085,7 +1085,7 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
 	JSON_CPACK(json_msg, "{sisisisssisssssosssssssb}",
-			     "proxy", proxy->id, "subproxy", proxi->id,
+			     "proxy", proxy->id, "subproxy", proxi->subid,
 			     "jobid", ni->id, "prevhash", ni->prevhash, "coinb1len", ni->coinb1len,
 			     "coinbase1", ni->coinbase1, "coinbase2", ni->coinbase2,
 			     "merklehash", merkle_arr, "bbversion", ni->bbversion,
@@ -1281,7 +1281,7 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 
 	JSON_CPACK(json_msg, "{sisisssi}",
 			     "proxy", proxi->proxy->id,
-			     "subproxy", proxi->id,
+			     "subproxy", proxi->subid,
 			     "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
