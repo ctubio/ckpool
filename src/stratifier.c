@@ -321,7 +321,7 @@ struct proxy_base {
 	int64_t max_clients;
 	enonce1_t enonce1u;
 
-	proxy_t *parent; /* Parent proxy - set to NULL on parent itself */
+	proxy_t *parent; /* Parent proxy - set to self on parent itself */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
 };
@@ -1030,12 +1030,16 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	return dsdata;
 }
 
-/* Note that proxies don't have unique sdata, only the subproxies do */
 static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
 
 	proxy->id = id;
+	proxy->sdata = duplicate_sdata(sdata);
+	proxy->sdata->subproxy = proxy;
+	proxy->parent = proxy;
+	/* subid == 0 on parent proxy */
+	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
 	HASH_ADD_INT(sdata->proxies, id, proxy);
 	return proxy;
 }
@@ -1061,7 +1065,7 @@ static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 	HASH_FIND_INT(sdata->proxies, &id, proxy);
 	if (unlikely(!proxy)) {
 		proxy = __generate_proxy(sdata, id);
-		LOGINFO("Stratifier added new proxy %d", id);
+		LOGNOTICE("Stratifier added new proxy %d", id);
 	}
 
 	return proxy;
@@ -1072,8 +1076,10 @@ static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid
 	proxy_t *subproxy;
 
 	HASH_FIND(sh, proxy->subproxies, &subid, sizeof(int), subproxy);
-	if (!subproxy)
+	if (!subproxy) {
 		subproxy = __generate_subproxy(sdata, proxy, subid);
+		LOGINFO("Stratifier added new subproxy %d:%d", proxy->id, subid);
+	}
 	return subproxy;
 }
 
@@ -1925,6 +1931,8 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	proxy = __proxy_by_id(sdata, id);
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
+
+	LOGNOTICE("Stratifier setting active proxy to %d", id);
 
 	/* We will receive a notification immediately after this and it should
 	 * be the flag to reconnect clients. */
