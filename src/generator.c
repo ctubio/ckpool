@@ -1401,11 +1401,13 @@ static bool parse_share(proxy_instance_t *proxi, const char *buf)
 		HASH_DEL(proxi->shares, share);
 	mutex_unlock(&proxi->share_lock);
 
+	/* We set response to true even if we don't find the matching share,
+	 * so long as we recognised it as a share response */
+	ret = true;
 	if (!share) {
 		LOGINFO("Failed to find matching share to result: %s", buf);
 		goto out;
 	}
-	ret = true;
 	LOGDEBUG("Found share from client %d with msg_id %d", share->client_id,
 		 share->msg_id);
 	free(share);
