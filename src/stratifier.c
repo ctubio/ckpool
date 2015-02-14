@@ -300,6 +300,7 @@ typedef struct proxy_base proxy_t;
 
 struct proxy_base {
 	UT_hash_handle hh;
+	UT_hash_handle sh; /* For subproxy hashlist */
 	int id;
 	int subid;
 
@@ -1045,7 +1046,7 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 
 	subproxy->id = proxy->id;
 	subproxy->subid = subid;
-	HASH_ADD_INT(proxy->subproxies, subid, subproxy);
+	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
 	subproxy->sdata = duplicate_sdata(sdata);
 	subproxy->sdata->subproxy = subproxy;
 	subproxy->parent = proxy;
@@ -1070,7 +1071,7 @@ static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid
 {
 	proxy_t *subproxy;
 
-	HASH_FIND_INT(proxy->subproxies, &subid, subproxy);
+	HASH_FIND(sh, proxy->subproxies, &subid, sizeof(int), subproxy);
 	if (!subproxy)
 		subproxy = __generate_subproxy(sdata, proxy, subid);
 	return subproxy;
@@ -2193,7 +2194,7 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 		return NULL;
 	}
 	mutex_lock(&ckp_sdata->proxy_lock);
-	HASH_ITER(hh, proxy->subproxies, subproxy, tmp) {
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
 		int64_t subproxy_headroom = subproxy->max_clients - subproxy->clients;
 
 		headroom += subproxy_headroom;
