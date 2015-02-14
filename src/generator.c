@@ -659,6 +659,7 @@ retry:
 	if (parent_proxy(proxi)) {
 		/* Set the number of clients per proxy on the parent proxy */
 		proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
+		proxi->client_headroom = proxi->clients_per_proxy;
 		LOGNOTICE("Proxy %d:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
 			proxi->clients_per_proxy);
 	}
@@ -1046,10 +1047,6 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_t *json_msg;
 	char *msg, *buf;
 
-	/* Master proxy, we don't use this for work */
-	if (parent_proxy(proxi))
-		return;
-
 	/* Not set yet */
 	if (!proxi->diff)
 		return;
@@ -1073,10 +1070,6 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 	notify_instance_t *ni;
 	char *msg, *buf;
 	int i;
-
-	/* Master proxy, we don't use this for work */
-	if (parent_proxy(proxi))
-		return;
 
 	merkle_arr = json_array();
 
@@ -1285,10 +1278,6 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_t *json_msg;
 	char *msg, *buf;
 
-	/* Master proxy, we don't use this for work */
-	if (parent_proxy(proxi))
-		return;
-
 	JSON_CPACK(json_msg, "{sisisssi}",
 			     "proxy", proxi->proxy->id,
 			     "subproxy", proxi->id,
@@ -1476,10 +1465,6 @@ static void *proxy_send(void *arg)
 					"id", json_object_dup(msg->json_msg, "id"),
 					"method", "mining.submit");
 			ret = send_json_msg(cs, val);
-			if (unlikely(!ret && !subproxy->disabled)) {
-				LOGWARNING("Proxy %d:%d dead, disabling", proxy->id, subid);
-				disable_subproxy(gdata, proxy, subproxy);
-			}
 			json_decref(val);
 		} else {
 			LOGNOTICE("Proxy %d:%s failed to find matching jobid in proxysend",
@@ -1492,6 +1477,8 @@ static void *proxy_send(void *arg)
 			LOGWARNING("Proxy %d:%s failed to send msg in proxy_send, dropping to reconnect",
 				   proxy->id, proxy->si->url);
 			Close(cs->fd);
+			if (!parent_proxy && !subproxy->disabled)
+				disable_subproxy(gdata, proxy, subproxy);
 		}
 	}
 	return NULL;
@@ -1841,6 +1828,7 @@ static void prepare_proxy(proxy_instance_t *proxi)
 {
 	proxi->proxy = proxi;
 	mutex_init(&proxi->proxy_lock);
+	add_subproxy(proxi, proxi);
 	mutex_init(&proxi->psend_lock);
 	cond_init(&proxi->psend_cond);
 	create_pthread(&proxi->pth_psend, proxy_send, proxi);
