@@ -1477,7 +1477,7 @@ static void *proxy_send(void *arg)
 			LOGWARNING("Proxy %d:%s failed to send msg in proxy_send, dropping to reconnect",
 				   proxy->id, proxy->si->url);
 			Close(cs->fd);
-			if (!parent_proxy && !subproxy->disabled)
+			if (!parent_proxy(subproxy) && !subproxy->disabled)
 				disable_subproxy(gdata, proxy, subproxy);
 		}
 	}
