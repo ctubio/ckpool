@@ -1753,8 +1753,8 @@ static void *proxy_recv(void *arg)
 			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->si->url);
 			proxi->reconnect_time = 0;
 			send_proc(ckp->generator, "reconnect");
+			alive = true;
 		}
-		alive = true;
 
 		now = time(NULL);
 
@@ -1788,7 +1788,7 @@ static void *proxy_recv(void *arg)
 			ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
-			if (alive && parent_proxy(subproxy)) {
+			if (parent_proxy(subproxy)) {
 				alive = false;
 				LOGWARNING("Proxy %d:%s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
 					   subproxy->id, subproxy->si->url);
