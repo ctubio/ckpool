@@ -1794,10 +1794,11 @@ static void *proxy_recv(void *arg)
 			ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
-			if (alive) {
+			if (alive && parent_proxy(subproxy)) {
 				alive = false;
 				LOGWARNING("Proxy %d:%s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
 					   subproxy->id, subproxy->si->url);
+				send_proc(ckp->generator, "reconnect");
 			}
 			continue;
 		}
