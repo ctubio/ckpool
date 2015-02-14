@@ -228,5 +228,6 @@ bool json_get_int(int *store, const json_t *val, const char *res);
 bool json_get_double(double *store, const json_t *val, const char *res);
 bool json_get_bool(bool *store, const json_t *val, const char *res);
 bool json_getdel_int(int *store, json_t *val, const char *res);
+bool json_getdel_int64(int64_t *store, json_t *val, const char *res);
 
 #endif /* CKPOOL_H */
