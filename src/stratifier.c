@@ -3294,8 +3294,11 @@ out_unlock:
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
 	if (wb && wb->proxy && submit) {
+		int msg_id = 0;
+
+		json_get_int(&msg_id, json_msg, "id");
 		LOGINFO("Submitting share upstream: %s", hexhash);
-		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
+		submit_share(client, id, nonce2, ntime, nonce, msg_id);
 	}
 
 	add_submit(ckp, client, diff, result, submit);
