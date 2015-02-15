@@ -1032,6 +1032,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->cs = &newsi->cs;
 	newproxi->cs->ckp = ckp;
 	newproxi->id = newsi->id;
+	newproxi->subproxy_count = ++proxi->subproxy_count;
 	HASH_REPLACE_INT(gdata->proxies, id, newproxi, proxi);
 	mutex_unlock(&gdata->lock);
 
