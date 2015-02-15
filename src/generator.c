@@ -943,7 +943,7 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	mutex_lock(&proxi->proxy_lock);
 	subproxy->disabled = true;
 	/* Make sure subproxy is still in the list */
-	subproxy = __subproxy_by_id(proxi, subproxy->id);
+	subproxy = __subproxy_by_id(proxi, subproxy->subid);
 	if (subproxy) {
 		Close(subproxy->cs->fd);
 		HASH_DEL(proxi->subproxies, subproxy);
@@ -1279,12 +1279,12 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	free(buf);
 }
 
-static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int id)
+static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int subid)
 {
 	proxy_instance_t *subproxy;
 
 	mutex_lock(&proxy->proxy_lock);
-	subproxy = __subproxy_by_id(proxy, id);
+	subproxy = __subproxy_by_id(proxy, subid);
 	if (subproxy && subproxy->disabled)
 		subproxy = NULL;
 	mutex_unlock(&proxy->proxy_lock);
