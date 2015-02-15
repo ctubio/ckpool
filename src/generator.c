@@ -135,7 +135,7 @@ struct proxy_instance {
 	pthread_mutex_t proxy_lock; /* Lock protecting hashlist of proxies */
 	int64_t clients_per_proxy; /* How many clients can connect to each subproxy */
 	int64_t client_headroom; /* How many more clients can we connect */
-	proxy_instance_t *proxy; /* Parent proxy of subproxies */
+	proxy_instance_t *parent; /* Parent proxy of subproxies */
 	proxy_instance_t *subproxies; /* Hashlist of subproxies of this proxy */
 	int subproxy_count; /* Number of subproxies */
 };
@@ -562,7 +562,7 @@ out:
 
 static inline bool parent_proxy(proxy_instance_t *proxy)
 {
-	return (proxy->proxy == proxy);
+	return (proxy->parent == proxy);
 }
 
 static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
@@ -787,7 +787,7 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_
 static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
-	proxy_instance_t *proxy = proxi->proxy;
+	proxy_instance_t *proxy = proxi->parent;
 	char *job_id, *coinbase1, *coinbase2;
 	gdata_t *gdata = proxi->ckp->data;
 	bool clean, ret = false;
@@ -1035,6 +1035,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->cs = &newsi->cs;
 	newproxi->cs->ckp = ckp;
 	newproxi->id = newsi->id;
+	newproxi->parent = newproxi;
 	HASH_REPLACE_INT(gdata->proxies, id, newproxi, proxi);
 	HASH_ADD(sh, newproxi->subproxies, subid, sizeof(int), newproxi);
 	mutex_unlock(&gdata->lock);
@@ -1046,7 +1047,7 @@ out:
 
 static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 {
-	proxy_instance_t *proxy = proxi->proxy;
+	proxy_instance_t *proxy = proxi->parent;
 	json_t *json_msg;
 	char *msg, *buf;
 
@@ -1068,7 +1069,7 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 
 static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_t *ni)
 {
-	proxy_instance_t *proxy = proxi->proxy;
+	proxy_instance_t *proxy = proxi->parent;
 	json_t *json_msg, *merkle_arr;
 	char *msg, *buf;
 	int i;
@@ -1271,7 +1272,7 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	char *msg, *buf;
 
 	JSON_CPACK(json_msg, "{sisisssi}",
-			     "proxy", proxi->proxy->id,
+			     "proxy", proxi->parent->id,
 			     "subproxy", proxi->subid,
 			     "enonce1", proxi->enonce1,
 			     "nonce2len", proxi->nonce2len);
@@ -1612,7 +1613,7 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 	subproxy->subid = proxi->subproxy_count;
 	subproxy->auth = proxi->auth;
 	subproxy->pass = proxi->pass;
-	subproxy->proxy = proxi;
+	subproxy->parent = proxi;
 	subproxy->epfd = proxi->epfd;
 	return subproxy;
 }
@@ -1828,7 +1829,7 @@ static void *proxy_recv(void *arg)
 
 static void prepare_proxy(proxy_instance_t *proxi)
 {
-	proxi->proxy = proxi;
+	proxi->parent = proxi;
 	mutex_init(&proxi->proxy_lock);
 	add_subproxy(proxi, proxi);
 	mutex_init(&proxi->psend_lock);
