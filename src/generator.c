@@ -783,7 +783,9 @@ out:
 	return ret;
 }
 
-static bool parse_notify(proxy_instance_t *proxi, json_t *val)
+static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_t *ni);
+
+static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
 	proxy_instance_t *proxy = proxi->proxy;
@@ -855,6 +857,7 @@ static bool parse_notify(proxy_instance_t *proxi, json_t *val)
 	proxi->current_notify = ni;
 	mutex_unlock(&proxy->notify_lock);
 
+	send_notify(ckp, proxi, ni);
 out:
 	return ret;
 }
@@ -1066,23 +1069,15 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 	free(buf);
 }
 
-static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
+static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_t *ni)
 {
 	proxy_instance_t *proxy = proxi->proxy;
 	json_t *json_msg, *merkle_arr;
-	notify_instance_t *ni;
 	char *msg, *buf;
 	int i;
 
 	merkle_arr = json_array();
 
-	mutex_lock(&proxy->notify_lock);
-	ni = proxi->current_notify;
-	if (unlikely(!ni)) {
-		mutex_unlock(&proxy->notify_lock);
-		LOGNOTICE("Proxi %d not ready to send notify", proxi->id);
-		return;
-	}
 	for (i = 0; i < ni->merkles; i++)
 		json_array_append_new(merkle_arr, json_string(&ni->merklehash[i][0]));
 	/* Use our own jobid instead of the server's one for easy lookup */
@@ -1093,7 +1088,6 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi)
 			     "merklehash", merkle_arr, "bbversion", ni->bbversion,
 			     "nbit", ni->nbit, "ntime", ni->ntime,
 			     "clean", ni->clean);
-	mutex_unlock(&proxy->notify_lock);
 
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
@@ -1153,9 +1147,7 @@ static bool parse_method(ckpool_t *ckp, proxy_instance_t *proxi, const char *msg
 	}
 
 	if (cmdmatch(buf, "mining.notify")) {
-		ret = parse_notify(proxi, params);
-		if (ret)
-			send_notify(ckp, proxi);
+		ret = parse_notify(ckp, proxi, params);
 		goto out;
 	}
 
