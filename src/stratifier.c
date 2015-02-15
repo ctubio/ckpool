@@ -1183,6 +1183,11 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		proxy->enonce1varlen = 0;
 	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
 	proxy->max_clients = 1ll << (proxy->enonce1varlen * 8);
+	/* Reset the enonce1u in case this is a resubscribe of an existing
+	 * parent proxy. All clients previously bound will be disconnected so
+	 * we can start with a fresh count. */
+	proxy->clients = 0;
+	proxy->enonce1u.u64 = 0;
 	ck_wunlock(&dsdata->workbase_lock);
 
 	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %"PRId64,
@@ -2228,7 +2233,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 		send_generator(ckp, "recruit", GEN_PRIORITY);
 	}
 	if (!best) {
-		LOGWARNING("Insufficient subproxies to accept more clients");
+		LOGNOTICE("Temporarily insufficient subproxies of proxy %d to accept more clients",
+			   proxy->id);
 		return NULL;
 	}
 	return best->sdata;
