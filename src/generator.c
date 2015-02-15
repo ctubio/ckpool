@@ -1931,6 +1931,7 @@ retry:
 	if (unlikely(proxi->cs->fd < 0)) {
 		LOGWARNING("Upstream proxy %d:%s socket invalidated, will attempt failover",
 			   proxi->id, proxi->cs->url);
+		drop_subproxies(proxi);
 		proxi->alive = false;
 		proxi = NULL;
 		goto reconnect;
