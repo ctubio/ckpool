@@ -1476,10 +1476,12 @@ static void *proxy_send(void *arg)
 		free(jobid);
 		json_decref(msg->json_msg);
 		free(msg);
-		if (!ret && subproxy && cs->fd > 0) {
-			LOGWARNING("Proxy %d:%s failed to send msg in proxy_send, dropping to reconnect",
-				   proxy->id, proxy->si->url);
-			Close(cs->fd);
+		if (!ret && subproxy) {
+			if (cs->fd > 0) {
+				LOGWARNING("Proxy %d:%s failed to send msg in proxy_send, dropping to reconnect",
+					proxy->id, proxy->si->url);
+				Close(cs->fd);
+			}
 			if (!parent_proxy(subproxy) && !subproxy->disabled)
 				disable_subproxy(gdata, proxy, subproxy);
 		}
