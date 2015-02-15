@@ -932,6 +932,8 @@ static proxy_instance_t *__subproxy_by_id(proxy_instance_t *proxy, const int sub
 /* Add to the dead list to be recycled if possible */
 static void store_proxy(gdata_t *gdata, proxy_instance_t *proxy)
 {
+	LOGINFO("Recycling data from proxy %d:%d", proxy->id, proxy->subid);
+
 	mutex_lock(&gdata->lock);
 	DL_APPEND(gdata->dead_proxies, proxy);
 	mutex_unlock(&gdata->lock);
@@ -1017,7 +1019,6 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newsi = ckzalloc(sizeof(server_instance_t));
 
 	mutex_lock(&gdata->lock);
-	HASH_DEL(gdata->proxies, proxi);
 	newsi->id = si->id; /* Inherit the old connection's id */
 	ckp->servers[newsi->id] = newsi;
 	newsi->url = url;
@@ -1034,7 +1035,8 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->cs = &newsi->cs;
 	newproxi->cs->ckp = ckp;
 	newproxi->id = newsi->id;
-	HASH_ADD_INT(gdata->proxies, id, newproxi);
+	HASH_REPLACE_INT(gdata->proxies, id, newproxi, proxi);
+	HASH_ADD(sh, newproxi->subproxies, subid, sizeof(int), newproxi);
 	mutex_unlock(&gdata->lock);
 
 	prepare_proxy(newproxi);
@@ -1830,6 +1832,8 @@ static void *proxy_recv(void *arg)
 		/* If it's not a method it should be a share result */
 		LOGWARNING("Unhandled stratum message: %s", cs->buf);
 	}
+	store_proxy(gdata, proxi);
+
 	return NULL;
 }
 
