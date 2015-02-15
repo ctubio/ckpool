@@ -1279,12 +1279,12 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	add_base(ckp, dsdata, wb, &new_block);
 
-	if (parent_proxy(proxy) && proxy->notify_id == -1) {
+	if (proxy->notify_id == -1) {
 		/* This is the first notification from the current proxy, tell
 		 * clients now to reconnect since we have enough information to
 		 * switch. */
 		proxy->notify_id = wb->id;
-		if (proxy == current_proxy(sdata))
+		if (parent_proxy(proxy) && proxy == current_proxy(sdata))
 			reconnect_clients(sdata, proxy->id, proxy->notify_id);
 	}
 	LOGINFO("Broadcast updated stratum notify");
