@@ -1530,7 +1530,6 @@ static void drop_subproxies(proxy_instance_t *proxi)
 static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
 			connsock_t *cs, bool pinging, int epfd)
 {
-	gdata_t *gdata = ckp->data;
 	struct epoll_event event;
 	bool ret = false;
 
@@ -1588,20 +1587,6 @@ out:
 			LOGERR("Failed to add fd %d to epfd %d to epoll_ctl in proxy_alive",
 			       cs->fd, epfd);
 			return false;
-		}
-		if (!ckp->passthrough && parent_proxy(proxi)) {
-			/* We recruit enough proxies to begin with and then
-			 * recruit extra when asked by the stratifier. */
-			while (proxi->client_headroom < 42) {
-				/* Note recursive call of proxy_alive here */
-				if (!recruit_subproxy(gdata, proxi)) {
-					LOGWARNING("Unable to recruit extra subproxies after just %"PRId64,
-						   proxi->client_headroom);
-					break;
-				}
-				LOGWARNING("Proxy %d:%s recruited extra subproxy!",
-					   proxi->id, cs->url);
-			}
 		}
 	}
 	proxi->alive = ret;
