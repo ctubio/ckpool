@@ -456,7 +456,7 @@ static json_t *json_result(json_t *val)
 		else
 			ss = strdup("(unknown reason)");
 
-		LOGWARNING("JSON-RPC decode failed: %s", ss);
+		LOGNOTICE("JSON-RPC decode of json_result failed: %s", ss);
 		free(ss);
 	}
 	return res_val;
