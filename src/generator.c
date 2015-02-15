@@ -1519,8 +1519,10 @@ static void drop_subproxies(proxy_instance_t *proxi)
 
 	mutex_lock(&proxi->proxy_lock);
 	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
-		if (!parent_proxy(subproxy))
+		if (!parent_proxy(subproxy)) {
+			subproxy->disabled = true;
 			Close(subproxy->cs->fd);
+		}
 	}
 	mutex_unlock(&proxi->proxy_lock);
 }
