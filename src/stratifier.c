@@ -2824,20 +2824,20 @@ static double sane_tdiff(tv_t *end, tv_t *start)
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const int diff, const bool valid,
 		       const bool submit)
 {
+	sdata_t *ckp_sdata = ckp->data, *sdata = client->sdata;
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	user_instance_t *user = client->user_instance;
-	sdata_t *sdata = client->sdata;
 	int64_t next_blockid, optimal;
 	tv_t now_t;
 
-	mutex_lock(&sdata->stats_lock);
+	mutex_lock(&ckp_sdata->stats_lock);
 	if (valid) {
-		sdata->stats.unaccounted_shares++;
-		sdata->stats.unaccounted_diff_shares += diff;
+		ckp_sdata->stats.unaccounted_shares++;
+		ckp_sdata->stats.unaccounted_diff_shares += diff;
 	} else
-		sdata->stats.unaccounted_rejects += diff;
-	mutex_unlock(&sdata->stats_lock);
+		ckp_sdata->stats.unaccounted_rejects += diff;
+	mutex_unlock(&ckp_sdata->stats_lock);
 
 	/* Count only accepted and stale rejects in diff calculation. */
 	if (!valid && !submit)
