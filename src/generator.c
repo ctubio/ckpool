@@ -107,7 +107,6 @@ struct proxy_instance {
 
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
-	bool reconnecting; /* Parsed reconnect, need to reconnect clients */
 	bool alive;
 
 	pthread_mutex_t notify_lock;
@@ -1024,7 +1023,6 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newsi->url = url;
 	newsi->auth = strdup(si->auth);
 	newsi->pass = strdup(si->pass);
-	proxi->reconnect = true;
 
 	newproxi = ckzalloc(sizeof(proxy_instance_t));
 	newsi->data = newproxi;
@@ -1426,16 +1424,28 @@ static void *proxy_send(void *arg)
 		int subid = 0;
 		json_t *val;
 		uint32_t id;
+		tv_t now;
+		ts_t abs;
+
+		if (unlikely(proxy->reconnect)) {
+			LOGINFO("Shutting down proxy_send thread for proxy %d to reconnect",
+				proxy->id);
+			break;
+		}
+
+		tv_time(&now);
+		tv_to_ts(&abs, &now);
+		abs.tv_sec++;
 
 		mutex_lock(&proxy->psend_lock);
 		if (!proxy->psends)
-			pthread_cond_wait(&proxy->psend_cond, &proxy->psend_lock);
+			pthread_cond_timedwait(&proxy->psend_cond, &proxy->psend_lock, &abs);
 		msg = proxy->psends;
 		if (likely(msg))
 			DL_DELETE(proxy->psends, msg);
 		mutex_unlock(&proxy->psend_lock);
 
-		if (unlikely(!msg))
+		if (!msg)
 			continue;
 
 		json_getdel_int(&subid, msg->json_msg, "subproxy");
@@ -1800,11 +1810,8 @@ static void *proxy_recv(void *arg)
 				 * over to a backup pool until the reconnect
 				 * pool is up */
 				Close(cs->fd);
-				subproxy->reconnect = false;
-				subproxy->reconnecting = true;
 				subproxy->alive = false;
 				if (parent_proxy(subproxy)) {
-					alive = false;
 					send_proc(ckp->generator, "reconnect");
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 						subproxy->id, subproxy->si->url);
@@ -1820,7 +1827,6 @@ static void *proxy_recv(void *arg)
 		/* If it's not a method it should be a share result */
 		LOGWARNING("Unhandled stratum message: %s", cs->buf);
 	}
-	store_proxy(gdata, proxi);
 
 	return NULL;
 }
@@ -1900,8 +1906,7 @@ reconnect:
 	cproxy = wait_best_proxy(ckp, gdata);
 	if (!cproxy)
 		goto out;
-	if (proxi != cproxy || cproxy->reconnecting) {
-		cproxy->reconnecting = false;
+	if (proxi != cproxy) {
 		proxi = cproxy;
 		if (!ckp->passthrough) {
 			connsock_t *cs = proxi->cs;
