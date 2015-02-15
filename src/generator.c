@@ -914,7 +914,6 @@ static bool recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi);
 static void add_subproxy(proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
 	mutex_lock(&proxi->proxy_lock);
-	proxi->subproxy_count++;
 	HASH_ADD(sh, proxi->subproxies, subid, sizeof(int), subproxy);
 	proxi->client_headroom += proxi->clients_per_proxy;
 	mutex_unlock(&proxi->proxy_lock);
@@ -1618,7 +1617,12 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 
 	subproxy->cs->ckp = subproxy->ckp = proxi->ckp;
 	subproxy->si = proxi->si;
-	subproxy->subid = proxi->subproxy_count;
+
+	mutex_lock(&proxi->proxy_lock);
+	subproxy->subid = ++proxi->subproxy_count;
+	mutex_unlock(&proxi->proxy_lock);
+
+	subproxy->id = proxi->id;
 	subproxy->auth = proxi->auth;
 	subproxy->pass = proxi->pass;
 	subproxy->parent = proxi;
