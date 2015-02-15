@@ -652,9 +652,8 @@ retry:
 		goto out;
 	}
 	if (size < 3) {
-		LOGWARNING("Proxy %d:%s Nonce2 length %d too small to be able to proxy",
-			   proxi->id, proxi->si->url, size);
-		goto out;
+		LOGWARNING("Proxy %d:%d %s Nonce2 length %d too small for fast miners",
+			   proxi->id, proxi->subid, proxi->si->url, size);
 	}
 	proxi->nonce2len = size;
 	if (parent_proxy(proxi)) {
