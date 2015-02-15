@@ -1572,8 +1572,8 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		return;
 	}
 
-	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+	ck_rlock(&ckp_sdata->instance_lock);
+	HASH_ITER(hh, ckp_sdata->stratum_instances, client, tmp) {
 		ckmsg_t *client_msg;
 		smsg_t *msg;
 
@@ -1588,7 +1588,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		client_msg->data = msg;
 		DL_APPEND(bulk_send, client_msg);
 	}
-	ck_runlock(&sdata->instance_lock);
+	ck_runlock(&ckp_sdata->instance_lock);
 
 	json_decref(val);
 
