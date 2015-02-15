@@ -575,8 +575,8 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 retry:
 	parsed = true;
 	if (!(buf = new_proxy_line(cs))) {
-		LOGNOTICE("Proxy %d:%s failed to receive line in parse_subscribe",
-			   proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%d %s failed to receive line in parse_subscribe",
+			   proxi->id, proxi->subid, proxi->si->url);
 		goto out;
 	}
 	LOGDEBUG("parse_subscribe received %s", buf);
@@ -608,8 +608,8 @@ retry:
 			buf = NULL;
 			goto retry;
 		}
-		LOGNOTICE("Proxy %d:%s failed to parse subscribe response in parse_subscribe",
-			  proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%d %s failed to parse subscribe response in parse_subscribe",
+			  proxi->id, proxi->subid, proxi->si->url);
 		goto out;
 	}
 
@@ -662,7 +662,7 @@ retry:
 		proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
 		proxi->client_headroom = proxi->clients_per_proxy;
 		LOGNOTICE("Proxy %d:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
-			proxi->clients_per_proxy);
+			  proxi->clients_per_proxy);
 	}
 
 	LOGINFO("Found notify with enonce %s nonce2len %d", proxi->enonce1,
@@ -704,8 +704,8 @@ retry:
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
-		LOGNOTICE("Proxy %d:%s failed to send message in subscribe_stratum",
-			   proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%d %s failed to send message in subscribe_stratum",
+			   proxi->id, proxi->subid, proxi->si->url);
 		goto out;
 	}
 	ret = parse_subscribe(cs, proxi);
@@ -713,24 +713,24 @@ retry:
 		goto out;
 
 	if (proxi->no_params) {
-		LOGNOTICE("Proxy %d:%s failed all subscription options in subscribe_stratum",
-			   proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%d %s failed all subscription options in subscribe_stratum",
+			   proxi->id, proxi->subid, proxi->si->url);
 		goto out;
 	}
 	if (proxi->sessionid) {
-		LOGINFO("Proxy %d:%s failed sessionid reconnect in subscribe_stratum, retrying without",
-			proxi->id, proxi->si->url);
+		LOGINFO("Proxy %d:%d %s failed sessionid reconnect in subscribe_stratum, retrying without",
+			proxi->id, proxi->subid, proxi->si->url);
 		proxi->no_sessionid = true;
 		dealloc(proxi->sessionid);
 	} else {
-		LOGINFO("Proxy %d:%s failed connecting with parameters in subscribe_stratum, retrying without",
-			proxi->id, proxi->si->url);
+		LOGINFO("Proxy %d:%d %s failed connecting with parameters in subscribe_stratum, retrying without",
+			proxi->id, proxi->subid, proxi->si->url);
 		proxi->no_params = true;
 	}
 	ret = connect_proxy(cs);
 	if (!ret) {
-		LOGNOTICE("Proxy %d:%s failed to reconnect in subscribe_stratum",
-			   proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%d %s failed to reconnect in subscribe_stratum",
+			   proxi->id, proxi->subid, proxi->si->url);
 		goto out;
 	}
 	goto retry;
@@ -1189,8 +1189,8 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
-		LOGNOTICE("Proxy %d:%s failed to send message in auth_stratum",
-			  proxi->id, proxi->si->url);
+		LOGNOTICE("Proxy %d:%d %s failed to send message in auth_stratum",
+			  proxi->id, proxi->subid, proxi->si->url);
 		Close(cs->fd);
 		goto out;
 	}
@@ -1201,8 +1201,8 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 		free(buf);
 		buf = next_proxy_line(cs, proxi);
 		if (!buf) {
-			LOGNOTICE("Proxy %d:%s failed to receive line in auth_stratum",
-				  proxi->id, proxi->si->url);
+			LOGNOTICE("Proxy %d:%d %s failed to receive line in auth_stratum",
+				  proxi->id, proxi->subid, proxi->si->url);
 			ret = false;
 			goto out;
 		}
@@ -1211,28 +1211,28 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 
 	val = json_msg_result(buf, &res_val, &err_val);
 	if (!val) {
-		LOGWARNING("Proxy %d:%s failed to get a json result in auth_stratum, got: %s",
-			   proxi->id, proxi->si->url, buf);
+		LOGWARNING("Proxy %d:%d %s failed to get a json result in auth_stratum, got: %s",
+			   proxi->id, proxi->subid, proxi->si->url, buf);
 		goto out;
 	}
 
 	if (err_val && !json_is_null(err_val)) {
-		LOGWARNING("Proxy %d:%s failed to authorise in auth_stratum due to err_val, got: %s",
-			   proxi->id, proxi->si->url, buf);
+		LOGWARNING("Proxy %d:%d %s failed to authorise in auth_stratum due to err_val, got: %s",
+			   proxi->id, proxi->subid, proxi->si->url, buf);
 		goto out;
 	}
 	if (res_val) {
 		ret = json_is_true(res_val);
 		if (!ret) {
-			LOGWARNING("Proxy %d:%s failed to authorise in auth_stratum, got: %s",
-				   proxi->id, proxi->si->url, buf);
+			LOGWARNING("Proxy %d:%d %s failed to authorise in auth_stratum, got: %s",
+				   proxi->id, proxi->subid, proxi->si->url, buf);
 			goto out;
 		}
 	} else {
 		/* No result and no error but successful val means auth success */
 		ret = true;
 	}
-	LOGINFO("Proxy %d:%s auth success in auth_stratum", proxi->id, proxi->si->url);
+	LOGINFO("Proxy %d:%d %s auth success in auth_stratum", proxi->id, proxi->subid, proxi->si->url);
 out:
 	if (val)
 		json_decref(val);
@@ -1327,8 +1327,8 @@ static void submit_share(gdata_t *gdata, json_t *val)
 		return json_decref(val);
 	}
 	if (!proxi->alive) {
-		LOGNOTICE("Client %"PRId64" attempting to send shares to dead proxy %d, dropping",
-			  client_id, id);
+		LOGNOTICE("Client %"PRId64" attempting to send shares to dead proxy %d:%d, dropping",
+			  client_id, id, subid);
 		stratifier_drop_client(ckp, client_id);
 		return json_decref(val);
 	}
@@ -1468,17 +1468,20 @@ static void *proxy_send(void *arg)
 					"method", "mining.submit");
 			ret = send_json_msg(cs, val);
 			json_decref(val);
-		} else {
+		} else if (!jobid) {
 			LOGNOTICE("Proxy %d:%s failed to find matching jobid in proxysend",
 				  proxy->id, proxy->si->url);
+		} else {
+			LOGNOTICE("Failed to find subproxy %d:%d to send message to",
+				  proxy->id, subid);
 		}
 		free(jobid);
 		json_decref(msg->json_msg);
 		free(msg);
 		if (!ret && subproxy) {
 			if (cs->fd > 0) {
-				LOGWARNING("Proxy %d:%s failed to send msg in proxy_send, dropping to reconnect",
-					proxy->id, proxy->si->url);
+				LOGWARNING("Proxy %d:%d %s failed to send msg in proxy_send, dropping to reconnect",
+					   proxy->id, proxy->subid, proxy->si->url);
 				Close(cs->fd);
 			}
 			if (!parent_proxy(subproxy) && !subproxy->disabled)
