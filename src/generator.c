@@ -112,7 +112,6 @@ struct proxy_instance {
 
 	pthread_mutex_t notify_lock;
 	notify_instance_t *notify_instances;
-	notify_instance_t *current_notify;
 
 	pthread_t pth_precv;
 	pthread_t pth_psend;
@@ -853,8 +852,6 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 	mutex_lock(&proxy->notify_lock);
 	ni->id = gdata->proxy_notify_id++;
 	HASH_ADD_INT(proxy->notify_instances, id, ni);
-	/* Now set the subproxy's current notify to this */
-	proxi->current_notify = ni;
 	mutex_unlock(&proxy->notify_lock);
 
 	send_notify(ckp, proxi, ni);
