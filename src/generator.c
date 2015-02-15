@@ -1237,8 +1237,8 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 	if (res_val) {
 		ret = json_is_true(res_val);
 		if (!ret) {
-			LOGWARNING("Proxy %d:%s failed to authorise in auth_stratum",
-				   proxi->id, proxi->si->url);
+			LOGWARNING("Proxy %d:%s failed to authorise in auth_stratum, got: %s",
+				   proxi->id, proxi->si->url, buf);
 			goto out;
 		}
 	} else {
