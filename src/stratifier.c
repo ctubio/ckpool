@@ -1935,6 +1935,20 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 	return buf;
 }
 
+/* Send a single client a reconnect request, setting the time we sent the
+ * request so we can drop the client lazily if it hasn't reconnected on its
+ * own one minute later */
+static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
+{
+	json_t *json_msg;
+
+	client->reconnect = false;
+	client->reconnect_request = time(NULL);
+	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
+		   "params");
+	stratum_add_send(sdata, json_msg, client->id);
+}
+
 /* Sets the currently active proxy. Clients will be told to reconnect once the
  * first notify data comes from this proxy. Even if we are already bound to
  * this proxy we are only given this message if all clients must move. */
@@ -1955,18 +1969,22 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 		reconnect_clients(sdata, proxy->id, proxy->notify_id);
 }
 
-/* Send a single client a reconnect request, setting the time we sent the
- * request so we can drop the client lazily if it hasn't reconnected on its
- * own one minute later */
-static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
+static void dead_proxy(sdata_t *sdata, const char *buf)
 {
-	json_t *json_msg;
+	stratum_instance_t *client, *tmp;
+	int id = 0, subid = 0;
+	proxy_t *proxy;
 
-	client->reconnect = false;
-	client->reconnect_request = time(NULL);
-	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
-		   "params");
-	stratum_add_send(sdata, json_msg, client->id);
+	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
+	proxy = subproxy_by_id(sdata, id, subid);
+	LOGNOTICE("Stratifier dropping clients from proxy %d:%d", id, subid);
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->proxyid == id && client->subproxyid == subid)
+			reconnect_client(sdata, client);
+	}
+	ck_runlock(&sdata->instance_lock);
 }
 
 static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
@@ -2099,6 +2117,8 @@ retry:
 		request_reconnect(sdata, buf);
 	} else if (cmdmatch(buf, "proxy")) {
 		set_proxy(sdata, buf);
+	} else if (cmdmatch(buf, "deadproxy")) {
+		dead_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else

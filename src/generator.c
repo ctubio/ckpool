@@ -950,8 +950,13 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	}
 	mutex_unlock(&proxi->proxy_lock);
 
-	if (subproxy)
+	if (subproxy) {
+		char buf[256];
+
+		sprintf(buf, "deadproxy=%d:%d", subproxy->id, subproxy->subid);
+		send_proc(gdata->ckp->stratifier, buf);
 		store_proxy(gdata, subproxy);
+	}
 
 	if (proxi->client_headroom < 42 && proxi->alive)
 		recruit_subproxy(gdata, proxi);
