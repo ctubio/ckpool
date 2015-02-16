@@ -945,7 +945,7 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	subproxy = __subproxy_by_id(proxi, subproxy->subid);
 	if (subproxy) {
 		Close(subproxy->cs->fd);
-		HASH_DEL(proxi->subproxies, subproxy);
+		HASH_DELETE(sh, proxi->subproxies, subproxy);
 		proxi->client_headroom -= proxi->clients_per_proxy;
 	}
 	mutex_unlock(&proxi->proxy_lock);
