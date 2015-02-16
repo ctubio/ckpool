@@ -1161,7 +1161,10 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_get_int(&id, val, "proxy");
 	json_get_int(&subid, val, "subproxy");
 
-	LOGNOTICE("Got updated subscribe for proxy %d:%d", id, subid);
+	if (!subid)
+		LOGNOTICE("Got updated subscribe for proxy %d", id);
+	else
+		LOGINFO("Got updated subscribe for proxy %d:%d", id, subid);
 
 	proxy = subproxy_by_id(sdata, id, subid);
 	proxy->notify_id = -1; /* Reset this */
@@ -1233,7 +1236,10 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		LOGNOTICE("No valid proxy %d:%d subscription to update notify yet", id, subid);
 		goto out;
 	}
-	LOGNOTICE("Got updated notify for proxy %d:%d", id, subid);
+	if (!subid)
+		LOGNOTICE("Got updated notify for proxy %d", id);
+	else
+		LOGINFO("Got updated notify for proxy %d:%d", id, subid);
 
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
@@ -1329,7 +1335,10 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
 
-	LOGNOTICE("Got updated diff for proxy %d:%d", id, subid);
+	if (!subid)
+		LOGNOTICE("Got updated diff for proxy %d", id);
+	else
+		LOGINFO("Got updated diff for proxy %d:%d", id, subid);
 	proxy = subproxy_by_id(sdata, id, subid);
 
 	/* We only really care about integer diffs so clamp the lower limit to
