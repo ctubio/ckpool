@@ -957,6 +957,22 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 		recruit_subproxy(gdata, proxi);
 }
 
+/* If the parent is no longer in use due to reconnect, we shouldn't use any of
+ * the child subproxies. */
+static void drop_subproxies(proxy_instance_t *proxi)
+{
+	proxy_instance_t *subproxy, *tmp;
+
+	mutex_lock(&proxi->proxy_lock);
+	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
+		if (!parent_proxy(subproxy)) {
+			subproxy->disabled = true;
+			Close(subproxy->cs->fd);
+		}
+	}
+	mutex_unlock(&proxi->proxy_lock);
+}
+
 static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 {
 	server_instance_t *newsi, *si = proxi->si;
@@ -1037,6 +1053,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 
 	/* Old proxy memory is basically lost here */
 	prepare_proxy(newproxi);
+	drop_subproxies(proxi);
 out:
 	return ret;
 }
@@ -1293,11 +1310,11 @@ static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int subid
 	return subproxy;
 }
 
-static void stratifier_drop_client(ckpool_t *ckp, int64_t id)
+static void stratifier_reconnect_client(ckpool_t *ckp, int64_t id)
 {
 	char buf[256];
 
-	sprintf(buf, "dropclient=%"PRId64, id);
+	sprintf(buf, "reconnclient=%"PRId64, id);
 	send_proc(ckp->stratifier, buf);
 }
 
@@ -1317,20 +1334,20 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
 		LOGWARNING("Failed to find proxy %d to send share to", id);
-		stratifier_drop_client(ckp, client_id);
+		stratifier_reconnect_client(ckp, client_id);
 		return json_decref(val);
 	}
 	json_get_int(&subid, val, "subproxy");
 	proxi = subproxy_by_id(proxy, subid);
 	if (unlikely(!proxi)) {
 		LOGNOTICE("Failed to find proxy %d:%d to send share to", id, subid);
-		stratifier_drop_client(ckp, client_id);
+		stratifier_reconnect_client(ckp, client_id);
 		return json_decref(val);
 	}
 	if (!proxi->alive) {
 		LOGNOTICE("Client %"PRId64" attempting to send shares to dead proxy %d:%d, dropping",
 			  client_id, id, subid);
-		stratifier_drop_client(ckp, client_id);
+		stratifier_reconnect_client(ckp, client_id);
 		return json_decref(val);
 	}
 
@@ -1516,22 +1533,6 @@ static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
 	ckmsgq_add(proxi->passsends, pm);
 }
 
-/* If the parent is dead, we shouldn't use any of the child subproxies to be
- * used. */
-static void drop_subproxies(proxy_instance_t *proxi)
-{
-	proxy_instance_t *subproxy, *tmp;
-
-	mutex_lock(&proxi->proxy_lock);
-	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
-		if (!parent_proxy(subproxy)) {
-			subproxy->disabled = true;
-			Close(subproxy->cs->fd);
-		}
-	}
-	mutex_unlock(&proxi->proxy_lock);
-}
-
 static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *proxi,
 			connsock_t *cs, bool pinging, int epfd)
 {
@@ -1595,8 +1596,6 @@ out:
 		}
 	}
 	proxi->alive = ret;
-	if (!ret && parent_proxy(proxi))
-		drop_subproxies(proxi);
 	return ret;
 }
 
@@ -1938,7 +1937,6 @@ retry:
 	if (unlikely(proxi->cs->fd < 0)) {
 		LOGWARNING("Upstream proxy %d:%s socket invalidated, will attempt failover",
 			   proxi->id, proxi->cs->url);
-		drop_subproxies(proxi);
 		proxi->alive = false;
 		proxi = NULL;
 		goto reconnect;

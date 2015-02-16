@@ -1111,7 +1111,9 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 }
 
 /* Iterates over all clients in proxy mode and sets the reconnect bool for the
- * message to be sent lazily next time they speak to us */
+ * message to be sent lazily next time they speak to us only if the proxy is
+ * higher priority than the one they're currently connected to or the notify_id
+ * on their proxy has changed indicating a new subscription. */
 static void reconnect_clients(sdata_t *sdata, const int proxyid, const int64_t notify_id)
 {
 	stratum_instance_t *client, *tmp;
@@ -1120,7 +1122,7 @@ static void reconnect_clients(sdata_t *sdata, const int proxyid, const int64_t n
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->proxyid != proxyid || client->notify_id != notify_id)
+		if (client->proxyid > proxyid || (client->proxyid == proxyid && client->notify_id != notify_id))
 			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
@@ -1953,6 +1955,34 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 		reconnect_clients(sdata, proxy->id, proxy->notify_id);
 }
 
+/* Send a single client a reconnect request, setting the time we sent the
+ * request so we can drop the client lazily if it hasn't reconnected on its
+ * own one minute later */
+static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
+{
+	json_t *json_msg;
+
+	client->reconnect = false;
+	client->reconnect_request = time(NULL);
+	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
+		   "params");
+	stratum_add_send(sdata, json_msg, client->id);
+}
+
+static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
+{
+	stratum_instance_t *client;
+
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		LOGINFO("reconnect_client_id failed to find client %"PRId64, client_id);
+		return;
+	}
+	LOGNOTICE("Reconnecting client %"PRId64, client_id);
+	reconnect_client(sdata, client);
+	dec_instance_ref(sdata, client);
+}
+
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	int sockd, ret = 0, selret = 0;
@@ -2051,6 +2081,14 @@ retry:
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
 			drop_client(ckp, sdata, client_id);
+	} else if (cmdmatch(buf, "reconnclient")) {
+		int64_t client_id;
+
+		ret = sscanf(buf, "reconnclient=%"PRId64, &client_id);
+		if (ret < 0)
+			LOGDEBUG("Stratifier failed to parse reconnclient command: %s", buf);
+		else
+			reconnect_client_id(sdata, client_id);
 	} else if (cmdmatch(buf, "dropall")) {
 		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
@@ -3737,20 +3775,6 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 	parse_method(sdata, client, client_id, id_val, method, params, msg->address);
 out:
 	free_smsg(msg);
-}
-
-/* Send a single client a reconnect request, setting the time we sent the
- * request so we can drop the client lazily if it hasn't reconnected on its
- * own one minute later */
-static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
-{
-	json_t *json_msg;
-
-	client->reconnect = false;
-	client->reconnect_request = time(NULL);
-	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
-		   "params");
-	stratum_add_send(sdata, json_msg, client->id);
 }
 
 static void srecv_process(ckpool_t *ckp, char *buf)
