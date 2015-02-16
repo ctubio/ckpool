@@ -682,12 +682,12 @@ int write_socket(int fd, const void *buf, size_t nbyte)
 		if (!ret)
 			LOGNOTICE("Select timed out in write_socket");
 		else
-			LOGERR("Select failed in write_socket");
+			LOGNOTICE("Select failed in write_socket");
 		goto out;
 	}
 	ret = write_length(fd, buf, nbyte);
 	if (ret < 0)
-		LOGWARNING("Failed to write in write_socket");
+		LOGNOTICE("Failed to write in write_socket");
 out:
 	return ret;
 }
