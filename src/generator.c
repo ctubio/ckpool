@@ -1035,6 +1035,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	HASH_REPLACE_INT(gdata->proxies, id, newproxi, proxi);
 	mutex_unlock(&gdata->lock);
 
+	/* Old proxy memory is basically lost here */
 	prepare_proxy(newproxi);
 out:
 	return ret;
