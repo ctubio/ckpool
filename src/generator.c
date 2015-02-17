@@ -132,8 +132,6 @@ struct proxy_instance {
 	int epfd; /* Epoll fd used by the parent proxy */
 
 	pthread_mutex_t proxy_lock; /* Lock protecting hashlist of proxies */
-	int64_t clients_per_proxy; /* How many clients can connect to each subproxy */
-	int64_t client_headroom; /* How many more clients can we connect */
 	proxy_instance_t *parent; /* Parent proxy of subproxies */
 	proxy_instance_t *subproxies; /* Hashlist of subproxies of this proxy */
 	int subproxy_count; /* Number of subproxies */
@@ -658,10 +656,10 @@ retry:
 	proxi->nonce2len = size;
 	if (parent_proxy(proxi)) {
 		/* Set the number of clients per proxy on the parent proxy */
-		proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
-		proxi->client_headroom = proxi->clients_per_proxy;
+		int64_t clients_per_proxy = 1ll << ((size - 3) * 8);
+
 		LOGNOTICE("Proxy %d:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
-			  proxi->clients_per_proxy);
+			  clients_per_proxy);
 	}
 
 	LOGINFO("Found notify with enonce %s nonce2len %d", proxi->enonce1,
@@ -914,7 +912,6 @@ static void add_subproxy(proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
 	mutex_lock(&proxi->proxy_lock);
 	HASH_ADD(sh, proxi->subproxies, subid, sizeof(int), subproxy);
-	proxi->client_headroom += proxi->clients_per_proxy;
 	mutex_unlock(&proxi->proxy_lock);
 }
 
@@ -946,7 +943,6 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	if (subproxy) {
 		Close(subproxy->cs->fd);
 		HASH_DELETE(sh, proxi->subproxies, subproxy);
-		proxi->client_headroom -= proxi->clients_per_proxy;
 	}
 	mutex_unlock(&proxi->proxy_lock);
 
@@ -957,9 +953,6 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 		send_proc(gdata->ckp->stratifier, buf);
 		store_proxy(gdata, subproxy);
 	}
-
-	if (proxi->client_headroom < 42 && proxi->alive)
-		recruit_subproxy(gdata, proxi);
 }
 
 /* If the parent is no longer in use due to reconnect, we shouldn't use any of
