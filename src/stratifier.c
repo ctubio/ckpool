@@ -396,6 +396,7 @@ struct stratifier_data {
 
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
+	proxy_t *old_proxies; /* Hashlist of proxies now no longer in user */
 	pthread_mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 };
@@ -1139,6 +1140,25 @@ static proxy_t *current_proxy(sdata_t *sdata)
 	return proxy;
 }
 
+static void new_proxy(sdata_t *sdata, const int id)
+{
+	bool exists = false;
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_FIND_INT(sdata->proxies, &id, proxy);
+	if (proxy) {
+		exists = true;
+		HASH_DEL(sdata->proxies, proxy);
+		HASH_ADD_INT(sdata->old_proxies, id, proxy);
+	}
+	proxy = __generate_proxy(sdata, id);
+	mutex_unlock(&sdata->proxy_lock);
+
+	if (exists)
+		LOGNOTICE("Stratifier replaced old proxy instance %d", id);
+}
+
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
@@ -1161,9 +1181,10 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_get_int(&id, val, "proxy");
 	json_get_int(&subid, val, "subproxy");
 
-	if (!subid)
+	if (!subid) {
+		new_proxy(sdata, id);
 		LOGNOTICE("Got updated subscribe for proxy %d", id);
-	else
+	} else
 		LOGINFO("Got updated subscribe for proxy %d:%d", id, subid);
 
 	proxy = subproxy_by_id(sdata, id, subid);
