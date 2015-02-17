@@ -1252,6 +1252,38 @@ static inline bool parent_proxy(const proxy_t *proxy)
 	return (proxy->parent == proxy);
 }
 
+/* Find how much headroom we have and connect up to that many clients that are
+ * not currently on this pool */
+static void reconnect_backup_clients(sdata_t *sdata)
+{
+	stratum_instance_t *client, *tmpclient;
+	proxy_t *proxy, *subproxy, *tmp;
+	int64_t headroom = 0;
+	int reconnects = 0;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = sdata->proxy;
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		if (subproxy->dead)
+			continue;
+		headroom += subproxy->max_clients - subproxy->clients;
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (reconnects >= headroom)
+			break;
+		if (client->proxyid == proxy->id)
+			continue;
+		if (client->reconnect)
+			continue;
+		client->reconnect = true;
+		reconnects++;
+	}
+	ck_runlock(&sdata->instance_lock);
+}
+
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
@@ -1351,7 +1383,8 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		proxy->notify_id = wb->id;
 		if (parent_proxy(proxy) && proxy == current_proxy(sdata))
 			reconnect_clients(sdata, proxy->id, proxy->notify_id);
-	}
+	} else if (parent_proxy(proxy) && proxy == current_proxy(sdata))
+		reconnect_backup_clients(sdata);
 	LOGINFO("Broadcast updated stratum notify");
 	stratum_broadcast_update(dsdata, new_block | clean);
 out:
