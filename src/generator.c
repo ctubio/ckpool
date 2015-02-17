@@ -1634,12 +1634,13 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 
 static void *proxy_recruit(void *arg)
 {
-	proxy_instance_t *proxy = (proxy_instance_t *)arg, *parent = proxy->parent;
-	ckpool_t *ckp = proxy->ckp;
+	proxy_instance_t *proxy, *parent = (proxy_instance_t *)arg;
+	ckpool_t *ckp = parent->ckp;
 	gdata_t *gdata = ckp->data;
 
 	pthread_detach(pthread_self());
 
+	proxy = create_subproxy(gdata, parent);
 	if (!proxy_alive(ckp, proxy->si, proxy, proxy->cs, false, parent->epfd)) {
 		LOGNOTICE("Subproxy failed proxy_alive testing");
 		store_proxy(gdata, proxy);
@@ -1648,12 +1649,11 @@ static void *proxy_recruit(void *arg)
 	return NULL;
 }
 
-static void recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
+static void recruit_subproxy(proxy_instance_t *proxi)
 {
-	proxy_instance_t *subproxy = create_subproxy(gdata, proxi);
 	pthread_t pth;
 
-	create_pthread(&pth, proxy_recruit, subproxy);
+	create_pthread(&pth, proxy_recruit, proxi);
 }
 
 /* For receiving messages from an upstream pool to pass downstream. Responsible
@@ -1831,7 +1831,7 @@ static void *proxy_recv(void *arg)
 						subproxy->id, subproxy->si->url);
 					break;
 				} else
-					recruit_subproxy(gdata, proxi);
+					recruit_subproxy(proxi);
 			}
 			continue;
 		}
@@ -1976,7 +1976,7 @@ retry:
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
 	} else if (cmdmatch(buf, "recruit")) {
-		recruit_subproxy(gdata, proxi);
+		recruit_subproxy(proxi);
 	} else if (ckp->passthrough) {
 		/* Anything remaining should be stratum messages */
 		passthrough_add_send(proxi, buf);
