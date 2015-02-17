@@ -906,7 +906,6 @@ static bool send_pong(proxy_instance_t *proxi, json_t *val)
 
 static void prepare_proxy(proxy_instance_t *proxi);
 static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi);
-static bool recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi);
 
 static void add_subproxy(proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
@@ -1633,20 +1632,28 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 	return subproxy;
 }
 
-static bool recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
+static void *proxy_recruit(void *arg)
+{
+	proxy_instance_t *proxy = (proxy_instance_t *)arg, *parent = proxy->parent;
+	ckpool_t *ckp = proxy->ckp;
+	gdata_t *gdata = ckp->data;
+
+	pthread_detach(pthread_self());
+
+	if (!proxy_alive(ckp, proxy->si, proxy, proxy->cs, false, parent->epfd)) {
+		LOGNOTICE("Subproxy failed proxy_alive testing");
+		store_proxy(gdata, proxy);
+	} else
+		add_subproxy(parent, proxy);
+	return NULL;
+}
+
+static void recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
 {
 	proxy_instance_t *subproxy = create_subproxy(gdata, proxi);
-	int epfd = proxi->epfd;
+	pthread_t pth;
 
-	if (!proxy_alive(subproxy->ckp, subproxy->si, subproxy, subproxy->cs, false, epfd)) {
-		LOGNOTICE("Subproxy failed proxy_alive testing");
-		store_proxy(gdata, subproxy);
-		return false;
-	}
-
-	add_subproxy(proxi, subproxy);
-
-	return true;
+	create_pthread(&pth, proxy_recruit, subproxy);
 }
 
 /* For receiving messages from an upstream pool to pass downstream. Responsible
@@ -1823,7 +1830,8 @@ static void *proxy_recv(void *arg)
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 						subproxy->id, subproxy->si->url);
 					break;
-				}
+				} else
+					recruit_subproxy(gdata, proxi);
 			}
 			continue;
 		}
