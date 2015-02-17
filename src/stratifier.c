@@ -2348,6 +2348,7 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
 		int most_headroom;
 
+		best = NULL;
 		proxy->headroom = most_headroom = 0;
 		HASH_ITER(sh, proxy->subproxies, subproxy, tmpsub) {
 			int64_t subproxy_headroom;
@@ -2365,6 +2366,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 		if (best && best->id < best_id) {
 			best_id = best->id;
 			best_subid = best->subid;
+			if (best == current)
+				break;
 		}
 	}
 	mutex_unlock(&ckp_sdata->proxy_lock);
