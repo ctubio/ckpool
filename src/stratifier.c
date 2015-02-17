@@ -326,6 +326,7 @@ struct proxy_base {
 	proxy_t *parent; /* Parent proxy - set to self on parent itself */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
+	bool dead;
 };
 
 struct stratifier_data {
@@ -2007,6 +2008,7 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 
 	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
 	proxy = subproxy_by_id(sdata, id, subid);
+	proxy->dead = true;
 	LOGNOTICE("Stratifier dropping clients from proxy %d:%d", id, subid);
 
 	ck_rlock(&sdata->instance_lock);
@@ -2306,7 +2308,11 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	}
 	mutex_lock(&ckp_sdata->proxy_lock);
 	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
-		int64_t subproxy_headroom = subproxy->max_clients - subproxy->clients;
+		int64_t subproxy_headroom;
+
+		if (subproxy->dead)
+			continue;
+		subproxy_headroom = subproxy->max_clients - subproxy->clients;
 
 		headroom += subproxy_headroom;
 		if (subproxy_headroom > most_headroom) {
