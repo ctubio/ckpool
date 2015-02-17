@@ -343,6 +343,7 @@ struct stratifier_data {
 	pthread_mutex_t ckdb_lock;
 
 	bool ckdb_offline;
+	bool verbose;
 
 	enonce1_t enonce1u;
 
@@ -773,10 +774,8 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 	sdata->current_workbase = wb;
 	ck_wunlock(&sdata->workbase_lock);
 
-	if (*new_block) {
-		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
+	if (*new_block)
 		purge_share_hashtable(sdata, wb->id);
-	}
 
 	send_workinfo(ckp, wb);
 
@@ -915,6 +914,8 @@ static void *do_update(void *arg)
 	generate_coinbase(ckp, wb);
 
 	add_base(ckp, sdata, wb, &new_block);
+	if (new_block)
+		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 
 	stratum_broadcast_update(sdata, new_block);
 	ret = true;
@@ -1041,6 +1042,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	proxy->id = id;
 	proxy->sdata = duplicate_sdata(sdata);
 	proxy->sdata->subproxy = proxy;
+	proxy->sdata->verbose = true;
 	proxy->parent = proxy;
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
@@ -1313,6 +1315,12 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	ck_runlock(&dsdata->workbase_lock);
 
 	add_base(ckp, dsdata, wb, &new_block);
+	if (new_block) {
+		if (subid)
+			LOGINFO("Block hash on proxy %d:%d changed to %s", id, subid, dsdata->lastswaphash);
+		else
+			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
+	}
 
 	if (proxy->notify_id == -1) {
 		/* This is the first notification from the current proxy, tell
@@ -4749,6 +4757,7 @@ int stratifier(proc_instance_t *pi)
 	sdata = ckzalloc(sizeof(sdata_t));
 	ckp->data = sdata;
 	sdata->ckp = ckp;
+	sdata->verbose = true;
 
 	/* Wait for the generator to have something for us */
 	do {
