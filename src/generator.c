@@ -1491,8 +1491,8 @@ static void *proxy_send(void *arg)
 			ret = send_json_msg(cs, val);
 			json_decref(val);
 		} else if (!jobid) {
-			LOGNOTICE("Proxy %d:%s failed to find matching jobid in proxysend",
-				  proxy->id, proxy->si->url);
+			LOGNOTICE("Proxy %d:%s failed to find matching jobid for %sknown subproxy in proxysend",
+				  proxy->id, proxy->si->url, subproxy ? "" : "un");
 		} else {
 			LOGNOTICE("Failed to find subproxy %d:%d to send message to",
 				  proxy->id, subid);
