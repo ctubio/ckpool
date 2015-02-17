@@ -951,7 +951,8 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 
 		sprintf(buf, "deadproxy=%d:%d", subproxy->id, subproxy->subid);
 		send_proc(gdata->ckp->stratifier, buf);
-		store_proxy(gdata, subproxy);
+		if (!parent_proxy(subproxy))
+			store_proxy(gdata, subproxy);
 	}
 }
 
@@ -1815,15 +1816,14 @@ static void *proxy_recv(void *arg)
 				/* Call this proxy dead to allow us to fail
 				 * over to a backup pool until the reconnect
 				 * pool is up */
-				Close(cs->fd);
 				subproxy->alive = false;
+				disable_subproxy(gdata, proxi, subproxy);
 				if (parent_proxy(subproxy)) {
 					send_proc(ckp->generator, "reconnect");
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 						subproxy->id, subproxy->si->url);
 					break;
-				} else
-					disable_subproxy(gdata, proxi, subproxy);
+				}
 			}
 			continue;
 		}
