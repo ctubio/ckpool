@@ -814,7 +814,7 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 		goto out;
 	}
 
-	LOGDEBUG("New notify");
+	LOGDEBUG("Received new notify from proxy %d:%d", proxi->id, proxi->subid);
 	ni = ckzalloc(sizeof(notify_instance_t));
 	ni->jobid = job_id;
 	LOGDEBUG("Job ID %s", job_id);
@@ -1155,6 +1155,7 @@ static bool parse_method(ckpool_t *ckp, proxy_instance_t *proxi, const char *msg
 		goto out;
 	}
 
+	LOGDEBUG("Proxy %d:%d received method %s", proxi->id, proxi->subid, buf);
 	if (cmdmatch(buf, "mining.notify")) {
 		ret = parse_notify(ckp, proxi, params);
 		goto out;
