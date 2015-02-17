@@ -1063,12 +1063,19 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	return subproxy;
 }
 
-/* Find proxy by id number, generate one if none exist yet by that id */
-static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
+static proxy_t *__existing_proxy(const sdata_t *sdata, const int id)
 {
 	proxy_t *proxy;
 
 	HASH_FIND_INT(sdata->proxies, &id, proxy);
+	return proxy;
+}
+
+/* Find proxy by id number, generate one if none exist yet by that id */
+static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
+{
+	proxy_t *proxy = __existing_proxy(sdata, id);
+
 	if (unlikely(!proxy)) {
 		proxy = __generate_proxy(sdata, id);
 		LOGNOTICE("Stratifier added new proxy %d", id);
@@ -1077,11 +1084,18 @@ static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 	return proxy;
 }
 
-static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid)
+static proxy_t *__existing_subproxy(proxy_t *proxy, const int subid)
 {
 	proxy_t *subproxy;
 
 	HASH_FIND(sh, proxy->subproxies, &subid, sizeof(int), subproxy);
+	return subproxy;
+}
+
+static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid)
+{
+	proxy_t *subproxy = __existing_subproxy(proxy, subid);
+
 	if (!subproxy) {
 		subproxy = __generate_subproxy(sdata, proxy, subid);
 		LOGINFO("Stratifier added new subproxy %d:%d", proxy->id, subid);
@@ -1113,6 +1127,20 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 
 	return subproxy;
 }
+
+static proxy_t *existing_subproxy(sdata_t *sdata, const int id, const int subid)
+{
+	proxy_t *proxy, *subproxy = NULL;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __existing_proxy(sdata, id);
+	if (proxy)
+		subproxy = __existing_subproxy(proxy, subid);
+	mutex_unlock(&sdata->proxy_lock);
+
+	return subproxy;
+}
+
 
 /* Iterates over all clients in proxy mode and sets the reconnect bool for the
  * message to be sent lazily next time they speak to us only if the proxy is
