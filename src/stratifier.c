@@ -1173,7 +1173,7 @@ static proxy_t *current_proxy(sdata_t *sdata)
 
 static void new_proxy(sdata_t *sdata, const int id)
 {
-	bool exists = false;
+	bool exists = false, current = false;
 	proxy_t *proxy;
 
 	mutex_lock(&sdata->proxy_lock);
@@ -1182,8 +1182,12 @@ static void new_proxy(sdata_t *sdata, const int id)
 		exists = true;
 		HASH_DEL(sdata->proxies, proxy);
 		HASH_ADD_INT(sdata->old_proxies, id, proxy);
+		if (proxy == sdata->proxy)
+			current = true;
 	}
 	proxy = __generate_proxy(sdata, id);
+	if (current)
+		sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
 	if (exists)
