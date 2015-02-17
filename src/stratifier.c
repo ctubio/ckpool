@@ -321,6 +321,7 @@ struct proxy_base {
 
 	int64_t clients;
 	int64_t max_clients;
+	int64_t headroom;
 	enonce1_t enonce1u;
 
 	proxy_t *parent; /* Parent proxy - set to self on parent itself */
@@ -396,6 +397,7 @@ struct stratifier_data {
 	/* Generator message priority */
 	int gen_priority;
 
+	int proxy_count;
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
 	proxy_t *old_proxies; /* Hashlist of proxies now no longer in user */
@@ -1047,6 +1049,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
 	HASH_ADD_INT(sdata->proxies, id, proxy);
+	sdata->proxy_count++;
 	return proxy;
 }
 
@@ -1102,19 +1105,6 @@ static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid
 	}
 	return subproxy;
 }
-
-#if 0
-static proxy_t *proxy_by_id(sdata_t *sdata, const int id)
-{
-	proxy_t *proxy;
-
-	mutex_lock(&sdata->proxy_lock);
-	proxy = __proxy_by_id(sdata, id);
-	mutex_unlock(&sdata->proxy_lock);
-
-	return proxy;
-}
-#endif
 
 static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 {
@@ -2342,41 +2332,52 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
  * running out of room. */
 static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 {
-	proxy_t *proxy, *subproxy, *best = NULL, *tmp;
-	int64_t headroom = 0, most_headroom = 0;
+	proxy_t *current, *proxy, *subproxy, *best = NULL, *tmp, *tmpsub;
+	int best_id, best_subid = 0;
 
 	if (!ckp->proxy || ckp->passthrough)
 		return ckp_sdata;
-	proxy = ckp_sdata->proxy;
-	if (!proxy) {
+	current = ckp_sdata->proxy;
+	if (!current) {
 		LOGWARNING("No proxy available yet to generate subscribes");
 		return NULL;
 	}
+	best_id = ckp_sdata->proxy_count;
+
 	mutex_lock(&ckp_sdata->proxy_lock);
-	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
-		int64_t subproxy_headroom;
+	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
+		int most_headroom;
 
-		if (subproxy->dead)
-			continue;
-		subproxy_headroom = subproxy->max_clients - subproxy->clients;
+		proxy->headroom = most_headroom = 0;
+		HASH_ITER(sh, proxy->subproxies, subproxy, tmpsub) {
+			int64_t subproxy_headroom;
 
-		headroom += subproxy_headroom;
-		if (subproxy_headroom > most_headroom) {
-			best = subproxy;
-			most_headroom = subproxy_headroom;
+			if (subproxy->dead)
+				continue;
+			subproxy_headroom = subproxy->max_clients - subproxy->clients;
+
+			proxy->headroom += subproxy_headroom;
+			if (subproxy_headroom > most_headroom) {
+				best = subproxy;
+				most_headroom = subproxy_headroom;
+			}
+		}
+		if (best && best->id < best_id) {
+			best_id = best->id;
+			best_subid = best->subid;
 		}
 	}
 	mutex_unlock(&ckp_sdata->proxy_lock);
 
-	if (headroom < 42) {
+	if (best_id != current->id || current->headroom < 42) {
 		LOGNOTICE("Stratifer requesting more proxies from generator");
 		send_generator(ckp, "recruit", GEN_PRIORITY);
 	}
-	if (!best) {
-		LOGNOTICE("Temporarily insufficient subproxies of proxy %d to accept more clients",
-			   proxy->id);
+	if (best_id == ckp_sdata->proxy_count) {
+		LOGNOTICE("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
 	}
+	best = subproxy_by_id(ckp_sdata, best_id, best_subid);
 	return best->sdata;
 }
 
