@@ -932,6 +932,14 @@ static void store_proxy(gdata_t *gdata, proxy_instance_t *proxy)
 	mutex_unlock(&gdata->lock);
 }
 
+static void send_stratifier_deadproxy(ckpool_t *ckp, const int id, const int subid)
+{
+	char buf[256];
+
+	sprintf(buf, "deadproxy=%d:%d", id, subid);
+	send_proc(ckp->stratifier, buf);
+}
+
 /* Remove the subproxy from the proxi list and put it on the dead list */
 static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
@@ -946,10 +954,7 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	mutex_unlock(&proxi->proxy_lock);
 
 	if (subproxy) {
-		char buf[256];
-
-		sprintf(buf, "deadproxy=%d:%d", subproxy->id, subproxy->subid);
-		send_proc(gdata->ckp->stratifier, buf);
+		send_stratifier_deadproxy(gdata->ckp, subproxy->id, subproxy->subid);
 		if (!parent_proxy(subproxy))
 			store_proxy(gdata, subproxy);
 	}
@@ -1581,6 +1586,7 @@ static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *
 	ret = true;
 out:
 	if (!ret) {
+		send_stratifier_deadproxy(ckp, proxi->id, proxi->subid);
 		/* Close and invalidate the file handle */
 		Close(cs->fd);
 	} else {
