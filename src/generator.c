@@ -103,18 +103,18 @@ struct proxy_instance {
 	bool reconnect; /* We need to drop and reconnect */
 	bool alive;
 
-	pthread_mutex_t notify_lock;
+	mutex_t notify_lock;
 	notify_instance_t *notify_instances;
 	notify_instance_t *current_notify;
 
 	pthread_t pth_precv;
 	pthread_t pth_psend;
-	pthread_mutex_t psend_lock;
+	mutex_t psend_lock;
 	pthread_cond_t psend_cond;
 
 	stratum_msg_t *psends;
 
-	pthread_mutex_t share_lock;
+	mutex_t share_lock;
 	share_msg_t *shares;
 	int64_t share_id;
 
@@ -127,7 +127,7 @@ struct proxy_instance {
 
 /* Private data for the generator */
 struct generator_data {
-	pthread_mutex_t lock; /* Lock protecting linked lists */
+	mutex_t lock; /* Lock protecting linked lists */
 	proxy_instance_t *proxies; /* Hash list of all proxies */
 	proxy_instance_t *proxy; /* Current proxy */
 	int proxy_notify_id;	// Globally increasing notify id
@@ -1294,7 +1294,7 @@ static void *proxy_send(void *arg)
 
 		mutex_lock(&proxi->psend_lock);
 		if (!proxi->psends)
-			pthread_cond_wait(&proxi->psend_cond, &proxi->psend_lock);
+			cond_wait(&proxi->psend_cond, &proxi->psend_lock);
 		msg = proxi->psends;
 		if (likely(msg))
 			DL_DELETE(proxi->psends, msg);
