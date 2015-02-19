@@ -140,11 +140,24 @@ int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const ch
 	return ret;
 }
 
+/* Make every locking attempt warn if we're unable to get the lock for more
+ * than 10 seconds and fail if we can't get it for longer than a minute. */
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
+	int ret, retries = 0;
+
 	GETLOCK(lock, file, func, line);
-	if (unlikely(pthread_mutex_lock(lock)))
+retry:
+	ret = _mutex_timedlock(lock, 10, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged mutex lock contention from %s %s:%d", file, func, line);
+			if (++retries < 6)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB MUTEX!");
+		}
 		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK!");
+	}
 	GOTLOCK(lock, file, func, line);
 }
 
@@ -185,9 +198,20 @@ int _wr_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char
 
 void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
+	int ret, retries = 0;
+
 	GETLOCK(lock, file, func, line);
-	if (unlikely(pthread_rwlock_wrlock(lock)))
-		quitfrom(1, file, func, line, "WTF WRLOCK ERROR ON LOCK!");
+retry:
+	ret = _wr_timedlock(lock, 10, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged write lock contention from %s %s:%d", file, func, line);
+			if (++retries < 6)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB WRITE LOCK!");
+		}
+		quitfrom(1, file, func, line, "WTF ERROR ON WRITE LOCK!");
+	}
 	GOTLOCK(lock, file, func, line);
 }
 
@@ -218,9 +242,20 @@ int _rd_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char
 
 void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
+	int ret, retries = 0;
+
 	GETLOCK(lock, file, func, line);
-	if (unlikely(pthread_rwlock_rdlock(lock)))
-		quitfrom(1, file, func, line, "WTF RDLOCK ERROR ON LOCK!");
+retry:
+	ret = _rd_timedlock(lock, 10, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged read lock contention from %s %s:%d", file, func, line);
+			if (++retries < 6)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB READ LOCK!");
+		}
+		quitfrom(1, file, func, line, "WTF ERROR ON READ LOCK!");
+	}
 	GOTLOCK(lock, file, func, line);
 }
 
