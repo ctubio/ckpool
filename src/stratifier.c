@@ -303,6 +303,8 @@ typedef union {
 struct proxy_base {
 	UT_hash_handle hh;
 	UT_hash_handle sh; /* For subproxy hashlist */
+	proxy_t *next; /* For retired subproxies */
+	proxy_t *prev;
 	int id;
 	int subid;
 
@@ -399,10 +401,10 @@ struct stratifier_data {
 	/* Generator message priority */
 	int gen_priority;
 
-	int proxy_count;
+	int proxy_count; /* Total proxies generated (not necessarily still alive) */
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
-	proxy_t *old_proxies; /* Hashlist of proxies now no longer in user */
+	proxy_t *retired_proxies; /* Hashlist of proxies now no longer in user */
 	mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 };
@@ -1175,7 +1177,7 @@ static void new_proxy(sdata_t *sdata, const int id)
 	if (proxy) {
 		exists = true;
 		HASH_DEL(sdata->proxies, proxy);
-		HASH_ADD_INT(sdata->old_proxies, id, proxy);
+		DL_APPEND(sdata->retired_proxies, proxy);
 		if (proxy == sdata->proxy)
 			current = true;
 	}
