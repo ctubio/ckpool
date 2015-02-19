@@ -123,11 +123,41 @@ bool ck_completion_timeout(void *fn, void *fnarg, int timeout)
 #define GUNLOCK(_lock, _file, _func, _line)
 #define INITLOCK(_typ, _lock, _file, _func, _line)
 
+int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+{
+	tv_t now;
+	ts_t abs;
+	int ret;
+
+	tv_time(&now);
+	tv_to_ts(&abs, &now);
+	abs.tv_sec += timeout;
+
+	TRYLOCK(lock, file, func, line);
+	ret = pthread_mutex_timedlock(lock, &abs);
+	DIDLOCK(ret, lock, file, func, line);
+
+	return ret;
+}
+
+/* Make every locking attempt warn if we're unable to get the lock for more
+ * than 10 seconds and fail if we can't get it for longer than a minute. */
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
+	int ret, retries = 0;
+
 	GETLOCK(lock, file, func, line);
-	if (unlikely(pthread_mutex_lock(lock)))
+retry:
+	ret = _mutex_timedlock(lock, 10, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged mutex lock contention from %s %s:%d", file, func, line);
+			if (++retries < 6)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB MUTEX!");
+		}
 		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK!");
+	}
 	GOTLOCK(lock, file, func, line);
 }
 
@@ -149,7 +179,7 @@ int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __may
 	return ret;
 }
 
-int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int _wr_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
 {
 	tv_t now;
 	ts_t abs;
@@ -160,7 +190,7 @@ int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const ch
 	abs.tv_sec += timeout;
 
 	TRYLOCK(lock, file, func, line);
-	ret = pthread_mutex_timedlock(lock, &abs);
+	ret = pthread_rwlock_timedwrlock(lock, &abs);
 	DIDLOCK(ret, lock, file, func, line);
 
 	return ret;
@@ -168,9 +198,20 @@ int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const ch
 
 void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
+	int ret, retries = 0;
+
 	GETLOCK(lock, file, func, line);
-	if (unlikely(pthread_rwlock_wrlock(lock)))
-		quitfrom(1, file, func, line, "WTF WRLOCK ERROR ON LOCK!");
+retry:
+	ret = _wr_timedlock(lock, 10, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged write lock contention from %s %s:%d", file, func, line);
+			if (++retries < 6)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB WRITE LOCK!");
+		}
+		quitfrom(1, file, func, line, "WTF ERROR ON WRITE LOCK!");
+	}
 	GOTLOCK(lock, file, func, line);
 }
 
@@ -182,11 +223,39 @@ int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe
 	return ret;
 }
 
+int _rd_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+{
+	tv_t now;
+	ts_t abs;
+	int ret;
+
+	tv_time(&now);
+	tv_to_ts(&abs, &now);
+	abs.tv_sec += timeout;
+
+	TRYLOCK(lock, file, func, line);
+	ret = pthread_rwlock_timedrdlock(lock, &abs);
+	DIDLOCK(ret, lock, file, func, line);
+
+	return ret;
+}
+
 void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
+	int ret, retries = 0;
+
 	GETLOCK(lock, file, func, line);
-	if (unlikely(pthread_rwlock_rdlock(lock)))
-		quitfrom(1, file, func, line, "WTF RDLOCK ERROR ON LOCK!");
+retry:
+	ret = _rd_timedlock(lock, 10, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged read lock contention from %s %s:%d", file, func, line);
+			if (++retries < 6)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB READ LOCK!");
+		}
+		quitfrom(1, file, func, line, "WTF ERROR ON READ LOCK!");
+	}
 	GOTLOCK(lock, file, func, line);
 }
 
