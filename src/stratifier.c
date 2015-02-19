@@ -214,6 +214,8 @@ struct worker_instance {
 
 typedef struct stratifier_data sdata_t;
 
+typedef struct proxy_base proxy_t;
+
 /* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
@@ -276,7 +278,8 @@ struct stratum_instance {
 	double best_diff; /* Best share found by this instance */
 
 	sdata_t *sdata; /* Which sdata this client is bound to */
-	int proxyid; /* Which proxy this is bound to in proxy mode */
+	proxy_t *proxy; /* Proxy this is bound to in proxy mode */
+	int proxyid; /* Which proxy id  */
 	int subproxyid; /* Which subproxy */
 	int64_t notify_id; /* Which notify_id from the subproxy did we join */
 };
@@ -296,8 +299,6 @@ typedef union {
 	uint16_t u16;
 	uint8_t u8;
 } enonce1_t;
-
-typedef struct proxy_base proxy_t;
 
 struct proxy_base {
 	UT_hash_handle hh;
@@ -321,6 +322,7 @@ struct proxy_base {
 
 	int64_t clients;
 	int64_t max_clients;
+	int64_t bound_clients;
 	int64_t headroom;
 	enonce1_t enonce1u;
 
@@ -948,6 +950,8 @@ static void update_base(ckpool_t *ckp, const int prio)
 
 static void __kill_instance(stratum_instance_t *client)
 {
+	if (client->proxy)
+		client->proxy->bound_clients--;
 	free(client->workername);
 	free(client->useragent);
 	free(client);
@@ -2341,8 +2345,11 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 			quit(0, "Invalid enonce1varlen %d", enonce1varlen);
 	}
 	if (ret) {
-		if (proxy)
+		if (proxy) {
+			client->proxy = proxy;
 			proxy->clients++;
+			proxy->bound_clients++;
+		}
 		client->enonce1_64 = enonce1u->u64;
 	}
 	ck_wunlock(&ckp_sdata->instance_lock);
