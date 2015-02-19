@@ -114,8 +114,30 @@ bool ck_completion_timeout(void *fn, void *fnarg, int timeout)
 	return !ret;
 }
 
+int _cond_wait(pthread_cond_t *cond, mutex_t *lock, const char *file, const char *func, const int line)
+{
+	int ret;
 
-int mutex_timedlock(pthread_mutex_t *lock, int timeout)
+	ret = pthread_cond_wait(cond, &lock->mutex);
+	lock->file = file;
+	lock->func = func;
+	lock->line = line;
+	return ret;
+}
+
+int _cond_timedwait(pthread_cond_t *cond, mutex_t *lock, const struct timespec *abstime, const char *file, const char *func, const int line)
+{
+	int ret;
+
+	ret = pthread_cond_timedwait(cond, &lock->mutex, abstime);
+	lock->file = file;
+	lock->func = func;
+	lock->line = line;
+	return ret;
+}
+
+
+int _mutex_timedlock(mutex_t *lock, int timeout, const char *file, const char *func, const int line)
 {
 	tv_t now;
 	ts_t abs;
@@ -125,22 +147,28 @@ int mutex_timedlock(pthread_mutex_t *lock, int timeout)
 	tv_to_ts(&abs, &now);
 	abs.tv_sec += timeout;
 
-	ret = pthread_mutex_timedlock(lock, &abs);
+	ret = pthread_mutex_timedlock(&lock->mutex, &abs);
+	if (!ret) {
+		lock->file = file;
+		lock->func = func;
+		lock->line = line;
+	}
 
 	return ret;
 }
 
 /* Make every locking attempt warn if we're unable to get the lock for more
  * than 10 seconds and fail if we can't get it for longer than a minute. */
-void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+void _mutex_lock(mutex_t *lock, const char *file, const char *func, const int line)
 {
 	int ret, retries = 0;
 
 retry:
-	ret = mutex_timedlock(lock, 10);
+	ret = _mutex_timedlock(lock, 10, file, func, line);
 	if (unlikely(ret)) {
 		if (likely(ret == ETIMEDOUT)) {
-			LOGERR("WARNING: Prolonged mutex lock contention from %s %s:%d", file, func, line);
+			LOGERR("WARNING: Prolonged mutex lock contention from %s %s:%d, held by %s %s:%d",
+			       file, func, line, lock->file, lock->func, lock->line);
 			if (++retries < 6)
 				goto retry;
 			quitfrom(1, file, func, line, "FAILED TO GRAB MUTEX!");
@@ -149,22 +177,33 @@ retry:
 	}
 }
 
-void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+/* Does not unset lock->file/func/line since they're only relevant when the lock is held */
+void _mutex_unlock(mutex_t *lock, const char *file, const char *func, const int line)
 {
-	if (unlikely(pthread_mutex_unlock(lock)))
+	if (unlikely(pthread_mutex_unlock(&lock->mutex)))
 		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK!");
 }
 
-int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int _mutex_trylock(mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
 {
 	int ret;
 
-	ret = pthread_mutex_trylock(lock);
-
+	ret = pthread_mutex_trylock(&lock->mutex);
+	if (!ret) {
+		lock->file = file;
+		lock->func = func;
+		lock->line = line;
+	}
 	return ret;
 }
 
-int wr_timedlock(pthread_rwlock_t *lock, int timeout)
+void mutex_destroy(mutex_t *lock)
+{
+	pthread_mutex_destroy(&lock->mutex);
+}
+
+
+static int wr_timedlock(pthread_rwlock_t *lock, int timeout)
 {
 	tv_t now;
 	ts_t abs;
@@ -179,31 +218,40 @@ int wr_timedlock(pthread_rwlock_t *lock, int timeout)
 	return ret;
 }
 
-void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+void _wr_lock(rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	int ret, retries = 0;
 
 retry:
-	ret = wr_timedlock(lock, 10);
+	ret = wr_timedlock(&lock->rwlock, 10);
 	if (unlikely(ret)) {
 		if (likely(ret == ETIMEDOUT)) {
-			LOGERR("WARNING: Prolonged write lock contention from %s %s:%d", file, func, line);
+			LOGERR("WARNING: Prolonged write lock contention from %s %s:%d, held by %s %s:%d",
+			       file, func, line, lock->file, lock->func, lock->line);
 			if (++retries < 6)
 				goto retry;
 			quitfrom(1, file, func, line, "FAILED TO GRAB WRITE LOCK!");
 		}
 		quitfrom(1, file, func, line, "WTF ERROR ON WRITE LOCK!");
 	}
+	lock->file = file;
+	lock->func = func;
+	lock->line = line;
 }
 
-int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int _wr_trylock(rwlock_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
 {
-	int ret = pthread_rwlock_trywrlock(lock);
+	int ret = pthread_rwlock_trywrlock(&lock->rwlock);
 
+	if (!ret) {
+		lock->file = file;
+		lock->func = func;
+		lock->line = line;
+	}
 	return ret;
 }
 
-int rd_timedlock(pthread_rwlock_t *lock, int timeout)
+static int rd_timedlock(pthread_rwlock_t *lock, int timeout)
 {
 	tv_t now;
 	ts_t abs;
@@ -218,62 +266,55 @@ int rd_timedlock(pthread_rwlock_t *lock, int timeout)
 	return ret;
 }
 
-void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+void _rd_lock(rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	int ret, retries = 0;
 
 retry:
-	ret = rd_timedlock(lock, 10);
+	ret = rd_timedlock(&lock->rwlock, 10);
 	if (unlikely(ret)) {
 		if (likely(ret == ETIMEDOUT)) {
-			LOGERR("WARNING: Prolonged read lock contention from %s %s:%d", file, func, line);
+			LOGERR("WARNING: Prolonged read lock contention from %s %s:%d, held by %s %s:%d",
+			       file, func, line, lock->file, lock->func, lock->line);
 			if (++retries < 6)
 				goto retry;
 			quitfrom(1, file, func, line, "FAILED TO GRAB READ LOCK!");
 		}
 		quitfrom(1, file, func, line, "WTF ERROR ON READ LOCK!");
 	}
+	lock->file = file;
+	lock->func = func;
+	lock->line = line;
 }
 
-void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+void _rw_unlock(rwlock_t *lock, const char *file, const char *func, const int line)
 {
-	if (unlikely(pthread_rwlock_unlock(lock)))
+	if (unlikely(pthread_rwlock_unlock(&lock->rwlock)))
 		quitfrom(1, file, func, line, "WTF RWLOCK ERROR ON UNLOCK!");
 }
 
-void _rd_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+void _rd_unlock(rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	_rw_unlock(lock, file, func, line);
 }
 
-void _wr_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
+void _wr_unlock(rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	_rw_unlock(lock, file, func, line);
 }
 
-void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, const int line)
+void _mutex_init(mutex_t *lock, const char *file, const char *func, const int line)
 {
-	if (unlikely(pthread_mutex_init(lock, NULL)))
+	if (unlikely(pthread_mutex_init(&lock->mutex, NULL)))
 		quitfrom(1, file, func, line, "Failed to pthread_mutex_init");
 }
 
-void mutex_destroy(pthread_mutex_t *lock)
+void _rwlock_init(rwlock_t *lock, const char *file, const char *func, const int line)
 {
-	/* Ignore return code. This only invalidates the mutex on linux but
-	 * releases resources on windows. */
-	pthread_mutex_destroy(lock);
-}
-
-void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
-{
-	if (unlikely(pthread_rwlock_init(lock, NULL)))
+	if (unlikely(pthread_rwlock_init(&lock->rwlock, NULL)))
 		quitfrom(1, file, func, line, "Failed to pthread_rwlock_init");
 }
 
-void rwlock_destroy(pthread_rwlock_t *lock)
-{
-	pthread_rwlock_destroy(lock);
-}
 
 void _cond_init(pthread_cond_t *cond, const char *file, const char *func, const int line)
 {
@@ -287,11 +328,6 @@ void _cklock_init(cklock_t *lock, const char *file, const char *func, const int 
 	_rwlock_init(&lock->rwlock, file, func, line);
 }
 
-void cklock_destroy(cklock_t *lock)
-{
-	rwlock_destroy(&lock->rwlock);
-	mutex_destroy(&lock->mutex);
-}
 
 /* Read lock variant of cklock. Cannot be promoted. */
 void _ck_rlock(cklock_t *lock, const char *file, const char *func, const int line)
@@ -358,6 +394,13 @@ void _ck_wunlock(cklock_t *lock, const char *file, const char *func, const int l
 	_wr_unlock(&lock->rwlock, file, func, line);
 	_mutex_unlock(&lock->mutex, file, func, line);
 }
+
+void cklock_destroy(cklock_t *lock)
+{
+	pthread_rwlock_destroy(&lock->rwlock.rwlock);
+	pthread_mutex_destroy(&lock->mutex.mutex);
+}
+
 
 void _cksem_init(sem_t *sem, const char *file, const char *func, const int line)
 {

@@ -285,10 +285,10 @@ struct stratifier_data {
 
 	pool_stats_t stats;
 	/* Protects changes to pool stats */
-	pthread_mutex_t stats_lock;
+	mutex_t stats_lock;
 
 	/* Serialises sends/receives to ckdb if possible */
-	pthread_mutex_t ckdb_lock;
+	mutex_t ckdb_lock;
 
 	bool ckdb_offline;
 
@@ -336,14 +336,14 @@ struct stratifier_data {
 	cklock_t instance_lock;
 
 	share_t *shares;
-	pthread_mutex_t share_lock;
+	mutex_t share_lock;
 
 	int64_t shares_generated;
 
 	/* Linked list of block solves, added to during submission, removed on
 	 * accept/reject. It is likely we only ever have one solve on here but
 	 * you never know... */
-	pthread_mutex_t block_lock;
+	mutex_t block_lock;
 	ckmsg_t *block_solves;
 
 	/* Generator message priority */
@@ -3676,7 +3676,7 @@ static void parse_ckdb_cmd(ckpool_t *ckp, const char *cmd)
 }
 
 /* Test a value under lock and set it, returning the original value */
-static bool test_and_set(bool *val, pthread_mutex_t *lock)
+static bool test_and_set(bool *val, mutex_t *lock)
 {
 	bool ret;
 
@@ -3688,7 +3688,7 @@ static bool test_and_set(bool *val, pthread_mutex_t *lock)
 	return ret;
 }
 
-static bool test_and_clear(bool *val, pthread_mutex_t *lock)
+static bool test_and_clear(bool *val, mutex_t *lock)
 {
 	bool ret;
 
