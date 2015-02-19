@@ -386,13 +386,15 @@ void create_pthread(pthread_t *thread, void *(*start_routine)(void *), void *arg
 void join_pthread(pthread_t thread);
 bool ck_completion_timeout(void *fn, void *fnarg, int timeout);
 
+int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line);
 int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
-int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
+int _wr_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
 void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
 int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
+int _rd_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line);
 void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
 void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line);
 void _rd_unlock_noyield(pthread_rwlock_t *lock, const char *file, const char *func, const int line);

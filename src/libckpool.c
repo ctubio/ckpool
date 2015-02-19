@@ -123,6 +123,23 @@ bool ck_completion_timeout(void *fn, void *fnarg, int timeout)
 #define GUNLOCK(_lock, _file, _func, _line)
 #define INITLOCK(_typ, _lock, _file, _func, _line)
 
+int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+{
+	tv_t now;
+	ts_t abs;
+	int ret;
+
+	tv_time(&now);
+	tv_to_ts(&abs, &now);
+	abs.tv_sec += timeout;
+
+	TRYLOCK(lock, file, func, line);
+	ret = pthread_mutex_timedlock(lock, &abs);
+	DIDLOCK(ret, lock, file, func, line);
+
+	return ret;
+}
+
 void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	GETLOCK(lock, file, func, line);
@@ -149,7 +166,7 @@ int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __may
 	return ret;
 }
 
-int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int _wr_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
 {
 	tv_t now;
 	ts_t abs;
@@ -160,7 +177,7 @@ int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const ch
 	abs.tv_sec += timeout;
 
 	TRYLOCK(lock, file, func, line);
-	ret = pthread_mutex_timedlock(lock, &abs);
+	ret = pthread_rwlock_timedwrlock(lock, &abs);
 	DIDLOCK(ret, lock, file, func, line);
 
 	return ret;
@@ -179,6 +196,23 @@ int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe
 	TRYLOCK(lock, file, func, line);
 	int ret = pthread_rwlock_trywrlock(lock);
 	DIDLOCK(ret, lock, file, func, line);
+	return ret;
+}
+
+int _rd_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+{
+	tv_t now;
+	ts_t abs;
+	int ret;
+
+	tv_time(&now);
+	tv_to_ts(&abs, &now);
+	abs.tv_sec += timeout;
+
+	TRYLOCK(lock, file, func, line);
+	ret = pthread_rwlock_timedrdlock(lock, &abs);
+	DIDLOCK(ret, lock, file, func, line);
+
 	return ret;
 }
 
