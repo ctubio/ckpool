@@ -115,15 +115,7 @@ bool ck_completion_timeout(void *fn, void *fnarg, int timeout)
 }
 
 
-/* Place holders for when we add lock debugging */
-#define GETLOCK(_lock, _file, _func, _line)
-#define GOTLOCK(_lock, _file, _func, _line)
-#define TRYLOCK(_lock, _file, _func, _line)
-#define DIDLOCK(_ret, _lock, _file, _func, _line)
-#define GUNLOCK(_lock, _file, _func, _line)
-#define INITLOCK(_typ, _lock, _file, _func, _line)
-
-int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int mutex_timedlock(pthread_mutex_t *lock, int timeout)
 {
 	tv_t now;
 	ts_t abs;
@@ -133,9 +125,7 @@ int _mutex_timedlock(pthread_mutex_t *lock, int timeout, __maybe_unused const ch
 	tv_to_ts(&abs, &now);
 	abs.tv_sec += timeout;
 
-	TRYLOCK(lock, file, func, line);
 	ret = pthread_mutex_timedlock(lock, &abs);
-	DIDLOCK(ret, lock, file, func, line);
 
 	return ret;
 }
@@ -146,9 +136,8 @@ void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, cons
 {
 	int ret, retries = 0;
 
-	GETLOCK(lock, file, func, line);
 retry:
-	ret = _mutex_timedlock(lock, 10, file, func, line);
+	ret = mutex_timedlock(lock, 10);
 	if (unlikely(ret)) {
 		if (likely(ret == ETIMEDOUT)) {
 			LOGERR("WARNING: Prolonged mutex lock contention from %s %s:%d", file, func, line);
@@ -158,28 +147,24 @@ retry:
 		}
 		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK!");
 	}
-	GOTLOCK(lock, file, func, line);
 }
 
 void _mutex_unlock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_unlock(lock)))
 		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK!");
-	GUNLOCK(lock, file, func, line);
 }
 
 int _mutex_trylock(pthread_mutex_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
 {
 	int ret;
 
-	TRYLOCK(lock, file, func, line);
 	ret = pthread_mutex_trylock(lock);
-	DIDLOCK(ret, lock, file, func, line);
 
 	return ret;
 }
 
-int _wr_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int wr_timedlock(pthread_rwlock_t *lock, int timeout)
 {
 	tv_t now;
 	ts_t abs;
@@ -189,9 +174,7 @@ int _wr_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char
 	tv_to_ts(&abs, &now);
 	abs.tv_sec += timeout;
 
-	TRYLOCK(lock, file, func, line);
 	ret = pthread_rwlock_timedwrlock(lock, &abs);
-	DIDLOCK(ret, lock, file, func, line);
 
 	return ret;
 }
@@ -200,9 +183,8 @@ void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const 
 {
 	int ret, retries = 0;
 
-	GETLOCK(lock, file, func, line);
 retry:
-	ret = _wr_timedlock(lock, 10, file, func, line);
+	ret = wr_timedlock(lock, 10);
 	if (unlikely(ret)) {
 		if (likely(ret == ETIMEDOUT)) {
 			LOGERR("WARNING: Prolonged write lock contention from %s %s:%d", file, func, line);
@@ -212,18 +194,16 @@ retry:
 		}
 		quitfrom(1, file, func, line, "WTF ERROR ON WRITE LOCK!");
 	}
-	GOTLOCK(lock, file, func, line);
 }
 
 int _wr_trylock(pthread_rwlock_t *lock, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
 {
-	TRYLOCK(lock, file, func, line);
 	int ret = pthread_rwlock_trywrlock(lock);
-	DIDLOCK(ret, lock, file, func, line);
+
 	return ret;
 }
 
-int _rd_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char *file, __maybe_unused const char *func, __maybe_unused const int line)
+int rd_timedlock(pthread_rwlock_t *lock, int timeout)
 {
 	tv_t now;
 	ts_t abs;
@@ -233,9 +213,7 @@ int _rd_timedlock(pthread_rwlock_t *lock, int timeout, __maybe_unused const char
 	tv_to_ts(&abs, &now);
 	abs.tv_sec += timeout;
 
-	TRYLOCK(lock, file, func, line);
 	ret = pthread_rwlock_timedrdlock(lock, &abs);
-	DIDLOCK(ret, lock, file, func, line);
 
 	return ret;
 }
@@ -244,9 +222,8 @@ void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const 
 {
 	int ret, retries = 0;
 
-	GETLOCK(lock, file, func, line);
 retry:
-	ret = _rd_timedlock(lock, 10, file, func, line);
+	ret = rd_timedlock(lock, 10);
 	if (unlikely(ret)) {
 		if (likely(ret == ETIMEDOUT)) {
 			LOGERR("WARNING: Prolonged read lock contention from %s %s:%d", file, func, line);
@@ -256,14 +233,12 @@ retry:
 		}
 		quitfrom(1, file, func, line, "WTF ERROR ON READ LOCK!");
 	}
-	GOTLOCK(lock, file, func, line);
 }
 
 void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_unlock(lock)))
 		quitfrom(1, file, func, line, "WTF RWLOCK ERROR ON UNLOCK!");
-	GUNLOCK(lock, file, func, line);
 }
 
 void _rd_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
@@ -280,7 +255,6 @@ void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, cons
 {
 	if (unlikely(pthread_mutex_init(lock, NULL)))
 		quitfrom(1, file, func, line, "Failed to pthread_mutex_init");
-	INITLOCK(lock, CGLOCK_MUTEX, file, func, line);
 }
 
 void mutex_destroy(pthread_mutex_t *lock)
@@ -294,7 +268,6 @@ void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, co
 {
 	if (unlikely(pthread_rwlock_init(lock, NULL)))
 		quitfrom(1, file, func, line, "Failed to pthread_rwlock_init");
-	INITLOCK(lock, CGLOCK_RW, file, func, line);
 }
 
 void rwlock_destroy(pthread_rwlock_t *lock)
