@@ -109,17 +109,17 @@ struct proxy_instance {
 	bool reconnect; /* We need to drop and reconnect */
 	bool alive;
 
-	pthread_mutex_t notify_lock;
+	mutex_t notify_lock;
 	notify_instance_t *notify_instances;
 
 	pthread_t pth_precv;
 	pthread_t pth_psend;
-	pthread_mutex_t psend_lock;
+	mutex_t psend_lock;
 	pthread_cond_t psend_cond;
 
 	stratum_msg_t *psends;
 
-	pthread_mutex_t share_lock;
+	mutex_t share_lock;
 	share_msg_t *shares;
 	int64_t share_id;
 
@@ -131,7 +131,7 @@ struct proxy_instance {
 
 	int epfd; /* Epoll fd used by the parent proxy */
 
-	pthread_mutex_t proxy_lock; /* Lock protecting hashlist of proxies */
+	mutex_t proxy_lock; /* Lock protecting hashlist of proxies */
 	proxy_instance_t *parent; /* Parent proxy of subproxies */
 	proxy_instance_t *subproxies; /* Hashlist of subproxies of this proxy */
 	int subproxy_count; /* Number of subproxies */
@@ -140,7 +140,7 @@ struct proxy_instance {
 /* Private data for the generator */
 struct generator_data {
 	ckpool_t *ckp;
-	pthread_mutex_t lock; /* Lock protecting linked lists */
+	mutex_t lock; /* Lock protecting linked lists */
 	proxy_instance_t *proxies; /* Hash list of all proxies */
 	proxy_instance_t *proxy; /* Current proxy */
 	proxy_instance_t *dead_proxies; /* Disabled proxies */
@@ -1461,7 +1461,7 @@ static void *proxy_send(void *arg)
 
 		mutex_lock(&proxy->psend_lock);
 		if (!proxy->psends)
-			pthread_cond_timedwait(&proxy->psend_cond, &proxy->psend_lock, &abs);
+			cond_timedwait(&proxy->psend_cond, &proxy->psend_lock, &abs);
 		msg = proxy->psends;
 		if (likely(msg))
 			DL_DELETE(proxy->psends, msg);

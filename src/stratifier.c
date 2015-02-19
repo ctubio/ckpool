@@ -338,10 +338,10 @@ struct stratifier_data {
 
 	pool_stats_t stats;
 	/* Protects changes to pool stats */
-	pthread_mutex_t stats_lock;
+	mutex_t stats_lock;
 
 	/* Serialises sends/receives to ckdb if possible */
-	pthread_mutex_t ckdb_lock;
+	mutex_t ckdb_lock;
 
 	bool ckdb_offline;
 	bool verbose;
@@ -384,14 +384,14 @@ struct stratifier_data {
 	cklock_t instance_lock;
 
 	share_t *shares;
-	pthread_mutex_t share_lock;
+	mutex_t share_lock;
 
 	int64_t shares_generated;
 
 	/* Linked list of block solves, added to during submission, removed on
 	 * accept/reject. It is likely we only ever have one solve on here but
 	 * you never know... */
-	pthread_mutex_t block_lock;
+	mutex_t block_lock;
 	ckmsg_t *block_solves;
 
 	/* Generator message priority */
@@ -401,7 +401,7 @@ struct stratifier_data {
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
 	proxy_t *old_proxies; /* Hashlist of proxies now no longer in user */
-	pthread_mutex_t proxy_lock; /* Protects all proxy data */
+	mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 };
 
@@ -4163,7 +4163,7 @@ static void parse_ckdb_cmd(ckpool_t *ckp, const char *cmd)
 }
 
 /* Test a value under lock and set it, returning the original value */
-static bool test_and_set(bool *val, pthread_mutex_t *lock)
+static bool test_and_set(bool *val, mutex_t *lock)
 {
 	bool ret;
 
@@ -4175,7 +4175,7 @@ static bool test_and_set(bool *val, pthread_mutex_t *lock)
 	return ret;
 }
 
-static bool test_and_clear(bool *val, pthread_mutex_t *lock)
+static bool test_and_clear(bool *val, mutex_t *lock)
 {
 	bool ret;
 
