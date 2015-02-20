@@ -28,7 +28,7 @@ struct notify_instance {
 	int id;
 
 	char prevhash[68];
-	char *jobid;
+	json_t *jobid;
 	char *coinbase1;
 	char *coinbase2;
 	int coinb1len;
@@ -403,7 +403,7 @@ out:
 	return ret;
 }
 
-static bool send_json_msg(connsock_t *cs, json_t *json_msg)
+static bool send_json_msg(connsock_t *cs, const json_t *json_msg)
 {
 	int len, sent;
 	char *s;
@@ -784,19 +784,19 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
 	proxy_instance_t *proxy = proxi->parent;
-	char *job_id, *coinbase1, *coinbase2;
 	gdata_t *gdata = proxi->ckp->data;
+	char *coinbase1, *coinbase2;
 	bool clean, ret = false;
 	notify_instance_t *ni;
+	json_t *arr, *job_id;
 	int merkles, i;
-	json_t *arr;
 
 	arr = json_array_get(val, 4);
 	if (!arr || !json_is_array(arr))
 		goto out;
 
 	merkles = json_array_size(arr);
-	job_id = json_array_string(val, 0);
+	job_id = json_copy(json_array_get(val, 0));
 	prev_hash = __json_array_string(val, 1);
 	coinbase1 = json_array_string(val, 2);
 	coinbase2 = json_array_string(val, 3);
@@ -806,7 +806,7 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 	clean = json_is_true(json_array_get(val, 8));
 	if (!job_id || !prev_hash || !coinbase1 || !coinbase2 || !bbversion || !nbit || !ntime) {
 		if (job_id)
-			free(job_id);
+			json_decref(job_id);
 		if (coinbase1)
 			free(coinbase1);
 		if (coinbase2)
@@ -817,7 +817,6 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 	LOGDEBUG("Received new notify from proxy %d:%d", proxi->id, proxi->subid);
 	ni = ckzalloc(sizeof(notify_instance_t));
 	ni->jobid = job_id;
-	LOGDEBUG("Job ID %s", job_id);
 	ni->coinbase1 = coinbase1;
 	LOGDEBUG("Coinbase1 %s", coinbase1);
 	ni->coinb1len = strlen(coinbase1) / 2;
@@ -1357,8 +1356,8 @@ static void submit_share(gdata_t *gdata, json_t *val)
 
 	/* Get the client id so we can tell the stratifier to drop it if the
 	 * proxy it's bound to is not functional */
-	json_getdel_int64(&client_id, val, "client_id");
-	json_getdel_int(&id, val, "proxy");
+	json_get_int64(&client_id, val, "client_id");
+	json_get_int(&id, val, "proxy");
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
 		LOGWARNING("Failed to find proxy %d to send share to", id);
@@ -1384,7 +1383,7 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	share = ckzalloc(sizeof(share_msg_t));
 	share->submit_time = time(NULL);
 	share->client_id = client_id;
-	json_getdel_int(&share->msg_id, val, "msg_id");
+	json_get_int(&share->msg_id, val, "msg_id");
 	msg->json_msg = val;
 
 	/* Add new share entry to the share hashtable */
@@ -1404,7 +1403,8 @@ static void submit_share(gdata_t *gdata, json_t *val)
 
 static void clear_notify(notify_instance_t *ni)
 {
-	free(ni->jobid);
+	if (ni->jobid)
+		json_decref(ni->jobid);
 	free(ni->coinbase1);
 	free(ni->coinbase2);
 	free(ni);
@@ -1463,13 +1463,13 @@ static void *proxy_send(void *arg)
 
 	while (42) {
 		proxy_instance_t *subproxy;
+		int proxyid = 0, subid = 0;
 		notify_instance_t *ni;
+		json_t *jobid = NULL;
 		stratum_msg_t *msg;
-		char *jobid = NULL;
 		bool ret = true;
-		int subid = 0;
 		json_t *val;
-		uint32_t id;
+		int id;
 		tv_t now;
 		ts_t abs;
 
@@ -1494,20 +1494,25 @@ static void *proxy_send(void *arg)
 		if (!msg)
 			continue;
 
-		json_getdel_int(&subid, msg->json_msg, "subproxy");
-		json_uintcpy(&id, msg->json_msg, "jobid");
+		json_get_int(&subid, msg->json_msg, "subproxy");
+		json_get_int(&id, msg->json_msg, "jobid");
+		json_get_int(&proxyid, msg->json_msg, "proxy");
+		if (unlikely(proxyid != proxy->id)) {
+			LOGWARNING("Proxysend for proxy %d got message for proxy %d!",
+				   proxy->id, proxyid);
+		}
 
 		mutex_lock(&proxy->notify_lock);
 		HASH_FIND_INT(proxy->notify_instances, &id, ni);
 		if (ni)
-			jobid = strdup(ni->jobid);
+			jobid = json_copy(ni->jobid);
 		mutex_unlock(&proxy->notify_lock);
 
 		subproxy = subproxy_by_id(proxy, subid);
 		if (subproxy)
 			cs = subproxy->cs;
 		if (jobid && subproxy) {
-			JSON_CPACK(val, "{s[ssooo]soss}", "params", proxy->auth, jobid,
+			JSON_CPACK(val, "{s[soooo]soss}", "params", proxy->auth, jobid,
 					json_object_dup(msg->json_msg, "nonce2"),
 					json_object_dup(msg->json_msg, "ntime"),
 					json_object_dup(msg->json_msg, "nonce"),
@@ -1522,7 +1527,6 @@ static void *proxy_send(void *arg)
 			LOGNOTICE("Failed to find subproxy %d:%d to send message to",
 				  proxy->id, subid);
 		}
-		free(jobid);
 		json_decref(msg->json_msg);
 		free(msg);
 		if (!ret && subproxy) {
