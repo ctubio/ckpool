@@ -1504,9 +1504,9 @@ static void *proxy_send(void *arg)
 		mutex_unlock(&proxy->notify_lock);
 
 		subproxy = subproxy_by_id(proxy, subid);
-
-		if (jobid && subproxy) {
+		if (subproxy)
 			cs = subproxy->cs;
+		if (jobid && subproxy) {
 			JSON_CPACK(val, "{s[ssooo]soss}", "params", proxy->auth, jobid,
 					json_object_dup(msg->json_msg, "nonce2"),
 					json_object_dup(msg->json_msg, "ntime"),
