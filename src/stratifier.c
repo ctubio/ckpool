@@ -1243,8 +1243,13 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	proxy->enonce1u.u64 = 0;
 	ck_wunlock(&dsdata->workbase_lock);
 
-	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %"PRId64,
-		  proxy->nonce2len, proxy->max_clients);
+	if (subid) {
+		LOGINFO("Upstream pool %d:%d extranonce2 length %d, max proxy clients %"PRId64,
+			id, subid, proxy->nonce2len, proxy->max_clients);
+	} else {
+		LOGNOTICE("Upstream pool %d extranonce2 length %d, max proxy clients %"PRId64,
+			  id, proxy->nonce2len, proxy->max_clients);
+	}
 
 	json_decref(val);
 }
