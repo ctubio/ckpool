@@ -2462,6 +2462,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 
 			if (subproxy->dead)
 				continue;
+			if (!subproxy->sdata->current_workbase)
+				continue;
 			subproxy_headroom = subproxy->max_clients - subproxy->clients;
 
 			proxy->headroom += subproxy_headroom;
