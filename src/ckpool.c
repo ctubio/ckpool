@@ -596,6 +596,9 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 	if (unlikely(!pi->pid))
 		pi->pid = get_proc_pid(pi);
 	if (unlikely(kill_pid(pi->pid, 0))) {
+		/* Reset the pid value in case we are still looking for an old
+		 * process */
+		pi->pid = 0;
 		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
 		goto out;
 	}
