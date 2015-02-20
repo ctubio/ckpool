@@ -549,6 +549,8 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
+	if (unlikely(!pi->pid))
+		pi->pid = get_proc_pid(pi);
 	if (unlikely(kill_pid(pi->pid, 0))) {
 		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
 		goto out;
