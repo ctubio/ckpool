@@ -2156,9 +2156,8 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 
 	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
 	proxy = existing_subproxy(sdata, id, subid);
-	if (!proxy)
-		return;
-	proxy->dead = true;
+	if (proxy)
+		proxy->dead = true;
 	LOGNOTICE("Stratifier dropping clients from proxy %d:%d", id, subid);
 
 	ck_rlock(&sdata->instance_lock);
