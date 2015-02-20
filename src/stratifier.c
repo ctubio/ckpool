@@ -1472,6 +1472,48 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	ck_runlock(&sdata->instance_lock);
 }
 
+static void generator_drop_proxy(ckpool_t *ckp, const int id, const int subid)
+{
+	char msg[256];
+
+	sprintf(msg, "dropproxy=%d:%d", id, subid);
+	send_generator(ckp, msg, GEN_LAX);
+}
+
+/* Remove subproxies that are flagged dead or have used up their quota of
+ * clients and inform the generator if it is still alive */
+static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
+{
+	proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
+
+	if (!ckp->proxy)
+		return;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
+		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+			if (proxy == subproxy)
+				continue;
+			if (subproxy->bound_clients)
+				continue;
+			if (!subproxy->dead) {
+				if (subproxy->clients < subproxy->max_clients)
+					continue;
+				generator_drop_proxy(ckp, subproxy->id, subproxy->subid);
+				LOGNOTICE("Stratifier discarding used proxy %d:%d",
+					  subproxy->id, subproxy->subid);
+			} else {
+				LOGNOTICE("Stratifier discarding dead proxy %d:%d",
+					  subproxy->id, subproxy->subid);
+			}
+			HASH_DELETE(sh, proxy->subproxies, subproxy);
+			free(subproxy->sdata);
+			free(subproxy);
+		}
+	}
+	mutex_unlock(&sdata->proxy_lock);
+}
+
 /* Enter with instance_lock held */
 static stratum_instance_t *__instance_by_id(sdata_t *sdata, const int64_t id)
 {
@@ -1589,6 +1631,9 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* This should never happen */
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
+
+	if (dropped)
+		reap_proxies(sdata->ckp, sdata);
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
@@ -1786,11 +1831,13 @@ static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 	client_drop_message(id, dropped, false);
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
-
 	/* Decrease worker count outside of instance_lock to avoid recursive
 	 * locking */
 	if (user)
 		dec_worker(ckp, user);
+
+	if (aged || dropped)
+		reap_proxies(ckp, sdata);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)

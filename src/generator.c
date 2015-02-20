@@ -1314,6 +1314,30 @@ static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int subid
 	return subproxy;
 }
 
+static void drop_proxy(gdata_t *gdata, const char *buf)
+{
+	proxy_instance_t *proxy, *subproxy;
+	int id  = 0, subid = 0;
+
+	sscanf(buf, "dropproxy=%d:%d", &id, &subid);
+	if (unlikely(!subid)) {
+		LOGWARNING("Generator asked to drop parent proxy %d", id);
+		return;
+	}
+	proxy = proxy_by_id(gdata, id);
+	if (unlikely(!proxy)) {
+		LOGINFO("Generator asked to drop subproxy from non-existent parent %d", id);
+		return;
+	}
+	subproxy = subproxy_by_id(proxy, subid);
+	if (!subproxy) {
+		LOGINFO("Generator asked to drop non-existent subproxy %d:%d", id, subid);
+		return;
+	}
+	LOGNOTICE("Generator asked to drop proxy %d:%d", id, subid);
+	disable_subproxy(gdata, proxy, subproxy);
+}
+
 static void stratifier_reconnect_client(ckpool_t *ckp, int64_t id)
 {
 	char buf[256];
@@ -1984,6 +2008,8 @@ retry:
 		send_unix_msg(sockd, "pong");
 	} else if (cmdmatch(buf, "recruit")) {
 		recruit_subproxy(proxi);
+	} else if (cmdmatch(buf, "dropproxy")) {
+		drop_proxy(gdata, buf);
 	} else if (ckp->passthrough) {
 		/* Anything remaining should be stratum messages */
 		passthrough_add_send(proxi, buf);
