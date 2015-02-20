@@ -494,7 +494,7 @@ out:
 
 /* Send a single message to a process instance when there will be no response,
  * closing the socket immediately. */
-bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path;
 	bool ret = false;
@@ -533,7 +533,6 @@ out:
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
-	return ret;
 }
 
 /* Send a single message to a process instance and retrieve the response, then
