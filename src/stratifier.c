@@ -2504,6 +2504,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 
 	sdata = select_sdata(ckp, ckp_sdata);
 	if (unlikely(!sdata || !sdata->current_workbase)) {
+		LOGWARNING("Failed to provide subscription due to no %s", sdata ? "current workbase" : "sdata");
 		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
