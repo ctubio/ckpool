@@ -1151,22 +1151,40 @@ static int64_t current_headroom(sdata_t *sdata, proxy_t **proxy)
 	return headroom;
 }
 
-/* Iterates over all clients in proxy mode and sets the reconnect bool for the
- * message to be sent lazily next time they speak to us only if the proxy is
- * higher priority than the one they're currently connected to or the notify_id
- * on their proxy has changed indicating a new subscription. */
-static void reconnect_clients(sdata_t *sdata, const int proxyid, const int64_t notify_id)
-{
-	stratum_instance_t *client, *tmp;
+static void reconnect_client(sdata_t *sdata, stratum_instance_t *client);
 
-	LOGINFO("Setting reconnect to proxy %d notifyid %"PRId64, proxyid, notify_id);
+/* Find how much headroom we have and connect up to that many clients that are
+ * not currently on this pool, setting the reconnect for the remainder to be
+ * switched lazily. */
+static void reconnect_clients(sdata_t *sdata)
+{
+	stratum_instance_t *client, *tmpclient;
+	int reconnects = 0, flagged = 0;
+	int64_t headroom;
+	proxy_t *proxy;
+
+	headroom = current_headroom(sdata, &proxy);
 
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->proxyid != proxyid || client->notify_id != notify_id)
-			client->reconnect = true;
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->proxyid == proxy->id && client->notify_id == proxy->parent->notify_id)
+			continue;
+		if (reconnects >= headroom) {
+			if (!client->reconnect) {
+				client->reconnect = true;
+				flagged++;
+			}
+			continue;
+		}
+		reconnects++;
+		reconnect_client(sdata, client);
 	}
 	ck_runlock(&sdata->instance_lock);
+
+	if (reconnects || flagged) {
+		LOGNOTICE("Reconnected %d clients, flagged %d for proxy %d", reconnects,
+			  flagged, proxy->id);
+	}
 }
 
 static proxy_t *current_proxy(sdata_t *sdata)
@@ -1276,31 +1294,6 @@ static inline bool parent_proxy(const proxy_t *proxy)
 	return (proxy->parent == proxy);
 }
 
-/* Find how much headroom we have and connect up to that many clients that are
- * not currently on this pool */
-static void reconnect_backup_clients(sdata_t *sdata)
-{
-	stratum_instance_t *client, *tmpclient;
-	int64_t headroom = 0;
-	int reconnects = 0;
-	proxy_t *proxy;
-
-	headroom = current_headroom(sdata, &proxy);
-
-	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
-		if (reconnects >= headroom)
-			break;
-		if (client->proxyid == proxy->id)
-			continue;
-		reconnects++;
-		if (client->reconnect)
-			continue;
-		client->reconnect = true;
-	}
-	ck_runlock(&sdata->instance_lock);
-}
-
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
@@ -1393,15 +1386,10 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
 	}
 
-	if (proxy->notify_id == -1) {
-		/* This is the first notification from the current proxy, tell
-		 * clients now to reconnect since we have enough information to
-		 * switch. */
+	if (proxy->notify_id == -1)
 		proxy->notify_id = wb->id;
-		if (parent_proxy(proxy) && proxy == current_proxy(sdata))
-			reconnect_clients(sdata, proxy->id, proxy->notify_id);
-	} else if (parent_proxy(proxy) && proxy == current_proxy(sdata))
-		reconnect_backup_clients(sdata);
+	if (parent_proxy(proxy) && proxy == current_proxy(sdata))
+		reconnect_clients(sdata);
 	LOGINFO("Broadcast updated stratum notify");
 	stratum_broadcast_update(dsdata, new_block | clean);
 out:
@@ -2149,7 +2137,7 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 
 	LOGNOTICE("Stratifier setting active proxy to %d", id);
 	if (proxy->notify_id != -1)
-		reconnect_clients(sdata, proxy->id, proxy->notify_id);
+		reconnect_clients(sdata);
 }
 
 static void dead_proxy(sdata_t *sdata, const char *buf)
