@@ -1133,6 +1133,23 @@ static proxy_t *existing_subproxy(sdata_t *sdata, const int id, const int subid)
 	return subproxy;
 }
 
+/* Set proxy to the current proxy and calculate how much headroom it has */
+static int64_t current_headroom(sdata_t *sdata, proxy_t **proxy)
+{
+	proxy_t *subproxy, *tmp;
+	int64_t headroom = 0;
+
+	mutex_lock(&sdata->proxy_lock);
+	*proxy = sdata->proxy;
+	HASH_ITER(sh, (*proxy)->subproxies, subproxy, tmp) {
+		if (subproxy->dead)
+			continue;
+		headroom += subproxy->max_clients - subproxy->clients;
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	return headroom;
+}
 
 /* Iterates over all clients in proxy mode and sets the reconnect bool for the
  * message to be sent lazily next time they speak to us only if the proxy is
@@ -1264,18 +1281,11 @@ static inline bool parent_proxy(const proxy_t *proxy)
 static void reconnect_backup_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmpclient;
-	proxy_t *proxy, *subproxy, *tmp;
 	int64_t headroom = 0;
 	int reconnects = 0;
+	proxy_t *proxy;
 
-	mutex_lock(&sdata->proxy_lock);
-	proxy = sdata->proxy;
-	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
-		if (subproxy->dead)
-			continue;
-		headroom += subproxy->max_clients - subproxy->clients;
-	}
-	mutex_unlock(&sdata->proxy_lock);
+	headroom = current_headroom(sdata, &proxy);
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
@@ -1283,10 +1293,10 @@ static void reconnect_backup_clients(sdata_t *sdata)
 			break;
 		if (client->proxyid == proxy->id)
 			continue;
+		reconnects++;
 		if (client->reconnect)
 			continue;
 		client->reconnect = true;
-		reconnects++;
 	}
 	ck_runlock(&sdata->instance_lock);
 }
