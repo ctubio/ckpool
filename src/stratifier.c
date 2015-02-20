@@ -2227,8 +2227,8 @@ retry:
 		/* The bulk of the messages will be received json from the
 		 * connector so look for this first. The srecv_process frees
 		 * the buf heap ram */
-		ckmsgq_add(sdata->srecvs, buf);
 		Close(sockd);
+		ckmsgq_add(sdata->srecvs, buf);
 		buf = NULL;
 		goto retry;
 	}
