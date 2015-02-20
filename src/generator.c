@@ -1946,6 +1946,7 @@ static int proxy_loop(proc_instance_t *pi)
 
 	setup_proxies(ckp, gdata);
 reconnect:
+	Close(sockd);
 	/* This does not necessarily mean we reconnect, but a change has
 	 * occurred and we need to reexamine the proxies. */
 	cproxy = wait_best_proxy(ckp, gdata);
@@ -1963,6 +1964,7 @@ reconnect:
 		}
 	}
 retry:
+	Close(sockd);
 	do {
 		selret = wait_read_select(us->sockd, 5);
 		if (!selret && !ping_main(ckp)) {
@@ -1990,7 +1992,6 @@ retry:
 	buf = recv_unix_msg(sockd);
 	if (!buf) {
 		LOGWARNING("Failed to get message in proxy_loop");
-		Close(sockd);
 		goto retry;
 	}
 	LOGDEBUG("Proxy received request: %s", buf);
@@ -2022,7 +2023,6 @@ retry:
 		else
 			submit_share(gdata, val);
 	}
-	Close(sockd);
 	goto retry;
 out:
 	Close(sockd);
