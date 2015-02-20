@@ -1480,8 +1480,16 @@ static void generator_drop_proxy(ckpool_t *ckp, const int id, const int subid)
 	send_generator(ckp, msg, GEN_LAX);
 }
 
+static void free_proxy(proxy_t *proxy)
+{
+	free(proxy->sdata);
+	free(proxy);
+}
+
 /* Remove subproxies that are flagged dead or have used up their quota of
- * clients and inform the generator if it is still alive */
+ * clients and inform the generator if it is still alive. Then see if there
+ * are any retired proxies that no longer have any other subproxies and reap
+ * those. */
 static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 {
 	proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
@@ -1507,8 +1515,17 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 					  subproxy->id, subproxy->subid);
 			}
 			HASH_DELETE(sh, proxy->subproxies, subproxy);
-			free(subproxy->sdata);
-			free(subproxy);
+			free_proxy(subproxy);
+		}
+	}
+
+	DL_FOREACH_SAFE(sdata->retired_proxies, proxy, proxytmp) {
+		if (unlikely(proxy->bound_clients))
+			continue;
+		if (HASH_CNT(sh, proxy->subproxies) == 1) {
+			LOGNOTICE("Stratifier discarding retired proxy %d", proxy->id);
+			DL_DELETE(sdata->retired_proxies, proxy);
+			free_proxy(proxy);
 		}
 	}
 	mutex_unlock(&sdata->proxy_lock);
