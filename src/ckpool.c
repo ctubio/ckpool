@@ -532,9 +532,9 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		ret = true;
-	shutdown(sockd, SHUT_WR);
 	if (!wait_close(sockd, 5))
 		LOGWARNING("send_proc did not close from %s %s:%d", file, func, line);
+	Close(sockd);
 out:
 	if (unlikely(!ret)) {
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
