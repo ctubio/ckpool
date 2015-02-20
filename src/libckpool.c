@@ -914,14 +914,18 @@ out:
 int wait_close(int sockd, int timeout)
 {
 	struct pollfd sfd;
+	int ret;
 
 	if (unlikely(sockd < 0))
 		return -1;
 	sfd.fd = sockd;
-	sfd.events = POLLHUP;
+	sfd.events = POLLIN;
 	sfd.revents = 0;
 	timeout *= 1000;
-	return poll(&sfd, 1, timeout);
+	ret = poll(&sfd, 1, timeout);
+	if (ret < 1)
+		return 0;
+	return sfd.revents & POLLHUP;
 }
 
 /* Emulate a select read wait for high fds that select doesn't support */
