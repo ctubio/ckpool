@@ -1851,6 +1851,7 @@ static void *proxy_recv(void *arg)
 		}
 		if (ret < 1) {
 			if (parent_proxy(subproxy)) {
+				proxi->reconnect_time = time(NULL);
 				alive = false;
 				LOGWARNING("Proxy %d:%s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
 					   subproxy->id, subproxy->si->url);
