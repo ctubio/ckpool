@@ -1146,7 +1146,7 @@ static void reconnect_clients(sdata_t *sdata, const int proxyid, const int64_t n
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->proxyid > proxyid || (client->proxyid == proxyid && client->notify_id != notify_id))
+		if (client->proxyid != proxyid || client->notify_id != notify_id)
 			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
