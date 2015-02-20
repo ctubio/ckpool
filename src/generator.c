@@ -650,8 +650,13 @@ retry:
 		goto out;
 	}
 	if (size < 3) {
-		LOGWARNING("Proxy %d:%d %s Nonce2 length %d too small for fast miners",
-			   proxi->id, proxi->subid, proxi->si->url, size);
+		if (!proxi->subid) {
+			LOGWARNING("Proxy %d %s Nonce2 length %d too small for fast miners",
+				   proxi->id, proxi->si->url, size);
+		} else {
+			LOGNOTICE("Proxy %d:%d Nonce2 length %d too small for fast miners",
+				   proxi->id, proxi->subid, size);
+		}
 	}
 	proxi->nonce2len = size;
 	if (parent_proxy(proxi)) {
