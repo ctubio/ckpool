@@ -1494,6 +1494,7 @@ static void free_proxy(proxy_t *proxy)
 static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 {
 	proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
+	int used = 0, dead = 0, retired = 0;
 
 	if (!ckp->proxy)
 		return;
@@ -1509,11 +1510,9 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 				if (subproxy->clients < subproxy->max_clients)
 					continue;
 				generator_drop_proxy(ckp, subproxy->id, subproxy->subid);
-				LOGNOTICE("Stratifier discarding used proxy %d:%d",
-					  subproxy->id, subproxy->subid);
+				used++;
 			} else {
-				LOGNOTICE("Stratifier discarding dead proxy %d:%d",
-					  subproxy->id, subproxy->subid);
+				dead++;
 			}
 			HASH_DELETE(sh, proxy->subproxies, subproxy);
 			free_proxy(subproxy);
@@ -1524,12 +1523,17 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 		if (unlikely(proxy->bound_clients))
 			continue;
 		if (HASH_CNT(sh, proxy->subproxies) == 1) {
-			LOGNOTICE("Stratifier discarding retired proxy %d", proxy->id);
+			retired++;
 			DL_DELETE(sdata->retired_proxies, proxy);
 			free_proxy(proxy);
 		}
 	}
 	mutex_unlock(&sdata->proxy_lock);
+
+	if (used || dead || retired) {
+		LOGNOTICE("Stratifier discarded %d used, %d dead and %d retired proxies",
+			  used, dead, retired);
+	}
 }
 
 /* Enter with instance_lock held */
