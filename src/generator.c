@@ -1589,7 +1589,7 @@ static bool proxy_alive(ckpool_t *ckp, server_instance_t *si, proxy_instance_t *
 			LOGINFO("Failed to connect to %s:%s in proxy_mode!",
 				cs->url, cs->port);
 		}
-		return ret;
+		goto out;
 	}
 	if (ckp->passthrough) {
 		if (!passthrough_stratum(cs, proxi)) {
