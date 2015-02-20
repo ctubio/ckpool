@@ -2199,7 +2199,6 @@ retry:
 					 ckp->update_interval);
 				broadcast_ping(sdata);
 			}
-			continue;
 		}
 		selret = wait_read_select(us->sockd, 5);
 		if (!selret && !ping_main(ckp)) {
