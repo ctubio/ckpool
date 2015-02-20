@@ -4909,8 +4909,11 @@ int stratifier(proc_instance_t *pi)
 			ret = 1;
 			goto out;
 		}
+		if (ckp->proxy)
+			break;
 		buf = send_recv_proc(ckp->generator, "ping");
 	} while (!buf);
+	dealloc(buf);
 
 	if (!ckp->proxy) {
 		if (!test_address(ckp, ckp->btcaddress)) {
@@ -4934,8 +4937,6 @@ int stratifier(proc_instance_t *pi)
 	if (!ckp->proxy)
 		sdata->blockchange_id = sdata->workbase_id = randomiser;
 	sdata->enonce1u.u64 = htobe64(randomiser);
-
-	dealloc(buf);
 
 	if (!ckp->serverurls) {
 		ckp->serverurl[0] = "127.0.0.1";

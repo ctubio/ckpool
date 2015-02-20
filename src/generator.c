@@ -2159,12 +2159,22 @@ int generator(proc_instance_t *pi)
 	ckp->data = gdata;
 	gdata->ckp = ckp;
 	if (ckp->proxy) {
+		char *buf;
+
+		/* Wait for the stratifier to be ready for us */
+		do {
+			if (!ping_main(ckp)) {
+				ret = 1;
+				goto out;
+			}
+			buf = send_recv_proc(ckp->stratifier, "ping");
+		} while (!buf);
 		ret = proxy_mode(ckp, pi);
 	} else {
 		gdata->srvchk = create_ckmsgq(ckp, "srvchk", &server_watchdog);
 		ret = server_mode(ckp, pi);
 	}
-
+out:
 	dealloc(ckp->data);
 	return process_exit(ckp, pi, ret);
 }
