@@ -1019,7 +1019,6 @@ static void drop_allclients(ckpool_t *ckp)
 static sdata_t *duplicate_sdata(const sdata_t *sdata)
 {
 	sdata_t *dsdata = ckzalloc(sizeof(sdata_t));
-	int64_t randomiser;
 
 	dsdata->ckp = sdata->ckp;
 
@@ -1035,10 +1034,7 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	dsdata->sauthq = sdata->sauthq;
 	dsdata->stxnq = sdata->stxnq;
 
-	/* Give the sbuproxy a unique workbase id and its own workbase list
-	 * and lock */
-	randomiser = ((int64_t)time(NULL)) << 32;
-	dsdata->blockchange_id = dsdata->workbase_id = randomiser;
+	/* Give the sbuproxy its own workbase list and lock */
 	cklock_init(&dsdata->workbase_lock);
 	return dsdata;
 }
@@ -1770,7 +1766,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 
 	ssends = sdata->ssends;
 
-	mutex_lock(sdata->ssends->lock);
+	mutex_lock(ssends->lock);
 	if (ssends->msgs)
 		DL_CONCAT(ssends->msgs, bulk_send);
 	else
