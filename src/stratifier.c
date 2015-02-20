@@ -1153,6 +1153,12 @@ static int64_t current_headroom(sdata_t *sdata, proxy_t **proxy)
 
 static void reconnect_client(sdata_t *sdata, stratum_instance_t *client);
 
+static void generator_recruit(const ckpool_t *ckp)
+{
+	LOGINFO("Stratifer requesting more proxies from generator");
+	send_generator(ckp, "recruit", GEN_PRIORITY);
+}
+
 /* Find how much headroom we have and connect up to that many clients that are
  * not currently on this pool, setting the reconnect for the remainder to be
  * switched lazily. */
@@ -1185,6 +1191,8 @@ static void reconnect_clients(sdata_t *sdata)
 		LOGNOTICE("Reconnected %d clients, flagged %d for proxy %d", reconnects,
 			  flagged, proxy->id);
 	}
+	if (flagged)
+		generator_recruit(client->ckp);
 }
 
 static proxy_t *current_proxy(sdata_t *sdata)
@@ -2482,10 +2490,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	}
 	mutex_unlock(&ckp_sdata->proxy_lock);
 
-	if (best_id != current->id || current->headroom < 42) {
-		LOGNOTICE("Stratifer requesting more proxies from generator");
-		send_generator(ckp, "recruit", GEN_PRIORITY);
-	}
+	if (best_id != current->id || current->headroom < 42)
+		generator_recruit(ckp);
 	if (best_id == ckp_sdata->proxy_count) {
 		LOGNOTICE("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
