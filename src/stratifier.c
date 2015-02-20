@@ -4905,8 +4905,8 @@ int stratifier(proc_instance_t *pi)
 	ckpool_t *ckp = pi->ckp;
 	int ret = 1, threads;
 	int64_t randomiser;
+	char *buf = NULL;
 	sdata_t *sdata;
-	char *buf;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
