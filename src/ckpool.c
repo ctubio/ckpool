@@ -526,7 +526,7 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 	else
 		ret = true;
 	if (!wait_close(sockd, 5))
-		LOGWARNING("send_proc did not close from %s %s:%d", file, func, line);
+		LOGWARNING("send_proc %s did not detect close from %s %s:%d", msg, file, func, line);
 	Close(sockd);
 out:
 	if (unlikely(!ret)) {
