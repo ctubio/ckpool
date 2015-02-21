@@ -1260,6 +1260,8 @@ static proc_instance_t *prepare_child(ckpool_t *ckp, int (*process)(), char *nam
 	pi->process = process;
 	create_process_unixsock(pi);
 	manage_old_child(ckp, pi);
+	/* Remove the old pid file if we've succeeded in coming this far */
+	rm_namepid(pi);
 	return pi;
 }
 
