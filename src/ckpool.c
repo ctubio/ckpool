@@ -237,7 +237,25 @@ static int pid_wait(const pid_t pid, const int ms)
 	return ret;
 }
 
-static int send_procmsg(const proc_instance_t *pi, const char *buf)
+static int get_proc_pid(const proc_instance_t *pi)
+{
+	int ret, pid = 0;
+	char path[256];
+	FILE *fp;
+
+	sprintf(path, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
+	fp = fopen(path, "re");
+	if (!fp)
+		goto out;
+	ret = fscanf(fp, "%d", &pid);
+	if (ret < 1)
+		pid = 0;
+	fclose(fp);
+out:
+	return pid;
+}
+
+static int send_procmsg(proc_instance_t *pi, const char *buf)
 {
 	char *path = pi->us.path;
 	int ret = -1;
@@ -250,6 +268,12 @@ static int send_procmsg(const proc_instance_t *pi, const char *buf)
 	if (unlikely(!buf || !strlen(buf))) {
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
+	}
+	if (unlikely(!pi->pid)) {
+		pi->pid = get_proc_pid(pi);
+		if (!pi->pid)
+			goto out;
+
 	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
 		LOGALERT("Attempting to send message %s to dead process %s", buf, pi->processname);
@@ -481,24 +505,6 @@ out:
 
 static void childsighandler(const int sig);
 
-static int get_proc_pid(const proc_instance_t *pi)
-{
-	int ret, pid = 0;
-	char path[256];
-	FILE *fp;
-
-	sprintf(path, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
-	fp = fopen(path, "re");
-	if (!fp)
-		goto out;
-	ret = fscanf(fp, "%d", &pid);
-	if (ret < 1)
-		pid = 0;
-	fclose(fp);
-out:
-	return pid;
-}
-
 struct proc_message {
 	proc_instance_t *pi;
 	char *msg;
@@ -535,10 +541,16 @@ void *async_send_proc(void *arg)
 	}
 	/* At startup the pid fields are not set up before some processes are
 	 * forked so they never inherit them. */
-	if (unlikely(!pi->pid))
+	if (unlikely(!pi->pid)) {
 		pi->pid = get_proc_pid(pi);
+		if (!pi->pid) {
+			LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
+			goto out_nofail;
+		}
+	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
-		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
+		LOGALERT("Attempting to send message %s to non existent process %s pid %d",
+			 msg, pi->processname, pi->pid);
 		goto out;
 	}
 	sockd = open_unix_client(path);
@@ -558,6 +570,7 @@ out:
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
+out_nofail:
 	free(msg);
 	free(pm);
 	return NULL;
@@ -593,8 +606,11 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
-	if (unlikely(!pi->pid))
+	if (unlikely(!pi->pid)) {
 		pi->pid = get_proc_pid(pi);
+		if (!pi->pid)
+			goto out;
+	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
 		/* Reset the pid value in case we are still looking for an old
 		 * process */
