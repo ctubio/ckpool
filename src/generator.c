@@ -1462,7 +1462,8 @@ static void *proxy_send(void *arg)
 {
 	proxy_instance_t *proxy = (proxy_instance_t *)arg;
 	connsock_t *cs = proxy->cs;
-	gdata_t *gdata = cs->ckp->data;
+	ckpool_t *ckp = cs->ckp;
+	gdata_t *gdata = ckp->data;
 
 	rename_proc("proxysend");
 
@@ -1470,6 +1471,7 @@ static void *proxy_send(void *arg)
 		proxy_instance_t *subproxy;
 		int proxyid = 0, subid = 0;
 		notify_instance_t *ni;
+		int64_t client_id = 0;
 		json_t *jobid = NULL;
 		stratum_msg_t *msg;
 		bool ret = true;
@@ -1502,6 +1504,7 @@ static void *proxy_send(void *arg)
 		json_get_int(&subid, msg->json_msg, "subproxy");
 		json_get_int(&id, msg->json_msg, "jobid");
 		json_get_int(&proxyid, msg->json_msg, "proxy");
+		json_get_int64(&client_id, val, "client_id");
 		if (unlikely(proxyid != proxy->id)) {
 			LOGWARNING("Proxysend for proxy %d got message for proxy %d!",
 				   proxy->id, proxyid);
@@ -1526,9 +1529,11 @@ static void *proxy_send(void *arg)
 			ret = send_json_msg(cs, val);
 			json_decref(val);
 		} else if (!jobid) {
+			stratifier_reconnect_client(ckp, client_id);
 			LOGNOTICE("Proxy %d:%s failed to find matching jobid for %sknown subproxy in proxysend",
 				  proxy->id, proxy->si->url, subproxy ? "" : "un");
 		} else {
+			stratifier_reconnect_client(ckp, client_id);
 			LOGNOTICE("Failed to find subproxy %d:%d to send message to",
 				  proxy->id, subid);
 		}
