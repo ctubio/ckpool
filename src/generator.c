@@ -944,9 +944,16 @@ static void send_stratifier_deadproxy(ckpool_t *ckp, const int id, const int sub
 	send_proc(ckp->stratifier, buf);
 }
 
-/* Remove the subproxy from the proxi list and put it on the dead list */
+/* Remove the subproxy from the proxi list and put it on the dead list.
+ * Further use of the subproxy pointer may point to a new proxy but will not
+ * dereference */
 static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
+	subproxy->alive = false;
+	send_stratifier_deadproxy(gdata->ckp, subproxy->id, subproxy->subid);
+	if (parent_proxy(subproxy))
+		return;
+
 	mutex_lock(&proxi->proxy_lock);
 	subproxy->disabled = true;
 	/* Make sure subproxy is still in the list */
@@ -957,11 +964,8 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	}
 	mutex_unlock(&proxi->proxy_lock);
 
-	if (subproxy) {
-		send_stratifier_deadproxy(gdata->ckp, subproxy->id, subproxy->subid);
-		if (!parent_proxy(subproxy))
-			store_proxy(gdata, subproxy);
-	}
+	if (subproxy)
+		store_proxy(gdata, subproxy);
 }
 
 /* If the parent is no longer in use due to reconnect, we shouldn't use any of
@@ -973,6 +977,7 @@ static void drop_subproxies(proxy_instance_t *proxi)
 	mutex_lock(&proxi->proxy_lock);
 	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
 		if (!parent_proxy(subproxy)) {
+			send_stratifier_deadproxy(proxi->ckp, proxi->id, subproxy->subid);
 			subproxy->disabled = true;
 			Close(subproxy->cs->fd);
 		}
@@ -1540,13 +1545,9 @@ static void *proxy_send(void *arg)
 		json_decref(msg->json_msg);
 		free(msg);
 		if (!ret && subproxy) {
-			if (cs->fd > 0) {
-				LOGWARNING("Proxy %d:%d %s failed to send msg in proxy_send, dropping to reconnect",
-					   proxy->id, proxy->subid, proxy->si->url);
-				Close(cs->fd);
-			}
-			if (!parent_proxy(subproxy) && !subproxy->disabled)
-				disable_subproxy(gdata, proxy, subproxy);
+			LOGNOTICE("Proxy %d:%d %s failed to send msg in proxy_send, dropping to reconnect",
+				  proxy->id, proxy->subid, proxy->si->url);
+			disable_subproxy(gdata, proxy, subproxy);
 		}
 	}
 	return NULL;
@@ -1902,11 +1903,9 @@ static void *proxy_recv(void *arg)
 			ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
-			subproxy->alive = false;
-			if (!parent_proxy(subproxy))
-				recruit_subproxy(proxi);
 			LOGNOTICE("Proxy %d:%d %s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
 				  proxi->id, subproxy->subid, subproxy->si->url);
+			disable_subproxy(gdata, proxi, subproxy);
 			continue;
 		}
 		if (parse_method(ckp, subproxy, cs->buf)) {
@@ -1914,12 +1913,11 @@ static void *proxy_recv(void *arg)
 				/* Call this proxy dead to allow us to fail
 				 * over to a backup pool until the reconnect
 				 * pool is up */
-				subproxy->alive = false;
 				disable_subproxy(gdata, proxi, subproxy);
 				if (parent_proxy(subproxy)) {
 					reconnect_generator(ckp);
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
-						subproxy->id, subproxy->si->url);
+						   subproxy->id, subproxy->si->url);
 					break;
 				} else
 					recruit_subproxy(proxi);
