@@ -1168,7 +1168,7 @@ static void generator_recruit(const ckpool_t *ckp)
 static void reconnect_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmpclient;
-	int reconnects = 0, flagged = 0;
+	int reconnects = 0;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -1180,23 +1180,19 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id && client->notify_id == proxy->parent->notify_id)
 			continue;
-		if (reconnects >= headroom) {
-			if (!client->reconnect) {
-				client->reconnect = true;
-				flagged++;
-			}
+		if (client->reconnect)
 			continue;
-		}
+		headroom--;
 		reconnects++;
-		reconnect_client(sdata, client);
+		client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	if (reconnects || flagged) {
-		LOGNOTICE("Reconnected %d clients, flagged %d for proxy %d", reconnects,
-			  flagged, proxy->id);
+	if (reconnects) {
+		LOGNOTICE("Flagged %d clients for reconnect to proxy %d", reconnects,
+			  proxy->id);
 	}
-	if (flagged)
+	if (headroom < 42)
 		generator_recruit(sdata->ckp);
 }
 
@@ -2162,8 +2158,8 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 static void dead_proxy(sdata_t *sdata, const char *buf)
 {
 	stratum_instance_t *client, *tmp;
-	int reconnects = 0, flagged = 0;
 	int id = 0, subid = 0;
+	int reconnects = 0;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -2180,24 +2176,19 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		if (reconnects >= headroom) {
-			if (!client->reconnect) {
-				client->reconnect = true;
-				flagged++;
-			}
+		if (client->reconnect)
 			continue;
-		}
-		client->reconnect = true;
+		headroom--;
 		reconnects++;
-		reconnect_client(sdata, client);
+		client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	if (reconnects || flagged) {
-		LOGNOTICE("Reconnected %d clients, flagged %d from dead proxy %d:%d", reconnects,
-			  flagged, id, subid);
+	if (reconnects) {
+		LOGNOTICE("Flagged %d clients to reconnect from dead proxy %d:%d", reconnects,
+			  id, subid);
 	}
-	if (flagged)
+	if (headroom < 42)
 		generator_recruit(sdata->ckp);
 }
 
