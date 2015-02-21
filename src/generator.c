@@ -1504,7 +1504,7 @@ static void *proxy_send(void *arg)
 		json_get_int(&subid, msg->json_msg, "subproxy");
 		json_get_int(&id, msg->json_msg, "jobid");
 		json_get_int(&proxyid, msg->json_msg, "proxy");
-		json_get_int64(&client_id, val, "client_id");
+		json_get_int64(&client_id, msg->json_msg, "client_id");
 		if (unlikely(proxyid != proxy->id)) {
 			LOGWARNING("Proxysend for proxy %d got message for proxy %d!",
 				   proxy->id, proxyid);
