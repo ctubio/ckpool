@@ -2222,7 +2222,7 @@ static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
 		LOGINFO("reconnect_client_id failed to find client %"PRId64, client_id);
 		return;
 	}
-	reconnect_client(sdata, client);
+	lazy_reconnect_client(sdata, client);
 	dec_instance_ref(sdata, client);
 }
 
