@@ -800,33 +800,21 @@ static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 		sdata->gen_priority = 0;
 }
 
-struct update_req {
-	pthread_t *pth;
-	ckpool_t *ckp;
-	int prio;
-};
-
 static void broadcast_ping(sdata_t *sdata);
 
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
-static void *do_update(void *arg)
+static void do_update(ckpool_t *ckp, int *prio)
 {
-	struct update_req *ur = (struct update_req *)arg;
-	ckpool_t *ckp = ur->ckp;
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
-	int prio = ur->prio;
 	bool ret = false;
 	workbase_t *wb;
 	json_t *val;
 	char *buf;
 
-	pthread_detach(pthread_self());
-	rename_proc("updater");
-
-	buf = send_recv_generator(ckp, "getbase", prio);
+	buf = send_recv_generator(ckp, "getbase", *prio);
 	if (unlikely(!buf)) {
 		LOGNOTICE("Get base in update_base delayed due to higher priority request");
 		goto out;
@@ -886,21 +874,17 @@ out:
 		LOGINFO("Broadcast ping due to failed stratum base update");
 		broadcast_ping(sdata);
 	}
-	dealloc(buf);
-	free(ur->pth);
-	free(ur);
-	return NULL;
+	free(buf);
+	free(prio);
 }
 
 static void update_base(ckpool_t *ckp, const int prio)
 {
-	struct update_req *ur = ckalloc(sizeof(struct update_req));
-	pthread_t *pth = ckalloc(sizeof(pthread_t));
+	int *pprio = ckalloc(sizeof(int));
+	sdata_t *sdata = ckp->data;
 
-	ur->pth = pth;
-	ur->ckp = ckp;
-	ur->prio = prio;
-	create_pthread(pth, do_update, ur);
+	*pprio = prio;
+	ckwq_add(sdata->ckwqs, &do_update, pprio);
 }
 
 static void __kill_instance(stratum_instance_t *client)
