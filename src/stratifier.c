@@ -2209,7 +2209,8 @@ static void lazy_reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 		if (!client->reconnect) {
 			LOGNOTICE("Flagging client %"PRId64, client->id);
 			client->reconnect = true;
-		}
+		} else /* Already been flagged, force the send */
+			reconnect_client(sdata, client);
 	}
 }
 
