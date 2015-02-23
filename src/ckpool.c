@@ -575,31 +575,13 @@ out:
 
 static void childsighandler(const int sig);
 
-struct proc_message {
-	proc_instance_t *pi;
-	char *msg;
-	const char *file;
-	const char *func;
-	int line;
-};
-
-/* Send all one way messages asynchronously so we can wait till the receiving
- * end closes the socket to ensure all messages are received but no deadlocks
- * can occur with 2 processes waiting for each other's socket closure. */
-void *async_send_proc(void *arg)
+/* Send a single message to a process instance when there will be no response,
+ * closing the socket immediately. */
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	struct proc_message *pm = (struct proc_message *)arg;
-	proc_instance_t *pi = pm->pi;
-	char *msg = pm->msg;
-	const char *file = pm->file;
-	const char *func = pm->func;
-	int line = pm->line;
-
 	char *path = pi->us.path;
 	bool ret = false;
 	int sockd;
-
-	pthread_detach(pthread_self());
 
 	if (unlikely(!path || !strlen(path))) {
 		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
@@ -611,16 +593,14 @@ void *async_send_proc(void *arg)
 	}
 	/* At startup the pid fields are not set up before some processes are
 	 * forked so they never inherit them. */
-	if (unlikely(!pi->pid)) {
+	if (unlikely(!pi->pid))
 		pi->pid = get_proc_pid(pi);
-		if (!pi->pid) {
-			LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
-			goto out_nofail;
-		}
+	if (!pi->pid) {
+		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
+		return;
 	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
-		LOGALERT("Attempting to send message %s to non existent process %s pid %d",
-			 msg, pi->processname, pi->pid);
+		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
 		goto out;
 	}
 	sockd = open_unix_client(path);
@@ -640,25 +620,41 @@ out:
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
-out_nofail:
-	free(msg);
-	free(pm);
-	return NULL;
 }
 
-/* Send a single message to a process instance when there will be no response,
- * closing the socket immediately. */
-void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
-{
-	struct proc_message *pm = ckalloc(sizeof(struct proc_message));
-	pthread_t pth;
+struct proc_message {
+	proc_instance_t *pi;
+	char *msg;
+	const char *file;
+	const char *func;
+	int line;
+};
 
+static void asp_send(ckpool_t __maybe_unused *ckp, struct proc_message *pm)
+{
+	_send_proc(pm->pi, pm->msg, pm->file, pm->func, pm->line);
+	free(pm->msg);
+	free(pm);
+}
+
+/* Fore sending asynchronous messages to another process, the sending process
+ * must have ckwqs of its own, referenced in the ckpool structure */
+void _async_send_proc(ckpool_t *ckp, proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+{
+	struct proc_message *pm;
+
+	if (unlikely(!ckp->ckwqs)) {
+		LOGALERT("Workqueues not set up in async_send_proc!");
+		_send_proc(pi, msg, file, func, line);
+		return;
+	}
+	pm = ckzalloc(sizeof(struct proc_message));
 	pm->pi = pi;
 	pm->msg = strdup(msg);
 	pm->file = file;
 	pm->func = func;
 	pm->line = line;
-	create_pthread(&pth, async_send_proc, pm);
+	ckwq_add(ckp->ckwqs, &asp_send, pm);
 }
 
 /* Send a single message to a process instance and retrieve the response, then
