@@ -1188,6 +1188,29 @@ static proxy_t *current_proxy(sdata_t *sdata)
 	return proxy;
 }
 
+static void dead_parent_proxy(sdata_t *sdata, const int id)
+{
+	stratum_instance_t *client, *tmp;
+	int reconnects = 0;
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->proxyid != id || client->subproxyid)
+			continue;
+		reconnects++;
+		if (client->reconnect)
+			reconnect_client(sdata, client);
+		else
+			client->reconnect = true;
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (reconnects) {
+		LOGNOTICE("Flagged %d clients to reconnect from dead proxy %d",
+			  reconnects, id);
+	}
+}
+
 static void new_proxy(sdata_t *sdata, const int id)
 {
 	bool exists = false, current = false;
@@ -1217,8 +1240,10 @@ static void new_proxy(sdata_t *sdata, const int id)
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (exists)
+	if (exists) {
 		LOGNOTICE("Stratifier replaced old proxy instance %d", id);
+		dead_parent_proxy(sdata, id);
+	}
 }
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
