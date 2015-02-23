@@ -137,27 +137,27 @@ static void *ckmsg_queue(void *arg)
 /* Generic workqueue function and message receiving and parsing thread */
 static void *ckwq_queue(void *arg)
 {
-	ckwq_t *ckmsgq = (ckwq_t *)arg;
-	ckpool_t *ckp = ckmsgq->ckp;
+	ckwq_t *ckwq = (ckwq_t *)arg;
+	ckpool_t *ckp = ckwq->ckp;
 
 	pthread_detach(pthread_self());
-	rename_proc(ckmsgq->name);
+	rename_proc(ckwq->name);
 
 	while (42) {
 		ckwqmsg_t *wqmsg;
 		tv_t now;
 		ts_t abs;
 
-		mutex_lock(ckmsgq->lock);
+		mutex_lock(ckwq->lock);
 		tv_time(&now);
 		tv_to_ts(&abs, &now);
 		abs.tv_sec++;
-		if (!ckmsgq->wqmsgs)
-			cond_timedwait(ckmsgq->cond, ckmsgq->lock, &abs);
-		wqmsg = ckmsgq->wqmsgs;
+		if (!ckwq->wqmsgs)
+			cond_timedwait(ckwq->cond, ckwq->lock, &abs);
+		wqmsg = ckwq->wqmsgs;
 		if (wqmsg)
-			DL_DELETE(ckmsgq->wqmsgs, wqmsg);
-		mutex_unlock(ckmsgq->lock);
+			DL_DELETE(ckwq->wqmsgs, wqmsg);
+		mutex_unlock(ckwq->lock);
 
 		if (!wqmsg)
 			continue;
@@ -209,7 +209,7 @@ ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, cons
 
 ckwq_t *create_ckwqs(ckpool_t *ckp, const char *name, const int count)
 {
-	ckwq_t *ckwq = ckzalloc(sizeof(ckmsgq_t) * count);
+	ckwq_t *ckwq = ckzalloc(sizeof(ckwq_t) * count);
 	mutex_t *lock;
 	pthread_cond_t *cond;
 	int i;
