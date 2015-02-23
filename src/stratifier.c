@@ -3505,7 +3505,7 @@ static void update_client(const stratum_instance_t *client, const int64_t client
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held.
  * Needs to be entered with client holding a ref count. */
 static void submit_share(stratum_instance_t *client, const int64_t jobid, const char *nonce2,
-			 const char *ntime, const char *nonce, const int msg_id)
+			 const char *ntime, const char *nonce)
 {
 	ckpool_t *ckp = client->ckp;
 	json_t *json_msg;
@@ -3513,10 +3513,9 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	JSON_CPACK(json_msg, "{sIsssssssIsisisi}", "jobid", jobid, "nonce2", enonce2,
+	JSON_CPACK(json_msg, "{sIsssssssIsisi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
-			     "msg_id", msg_id, "proxy", client->proxyid,
-			     "subproxy", client->subproxyid);
+			     "proxy", client->proxyid, "subproxy", client->subproxyid);
 	msg = json_dumps(json_msg, 0);
 	json_decref(json_msg);
 	send_generator(ckp, msg, GEN_LAX);
@@ -3697,11 +3696,8 @@ out_unlock:
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
 	if (wb && wb->proxy && submit) {
-		int msg_id = 0;
-
-		json_get_int(&msg_id, json_msg, "id");
 		LOGINFO("Submitting share upstream: %s", hexhash);
-		submit_share(client, id, nonce2, ntime, nonce, msg_id);
+		submit_share(client, id, nonce2, ntime, nonce);
 	}
 
 	add_submit(ckp, client, diff, result, submit);

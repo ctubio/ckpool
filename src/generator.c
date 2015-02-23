@@ -49,7 +49,6 @@ struct share_msg {
 	int64_t id; // Our own id for submitting upstream
 
 	int client_id;
-	int msg_id; // Stratum message id from client
 	time_t submit_time;
 };
 
@@ -1398,7 +1397,6 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	share = ckzalloc(sizeof(share_msg_t));
 	share->submit_time = time(NULL);
 	share->client_id = client_id;
-	json_get_int(&share->msg_id, val, "msg_id");
 	msg->json_msg = val;
 
 	/* Add new share entry to the share hashtable */
@@ -1459,8 +1457,8 @@ static bool parse_share(proxy_instance_t *proxi, const char *buf)
 			proxi->id, proxi->subid, buf);
 		goto out;
 	}
-	LOGINFO("Proxy %d:%d share result %s from client %d with msg_id %d", proxi->id,
-		proxi->subid, buf, share->client_id, share->msg_id);
+	LOGINFO("Proxy %d:%d share result %s from client %d", proxi->id, proxi->subid,
+		buf, share->client_id);
 	free(share);
 out:
 	if (val)
