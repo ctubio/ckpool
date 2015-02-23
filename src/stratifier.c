@@ -1634,10 +1634,13 @@ static void client_drop_message(const int64_t client_id, const int dropped, cons
 	}
 }
 
+static void dec_worker(ckpool_t *ckp, user_instance_t *instance);
+
 /* Decrease the reference count of instance. */
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
 {
+	user_instance_t *user = client->user_instance;
 	int64_t client_id = client->id;
 	int dropped = 0, ref;
 
@@ -1646,7 +1649,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref))
-		dropped = __drop_client(sdata, client, client->user_instance);
+		dropped = __drop_client(sdata, client, user);
 	ck_wunlock(&sdata->instance_lock);
 
 	client_drop_message(client_id, dropped, true);
@@ -1655,8 +1658,10 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
 
-	if (dropped)
+	if (dropped) {
+		dec_worker(sdata->ckp, user);
 		reap_proxies(sdata->ckp, sdata);
+	}
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
