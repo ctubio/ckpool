@@ -107,6 +107,7 @@ struct proxy_instance {
 
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
+	bool reconnecting; /* Testing in progress */
 	bool alive;
 
 	mutex_t notify_lock;
@@ -1712,6 +1713,7 @@ static void *proxy_reconnect(void *arg)
 
 	pthread_detach(pthread_self());
 	proxy_alive(ckp, si, proxy, cs, true, proxy->epfd);
+	proxy->reconnecting = false;
 	return NULL;
 }
 
@@ -1720,6 +1722,9 @@ static void reconnect_proxy(proxy_instance_t *proxi)
 {
 	pthread_t pth;
 
+	if (proxi->reconnecting)
+		return;
+	proxi->reconnecting = true;
 	create_pthread(&pth, proxy_reconnect, proxi);
 }
 
