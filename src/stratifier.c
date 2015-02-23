@@ -1227,11 +1227,17 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	LOGDEBUG("Update subscribe: %s", buf);
 	val = json_loads(buf, 0, NULL);
 	if (unlikely(!val)) {
-		LOGWARNING("Failed to json decode subscribe response in update_subscribe");
+		LOGWARNING("Failed to json decode subscribe response in update_subscribe %s", buf);
 		return;
 	}
-	json_get_int(&id, val, "proxy");
-	json_get_int(&subid, val, "subproxy");
+	if (unlikely(!json_get_int(&id, val, "proxy"))) {
+		LOGWARNING("Failed to json decode proxy value in update_subscribe %s", buf);
+		return;
+	}
+	if (unlikely(!json_get_int(&subid, val, "subproxy"))) {
+		LOGWARNING("Failed to json decode subproxy value in update_subscribe %s", buf);
+		return;
+	}
 
 	if (!subid) {
 		new_proxy(sdata, id);
