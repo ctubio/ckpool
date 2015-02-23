@@ -1455,8 +1455,8 @@ static bool parse_share(proxy_instance_t *proxi, const char *buf)
 		LOGINFO("Failed to find matching share to result: %s", buf);
 		goto out;
 	}
-	LOGDEBUG("Found share from client %d with msg_id %d", share->client_id,
-		 share->msg_id);
+	LOGINFO("Found share result %s from client %d with msg_id %d", buf, share->client_id,
+		share->msg_id);
 	free(share);
 out:
 	if (val)
