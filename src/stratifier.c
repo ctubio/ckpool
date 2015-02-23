@@ -4394,7 +4394,7 @@ int stratifier(proc_instance_t *pi)
 	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	/* Create as many generic workqueue threads as there are CPUs */
 	threads = sysconf(_SC_NPROCESSORS_ONLN);
-	sdata->ckwqs = create_ckwqs(ckp, "strat", threads);
+	ckp->ckwqs = sdata->ckwqs = create_ckwqs(ckp, "strat", threads);
 	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	if (!CKP_STANDALONE(ckp)) {
 		sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);

@@ -213,6 +213,8 @@ struct ckpool_instance {
 
 	/* Private data for each process */
 	void *data;
+	/* Private generic workqueues if this process has them */
+	ckwq_t *ckwqs;
 };
 
 #ifdef USE_CKDB
