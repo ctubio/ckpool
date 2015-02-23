@@ -1248,7 +1248,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
 
-	if (dropped)
+	if (dropped && user)
 		dec_worker(ckp, user);
 }
 
