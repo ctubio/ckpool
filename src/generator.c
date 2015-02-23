@@ -107,6 +107,7 @@ struct proxy_instance {
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
 	bool reconnecting; /* Testing in progress */
+	bool recruiting; /* Recruiting in progress */
 	bool alive;
 
 	mutex_t notify_lock;
@@ -1698,6 +1699,7 @@ static void *proxy_recruit(void *arg)
 		store_proxy(gdata, proxy);
 	} else
 		add_subproxy(parent, proxy);
+	parent->recruiting = false;
 	return NULL;
 }
 
@@ -1705,6 +1707,9 @@ static void recruit_subproxy(proxy_instance_t *proxi)
 {
 	pthread_t pth;
 
+	if (proxi->recruiting)
+		return;
+	proxi->recruiting = true;
 	create_pthread(&pth, proxy_recruit, proxi);
 }
 
