@@ -146,6 +146,7 @@ struct generator_data {
 	proxy_instance_t *dead_proxies; /* Disabled proxies */
 	int proxy_notify_id;	// Globally increasing notify id
 	ckmsgq_t *srvchk;	// Server check message queue
+	ckwq_t *ckwqs;
 };
 
 typedef struct generator_data gdata_t;
@@ -2207,6 +2208,7 @@ int generator(proc_instance_t *pi)
 	gdata = ckzalloc(sizeof(gdata_t));
 	ckp->data = gdata;
 	gdata->ckp = ckp;
+	ckp->ckwqs = gdata->ckwqs = create_ckwqs(ckp, "gen", 2);
 	if (ckp->proxy) {
 		char *buf = NULL;
 
