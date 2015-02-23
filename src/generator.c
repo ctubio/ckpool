@@ -668,8 +668,8 @@ retry:
 			  clients_per_proxy);
 	}
 
-	LOGINFO("Found notify with enonce %s nonce2len %d", proxi->enonce1,
-		proxi->nonce2len);
+	LOGINFO("Found notify for proxy %d:%d with enonce %s nonce2len %d", proxi->id,
+		proxi->subid, proxi->enonce1, proxi->nonce2len);
 	ret = true;
 
 out:
