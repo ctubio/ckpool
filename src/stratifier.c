@@ -1655,6 +1655,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	stratum_instance_t *client = ckzalloc(sizeof(stratum_instance_t));
 	sdata_t *sdata = ckp->data;
 
+	client->start_time = time(NULL);
 	sdata->stratum_generated++;
 	client->id = id;
 	client->server = server;
@@ -2987,7 +2988,6 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	bool ret = false;
 	const char *buf;
 	int arr_size;
-	ts_t now;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -3021,8 +3021,6 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	}
 	user = generate_user(ckp, client, buf);
 	client->user_id = user->id;
-	ts_realtime(&now);
-	client->start_time = now.tv_sec;
 	strcpy(client->address, address);
 	/* NOTE workername is NULL prior to this so should not be used in code
 	 * till after this point */
