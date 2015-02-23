@@ -1686,7 +1686,8 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
 
 	if (dropped) {
-		dec_worker(sdata->ckp, user);
+		if (user)
+			dec_worker(sdata->ckp, user);
 		reap_proxies(sdata->ckp, sdata);
 	}
 }
