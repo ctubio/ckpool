@@ -1856,6 +1856,7 @@ static void *proxy_recv(void *arg)
 		int ret;
 
 		if (!proxi->alive) {
+			reconnect_proxy(proxi);
 			while (!subproxies_alive(proxi)) {
 				reconnect_proxy(proxi);
 				if (alive) {
