@@ -1679,10 +1679,13 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 	return subproxy;
 }
 
-static void proxy_recruit(ckpool_t *ckp, proxy_instance_t *parent)
+static void *proxy_recruit(void *arg)
 {
+	proxy_instance_t *proxy, *parent = (proxy_instance_t *)arg;
+	ckpool_t *ckp = parent->ckp;
 	gdata_t *gdata = ckp->data;
-	proxy_instance_t *proxy;
+
+	pthread_detach(pthread_self());
 
 	proxy = create_subproxy(gdata, parent);
 	if (!proxy_alive(ckp, proxy->si, proxy, proxy->cs, false, parent->epfd)) {
@@ -1690,11 +1693,14 @@ static void proxy_recruit(ckpool_t *ckp, proxy_instance_t *parent)
 		store_proxy(gdata, proxy);
 	} else
 		add_subproxy(parent, proxy);
+	return NULL;
 }
 
-static void recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
+static void recruit_subproxy(proxy_instance_t *proxi)
 {
-	ckwq_add(gdata->ckwqs, &proxy_recruit, proxi);
+	pthread_t pth;
+
+	create_pthread(&pth, proxy_recruit, proxi);
 }
 
 static void *proxy_reconnect(void *arg)
@@ -1915,7 +1921,7 @@ static void *proxy_recv(void *arg)
 						   subproxy->id, subproxy->si->url);
 					break;
 				} else
-					recruit_subproxy(gdata, proxi);
+					recruit_subproxy(proxi);
 			}
 			continue;
 		}
@@ -2053,7 +2059,7 @@ retry:
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
 	} else if (cmdmatch(buf, "recruit")) {
-		recruit_subproxy(gdata, proxi);
+		recruit_subproxy(proxi);
 	} else if (cmdmatch(buf, "dropproxy")) {
 		drop_proxy(gdata, buf);
 	} else if (ckp->passthrough) {
