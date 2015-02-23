@@ -1805,6 +1805,17 @@ static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
 	mutex_unlock(&sdata->stats_lock);
 }
 
+/* Ask the connector asynchronously to send us dropclient commands if this
+ * client no longer exists. */
+static void connector_test_client(ckpool_t *ckp, const int64_t id)
+{
+	char buf[256];
+
+	LOGDEBUG("Stratifier requesting connector test client %"PRId64, id);
+	snprintf(buf, 255, "testclient=%"PRId64, id);
+	async_send_proc(ckp, ckp->connector, buf);
+}
+
 static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
@@ -1814,7 +1825,25 @@ static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
 
+	/* Use this locking as an opportunity to test other clients. */
 	ck_ilock(&sdata->instance_lock);
+	/* Test for clients that haven't authed in over a minute and drop them */
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->authorised)
+			continue;
+		if (now_t > client->start_time + 60) {
+			client->dropped = true;
+			connector_drop_client(ckp, client->id);
+		}
+	}
+
+	/* Look for clients that may have been dropped which the stratifer has
+	 * not been informed about and ask the connector of they still exist */
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->dropped || client->reconnect)
+			connector_test_client(ckp, client->id);
+	}
+
 	client = __instance_by_id(sdata, id);
 	/* Upgrade to write lock */
 	ck_ulock(&sdata->instance_lock);

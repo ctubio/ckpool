@@ -239,7 +239,7 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	return fd;
 }
 
-static void stratifier_drop_client(ckpool_t *ckp, int64_t id)
+static void stratifier_drop_client(ckpool_t *ckp, const int64_t id)
 {
 	char buf[256];
 
@@ -601,6 +601,17 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf)
 	mutex_unlock(&cdata->sender_lock);
 }
 
+static bool client_exists(cdata_t *cdata, const int64_t id)
+{
+	client_instance_t *client;
+
+	ck_rlock(&cdata->lock);
+	HASH_FIND_I64(cdata->clients, &id, client);
+	ck_runlock(&cdata->lock);
+
+	return !!client;
+}
+
 static client_instance_t *ref_client_by_id(cdata_t *cdata, int64_t id)
 {
 	client_instance_t *client;
@@ -774,7 +785,7 @@ retry:
 		client_instance_t *client;
 
 		ret = sscanf(buf, "dropclient=%"PRId64, &client_id64);
-		if (ret < 0) {
+		if (unlikely(ret < 0)) {
 			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
 			goto retry;
 		}
@@ -788,6 +799,17 @@ retry:
 		dec_instance_ref(cdata, client);
 		if (ret >= 0)
 			LOGINFO("Connector dropped client id: %"PRId64, client_id);
+	} else if (cmdmatch(buf, "testclient")) {
+		ret = sscanf(buf, "testclient=%"PRId64, &client_id64);
+		if (unlikely(ret < 0)) {
+			LOGDEBUG("Connector failed to parse testclient command: %s", buf);
+			goto retry;
+		}
+		client_id = client_id64 & 0xffffffffll;
+		if (client_exists(cdata, client_id))
+			goto retry;
+		LOGINFO("Connector detected non-existent client id: %"PRId64, client_id);
+		stratifier_drop_client(ckp, client_id);
 	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Connector received ping request");
 		send_unix_msg(sockd, "pong");
