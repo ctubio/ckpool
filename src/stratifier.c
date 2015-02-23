@@ -795,7 +795,7 @@ static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 		set = true;
 	} else
 		set = false;
-	send_proc(ckp->generator, msg);
+	async_send_proc(ckp, ckp->generator, msg);
 	if (set)
 		sdata->gen_priority = 0;
 }
@@ -928,7 +928,7 @@ static void drop_allclients(ckpool_t *ckp)
 			client->dropped = true;
 		kills++;
 		sprintf(buf, "dropclient=%"PRId64, client_id);
-		send_proc(ckp->connector, buf);
+		async_send_proc(ckp, ckp->connector, buf);
 	}
 	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		disconnects++;
@@ -3287,6 +3287,7 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp);
 static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
 			 json_t *id_val, json_t *method_val, json_t *params_val, const char *address)
 {
+	ckpool_t *ckp = client->ckp;
 	const char *method;
 	char buf[256];
 
@@ -3332,7 +3333,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		 * to it since it's unauthorised. Set the flag just in case. */
 		client->authorised = false;
 		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		async_send_proc(ckp, client->ckp->connector, buf);
 		return;
 	}
 
@@ -3340,7 +3341,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	if (!client->subscribed) {
 		LOGINFO("Dropping unsubscribed client %"PRId64, client_id);
 		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		async_send_proc(ckp, client->ckp->connector, buf);
 		return;
 	}
 
@@ -3363,7 +3364,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		 * the stratum instance data. Clients will just reconnect. */
 		LOGINFO("Dropping unauthorised client %"PRId64, client_id);
 		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		async_send_proc(ckp, client->ckp->connector, buf);
 		return;
 	}
 
@@ -3395,12 +3396,13 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 {
 	json_t *val = msg->json_msg, *id_val, *method, *params;
 	int64_t client_id = msg->client_id;
+	ckpool_t *ckp = client->ckp;
 	char buf[256];
 
 	if (unlikely(client->reject == 2)) {
 		LOGINFO("Dropping client %"PRId64" tagged for lazy invalidation", client_id);
 		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		async_send_proc(ckp, ckp->connector, buf);
 		goto out;
 	}
 
@@ -3534,7 +3536,7 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
 	s = json_dumps(msg->json_msg, 0);
-	send_proc(ckp->connector, s);
+	async_send_proc(ckp, ckp->connector, s);
 	free(s);
 	free_smsg(msg);
 }
