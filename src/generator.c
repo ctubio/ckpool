@@ -1842,11 +1842,11 @@ static void *proxy_recv(void *arg)
 	}
 
 	if (proxy_alive(ckp, si, proxi, cs, false, epfd)) {
-		reconnect_generator(ckp);
 		LOGWARNING("Proxy %d:%s connection established",
 			   proxi->id, proxi->si->url);
 	}
 	alive = proxi->alive;
+	reconnect_generator(ckp);
 
 	while (42) {
 		proxy_instance_t *subproxy = proxi;
@@ -1922,7 +1922,6 @@ static void *proxy_recv(void *arg)
 				 * pool is up */
 				disable_subproxy(gdata, proxi, subproxy);
 				if (parent_proxy(subproxy)) {
-					reconnect_generator(ckp);
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 						   subproxy->id, subproxy->si->url);
 					break;
