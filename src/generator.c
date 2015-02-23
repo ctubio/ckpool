@@ -1350,7 +1350,7 @@ static void drop_proxy(gdata_t *gdata, const char *buf)
 	disable_subproxy(gdata, proxy, subproxy);
 }
 
-static void stratifier_reconnect_client(ckpool_t *ckp, int64_t id)
+static void stratifier_reconnect_client(ckpool_t *ckp, const int64_t id)
 {
 	char buf[256];
 
@@ -1375,20 +1375,22 @@ static void submit_share(gdata_t *gdata, json_t *val)
 
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
-		LOGWARNING("Failed to find proxy %d to send share to", id);
-		send_stratifier_deadproxy(ckp, id, subid);
+		LOGNOTICE("Client %"PRId64" sending shares to non existent proxy %d, dropping",
+			  client_id, id);
+		stratifier_reconnect_client(ckp, client_id);
 		return json_decref(val);
 	}
 	proxi = subproxy_by_id(proxy, subid);
 	if (unlikely(!proxi)) {
-		LOGNOTICE("Failed to find proxy %d:%d to send share to", id, subid);
-		send_stratifier_deadproxy(ckp, id, subid);
+		LOGNOTICE("Client %"PRId64" sending shares to non existent subproxy %d:%d, dropping",
+			  client_id, id, subid);
+		stratifier_reconnect_client(ckp, client_id);
 		return json_decref(val);
 	}
 	if (!proxi->alive) {
-		LOGNOTICE("Client %"PRId64" attempting to send shares to dead proxy %d:%d, dropping",
+		LOGNOTICE("Client %"PRId64" sending shares to dead subproxy %d:%d, dropping",
 			  client_id, id, subid);
-		send_stratifier_deadproxy(ckp, id, subid);
+		stratifier_reconnect_client(ckp, client_id);
 		return json_decref(val);
 	}
 
