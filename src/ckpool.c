@@ -622,6 +622,41 @@ out:
 	}
 }
 
+struct proc_message {
+	proc_instance_t *pi;
+	char *msg;
+	const char *file;
+	const char *func;
+	int line;
+};
+
+static void asp_send(ckpool_t __maybe_unused *ckp, struct proc_message *pm)
+{
+	_send_proc(pm->pi, pm->msg, pm->file, pm->func, pm->line);
+	free(pm->msg);
+	free(pm);
+}
+
+/* Fore sending asynchronous messages to another process, the sending process
+ * must have ckwqs of its own, referenced in the ckpool structure */
+void _async_send_proc(ckpool_t *ckp, proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+{
+	struct proc_message *pm;
+
+	if (unlikely(!ckp->ckwqs)) {
+		LOGALERT("Workqueues not set up in async_send_proc!");
+		_send_proc(pi, msg, file, func, line);
+		return;
+	}
+	pm = ckzalloc(sizeof(struct proc_message));
+	pm->pi = pi;
+	pm->msg = strdup(msg);
+	pm->file = file;
+	pm->func = func;
+	pm->line = line;
+	ckwq_add(ckp->ckwqs, &asp_send, pm);
+}
+
 /* Send a single message to a process instance and retrieve the response, then
  * close the socket. */
 char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
