@@ -559,7 +559,7 @@ static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 	hex2bin(wb->headerbin, header, 112);
 }
 
-static void stratum_broadcast_update(sdata_t *sdata, bool clean);
+static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, bool clean);
 
 static void clear_workbase(workbase_t *wb)
 {
@@ -762,6 +762,9 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 	if (ckp->logshares)
 		sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
+	/* Is this long enough to ensure we don't dereference a workbase
+	 * immediately? Should be unless clock changes 10 minutes so we use
+	 * ts_realtime */
 	HASH_ITER(hh, sdata->workbases, tmp, tmpa) {
 		if (HASH_COUNT(sdata->workbases) < 3)
 			break;
@@ -909,7 +912,7 @@ static void do_update(ckpool_t *ckp, int *prio)
 	if (new_block)
 		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 
-	stratum_broadcast_update(sdata, new_block);
+	stratum_broadcast_update(sdata, wb, new_block);
 	ret = true;
 	LOGINFO("Broadcast updated stratum base");
 out:
@@ -1421,8 +1424,10 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		proxy->notify_id = wb->id;
 	if (parent_proxy(proxy) && proxy == current_proxy(sdata))
 		reconnect_clients(sdata);
-	LOGINFO("Broadcast updated stratum notify");
-	stratum_broadcast_update(dsdata, new_block | clean);
+	clean |= new_block;
+	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
+		subid, clean ? "" : "out");
+	stratum_broadcast_update(dsdata, wb, clean);
 out:
 	json_decref(val);
 }
@@ -3803,12 +3808,12 @@ static json_t *__stratum_notify(const workbase_t *wb, const bool clean)
 	return val;
 }
 
-static void stratum_broadcast_update(sdata_t *sdata, const bool clean)
+static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, const bool clean)
 {
 	json_t *json_msg;
 
 	ck_rlock(&sdata->workbase_lock);
-	json_msg = __stratum_notify(sdata->current_workbase, clean);
+	json_msg = __stratum_notify(wb, clean);
 	ck_runlock(&sdata->workbase_lock);
 
 	stratum_broadcast(sdata, json_msg);
