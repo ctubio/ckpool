@@ -1172,9 +1172,9 @@ static void reconnect_clients(sdata_t *sdata)
 	if (reconnects) {
 		LOGNOTICE("Flagged %d clients for reconnect to proxy %d", reconnects,
 			  proxy->id);
+		if (headroom < 42)
+			generator_recruit(sdata->ckp);
 	}
-	if (headroom < 42)
-		generator_recruit(sdata->ckp);
 }
 
 static proxy_t *current_proxy(sdata_t *sdata)
@@ -2258,9 +2258,9 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	if (reconnects) {
 		LOGNOTICE("Flagged %d clients to reconnect from dead proxy %d:%d", reconnects,
 			  id, subid);
+		if (headroom < 42)
+			generator_recruit(sdata->ckp);
 	}
-	if (headroom < 42)
-		generator_recruit(sdata->ckp);
 }
 
 /* Must hold a reference */
