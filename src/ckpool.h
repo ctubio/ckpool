@@ -210,8 +210,6 @@ struct ckpool_instance {
 
 	/* Private data for each process */
 	void *data;
-	/* Private generic workqueues if this process has them */
-	ckwq_t *ckwqs;
 };
 
 #ifdef USE_CKDB
@@ -236,8 +234,6 @@ void empty_buffer(connsock_t *cs);
 int read_socket_line(connsock_t *cs, const int timeout);
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
-void _async_send_proc(ckpool_t *ckp, proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
-#define async_send_proc(ckp, pi, msg) _async_send_proc(ckp, pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_ckdb(const ckpool_t *ckp, const char *msg, const char *file, const char *func, const int line);

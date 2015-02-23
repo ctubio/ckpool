@@ -146,7 +146,6 @@ struct generator_data {
 	proxy_instance_t *dead_proxies; /* Disabled proxies */
 	int proxy_notify_id;	// Globally increasing notify id
 	ckmsgq_t *srvchk;	// Server check message queue
-	ckwq_t *ckwqs;
 };
 
 typedef struct generator_data gdata_t;
@@ -236,7 +235,7 @@ retry:
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 out:
-	async_send_proc(ckp, ckp->connector, alive ? "accept" : "reject");
+	send_proc(ckp->connector, alive ? "accept" : "reject");
 	return alive;
 }
 
@@ -382,7 +381,7 @@ retry:
 		ret = submit_block(cs, buf + 12 + 64 + 1);
 		memset(buf + 12 + 64, 0, 1);
 		sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
-		async_send_proc(ckp, ckp->stratifier, blockmsg);
+		send_proc(ckp->stratifier, blockmsg);
 	} else if (cmdmatch(buf, "checkaddr:")) {
 		if (validate_address(cs, buf + 10))
 			send_unix_msg(sockd, "true");
@@ -945,7 +944,7 @@ static void send_stratifier_deadproxy(ckpool_t *ckp, const int id, const int sub
 	char buf[256];
 
 	sprintf(buf, "deadproxy=%d:%d", id, subid);
-	async_send_proc(ckp, ckp->stratifier, buf);
+	send_proc(ckp->stratifier, buf);
 }
 
 /* Remove the subproxy from the proxi list and put it on the dead list.
@@ -1092,7 +1091,7 @@ static void send_diff(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_decref(json_msg);
 	ASPRINTF(&buf, "diff=%s", msg);
 	free(msg);
-	async_send_proc(ckp, ckp->stratifier, buf);
+	send_proc(ckp->stratifier, buf);
 	free(buf);
 }
 
@@ -1120,7 +1119,7 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_
 	json_decref(json_msg);
 	ASPRINTF(&buf, "notify=%s", msg);
 	free(msg);
-	async_send_proc(ckp, ckp->stratifier, buf);
+	send_proc(ckp->stratifier, buf);
 	free(buf);
 
 	/* Send diff now as stratifier will not accept diff till it has a
@@ -1310,7 +1309,7 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_decref(json_msg);
 	ASPRINTF(&buf, "subscribe=%s", msg);
 	free(msg);
-	async_send_proc(ckp, ckp->stratifier, buf);
+	send_proc(ckp->stratifier, buf);
 	free(buf);
 }
 
@@ -1356,7 +1355,7 @@ static void stratifier_reconnect_client(ckpool_t *ckp, int64_t id)
 	char buf[256];
 
 	sprintf(buf, "reconnclient=%"PRId64, id);
-	async_send_proc(ckp, ckp->stratifier, buf);
+	send_proc(ckp->stratifier, buf);
 }
 
 static void submit_share(gdata_t *gdata, json_t *val)
@@ -1730,9 +1729,9 @@ static void reconnect_proxy(proxy_instance_t *proxi)
 	create_pthread(&pth, proxy_reconnect, proxi);
 }
 
-static void reconnect_generator(ckpool_t *ckp)
+static void reconnect_generator(const ckpool_t *ckp)
 {
-	async_send_proc(ckp, ckp->generator, "reconnect");
+	send_proc(ckp->generator, "reconnect");
 }
 
 /* For receiving messages from an upstream pool to pass downstream. Responsible
@@ -1789,7 +1788,7 @@ static void *passthrough_recv(void *arg)
 		/* Simply forward the message on, as is, to the connector to
 		 * process. Possibly parse parameters sent by upstream pool
 		 * here */
-		async_send_proc(ckp, ckp->connector, cs->buf);
+		send_proc(ckp->connector, cs->buf);
 	}
 	return NULL;
 }
@@ -1994,10 +1993,10 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 
 		if (ret)
 			break;
-		async_send_proc(ckp, ckp->connector, "reject");
+		send_proc(ckp->connector, "reject");
 		sleep(1);
 	}
-	async_send_proc(ckp, ckp->connector, ret ? "accept" : "reject");
+	send_proc(ckp->connector, ret ? "accept" : "reject");
 	return ret;
 }
 
@@ -2026,7 +2025,7 @@ reconnect:
 				   proxi->id, cs->url, cs->port);
 			dealloc(buf);
 			ASPRINTF(&buf, "proxy=%d", proxi->id);
-			async_send_proc(ckp, ckp->stratifier, buf);
+			send_proc(ckp->stratifier, buf);
 		}
 	}
 retry:
@@ -2216,7 +2215,6 @@ int generator(proc_instance_t *pi)
 	gdata = ckzalloc(sizeof(gdata_t));
 	ckp->data = gdata;
 	gdata->ckp = ckp;
-	ckp->ckwqs = gdata->ckwqs = create_ckwqs(ckp, "gen", 1);
 	if (ckp->proxy) {
 		char *buf = NULL;
 
