@@ -1161,7 +1161,7 @@ static void reconnect_clients(sdata_t *sdata)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
-		if (client->proxyid == proxy->id && client->notify_id == proxy->parent->notify_id)
+		if (client->proxyid == proxy->id)
 			continue;
 		headroom--;
 		reconnects++;
@@ -1284,7 +1284,6 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGINFO("Got updated subscribe for proxy %d:%d", id, subid);
 
 	proxy = subproxy_by_id(sdata, id, subid);
-	proxy->notify_id = -1; /* Reset this */
 	dsdata = proxy->sdata;
 
 	ck_wlock(&dsdata->workbase_lock);
@@ -1420,8 +1419,6 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
 	}
 
-	if (proxy->notify_id == -1)
-		proxy->notify_id = wb->id;
 	if (parent_proxy(proxy) && proxy == current_proxy(sdata))
 		reconnect_clients(sdata);
 	clean |= new_block;
@@ -2493,7 +2490,6 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 		enonce1u = &proxy->enonce1u;
 		client->proxyid = proxy->id;
 		client->subproxyid = proxy->subid;
-		client->notify_id = proxy->parent->notify_id;
 		mutex_unlock(&ckp_sdata->proxy_lock);
 
 		if (proxy->clients >= proxy->max_clients) {
