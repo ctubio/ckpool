@@ -2196,8 +2196,6 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 		proxy->dead = true;
 	LOGNOTICE("Stratifier dropping clients from proxy %d:%d", id, subid);
 	headroom = current_headroom(sdata, &proxy);
-	if (!proxy)
-		return;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
