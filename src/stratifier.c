@@ -1160,11 +1160,12 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id && client->notify_id == proxy->parent->notify_id)
 			continue;
-		if (client->reconnect)
-			continue;
 		headroom--;
 		reconnects++;
-		client->reconnect = true;
+		if (client->reconnect)
+			reconnect_client(sdata, client);
+		else
+			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 
@@ -2122,7 +2123,6 @@ static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 		client->dropped = true;
 		return;
 	}
-	client->reconnect = false;
 	client->reconnect_request = time(NULL);
 	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
@@ -2170,11 +2170,12 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		if (client->reconnect)
-			continue;
 		headroom--;
 		reconnects++;
-		client->reconnect = true;
+		if (client->reconnect)
+			reconnect_client(sdata, client);
+		else
+			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 
