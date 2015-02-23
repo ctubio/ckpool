@@ -1421,10 +1421,7 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
 
-	if (!subid)
-		LOGNOTICE("Got updated diff for proxy %d", id);
-	else
-		LOGINFO("Got updated diff for proxy %d:%d", id, subid);
+	LOGINFO("Got updated diff for proxy %d:%d", id, subid);
 	proxy = existing_subproxy(sdata, id, subid);
 	if (!proxy) {
 		LOGINFO("No existing subproxy %d:%d to update diff", id, subid);
