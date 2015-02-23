@@ -1191,7 +1191,7 @@ static proxy_t *current_proxy(sdata_t *sdata)
 static void new_proxy(sdata_t *sdata, const int id)
 {
 	bool exists = false, current = false;
-	proxy_t *proxy;
+	proxy_t *proxy, *proxy_list = NULL;
 
 	mutex_lock(&sdata->proxy_lock);
 	HASH_FIND_INT(sdata->proxies, &id, proxy);
@@ -1201,10 +1201,20 @@ static void new_proxy(sdata_t *sdata, const int id)
 		DL_APPEND(sdata->retired_proxies, proxy);
 		if (proxy == sdata->proxy)
 			current = true;
+		proxy_list = proxy->subproxies;
+		HASH_DELETE(sh, proxy_list, proxy);
+		proxy->subproxies = NULL;
 	}
 	proxy = __generate_proxy(sdata, id);
 	if (current)
 		sdata->proxy = proxy;
+	/* The old proxy had subproxies on its list so steal its list and add
+	 * ourselves to it. */
+	if (proxy_list) {
+		HASH_DELETE(sh, proxy->subproxies, proxy);
+		proxy->subproxies = proxy_list;
+		HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
+	}
 	mutex_unlock(&sdata->proxy_lock);
 
 	if (exists)
