@@ -1369,23 +1369,24 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	 * proxy it's bound to is not functional */
 	json_get_int64(&client_id, val, "client_id");
 	json_get_int(&id, val, "proxy");
+	json_get_int(&subid, val, "subproxy");
+
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
 		LOGWARNING("Failed to find proxy %d to send share to", id);
-		stratifier_reconnect_client(ckp, client_id);
+		send_stratifier_deadproxy(ckp, id, subid);
 		return json_decref(val);
 	}
-	json_get_int(&subid, val, "subproxy");
 	proxi = subproxy_by_id(proxy, subid);
 	if (unlikely(!proxi)) {
 		LOGNOTICE("Failed to find proxy %d:%d to send share to", id, subid);
-		stratifier_reconnect_client(ckp, client_id);
+		send_stratifier_deadproxy(ckp, id, subid);
 		return json_decref(val);
 	}
 	if (!proxi->alive) {
 		LOGNOTICE("Client %"PRId64" attempting to send shares to dead proxy %d:%d, dropping",
 			  client_id, id, subid);
-		stratifier_reconnect_client(ckp, client_id);
+		send_stratifier_deadproxy(ckp, id, subid);
 		return json_decref(val);
 	}
 
