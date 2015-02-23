@@ -1814,8 +1814,12 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		}
 		/* Look for clients that may have been dropped which the stratifer has
 		* not been informed about and ask the connector of they still exist */
-		if (client->dropped || client->reconnect) {
+		if (client->dropped) {
 			connector_test_client(ckp, client->id);
+			continue;
+		}
+		if (client->reconnect) {
+			reconnect_client(ckp_sdata, client);
 			continue;
 		}
 
