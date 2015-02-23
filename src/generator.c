@@ -792,7 +792,7 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 	const char *prev_hash, *bbversion, *nbit, *ntime;
 	proxy_instance_t *proxy = proxi->parent;
 	gdata_t *gdata = proxi->ckp->data;
-	char *coinbase1, *coinbase2;
+	char *coinbase1, *coinbase2, *buf;
 	bool clean, ret = false;
 	notify_instance_t *ni;
 	json_t *arr, *job_id;
@@ -824,6 +824,8 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 	LOGDEBUG("Received new notify from proxy %d:%d", proxi->id, proxi->subid);
 	ni = ckzalloc(sizeof(notify_instance_t));
 	ni->jobid = job_id;
+	buf = json_string_value(job_id);
+	LOGDEBUG("JobID %s", buf);
 	ni->coinbase1 = coinbase1;
 	LOGDEBUG("Coinbase1 %s", coinbase1);
 	ni->coinb1len = strlen(coinbase1) / 2;
@@ -1484,7 +1486,7 @@ static void *proxy_send(void *arg)
 		stratum_msg_t *msg;
 		bool ret = true;
 		json_t *val;
-		int id;
+		int64_t id;
 		tv_t now;
 		ts_t abs;
 
@@ -1510,7 +1512,7 @@ static void *proxy_send(void *arg)
 			continue;
 
 		json_get_int(&subid, msg->json_msg, "subproxy");
-		json_get_int(&id, msg->json_msg, "jobid");
+		json_get_int64(&id, msg->json_msg, "jobid");
 		json_get_int(&proxyid, msg->json_msg, "proxy");
 		json_get_int64(&client_id, msg->json_msg, "client_id");
 		if (unlikely(proxyid != proxy->id)) {

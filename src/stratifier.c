@@ -1367,7 +1367,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	wb->ckp = ckp;
 	wb->proxy = true;
 
-	json_int64cpy(&wb->id, val, "jobid");
+	json_get_int64(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
 	json_intcpy(&wb->coinb1len, val, "coinb1len");
 	wb->coinb1bin = ckalloc(wb->coinb1len);
@@ -3513,7 +3513,7 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	JSON_CPACK(json_msg, "{sisssssssIsisisi}", "jobid", jobid, "nonce2", enonce2,
+	JSON_CPACK(json_msg, "{sIsssssssIsisisi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
 			     "msg_id", msg_id, "proxy", client->proxyid,
 			     "subproxy", client->subproxyid);
