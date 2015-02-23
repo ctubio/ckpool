@@ -134,6 +134,39 @@ static void *ckmsg_queue(void *arg)
 	return NULL;
 }
 
+/* Generic workqueue function and message receiving and parsing thread */
+static void *ckwq_queue(void *arg)
+{
+	ckwq_t *ckmsgq = (ckwq_t *)arg;
+	ckpool_t *ckp = ckmsgq->ckp;
+
+	pthread_detach(pthread_self());
+	rename_proc(ckmsgq->name);
+
+	while (42) {
+		ckwqmsg_t *wqmsg;
+		tv_t now;
+		ts_t abs;
+
+		mutex_lock(ckmsgq->lock);
+		tv_time(&now);
+		tv_to_ts(&abs, &now);
+		abs.tv_sec++;
+		if (!ckmsgq->wqmsgs)
+			cond_timedwait(ckmsgq->cond, ckmsgq->lock, &abs);
+		wqmsg = ckmsgq->wqmsgs;
+		if (wqmsg)
+			DL_DELETE(ckmsgq->wqmsgs, wqmsg);
+		mutex_unlock(ckmsgq->lock);
+
+		if (!wqmsg)
+			continue;
+		wqmsg->func(ckp, wqmsg->data);
+		free(wqmsg);
+	}
+	return NULL;
+}
+
 ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func)
 {
 	ckmsgq_t *ckmsgq = ckzalloc(sizeof(ckmsgq_t));
@@ -174,6 +207,29 @@ ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, cons
 	return ckmsgq;
 }
 
+ckwq_t *create_ckwqs(ckpool_t *ckp, const char *name, const int count)
+{
+	ckwq_t *ckwq = ckzalloc(sizeof(ckmsgq_t) * count);
+	mutex_t *lock;
+	pthread_cond_t *cond;
+	int i;
+
+	lock = ckalloc(sizeof(mutex_t));
+	cond = ckalloc(sizeof(pthread_cond_t));
+	mutex_init(lock);
+	cond_init(cond);
+
+	for (i = 0; i < count; i++) {
+		snprintf(ckwq[i].name, 15, "%.6swq%d", name, i);
+		ckwq[i].ckp = ckp;
+		ckwq[i].lock = lock;
+		ckwq[i].cond = cond;
+		create_pthread(&ckwq[i].pth, ckwq_queue, &ckwq[i]);
+	}
+
+	return ckwq;
+}
+
 /* Generic function for adding messages to a ckmsgq linked list and signal the
  * ckmsgq parsing thread to wake up and process it. */
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
@@ -185,8 +241,22 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 	mutex_lock(ckmsgq->lock);
 	ckmsgq->messages++;
 	DL_APPEND(ckmsgq->msgs, msg);
-	pthread_cond_signal(ckmsgq->cond);
+	pthread_cond_broadcast(ckmsgq->cond);
 	mutex_unlock(ckmsgq->lock);
+}
+
+void ckwq_add(ckwq_t *ckwq, const void *func, void *data)
+{
+	ckwqmsg_t *wqmsg = ckalloc(sizeof(ckwqmsg_t));
+
+	wqmsg->func = func;
+	wqmsg->data = data;
+
+	mutex_lock(ckwq->lock);
+	ckwq->messages++;
+	DL_APPEND(ckwq->wqmsgs, wqmsg);
+	pthread_cond_broadcast(ckwq->cond);
+	mutex_unlock(ckwq->lock);
 }
 
 /* Return whether there are any messages queued in the ckmsgq linked list. */
@@ -237,7 +307,25 @@ static int pid_wait(const pid_t pid, const int ms)
 	return ret;
 }
 
-static int send_procmsg(const proc_instance_t *pi, const char *buf)
+static int get_proc_pid(const proc_instance_t *pi)
+{
+	int ret, pid = 0;
+	char path[256];
+	FILE *fp;
+
+	sprintf(path, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
+	fp = fopen(path, "re");
+	if (!fp)
+		goto out;
+	ret = fscanf(fp, "%d", &pid);
+	if (ret < 1)
+		pid = 0;
+	fclose(fp);
+out:
+	return pid;
+}
+
+static int send_procmsg(proc_instance_t *pi, const char *buf)
 {
 	char *path = pi->us.path;
 	int ret = -1;
@@ -250,6 +338,12 @@ static int send_procmsg(const proc_instance_t *pi, const char *buf)
 	if (unlikely(!buf || !strlen(buf))) {
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
+	}
+	if (unlikely(!pi->pid)) {
+		pi->pid = get_proc_pid(pi);
+		if (!pi->pid)
+			goto out;
+
 	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
 		LOGALERT("Attempting to send message %s to dead process %s", buf, pi->processname);
@@ -481,27 +575,9 @@ out:
 
 static void childsighandler(const int sig);
 
-static int get_proc_pid(const proc_instance_t *pi)
-{
-	int ret, pid = 0;
-	char path[256];
-	FILE *fp;
-
-	sprintf(path, "%s%s.pid", pi->ckp->socket_dir, pi->processname);
-	fp = fopen(path, "re");
-	if (!fp)
-		goto out;
-	ret = fscanf(fp, "%d", &pid);
-	if (ret < 1)
-		pid = 0;
-	fclose(fp);
-out:
-	return pid;
-}
-
 /* Send a single message to a process instance when there will be no response,
  * closing the socket immediately. */
-bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path;
 	bool ret = false;
@@ -519,6 +595,10 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 	 * forked so they never inherit them. */
 	if (unlikely(!pi->pid))
 		pi->pid = get_proc_pid(pi);
+	if (!pi->pid) {
+		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
+		return;
+	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
 		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
 		goto out;
@@ -532,13 +612,49 @@ bool _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		ret = true;
+	if (!wait_close(sockd, 5))
+		LOGWARNING("send_proc %s did not detect close from %s %s:%d", msg, file, func, line);
 	Close(sockd);
 out:
 	if (unlikely(!ret)) {
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
-	return ret;
+}
+
+struct proc_message {
+	proc_instance_t *pi;
+	char *msg;
+	const char *file;
+	const char *func;
+	int line;
+};
+
+static void asp_send(ckpool_t __maybe_unused *ckp, struct proc_message *pm)
+{
+	_send_proc(pm->pi, pm->msg, pm->file, pm->func, pm->line);
+	free(pm->msg);
+	free(pm);
+}
+
+/* Fore sending asynchronous messages to another process, the sending process
+ * must have ckwqs of its own, referenced in the ckpool structure */
+void _async_send_proc(ckpool_t *ckp, proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+{
+	struct proc_message *pm;
+
+	if (unlikely(!ckp->ckwqs)) {
+		LOGALERT("Workqueues not set up in async_send_proc!");
+		_send_proc(pi, msg, file, func, line);
+		return;
+	}
+	pm = ckzalloc(sizeof(struct proc_message));
+	pm->pi = pi;
+	pm->msg = strdup(msg);
+	pm->file = file;
+	pm->func = func;
+	pm->line = line;
+	ckwq_add(ckp->ckwqs, &asp_send, pm);
 }
 
 /* Send a single message to a process instance and retrieve the response, then
@@ -556,7 +672,15 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGERR("Attempted to send null message to socket %s in send_proc", path);
 		goto out;
 	}
+	if (unlikely(!pi->pid)) {
+		pi->pid = get_proc_pid(pi);
+		if (!pi->pid)
+			goto out;
+	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
+		/* Reset the pid value in case we are still looking for an old
+		 * process */
+		pi->pid = 0;
 		LOGALERT("Attempting to send message %s to dead process %s", msg, pi->processname);
 		goto out;
 	}
@@ -1209,6 +1333,8 @@ static proc_instance_t *prepare_child(ckpool_t *ckp, int (*process)(), char *nam
 	pi->process = process;
 	create_process_unixsock(pi);
 	manage_old_child(ckp, pi);
+	/* Remove the old pid file if we've succeeded in coming this far */
+	rm_namepid(pi);
 	return pi;
 }
 

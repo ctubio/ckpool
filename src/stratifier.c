@@ -336,12 +336,10 @@ struct stratifier_data {
 	char lasthash[68];
 	char lastswaphash[68];
 
+	ckwq_t *ckwqs;		// Generic workqueues
 	ckmsgq_t *ssends;	// Stratum sends
-	ckmsgq_t *srecvs;	// Stratum receives
 	ckmsgq_t *ckdbq;	// ckdb
-	ckmsgq_t *sshareq;	// Stratum share sends
 	ckmsgq_t *sauthq;	// Stratum authorisations
-	ckmsgq_t *stxnq;	// Transaction requests
 
 	int64_t user_instance_id;
 
@@ -815,33 +813,21 @@ static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 		sdata->gen_priority = 0;
 }
 
-struct update_req {
-	pthread_t *pth;
-	ckpool_t *ckp;
-	int prio;
-};
-
 static void broadcast_ping(sdata_t *sdata);
 
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
-static void *do_update(void *arg)
+static void do_update(ckpool_t *ckp, int *prio)
 {
-	struct update_req *ur = (struct update_req *)arg;
-	ckpool_t *ckp = ur->ckp;
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
-	int prio = ur->prio;
 	bool ret = false;
 	workbase_t *wb;
 	json_t *val;
 	char *buf;
 
-	pthread_detach(pthread_self());
-	rename_proc("updater");
-
-	buf = send_recv_generator(ckp, "getbase", prio);
+	buf = send_recv_generator(ckp, "getbase", *prio);
 	if (unlikely(!buf)) {
 		LOGNOTICE("Get base in update_base delayed due to higher priority request");
 		goto out;
@@ -901,21 +887,17 @@ out:
 		LOGINFO("Broadcast ping due to failed stratum base update");
 		broadcast_ping(sdata);
 	}
-	dealloc(buf);
-	free(ur->pth);
-	free(ur);
-	return NULL;
+	free(buf);
+	free(prio);
 }
 
 static void update_base(ckpool_t *ckp, const int prio)
 {
-	struct update_req *ur = ckalloc(sizeof(struct update_req));
-	pthread_t *pth = ckalloc(sizeof(pthread_t));
+	int *pprio = ckalloc(sizeof(int));
+	sdata_t *sdata = ckp->data;
 
-	ur->pth = pth;
-	ur->ckp = ckp;
-	ur->prio = prio;
-	create_pthread(pth, do_update, ur);
+	*pprio = prio;
+	ckwq_add(sdata->ckwqs, &do_update, pprio);
 }
 
 static void __kill_instance(stratum_instance_t *client)
@@ -1757,6 +1739,21 @@ static void ckmsgq_stats(ckmsgq_t *ckmsgq, const int size, json_t **val)
 	JSON_CPACK(*val, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 }
 
+static void ckwq_stats(ckwq_t *ckwq, const int size, json_t **val)
+{
+	int objects, generated;
+	int64_t memsize;
+	ckwqmsg_t *wqmsg;
+
+	mutex_lock(ckwq->lock);
+	DL_COUNT(ckwq->wqmsgs, wqmsg, objects);
+	generated = ckwq->messages;
+	mutex_unlock(ckwq->lock);
+
+	memsize = (sizeof(ckwqmsg_t) + size) * objects;
+	JSON_CPACK(*val, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+}
+
 static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 {
 	json_t *val = json_object(), *subval;
@@ -1803,15 +1800,14 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 
 	ckmsgq_stats(sdata->ssends, sizeof(smsg_t), &subval);
 	json_set_object(val, "ssends", subval);
+
 	/* Don't know exactly how big the string is so just count the pointer for now */
-	ckmsgq_stats(sdata->srecvs, sizeof(char *), &subval);
-	json_set_object(val, "srecvs", subval);
+	ckwq_stats(sdata->ckwqs, sizeof(char *) + sizeof(void *), &subval);
+	json_set_object(val, "ckwqs", subval);
 	if (!CKP_STANDALONE(ckp)) {
 		ckmsgq_stats(sdata->ckdbq, sizeof(char *), &subval);
 		json_set_object(val, "ckdbq", subval);
 	}
-	ckmsgq_stats(sdata->stxnq, sizeof(json_params_t), &subval);
-	json_set_object(val, "stxnq", subval);
 
 	buf = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 	json_decref(val);
@@ -1837,6 +1833,8 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	 * be the flag to reconnect clients. */
 	proxy->notified = false;
 }
+
+static void srecv_process(ckpool_t *ckp, char *buf);
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
@@ -1892,7 +1890,7 @@ retry:
 		/* The bulk of the messages will be received json from the
 		 * connector so look for this first. The srecv_process frees
 		 * the buf heap ram */
-		ckmsgq_add(sdata->srecvs, buf);
+		ckwq_add(sdata->ckwqs, &srecv_process, buf);
 		Close(sockd);
 		buf = NULL;
 		goto retry;
@@ -3416,6 +3414,9 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 	stratum_send_diff(sdata, client);
 }
 
+static void sshare_process(ckpool_t *ckp, json_params_t *jp);
+static void send_transactions(ckpool_t *ckp, json_params_t *jp);
+
 /* Enter with client holding ref count */
 static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
 			 json_t *id_val, json_t *method_val, json_t *params_val, const char *address)
@@ -3429,7 +3430,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	if (likely(cmdmatch(method, "mining.submit") && client->authorised)) {
 		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
 
-		ckmsgq_add(sdata->sshareq, jp);
+		ckwq_add(sdata->ckwqs, &sshare_process, jp);
 		return;
 	}
 
@@ -3508,7 +3509,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	if (cmdmatch(method, "mining.get")) {
 		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
 
-		ckmsgq_add(sdata->stxnq, jp);
+		ckwq_add(sdata->ckwqs, &send_transactions, jp);
 		return;
 	}
 	/* Unhandled message here */
@@ -3545,7 +3546,11 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 		if (res_val) {
 			const char *result = json_string_value(res_val);
 
-			LOGDEBUG("Received spurious response %s", result ? result : "");
+			if (!safecmp(result, "pong"))
+				LOGDEBUG("Received pong from client %"PRId64, client_id);
+			else
+				LOGDEBUG("Received spurious response %s from client %"PRId64,
+					 result ? result : "", client_id);
 			goto out;
 		}
 		send_json_err(sdata, client_id, id_val, "-3:method not found");
@@ -4488,8 +4493,8 @@ int stratifier(proc_instance_t *pi)
 	ckpool_t *ckp = pi->ckp;
 	int ret = 1, threads;
 	int64_t randomiser;
+	char *buf = NULL;
 	sdata_t *sdata;
-	char *buf;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
@@ -4537,14 +4542,10 @@ int stratifier(proc_instance_t *pi)
 
 	mutex_init(&sdata->ckdb_lock);
 	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
-	/* Create half as many share processing threads as there are CPUs */
-	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
-	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
-	/* Create 1/4 as many stratum processing threads as there are CPUs */
-	threads = threads / 2 ? : 1;
-	sdata->srecvs = create_ckmsgqs(ckp, "sreceiver", &srecv_process, threads);
+	/* Create as many generic workqueue threads as there are CPUs */
+	threads = sysconf(_SC_NPROCESSORS_ONLN);
+	ckp->ckwqs = sdata->ckwqs = create_ckwqs(ckp, "strat", threads);
 	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
-	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
 	if (!CKP_STANDALONE(ckp)) {
 		sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
