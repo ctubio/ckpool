@@ -1216,8 +1216,8 @@ static void dead_parent_proxy(sdata_t *sdata, const int id)
 
 static void new_proxy(sdata_t *sdata, const int id)
 {
+	proxy_t *proxy, *subproxy, *tmp, *proxy_list = NULL;
 	bool exists = false, current = false;
-	proxy_t *proxy, *proxy_list = NULL;
 
 	mutex_lock(&sdata->proxy_lock);
 	HASH_FIND_INT(sdata->proxies, &id, proxy);
@@ -1240,6 +1240,8 @@ static void new_proxy(sdata_t *sdata, const int id)
 		HASH_DELETE(sh, proxy->subproxies, proxy);
 		proxy->subproxies = proxy_list;
 		HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
+		HASH_ITER(sh, proxy->subproxies, subproxy, tmp)
+			subproxy->parent = proxy;
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
