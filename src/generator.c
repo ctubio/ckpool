@@ -1910,7 +1910,7 @@ static void *proxy_recv(void *arg)
 			ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
-			LOGNOTICE("Proxy %d:%d %s failed to epoll/read_socket_line in proxy_recv, attempting reconnect",
+			LOGNOTICE("Proxy %d:%d %s failed to epoll/read_socket_line in proxy_recv",
 				  proxi->id, subproxy->subid, subproxy->si->url);
 			disable_subproxy(gdata, proxi, subproxy);
 			continue;
