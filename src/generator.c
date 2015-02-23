@@ -2209,7 +2209,7 @@ int generator(proc_instance_t *pi)
 	gdata = ckzalloc(sizeof(gdata_t));
 	ckp->data = gdata;
 	gdata->ckp = ckp;
-	ckp->ckwqs = gdata->ckwqs = create_ckwqs(ckp, "gen", 2);
+	ckp->ckwqs = gdata->ckwqs = create_ckwqs(ckp, "gen", 1);
 	if (ckp->proxy) {
 		char *buf = NULL;
 
