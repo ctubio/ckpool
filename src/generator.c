@@ -1452,11 +1452,12 @@ static bool parse_share(proxy_instance_t *proxi, const char *buf)
 	 * so long as we recognised it as a share response */
 	ret = true;
 	if (!share) {
-		LOGINFO("Failed to find matching share to result: %s", buf);
+		LOGINFO("Proxy %d:%d failed to find matching share to result: %s",
+			proxi->id, proxi->subid, buf);
 		goto out;
 	}
-	LOGINFO("Found share result %s from client %d with msg_id %d", buf, share->client_id,
-		share->msg_id);
+	LOGINFO("Proxy %d:%d share result %s from client %d with msg_id %d", proxi->id,
+		proxi->subid, buf, share->client_id, share->msg_id);
 	free(share);
 out:
 	if (val)
