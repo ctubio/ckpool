@@ -808,7 +808,7 @@ static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 		set = true;
 	} else
 		set = false;
-	send_proc(ckp->generator, msg);
+	async_send_proc(ckp, ckp->generator, msg);
 	if (set)
 		sdata->gen_priority = 0;
 }
@@ -929,7 +929,7 @@ static void connector_drop_client(ckpool_t *ckp, const int64_t id)
 
 	LOGDEBUG("Stratifier requesting connector drop client %"PRId64, id);
 	snprintf(buf, 255, "dropclient=%"PRId64, id);
-	send_proc(ckp->connector, buf);
+	async_send_proc(ckp, ckp->connector, buf);
 }
 
 static void drop_allclients(ckpool_t *ckp)
@@ -3421,6 +3421,7 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp);
 static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
 			 json_t *id_val, json_t *method_val, json_t *params_val, const char *address)
 {
+	ckpool_t *ckp = client->ckp;
 	const char *method;
 
 	/* Random broken clients send something not an integer as the id so we
@@ -3467,14 +3468,14 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		 * to it since it's unauthorised. Set the flag just in case. */
 		client->authorised = false;
 		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		async_send_proc(ckp, ckp->connector, buf);
 		return;
 	}
 
 	/* We should only accept subscribed requests from here on */
 	if (!client->subscribed) {
 		LOGINFO("Dropping unsubscribed client %"PRId64, client_id);
-		connector_drop_client(client->ckp, client_id);
+		connector_drop_client(ckp, client_id);
 		return;
 	}
 
@@ -3496,7 +3497,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
 		LOGINFO("Dropping unauthorised client %"PRId64, client_id);
-		connector_drop_client(client->ckp, client_id);
+		connector_drop_client(ckp, client_id);
 		return;
 	}
 
@@ -3684,7 +3685,7 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
 	s = json_dumps(msg->json_msg, 0);
-	send_proc(ckp->connector, s);
+	async_send_proc(ckp, ckp->connector, s);
 	free(s);
 	free_smsg(msg);
 }
