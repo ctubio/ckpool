@@ -1697,18 +1697,24 @@ static void recruit_subproxy(gdata_t *gdata, proxy_instance_t *proxi)
 	ckwq_add(gdata->ckwqs, &proxy_recruit, proxi);
 }
 
-static void proxy_reconnect(ckpool_t *ckp, proxy_instance_t *proxy)
+static void *proxy_reconnect(void *arg)
 {
+	proxy_instance_t *proxy = (proxy_instance_t *)arg;
 	server_instance_t *si = proxy->si;
 	connsock_t *cs = proxy->cs;
+	ckpool_t *ckp = proxy->ckp;
 
+	pthread_detach(pthread_self());
 	proxy_alive(ckp, si, proxy, cs, true, proxy->epfd);
+	return NULL;
 }
 
 /* For reconnecting the parent proxy instance async */
-static void reconnect_proxy(gdata_t *gdata, proxy_instance_t *proxi)
+static void reconnect_proxy(proxy_instance_t *proxi)
 {
-	ckwq_add(gdata->ckwqs, &proxy_reconnect, proxi);
+	pthread_t pth;
+
+	create_pthread(&pth, proxy_reconnect, proxi);
 }
 
 static void reconnect_generator(ckpool_t *ckp)
@@ -1840,7 +1846,7 @@ static void *proxy_recv(void *arg)
 
 		if (!proxi->alive) {
 			while (!subproxies_alive(proxi)) {
-				reconnect_proxy(gdata, proxi);
+				reconnect_proxy(proxi);
 				if (alive) {
 					LOGWARNING("Proxy %d:%s failed, attempting reconnect",
 						   proxi->id, proxi->si->url);
