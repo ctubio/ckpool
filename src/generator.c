@@ -1983,7 +1983,9 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 			if (proxi->disabled)
 				continue;
 			if (proxi->alive || subproxies_alive(proxi)) {
-				if (!ret || proxi->low_id < ret->low_id)
+				if ((!ret) ||
+				    (proxi->low_id < ret->low_id) ||
+				    (proxi->low_id == ret->low_id && proxi->id > ret->id))
 					ret = proxi;
 			}
 		}
