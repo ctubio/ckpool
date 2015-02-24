@@ -327,7 +327,6 @@ struct proxy_base {
 	int64_t headroom;
 	enonce1_t enonce1u;
 
-	proxy_t *parent; /* Parent proxy - set to self on parent itself */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
 	bool dead;
@@ -1030,7 +1029,6 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int64_t id)
 	proxy->sdata = duplicate_sdata(sdata);
 	proxy->sdata->subproxy = proxy;
 	proxy->sdata->verbose = true;
-	proxy->parent = proxy;
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
 	HASH_ADD_I64(sdata->proxies, id, proxy);
@@ -1048,7 +1046,6 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
 	subproxy->sdata = duplicate_sdata(sdata);
 	subproxy->sdata->subproxy = subproxy;
-	subproxy->parent = proxy;
 	return subproxy;
 }
 
@@ -1181,6 +1178,7 @@ static void reconnect_clients(sdata_t *sdata)
 	}
 }
 
+#if 0
 static proxy_t *current_proxy(sdata_t *sdata)
 {
 	proxy_t *proxy;
@@ -1191,6 +1189,7 @@ static proxy_t *current_proxy(sdata_t *sdata)
 
 	return proxy;
 }
+#endif
 
 static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 {
@@ -1312,20 +1311,16 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_decref(val);
 }
 
-static inline bool parent_proxy(const proxy_t *proxy)
-{
-	return (proxy->parent == proxy);
-}
-
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
 	bool new_block = false, clean;
+	proxy_t *proxy, *current;
+	int64_t current_id;
 	int i, subid = 0;
 	char header[228];
 	const char *buf;
 	int64_t id = 0;
-	proxy_t *proxy;
 	workbase_t *wb;
 	json_t *val;
 
@@ -1410,7 +1405,14 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %ld changed to %s", id, dsdata->lastswaphash);
 	}
 
-	if (proxy->parent == current_proxy(sdata))
+	mutex_lock(&sdata->proxy_lock);
+	current = sdata->proxy;
+	if (unlikely(!current))
+		current = sdata->proxy = proxy;
+	current_id = current->id;
+	mutex_unlock(&sdata->proxy_lock);
+
+	if (proxy->id == current_id)
 		reconnect_clients(sdata);
 	clean |= new_block;
 	LOGINFO("Proxy %ld:%d broadcast updated stratum notify with%s clean", id,
