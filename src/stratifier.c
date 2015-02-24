@@ -1244,9 +1244,9 @@ static void reassess_headroom(sdata_t *sdata, const proxy_t *proxy)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
-		if (client->dropped || client->reconnect)
+		if (client->dropped)
 			continue;
-		if (client->proxyid != proxy->id)
+		if (client->reconnect || client->proxyid != proxy->id)
 			headroom--;
 	}
 	ck_runlock(&sdata->instance_lock);
