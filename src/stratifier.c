@@ -1251,7 +1251,7 @@ static void reassess_headroom(sdata_t *sdata, const proxy_t *proxy)
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	if (headroom < 0)
+	if (headroom < 1)
 		generator_recruit(sdata->ckp);
 }
 
