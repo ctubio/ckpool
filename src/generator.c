@@ -1735,14 +1735,10 @@ retry:
 	return NULL;
 }
 
-/* Queue up to the requested amount */
-static void recruit_subproxy(proxy_instance_t *proxi, const char *buf)
+static void recruit_subproxies(proxy_instance_t *proxi, const int recruits)
 {
 	bool recruit = false;
-	int recruits = 1;
 	pthread_t pth;
-
-	sscanf(buf, "recruit=%d", &recruits);
 
 	mutex_lock(&proxi->proxy_lock);
 	if (!proxi->recruit)
@@ -1753,6 +1749,15 @@ static void recruit_subproxy(proxy_instance_t *proxi, const char *buf)
 
 	if (recruit)
 		create_pthread(&pth, proxy_recruit, proxi);
+}
+
+/* Queue up to the requested amount */
+static void recruit_subproxy(proxy_instance_t *proxi, const char *buf)
+{
+	int recruits = 1;
+
+	sscanf(buf, "recruit=%d", &recruits);
+	recruit_subproxies(proxi, recruits);
 }
 
 static void *proxy_reconnect(void *arg)
