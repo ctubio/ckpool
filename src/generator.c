@@ -1966,25 +1966,25 @@ static void *proxy_recv(void *arg)
 			disable_subproxy(gdata, proxi, subproxy);
 			continue;
 		}
-		if (parse_method(ckp, subproxy, cs->buf)) {
-			if (subproxy->reconnect) {
-				/* Call this proxy dead to allow us to fail
-				 * over to a backup pool until the reconnect
-				 * pool is up */
-				disable_subproxy(gdata, proxi, subproxy);
-				if (parent_proxy(subproxy)) {
-					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
-						   subproxy->low_id, subproxy->si->url);
-					break;
+		do {
+			if (parse_method(ckp, subproxy, cs->buf)) {
+				if (subproxy->reconnect) {
+					/* Call this proxy dead to allow us to fail
+					* over to a backup pool until the reconnect
+					* pool is up */
+					disable_subproxy(gdata, proxi, subproxy);
+					if (parent_proxy(subproxy)) {
+						LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
+							subproxy->low_id, subproxy->si->url);
+						break;
+					}
 				}
+				continue;
 			}
-			continue;
-		}
-		if (parse_share(subproxy, cs->buf)) {
-			continue;
-		}
-		/* If it's not a method it should be a share result */
-		LOGWARNING("Unhandled stratum message: %s", cs->buf);
+			/* If it's not a method it should be a share result */
+			if (!parse_share(subproxy, cs->buf))
+				LOGWARNING("Unhandled stratum message: %s", cs->buf);
+		} while (read_socket_line(cs, 0) > 0);
 	}
 
 	return NULL;
