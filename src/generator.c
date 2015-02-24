@@ -741,8 +741,10 @@ retry:
 	goto retry;
 
 out:
-	if (!ret)
+	if (!ret && cs->fd > 0) {
+		epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, cs->fd, NULL);
 		Close(cs->fd);
+	}
 	return ret;
 }
 
@@ -965,7 +967,10 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	/* Make sure subproxy is still in the list */
 	subproxy = __subproxy_by_id(proxi, subproxy->subid);
 	if (subproxy) {
-		Close(subproxy->cs->fd);
+		if (subproxy->cs->fd > 0) {
+			epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, subproxy->cs->fd, NULL);
+			Close(subproxy->cs->fd);
+		}
 		HASH_DELETE(sh, proxi->subproxies, subproxy);
 	}
 	mutex_unlock(&proxi->proxy_lock);
@@ -1216,7 +1221,10 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 	if (!ret) {
 		LOGNOTICE("Proxy %ld:%d %s failed to send message in auth_stratum",
 			  proxi->id, proxi->subid, proxi->si->url);
-		Close(cs->fd);
+		if (cs->fd > 0) {
+			epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, cs->fd, NULL);
+			Close(cs->fd);
+		}
 		goto out;
 	}
 
@@ -1641,7 +1649,10 @@ out:
 	if (!ret) {
 		send_stratifier_deadproxy(ckp, proxi->id, proxi->subid);
 		/* Close and invalidate the file handle */
-		Close(cs->fd);
+		if (cs->fd > 0) {
+			epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, cs->fd, NULL);
+			Close(cs->fd);
+		}
 	} else {
 		keep_sockalive(cs->fd);
 		event.events = EPOLLIN;
