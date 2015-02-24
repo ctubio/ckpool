@@ -400,7 +400,6 @@ struct stratifier_data {
 	int proxy_count; /* Total proxies generated (not necessarily still alive) */
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
-	proxy_t *retired_proxies; /* Hashlist of proxies now no longer in user */
 	mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 };
@@ -1288,8 +1287,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
 	proxy->max_clients = 1ll << (proxy->enonce1varlen * 8);
 	/* Reset the enonce1u in case this is a resubscribe of an existing
-	 * parent proxy. All clients previously bound will be disconnected so
-	 * we can start with a fresh count. */
+	 * parent proxy. */
 	proxy->clients = 0;
 	proxy->enonce1u.u64 = 0;
 	ck_wunlock(&dsdata->workbase_lock);
@@ -1517,7 +1515,7 @@ static void free_proxy(proxy_t *proxy)
 static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 {
 	proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
-	int dead = 0, retired = 0;
+	int dead = 0;
 
 	if (!ckp->proxy)
 		return;
@@ -1525,37 +1523,37 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 	mutex_lock(&sdata->proxy_lock);
 	HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
 		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+			if (!subproxy->bound_clients && !subproxy->dead) {
+				/* Reset the counter to reuse this proxy */
+				subproxy->clients = 0;
+				subproxy->enonce1u.u64 = 0;
+				continue;
+			}
 			if (proxy == subproxy)
 				continue;
 			if (subproxy->bound_clients)
 				continue;
-			if (!subproxy->dead) {
-				/* Reset the counter to reuse this proxy */
-				subproxy->clients = 0;
+			if (!subproxy->dead)
 				continue;
-			} else {
-				dead++;
+			if (unlikely(!subproxy->subid)) {
+				LOGWARNING("Unexepectedly found proxy %ld:%d as subproxy of %ld:%d",
+					   subproxy->id, subproxy->subid, proxy->id, proxy->subid);
+				continue;
 			}
+			if (unlikely(subproxy == sdata->proxy)) {
+				LOGWARNING("Unexepectedly found proxy %ld:%d as current",
+					   subproxy->id, subproxy->subid);
+				continue;
+			}
+			dead++;
 			HASH_DELETE(sh, proxy->subproxies, subproxy);
 			free_proxy(subproxy);
 		}
 	}
-
-	DL_FOREACH_SAFE(sdata->retired_proxies, proxy, proxytmp) {
-		if (unlikely(proxy->bound_clients))
-			continue;
-		if (HASH_CNT(sh, proxy->subproxies) == 1) {
-			retired++;
-			DL_DELETE(sdata->retired_proxies, proxy);
-			free_proxy(proxy);
-		}
-	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (dead || retired) {
-		LOGNOTICE("Stratifier discarded %d dead and %d retired proxies",
-			  dead, retired);
-	}
+	if (dead)
+		LOGNOTICE("Stratifier discarded %d dead proxies", dead);
 }
 
 /* Enter with instance_lock held */
