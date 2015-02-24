@@ -2533,8 +2533,8 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
 static sdata_t *select_sdata(ckpool_t *ckp, sdata_t *ckp_sdata)
 {
 	proxy_t *current, *proxy, *subproxy, *best = NULL, *tmp, *tmpsub;
-	int best_subid = 0;
-	int64_t best_id;
+	int best_subid = 0, best_lowid;
+	int64_t best_id = 0;
 
 	if (!ckp->proxy || ckp->passthrough)
 		return ckp_sdata;
@@ -2543,7 +2543,7 @@ static sdata_t *select_sdata(ckpool_t *ckp, sdata_t *ckp_sdata)
 		LOGWARNING("No proxy available yet to generate subscribes");
 		return NULL;
 	}
-	best_id = ckp_sdata->proxy_count;
+	best_lowid = ckp_sdata->proxy_count;
 
 	mutex_lock(&ckp_sdata->proxy_lock);
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
@@ -2566,8 +2566,9 @@ static sdata_t *select_sdata(ckpool_t *ckp, sdata_t *ckp_sdata)
 				max_headroom = subproxy_headroom;
 			}
 		}
-		if (best && best->id < best_id) {
+		if (best && (best->low_id < best_lowid || (best->low_id == best_lowid && best->id > best_id))) {
 			best_id = best->id;
+			best_lowid = best->low_id;
 			best_subid = best->subid;
 			if (best == current)
 				break;
