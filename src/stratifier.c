@@ -1160,10 +1160,9 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id)
 			continue;
-		if (headroom < 1)
-			break;
-		headroom--;
 		reconnects++;
+		if (headroom-- < 1)
+			break;
 		if (client->reconnect)
 			reconnect_client(sdata, client);
 		else
@@ -1174,9 +1173,9 @@ static void reconnect_clients(sdata_t *sdata)
 	if (reconnects) {
 		LOGNOTICE("%d clients flagged for reconnect to proxy %ld", reconnects,
 			  proxy->id);
+		if (headroom < 42)
+			generator_recruit(sdata->ckp);
 	}
-	if (headroom < 42)
-		generator_recruit(sdata->ckp);
 }
 
 #if 0
@@ -1209,10 +1208,9 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		if (headroom < 1)
-			break;
-		headroom--;
 		reconnects++;
+		if (headroom-- < 1)
+			break;
 		if (client->reconnect)
 			reconnect_client(sdata, client);
 		else
@@ -1223,43 +1221,15 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	if (reconnects) {
 		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld:%d", reconnects,
 			  id, subid);
+		if (headroom < 42)
+			generator_recruit(sdata->ckp);
 	}
-	if (headroom < 42)
-		generator_recruit(sdata->ckp);
-}
-
-static void reassess_headroom(sdata_t *sdata, const proxy_t *proxy)
-{
-	stratum_instance_t *client, *tmpclient;
-	proxy_t *subproxy, *tmp;
-	int64_t headroom = 0;
-
-	mutex_lock(&sdata->proxy_lock);
-	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
-		if (subproxy->dead)
-			continue;
-		headroom += subproxy->max_clients - subproxy->clients;
-	}
-	mutex_unlock(&sdata->proxy_lock);
-
-	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
-		if (client->dropped)
-			continue;
-		if (client->reconnect || client->proxyid != proxy->id)
-			headroom--;
-	}
-	ck_runlock(&sdata->instance_lock);
-
-	if (headroom < 1)
-		generator_recruit(sdata->ckp);
 }
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
 	proxy_t *proxy, *old = NULL;
-	bool current = false;
 	const char *buf;
 	int64_t id = 0;
 	int subid = 0;
@@ -1326,14 +1296,10 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 
 	/* Is this a replacement proxy for the current one */
 	mutex_lock(&sdata->proxy_lock);
-	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id && !proxy->subid) {
-		current = true;
+	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id && !proxy->subid)
 		sdata->proxy = proxy;
-	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (current)
-		reassess_headroom(sdata, proxy);
 	if (subid) {
 		LOGINFO("Upstream pool %ld:%d extranonce2 length %d, max proxy clients %"PRId64,
 			id, subid, proxy->nonce2len, proxy->max_clients);

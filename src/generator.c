@@ -108,7 +108,7 @@ struct proxy_instance {
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
 	bool reconnecting; /* Testing in progress */
-	bool recruiting; /* Recruiting in progress */
+	int recruit; /* Recruiting in progress */
 	bool alive;
 
 	mutex_t notify_lock;
@@ -1707,27 +1707,48 @@ static void *proxy_recruit(void *arg)
 	proxy_instance_t *proxy, *parent = (proxy_instance_t *)arg;
 	ckpool_t *ckp = parent->ckp;
 	gdata_t *gdata = ckp->data;
+	bool recruit, alive;
 
 	pthread_detach(pthread_self());
 
+retry:
+	recruit = false;
 	proxy = create_subproxy(gdata, parent);
-	if (!proxy_alive(ckp, proxy->si, proxy, proxy->cs, false, parent->epfd)) {
+	alive = proxy_alive(ckp, proxy->si, proxy, proxy->cs, false, parent->epfd);
+	if (!alive) {
 		LOGNOTICE("Subproxy failed proxy_alive testing");
 		store_proxy(gdata, proxy);
 	} else
 		add_subproxy(parent, proxy);
-	parent->recruiting = false;
+
+	mutex_lock(&parent->proxy_lock);
+	if (alive) {
+		if (--parent->recruit > 0)
+			recruit = true;
+	}
+	mutex_unlock(&parent->proxy_lock);
+
+	if (recruit)
+		goto retry;
+
 	return NULL;
 }
 
+/* Allow up to 42 recruit requests to accumulate */
 static void recruit_subproxy(proxy_instance_t *proxi)
 {
+	bool recruit = false;
 	pthread_t pth;
 
-	if (proxi->recruiting)
-		return;
-	proxi->recruiting = true;
-	create_pthread(&pth, proxy_recruit, proxi);
+	mutex_lock(&proxi->proxy_lock);
+	if (!proxi->recruit++ > 0)
+		recruit = true;
+	else if (proxi->recruit > 42)
+		proxi->recruit = 42;
+	mutex_unlock(&proxi->proxy_lock);
+
+	if (recruit)
+		create_pthread(&pth, proxy_recruit, proxi);
 }
 
 static void *proxy_reconnect(void *arg)
