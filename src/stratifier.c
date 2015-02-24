@@ -2609,6 +2609,10 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
+	if (ckp->proxy) {
+		LOGINFO("Current %ld, selecting proxy %ld:%d for client %"PRId64, ckp_sdata->proxy->id,
+			sdata->subproxy->id, sdata->subproxy->subid, client->id);
+	}
 	client->sdata = sdata;
 
 	arr_size = json_array_size(params_val);
