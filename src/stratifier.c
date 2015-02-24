@@ -1228,10 +1228,38 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 		generator_recruit(sdata->ckp);
 }
 
+static void reassess_headroom(sdata_t *sdata, const proxy_t *proxy)
+{
+	stratum_instance_t *client, *tmpclient;
+	proxy_t *subproxy, *tmp;
+	int64_t headroom = 0;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		if (subproxy->dead)
+			continue;
+		headroom += subproxy->max_clients - subproxy->clients;
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->dropped || client->reconnect)
+			continue;
+		if (client->proxyid != proxy->id)
+			headroom--;
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (headroom < 0)
+		generator_recruit(sdata->ckp);
+}
+
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
 	proxy_t *proxy, *old = NULL;
+	bool current = false;
 	const char *buf;
 	int64_t id = 0;
 	int subid = 0;
@@ -1298,10 +1326,14 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 
 	/* Is this a replacement proxy for the current one */
 	mutex_lock(&sdata->proxy_lock);
-	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id && !proxy->subid)
+	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id && !proxy->subid) {
+		current = true;
 		sdata->proxy = proxy;
+	}
 	mutex_unlock(&sdata->proxy_lock);
 
+	if (current)
+		reassess_headroom(sdata, proxy);
 	if (subid) {
 		LOGINFO("Upstream pool %ld:%d extranonce2 length %d, max proxy clients %"PRId64,
 			id, subid, proxy->nonce2len, proxy->max_clients);
@@ -1309,7 +1341,6 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGNOTICE("Upstream pool %ld extranonce2 length %d, max proxy clients %"PRId64,
 			  id, proxy->nonce2len, proxy->max_clients);
 	}
-
 	json_decref(val);
 }
 
@@ -1414,7 +1445,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	current_id = current->id;
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (proxy->id == current_id)
+	if (!proxy->subid && proxy->id == current_id)
 		reconnect_clients(sdata);
 	clean |= new_block;
 	LOGINFO("Proxy %ld:%d broadcast updated stratum notify with%s clean", id,
