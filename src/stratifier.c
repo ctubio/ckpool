@@ -279,7 +279,7 @@ struct stratum_instance {
 
 	sdata_t *sdata; /* Which sdata this client is bound to */
 	proxy_t *proxy; /* Proxy this is bound to in proxy mode */
-	int proxyid; /* Which proxy id  */
+	int64_t proxyid; /* Which proxy id  */
 	int subproxyid; /* Which subproxy */
 	int64_t notify_id; /* Which notify_id from the subproxy did we join */
 };
@@ -305,7 +305,7 @@ struct proxy_base {
 	UT_hash_handle sh; /* For subproxy hashlist */
 	proxy_t *next; /* For retired subproxies */
 	proxy_t *prev;
-	int id;
+	int64_t id;
 	int subid;
 
 	double diff;
@@ -1022,7 +1022,7 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	return dsdata;
 }
 
-static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
+static proxy_t *__generate_proxy(sdata_t *sdata, const int64_t id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
 
@@ -1033,7 +1033,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	proxy->parent = proxy;
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
-	HASH_ADD_INT(sdata->proxies, id, proxy);
+	HASH_ADD_I64(sdata->proxies, id, proxy);
 	sdata->proxy_count++;
 	return proxy;
 }
@@ -1051,22 +1051,22 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	return subproxy;
 }
 
-static proxy_t *__existing_proxy(const sdata_t *sdata, const int id)
+static proxy_t *__existing_proxy(const sdata_t *sdata, const int64_t id)
 {
 	proxy_t *proxy;
 
-	HASH_FIND_INT(sdata->proxies, &id, proxy);
+	HASH_FIND_I64(sdata->proxies, &id, proxy);
 	return proxy;
 }
 
 /* Find proxy by id number, generate one if none exist yet by that id */
-static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
+static proxy_t *__proxy_by_id(sdata_t *sdata, const int64_t id)
 {
 	proxy_t *proxy = __existing_proxy(sdata, id);
 
 	if (unlikely(!proxy)) {
 		proxy = __generate_proxy(sdata, id);
-		LOGNOTICE("Stratifier added new proxy %d", id);
+		LOGNOTICE("Stratifier added new proxy %ld", id);
 	}
 
 	return proxy;
@@ -1086,12 +1086,12 @@ static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid
 
 	if (!subproxy) {
 		subproxy = __generate_subproxy(sdata, proxy, subid);
-		LOGINFO("Stratifier added new subproxy %d:%d", proxy->id, subid);
+		LOGINFO("Stratifier added new subproxy %ld:%d", proxy->id, subid);
 	}
 	return subproxy;
 }
 
-static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
+static proxy_t *subproxy_by_id(sdata_t *sdata, const int64_t id, const int subid)
 {
 	proxy_t *proxy, *subproxy;
 
@@ -1103,7 +1103,7 @@ static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
 	return subproxy;
 }
 
-static proxy_t *existing_subproxy(sdata_t *sdata, const int id, const int subid)
+static proxy_t *existing_subproxy(sdata_t *sdata, const int64_t id, const int subid)
 {
 	proxy_t *proxy, *subproxy = NULL;
 
@@ -1173,7 +1173,7 @@ static void reconnect_clients(sdata_t *sdata)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged for reconnect to proxy %d", reconnects,
+		LOGNOTICE("%d clients flagged for reconnect to proxy %ld", reconnects,
 			  proxy->id);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
@@ -1191,7 +1191,7 @@ static proxy_t *current_proxy(sdata_t *sdata)
 	return proxy;
 }
 
-static void dead_parent_proxy(sdata_t *sdata, const int id)
+static void dead_parent_proxy(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
 	int reconnects = 0;
@@ -1216,20 +1216,20 @@ static void dead_parent_proxy(sdata_t *sdata, const int id)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged to reconnect from dead proxy %d",
+		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld",
 			  reconnects, id);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
 	}
 }
 
-static void new_proxy(sdata_t *sdata, const int id)
+static void new_proxy(sdata_t *sdata, const int64_t id)
 {
 	proxy_t *proxy, *subproxy, *tmp, *proxy_list = NULL;
 	bool exists = false, current = false;
 
 	mutex_lock(&sdata->proxy_lock);
-	HASH_FIND_INT(sdata->proxies, &id, proxy);
+	HASH_FIND_I64(sdata->proxies, &id, proxy);
 	if (proxy) {
 		exists = true;
 		HASH_DEL(sdata->proxies, proxy);
@@ -1255,7 +1255,7 @@ static void new_proxy(sdata_t *sdata, const int id)
 	mutex_unlock(&sdata->proxy_lock);
 
 	if (exists) {
-		LOGNOTICE("Stratifier replaced old proxy instance %d", id);
+		LOGNOTICE("Stratifier replaced old proxy %ld", id);
 		dead_parent_proxy(sdata, id);
 	}
 }
@@ -1263,9 +1263,10 @@ static void new_proxy(sdata_t *sdata, const int id)
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
-	int id = 0, subid = 0;
 	const char *buf;
 	proxy_t *proxy;
+	int64_t id = 0;
+	int subid = 0;
 	json_t *val;
 
 	if (unlikely(strlen(cmd) < 11)) {
@@ -1279,7 +1280,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Failed to json decode subscribe response in update_subscribe %s", buf);
 		return;
 	}
-	if (unlikely(!json_get_int(&id, val, "proxy"))) {
+	if (unlikely(!json_get_int64(&id, val, "proxy"))) {
 		LOGWARNING("Failed to json decode proxy value in update_subscribe %s", buf);
 		return;
 	}
@@ -1290,9 +1291,9 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 
 	if (!subid) {
 		new_proxy(sdata, id);
-		LOGNOTICE("Got updated subscribe for proxy %d", id);
+		LOGNOTICE("Got updated subscribe for proxy %ld", id);
 	} else
-		LOGINFO("Got updated subscribe for proxy %d:%d", id, subid);
+		LOGINFO("Got updated subscribe for proxy %ld:%d", id, subid);
 
 	proxy = subproxy_by_id(sdata, id, subid);
 	dsdata = proxy->sdata;
@@ -1323,10 +1324,10 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	ck_wunlock(&dsdata->workbase_lock);
 
 	if (subid) {
-		LOGINFO("Upstream pool %d:%d extranonce2 length %d, max proxy clients %"PRId64,
+		LOGINFO("Upstream pool %ld:%d extranonce2 length %d, max proxy clients %"PRId64,
 			id, subid, proxy->nonce2len, proxy->max_clients);
 	} else {
-		LOGNOTICE("Upstream pool %d extranonce2 length %d, max proxy clients %"PRId64,
+		LOGNOTICE("Upstream pool %ld extranonce2 length %d, max proxy clients %"PRId64,
 			  id, proxy->nonce2len, proxy->max_clients);
 	}
 
@@ -1342,9 +1343,10 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
 	bool new_block = false, clean;
-	int i, id = 0, subid = 0;
+	int i, subid = 0;
 	char header[228];
 	const char *buf;
+	int64_t id = 0;
 	proxy_t *proxy;
 	workbase_t *wb;
 	json_t *val;
@@ -1361,17 +1363,17 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Failed to json decode in update_notify");
 		return;
 	}
-	json_get_int(&id, val, "proxy");
+	json_get_int64(&id, val, "proxy");
 	json_get_int(&subid, val, "subproxy");
 	proxy = existing_subproxy(sdata, id, subid);
 	if (unlikely(!proxy || !proxy->subscribed)) {
-		LOGINFO("No valid proxy %d:%d subscription to update notify yet", id, subid);
+		LOGINFO("No valid proxy %ld:%d subscription to update notify yet", id, subid);
 		goto out;
 	}
 	if (!subid)
-		LOGNOTICE("Got updated notify for proxy %d", id);
+		LOGNOTICE("Got updated notify for proxy %ld", id);
 	else
-		LOGINFO("Got updated notify for proxy %d:%d", id, subid);
+		LOGINFO("Got updated notify for proxy %ld:%d", id, subid);
 
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
@@ -1425,15 +1427,15 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	add_base(ckp, dsdata, wb, &new_block);
 	if (new_block) {
 		if (subid)
-			LOGINFO("Block hash on proxy %d:%d changed to %s", id, subid, dsdata->lastswaphash);
+			LOGINFO("Block hash on proxy %ld:%d changed to %s", id, subid, dsdata->lastswaphash);
 		else
-			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
+			LOGNOTICE("Block hash on proxy %ld changed to %s", id, dsdata->lastswaphash);
 	}
 
 	if (parent_proxy(proxy) && proxy == current_proxy(sdata))
 		reconnect_clients(sdata);
 	clean |= new_block;
-	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
+	LOGINFO("Proxy %ld:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
 	stratum_broadcast_update(dsdata, wb, clean);
 out:
@@ -1447,9 +1449,10 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	sdata_t *sdata = ckp->data, *dsdata;
 	stratum_instance_t *client, *tmp;
 	double old_diff, diff;
-	int id = 0, subid = 0;
 	const char *buf;
+	int64_t id = 0;
 	proxy_t *proxy;
+	int subid = 0;
 	json_t *val;
 
 	if (unlikely(strlen(cmd) < 6)) {
@@ -1464,15 +1467,15 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Failed to json decode in update_diff");
 		return;
 	}
-	json_get_int(&id, val, "proxy");
+	json_get_int64(&id, val, "proxy");
 	json_get_int(&subid, val, "subproxy");
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
 
-	LOGINFO("Got updated diff for proxy %d:%d", id, subid);
+	LOGINFO("Got updated diff for proxy %ld:%d", id, subid);
 	proxy = existing_subproxy(sdata, id, subid);
 	if (!proxy) {
-		LOGINFO("No existing subproxy %d:%d to update diff", id, subid);
+		LOGINFO("No existing subproxy %ld:%d to update diff", id, subid);
 		return;
 	}
 
@@ -1512,11 +1515,11 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	ck_runlock(&sdata->instance_lock);
 }
 
-static void generator_drop_proxy(ckpool_t *ckp, const int id, const int subid)
+static void generator_drop_proxy(ckpool_t *ckp, const int64_t id, const int subid)
 {
 	char msg[256];
 
-	sprintf(msg, "dropproxy=%d:%d", id, subid);
+	sprintf(msg, "dropproxy=%ld:%d", id, subid);
 	send_generator(ckp, msg, GEN_LAX);
 }
 
@@ -2226,17 +2229,17 @@ static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
  * this proxy we are only given this message if all clients must move. */
 static void set_proxy(sdata_t *sdata, const char *buf)
 {
+	int64_t id = 0;
 	proxy_t *proxy;
-	int id = 0;
 
-	sscanf(buf, "proxy=%d", &id);
+	sscanf(buf, "proxy=%ld", &id);
 
 	mutex_lock(&sdata->proxy_lock);
 	proxy = __proxy_by_id(sdata, id);
 	sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
-	LOGNOTICE("Stratifier setting active proxy to %d", id);
+	LOGNOTICE("Stratifier setting active proxy to %ld", id);
 	if (proxy->notify_id != -1)
 		reconnect_clients(sdata);
 }
@@ -2244,16 +2247,16 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 static void dead_proxy(sdata_t *sdata, const char *buf)
 {
 	stratum_instance_t *client, *tmp;
-	int id = 0, subid = 0;
+	int64_t headroom, id = 0;
 	int reconnects = 0;
-	int64_t headroom;
 	proxy_t *proxy;
+	int subid = 0;
 
-	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
+	sscanf(buf, "deadproxy=%ld:%d", &id, &subid);
 	proxy = existing_subproxy(sdata, id, subid);
 	if (proxy)
 		proxy->dead = true;
-	LOGNOTICE("Stratifier dropping clients from proxy %d:%d", id, subid);
+	LOGNOTICE("Stratifier dropping clients from proxy %ld:%d", id, subid);
 	headroom = current_headroom(sdata, &proxy);
 
 	ck_rlock(&sdata->instance_lock);
@@ -2270,7 +2273,7 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged to reconnect from dead proxy %d:%d", reconnects,
+		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld:%d", reconnects,
 			  id, subid);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
@@ -2578,7 +2581,8 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
 static sdata_t *select_sdata(ckpool_t *ckp, sdata_t *ckp_sdata)
 {
 	proxy_t *current, *proxy, *subproxy, *best = NULL, *tmp, *tmpsub;
-	int best_id, best_subid = 0;
+	int best_subid = 0;
+	int64_t best_id;
 
 	if (!ckp->proxy || ckp->passthrough)
 		return ckp_sdata;
@@ -3521,7 +3525,7 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	JSON_CPACK(json_msg, "{sIsssssssIsisi}", "jobid", jobid, "nonce2", enonce2,
+	JSON_CPACK(json_msg, "{sIsssssssIsIsi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
 			     "proxy", client->proxyid, "subproxy", client->subproxyid);
 	msg = json_dumps(json_msg, 0);
