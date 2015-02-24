@@ -1160,9 +1160,11 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id)
 			continue;
+		if (headroom < 1)
+			break;
 		headroom--;
 		reconnects++;
-		if (client->reconnect && headroom > 0)
+		if (client->reconnect)
 			reconnect_client(sdata, client);
 		else
 			client->reconnect = true;
@@ -1172,9 +1174,9 @@ static void reconnect_clients(sdata_t *sdata)
 	if (reconnects) {
 		LOGNOTICE("%d clients flagged for reconnect to proxy %ld", reconnects,
 			  proxy->id);
-		if (headroom < 42)
-			generator_recruit(sdata->ckp);
 	}
+	if (headroom < 42)
+		generator_recruit(sdata->ckp);
 }
 
 #if 0
@@ -1207,9 +1209,11 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
+		if (headroom < 1)
+			break;
 		headroom--;
 		reconnects++;
-		if (client->reconnect && headroom > 0)
+		if (client->reconnect)
 			reconnect_client(sdata, client);
 		else
 			client->reconnect = true;
@@ -1219,9 +1223,9 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	if (reconnects) {
 		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld:%d", reconnects,
 			  id, subid);
-		if (headroom < 42)
-			generator_recruit(sdata->ckp);
 	}
+	if (headroom < 42)
+		generator_recruit(sdata->ckp);
 }
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
