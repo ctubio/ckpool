@@ -1355,37 +1355,50 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	proxy_instance_t *proxy, *proxi;
 	ckpool_t *ckp = gdata->ckp;
 	int64_t client_id, id;
+	bool success = false;
 	stratum_msg_t *msg;
 	share_msg_t *share;
 	int subid;
 
 	/* Get the client id so we can tell the stratifier to drop it if the
 	 * proxy it's bound to is not functional */
-	json_get_int64(&client_id, val, "client_id");
-	json_get_int64(&id, val, "proxy");
-	json_get_int(&subid, val, "subproxy");
-
+	if (unlikely(!json_get_int64(&client_id, val, "client_id"))) {
+		LOGWARNING("Got no client_id in share");
+		goto out;
+	}
+	if (unlikely(!json_get_int64(&id, val, "proxy"))) {
+		LOGWARNING("Got no proxy in share");
+		goto out;
+	}
+	if (unlikely(!json_get_int(&subid, val, "subproxy"))) {
+		LOGWARNING("Got no subproxy in share");
+		goto out;
+	}
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
 		LOGNOTICE("Client %"PRId64" sending shares to non existent proxy %ld, dropping",
 			  client_id, id);
+		send_stratifier_deadproxy(ckp, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
-		return json_decref(val);
+		goto out;
 	}
 	proxi = subproxy_by_id(proxy, subid);
 	if (unlikely(!proxi)) {
 		LOGNOTICE("Client %"PRId64" sending shares to non existent subproxy %ld:%d, dropping",
 			  client_id, id, subid);
+		send_stratifier_deadproxy(ckp, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
-		return json_decref(val);
+		goto out;
 	}
 	if (!proxi->alive) {
 		LOGNOTICE("Client %"PRId64" sending shares to dead subproxy %ld:%d, dropping",
 			  client_id, id, subid);
+		send_stratifier_deadproxy(ckp, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
-		return json_decref(val);
+		goto out;
 	}
 
+	success = true;
 	msg = ckzalloc(sizeof(stratum_msg_t));
 	share = ckzalloc(sizeof(share_msg_t));
 	share->submit_time = time(NULL);
@@ -1405,6 +1418,10 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	DL_APPEND(proxy->psends, msg);
 	pthread_cond_signal(&proxy->psend_cond);
 	mutex_unlock(&proxy->psend_lock);
+
+out:
+	if (!success)
+		json_decref(val);
 }
 
 static void clear_notify(notify_instance_t *ni)
