@@ -1286,7 +1286,8 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	/* Is this a replacement for an existing proxy id? */
 	old = existing_subproxy(sdata, id, subid);
 	if (old) {
-		dead_proxyid(sdata, id, subid);
+		if (old->dead)
+			dead_proxyid(sdata, id, subid);
 		proxy = old;
 		proxy->dead = false;
 	} else
