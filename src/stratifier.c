@@ -1294,7 +1294,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 
 	/* Is this a replacement proxy for the current one */
 	mutex_lock(&sdata->proxy_lock);
-	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id)
+	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id && !proxy->subid)
 		sdata->proxy = proxy;
 	mutex_unlock(&sdata->proxy_lock);
 
