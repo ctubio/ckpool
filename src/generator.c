@@ -132,7 +132,6 @@ struct generator_data {
 	proxy_instance_t *proxy_list; /* Linked list of all active proxies */
 	int proxy_notify_id;	// Globally increasing notify id
 	ckmsgq_t *srvchk;	// Server check message queue
-	ckwq_t *ckwqs;
 };
 
 typedef struct generator_data gdata_t;
@@ -222,7 +221,7 @@ retry:
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 out:
-	async_send_proc(ckp, ckp->connector, alive ? "accept" : "reject");
+	send_proc(ckp->connector, alive ? "accept" : "reject");
 	return alive;
 }
 
@@ -368,7 +367,7 @@ retry:
 		ret = submit_block(cs, buf + 12 + 64 + 1);
 		memset(buf + 12 + 64, 0, 1);
 		sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
-		async_send_proc(ckp, ckp->stratifier, blockmsg);
+		send_proc(ckp->stratifier, blockmsg);
 	} else if (cmdmatch(buf, "checkaddr:")) {
 		if (validate_address(cs, buf + 10))
 			send_unix_msg(sockd, "true");
@@ -1298,22 +1297,22 @@ static void *proxy_recv(void *arg)
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
 			LOGWARNING("Failed to read_socket_line in proxy_recv, attempting reconnect");
-			async_send_proc(ckp, ckp->generator, "reconnect");
+			send_proc(ckp->generator, "reconnect");
 			break;
 		}
 		if (parse_method(proxi, cs->buf)) {
 			if (proxi->notified) {
-				async_send_proc(ckp, ckp->stratifier, "notify");
+				send_proc(ckp->stratifier, "notify");
 				proxi->notified = false;
 			}
 			if (proxi->diffed) {
-				async_send_proc(ckp, ckp->stratifier, "diff");
+				send_proc(ckp->stratifier, "diff");
 				proxi->diffed = false;
 			}
 			if (proxi->reconnect) {
 				proxi->reconnect = false;
 				LOGWARNING("Reconnect issue, dropping existing connection");
-				async_send_proc(ckp, ckp->generator, "reconnect");
+				send_proc(ckp->generator, "reconnect");
 				break;
 			}
 			continue;
@@ -1403,13 +1402,13 @@ static void *passthrough_recv(void *arg)
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
 			LOGWARNING("Failed to read_socket_line in proxy_recv, attempting reconnect");
-			async_send_proc(ckp, ckp->generator, "reconnect");
+			send_proc(ckp->generator, "reconnect");
 			break;
 		}
 		/* Simply forward the message on, as is, to the connector to
 		 * process. Possibly parse parameters sent by upstream pool
 		 * here */
-		async_send_proc(ckp, ckp->connector, cs->buf);
+		send_proc(ckp->connector, cs->buf);
 	}
 	return NULL;
 }
@@ -1524,8 +1523,8 @@ retry:
 		}
 	}
 	if (!alive) {
-		async_send_proc(ckp, ckp->connector, "reject");
-		async_send_proc(ckp, ckp->stratifier, "dropall");
+		send_proc(ckp->connector, "reject");
+		send_proc(ckp->stratifier, "dropall");
 		LOGWARNING("Failed to connect to any servers as proxy, retrying in 5s!");
 		sleep(5);
 		goto retry;
@@ -1544,7 +1543,7 @@ retry:
 		create_pthread(&alive->pth_psend, proxy_send, alive);
 	}
 out:
-	async_send_proc(ckp, ckp->connector, alive ? "accept" : "reject");
+	send_proc(ckp->connector, alive ? "accept" : "reject");
 	return alive;
 }
 
@@ -1553,8 +1552,8 @@ static void kill_proxy(ckpool_t *ckp, proxy_instance_t *proxi)
 	notify_instance_t *ni, *tmp;
 	connsock_t *cs;
 
-	async_send_proc(ckp, ckp->stratifier, "reconnect");
-	async_send_proc(ckp, ckp->connector, "reject");
+	send_proc(ckp->stratifier, "reconnect");
+	send_proc(ckp->connector, "reject");
 
 	if (!proxi) // This shouldn't happen
 		return;
@@ -1604,8 +1603,8 @@ reconnect:
 	/* We've just subscribed and authorised so tell the stratifier to
 	 * retrieve the first subscription. */
 	if (!ckp->passthrough) {
-		async_send_proc(ckp, ckp->stratifier, "subscribe");
-		async_send_proc(ckp, ckp->stratifier, "notify");
+		send_proc(ckp->stratifier, "subscribe");
+		send_proc(ckp->stratifier, "notify");
 		proxi->notified = false;
 	}
 
@@ -1793,7 +1792,7 @@ static void server_watchdog(ckpool_t *ckp, server_instance_t *cursi)
 			break;
 	}
 	if (alive)
-		async_send_proc(ckp, ckp->generator, "reconnect");
+		send_proc(ckp->generator, "reconnect");
 }
 
 static void proxy_watchdog(ckpool_t *ckp, server_instance_t *cursi)
@@ -1839,7 +1838,7 @@ static void proxy_watchdog(ckpool_t *ckp, server_instance_t *cursi)
 			break;
 	}
 	if (alive)
-		async_send_proc(ckp, ckp->generator, "reconnect");
+		send_proc(ckp->generator, "reconnect");
 }
 
 
@@ -1852,8 +1851,6 @@ int generator(proc_instance_t *pi)
 	LOGWARNING("%s generator starting", ckp->name);
 	gdata = ckzalloc(sizeof(gdata_t));
 	ckp->data = gdata;
-	/* Generator only requires one work queue */
-	ckp->ckwqs = gdata->ckwqs = create_ckwqs(ckp, "gen", 1);
 	if (ckp->proxy) {
 		gdata->srvchk = create_ckmsgq(ckp, "prxchk", &proxy_watchdog);
 		ret = proxy_mode(ckp, pi);

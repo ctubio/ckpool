@@ -22,22 +22,13 @@
 struct ckpool_instance;
 typedef struct ckpool_instance ckpool_t;
 
-typedef struct ckmsg ckmsg_t;
-
 struct ckmsg {
-	ckmsg_t *next;
-	ckmsg_t *prev;
+	struct ckmsg *next;
+	struct ckmsg *prev;
 	void *data;
 };
 
-typedef struct ckwqmsg ckwqmsg_t;
-
-struct ckwqmsg {
-	ckwqmsg_t *next;
-	ckwqmsg_t *prev;
-	void *data;
-	void (*func)(ckpool_t *, void *);
-};
+typedef struct ckmsg ckmsg_t;
 
 struct ckmsgq {
 	ckpool_t *ckp;
@@ -51,18 +42,6 @@ struct ckmsgq {
 };
 
 typedef struct ckmsgq ckmsgq_t;
-
-struct ckwq {
-	ckpool_t *ckp;
-	char name[16];
-	pthread_t pth;
-	mutex_t *lock;
-	pthread_cond_t *cond;
-	ckwqmsg_t *wqmsgs;
-	int64_t messages;
-};
-
-typedef struct ckwq ckwq_t;
 
 struct proc_instance {
 	ckpool_t *ckp;
@@ -213,8 +192,6 @@ struct ckpool_instance {
 
 	/* Private data for each process */
 	void *data;
-	/* Private generic workqueues if this process has them */
-	ckwq_t *ckwqs;
 };
 
 #ifdef USE_CKDB
@@ -227,9 +204,7 @@ struct ckpool_instance {
 
 ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
 ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, const int count);
-ckwq_t *create_ckwqs(ckpool_t *ckp, const char *name, const int count);
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
-void ckwq_add(ckwq_t *ckwq, const void *func, void *data);
 bool ckmsgq_empty(ckmsgq_t *ckmsgq);
 
 ckpool_t *global_ckp;
@@ -239,8 +214,6 @@ void empty_buffer(connsock_t *cs);
 int read_socket_line(connsock_t *cs, const int timeout);
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
-void _async_send_proc(ckpool_t *ckp, proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
-#define async_send_proc(ckp, pi, msg) _async_send_proc(ckp, pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_ckdb(const ckpool_t *ckp, const char *msg, const char *file, const char *func, const int line);

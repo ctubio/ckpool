@@ -134,39 +134,6 @@ static void *ckmsg_queue(void *arg)
 	return NULL;
 }
 
-/* Generic workqueue function and message receiving and parsing thread */
-static void *ckwq_queue(void *arg)
-{
-	ckwq_t *ckwq = (ckwq_t *)arg;
-	ckpool_t *ckp = ckwq->ckp;
-
-	pthread_detach(pthread_self());
-	rename_proc(ckwq->name);
-
-	while (42) {
-		ckwqmsg_t *wqmsg;
-		tv_t now;
-		ts_t abs;
-
-		mutex_lock(ckwq->lock);
-		tv_time(&now);
-		tv_to_ts(&abs, &now);
-		abs.tv_sec++;
-		if (!ckwq->wqmsgs)
-			cond_timedwait(ckwq->cond, ckwq->lock, &abs);
-		wqmsg = ckwq->wqmsgs;
-		if (wqmsg)
-			DL_DELETE(ckwq->wqmsgs, wqmsg);
-		mutex_unlock(ckwq->lock);
-
-		if (!wqmsg)
-			continue;
-		wqmsg->func(ckp, wqmsg->data);
-		free(wqmsg);
-	}
-	return NULL;
-}
-
 ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func)
 {
 	ckmsgq_t *ckmsgq = ckzalloc(sizeof(ckmsgq_t));
@@ -207,29 +174,6 @@ ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, cons
 	return ckmsgq;
 }
 
-ckwq_t *create_ckwqs(ckpool_t *ckp, const char *name, const int count)
-{
-	ckwq_t *ckwq = ckzalloc(sizeof(ckwq_t) * count);
-	mutex_t *lock;
-	pthread_cond_t *cond;
-	int i;
-
-	lock = ckalloc(sizeof(mutex_t));
-	cond = ckalloc(sizeof(pthread_cond_t));
-	mutex_init(lock);
-	cond_init(cond);
-
-	for (i = 0; i < count; i++) {
-		snprintf(ckwq[i].name, 15, "%.6swq%d", name, i);
-		ckwq[i].ckp = ckp;
-		ckwq[i].lock = lock;
-		ckwq[i].cond = cond;
-		create_pthread(&ckwq[i].pth, ckwq_queue, &ckwq[i]);
-	}
-
-	return ckwq;
-}
-
 /* Generic function for adding messages to a ckmsgq linked list and signal the
  * ckmsgq parsing thread to wake up and process it. */
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
@@ -241,22 +185,8 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 	mutex_lock(ckmsgq->lock);
 	ckmsgq->messages++;
 	DL_APPEND(ckmsgq->msgs, msg);
-	pthread_cond_broadcast(ckmsgq->cond);
+	pthread_cond_signal(ckmsgq->cond);
 	mutex_unlock(ckmsgq->lock);
-}
-
-void ckwq_add(ckwq_t *ckwq, const void *func, void *data)
-{
-	ckwqmsg_t *wqmsg = ckalloc(sizeof(ckwqmsg_t));
-
-	wqmsg->func = func;
-	wqmsg->data = data;
-
-	mutex_lock(ckwq->lock);
-	ckwq->messages++;
-	DL_APPEND(ckwq->wqmsgs, wqmsg);
-	pthread_cond_broadcast(ckwq->cond);
-	mutex_unlock(ckwq->lock);
 }
 
 /* Return whether there are any messages queued in the ckmsgq linked list. */
@@ -568,13 +498,31 @@ out:
 
 static void childsighandler(const int sig);
 
-/* Send a single message to a process instance when there will be no response,
- * closing the socket immediately. */
-void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+struct proc_message {
+	proc_instance_t *pi;
+	char *msg;
+	const char *file;
+	const char *func;
+	int line;
+};
+
+/* Send all one way messages asynchronously so we can wait till the receiving
+ * end closes the socket to ensure all messages are received but no deadlocks
+ * can occur with 2 processes waiting for each other's socket closure. */
+void *async_send_proc(void *arg)
 {
+	struct proc_message *pm = (struct proc_message *)arg;
+	proc_instance_t *pi = pm->pi;
+	char *msg = pm->msg;
+	const char *file = pm->file;
+	const char *func = pm->func;
+	int line = pm->line;
+
 	char *path = pi->us.path;
 	bool ret = false;
 	int sockd;
+
+	pthread_detach(pthread_self());
 
 	if (unlikely(!path || !strlen(path))) {
 		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
@@ -586,14 +534,16 @@ void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 	}
 	/* At startup the pid fields are not set up before some processes are
 	 * forked so they never inherit them. */
-	if (unlikely(!pi->pid))
+	if (unlikely(!pi->pid)) {
 		pi->pid = get_proc_pid(pi);
-	if (!pi->pid) {
-		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
-		return;
+		if (!pi->pid) {
+			LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
+			goto out_nofail;
+		}
 	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
-		LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
+		LOGALERT("Attempting to send message %s to non existent process %s pid %d",
+			 msg, pi->processname, pi->pid);
 		goto out;
 	}
 	sockd = open_unix_client(path);
@@ -613,41 +563,25 @@ out:
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
-}
-
-struct proc_message {
-	proc_instance_t *pi;
-	char *msg;
-	const char *file;
-	const char *func;
-	int line;
-};
-
-static void asp_send(ckpool_t __maybe_unused *ckp, struct proc_message *pm)
-{
-	_send_proc(pm->pi, pm->msg, pm->file, pm->func, pm->line);
-	free(pm->msg);
+out_nofail:
+	free(msg);
 	free(pm);
+	return NULL;
 }
 
-/* Fore sending asynchronous messages to another process, the sending process
- * must have ckwqs of its own, referenced in the ckpool structure */
-void _async_send_proc(ckpool_t *ckp, proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+/* Send a single message to a process instance when there will be no response,
+ * closing the socket immediately. */
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	struct proc_message *pm;
+	struct proc_message *pm = ckalloc(sizeof(struct proc_message));
+	pthread_t pth;
 
-	if (unlikely(!ckp->ckwqs)) {
-		LOGALERT("Workqueues not set up in async_send_proc!");
-		_send_proc(pi, msg, file, func, line);
-		return;
-	}
-	pm = ckzalloc(sizeof(struct proc_message));
 	pm->pi = pi;
 	pm->msg = strdup(msg);
 	pm->file = file;
 	pm->func = func;
 	pm->line = line;
-	ckwq_add(ckp->ckwqs, &asp_send, pm);
+	create_pthread(&pth, async_send_proc, pm);
 }
 
 /* Send a single message to a process instance and retrieve the response, then
