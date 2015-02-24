@@ -1734,17 +1734,20 @@ retry:
 	return NULL;
 }
 
-/* Allow up to 42 recruit requests to accumulate */
-static void recruit_subproxy(proxy_instance_t *proxi)
+/* Queue up to the requested amount */
+static void recruit_subproxy(proxy_instance_t *proxi, const char *buf)
 {
 	bool recruit = false;
+	int recruits = 1;
 	pthread_t pth;
 
+	sscanf(buf, "recruit=%d", &recruits);
+
 	mutex_lock(&proxi->proxy_lock);
-	if (!proxi->recruit++ > 0)
+	if (!proxi->recruit)
 		recruit = true;
-	else if (proxi->recruit > 42)
-		proxi->recruit = 42;
+	if (proxi->recruit < recruits)
+		proxi->recruit = recruits;
 	mutex_unlock(&proxi->proxy_lock);
 
 	if (recruit)
@@ -1972,8 +1975,7 @@ static void *proxy_recv(void *arg)
 					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 						   subproxy->low_id, subproxy->si->url);
 					break;
-				} else
-					recruit_subproxy(proxi);
+				}
 			}
 			continue;
 		}
@@ -2115,7 +2117,7 @@ retry:
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
 	} else if (cmdmatch(buf, "recruit")) {
-		recruit_subproxy(proxi);
+		recruit_subproxy(proxi, buf);
 	} else if (cmdmatch(buf, "dropproxy")) {
 		drop_proxy(gdata, buf);
 	} else if (ckp->passthrough) {

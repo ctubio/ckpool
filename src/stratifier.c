@@ -1136,10 +1136,13 @@ out_unlock:
 
 static void reconnect_client(sdata_t *sdata, stratum_instance_t *client);
 
-static void generator_recruit(ckpool_t *ckp)
+static void generator_recruit(ckpool_t *ckp, const int recruits)
 {
-	LOGINFO("Stratifer requesting more proxies from generator");
-	send_generator(ckp, "recruit", GEN_PRIORITY);
+	char buf[256];
+
+	sprintf(buf, "recruit=%d", recruits);
+	LOGINFO("Stratifer requesting %d more proxies from generator", recruits);
+	send_generator(ckp, buf, GEN_PRIORITY);
 }
 
 /* Find how much headroom we have and connect up to that many clients that are
@@ -1160,9 +1163,9 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id)
 			continue;
-		reconnects++;
 		if (headroom-- < 1)
-			break;
+			continue;
+		reconnects++;
 		if (client->reconnect)
 			reconnect_client(sdata, client);
 		else
@@ -1173,9 +1176,9 @@ static void reconnect_clients(sdata_t *sdata)
 	if (reconnects) {
 		LOGNOTICE("%d clients flagged for reconnect to proxy %ld", reconnects,
 			  proxy->id);
-		if (headroom < 42)
-			generator_recruit(sdata->ckp);
 	}
+	if (headroom < 0)
+		generator_recruit(sdata->ckp, -headroom);
 }
 
 #if 0
@@ -1208,9 +1211,9 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		reconnects++;
 		if (headroom-- < 1)
-			break;
+			continue;
+		reconnects++;
 		if (client->reconnect)
 			reconnect_client(sdata, client);
 		else
@@ -1221,9 +1224,9 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	if (reconnects) {
 		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld:%d", reconnects,
 			  id, subid);
-		if (headroom < 42)
-			generator_recruit(sdata->ckp);
 	}
+	if (headroom < 0)
+		generator_recruit(sdata->ckp, -headroom);
 }
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
@@ -2239,11 +2242,11 @@ static void lazy_reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 	headroom = current_headroom(sdata, &proxy);
 	if (!proxy)
 		return;
-	if (headroom > 0) {
+	if (headroom-- > 0) {
 		LOGNOTICE("Reconnecting client %"PRId64, client->id);
 		reconnect_client(sdata, client);
 	} else {
-		generator_recruit(sdata->ckp);
+		generator_recruit(sdata->ckp, -headroom);
 		if (!client->reconnect) {
 			LOGNOTICE("Flagging client %"PRId64, client->id);
 			client->reconnect = true;
@@ -2574,8 +2577,8 @@ static sdata_t *select_sdata(ckpool_t *ckp, sdata_t *ckp_sdata)
 	}
 	mutex_unlock(&ckp_sdata->proxy_lock);
 
-	if (best_id != current->id || current->headroom < 42)
-		generator_recruit(ckp);
+	if (best_id != current->id || current->headroom < 2)
+		generator_recruit(ckp, 1);
 	if (best_id == ckp_sdata->proxy_count) {
 		LOGNOTICE("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
