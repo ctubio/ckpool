@@ -1039,6 +1039,7 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newsi = ckzalloc(sizeof(server_instance_t));
 
 	mutex_lock(&gdata->lock);
+	HASH_DEL(gdata->proxies, proxi);
 	high_id = proxi->id >> 32; /* Use the high bits for the reconnect id */
 	high_id++;
 	high_id <<= 32;
