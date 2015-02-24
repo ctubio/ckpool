@@ -1997,11 +1997,6 @@ static void *proxy_recv(void *arg)
 			if (!parse_share(subproxy, cs->buf))
 				LOGWARNING("Unhandled stratum message: %s", cs->buf);
 		} while ((ret = read_socket_line(cs, 0)) > 0);
-		if (ret < 0) {
-			LOGNOTICE("Proxy %ld:%d %s failed to epoll/read_socket_line in proxy_recv",
-				  proxi->id, subproxy->subid, subproxy->si->url);
-			disable_subproxy(gdata, proxi, subproxy);
-		}
 	}
 
 	return NULL;
