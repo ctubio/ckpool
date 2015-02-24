@@ -320,7 +320,6 @@ struct proxy_base {
 
 	bool subscribed;
 	bool notified;
-	int64_t notify_id; /* What ID was the first notify from this proxy */
 
 	int64_t clients;
 	int64_t max_clients;
@@ -1270,7 +1269,6 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	} else
 		proxy = subproxy_by_id(sdata, id, subid);
 	dsdata = proxy->sdata;
-	proxy->notify_id = -1; /* Reset this so we can detect its first notify */
 
 	ck_wlock(&dsdata->workbase_lock);
 	proxy->subscribed = true;
@@ -1412,14 +1410,8 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %ld changed to %s", id, dsdata->lastswaphash);
 	}
 
-	/* Is this the first notify from this proxy? If so, we know we have
-	 * more room and can reconnect clients if we're a subproxy of the
-	 * current proxy. */
-	if (proxy->notify_id == -1) {
-		proxy->notify_id = wb->id;
-		if (proxy->parent == current_proxy(sdata))
-			reconnect_clients(sdata);
-	}
+	if (proxy->parent == current_proxy(sdata))
+		reconnect_clients(sdata);
 	clean |= new_block;
 	LOGINFO("Proxy %ld:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
@@ -2226,8 +2218,6 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 	mutex_unlock(&sdata->proxy_lock);
 
 	LOGNOTICE("Stratifier setting active proxy to %ld", id);
-	if (proxy->notify_id != -1)
-		reconnect_clients(sdata);
 }
 
 static void dead_proxy(sdata_t *sdata, const char *buf)
