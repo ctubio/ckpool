@@ -1045,6 +1045,7 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	proxy_t *subproxy = ckzalloc(sizeof(proxy_t));
 
 	subproxy->id = proxy->id;
+	subproxy->low_id = proxy->low_id;
 	subproxy->subid = subid;
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
 	subproxy->sdata = duplicate_sdata(sdata);
