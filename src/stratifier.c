@@ -1163,10 +1163,9 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id)
 			continue;
-		if (--headroom < 0)
-			break;
+		headroom--;
 		reconnects++;
-		if (client->reconnect)
+		if (client->reconnect && headroom > 0)
 			reconnect_client(sdata, client);
 		else
 			client->reconnect = true;
@@ -1174,12 +1173,11 @@ static void reconnect_clients(sdata_t *sdata)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("Flagged %d clients for reconnect to proxy %d", reconnects,
+		LOGNOTICE("%d clients flagged for reconnect to proxy %d", reconnects,
 			  proxy->id);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
-	} else if (headroom < 0)
-			generator_recruit(sdata->ckp);
+	}
 }
 
 static proxy_t *current_proxy(sdata_t *sdata)
@@ -1197,13 +1195,20 @@ static void dead_parent_proxy(sdata_t *sdata, const int id)
 {
 	stratum_instance_t *client, *tmp;
 	int reconnects = 0;
+	int64_t headroom;
+	proxy_t *proxy;
+
+	headroom = current_headroom(sdata, &proxy);
+	if (!proxy)
+		return;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid)
 			continue;
+		headroom--;
 		reconnects++;
-		if (client->reconnect)
+		if (client->reconnect && headroom > 0)
 			reconnect_client(sdata, client);
 		else
 			client->reconnect = true;
@@ -1211,8 +1216,10 @@ static void dead_parent_proxy(sdata_t *sdata, const int id)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("Flagged %d clients to reconnect from dead proxy %d",
+		LOGNOTICE("%d clients flagged to reconnect from dead proxy %d",
 			  reconnects, id);
+		if (headroom < 42)
+			generator_recruit(sdata->ckp);
 	}
 }
 
@@ -2253,10 +2260,9 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		if (--headroom < 0)
-			break;
+		headroom--;
 		reconnects++;
-		if (client->reconnect)
+		if (client->reconnect && headroom > 0)
 			reconnect_client(sdata, client);
 		else
 			client->reconnect = true;
@@ -2264,12 +2270,11 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("Flagged %d clients to reconnect from dead proxy %d:%d", reconnects,
+		LOGNOTICE("%d clients flagged to reconnect from dead proxy %d:%d", reconnects,
 			  id, subid);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
-	} else if (headroom < 0)
-			generator_recruit(sdata->ckp);
+	}
 }
 
 /* Must hold a reference */
