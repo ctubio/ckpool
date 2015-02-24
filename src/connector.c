@@ -382,7 +382,6 @@ void *receiver(void *arg)
 	cdata_t *cdata = (cdata_t *)arg;
 	struct epoll_event event;
 	uint64_t serverfds, i;
-	time_t start_t;
 	int ret, epfd;
 
 	rename_proc("creceiver");
@@ -408,7 +407,6 @@ void *receiver(void *arg)
 
 	while (!cdata->accept)
 		cksleep_ms(1);
-	start_t = time(NULL);
 
 	while (42) {
 		client_instance_t *client;
