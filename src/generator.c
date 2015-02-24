@@ -136,6 +136,7 @@ struct proxy_instance {
 	mutex_t proxy_lock; /* Lock protecting hashlist of proxies */
 	proxy_instance_t *parent; /* Parent proxy of subproxies */
 	proxy_instance_t *subproxies; /* Hashlist of subproxies of this proxy */
+	int64_t clients_per_proxy; /* Max number of clients of this proxy */
 	int subproxy_count; /* Number of subproxies */
 };
 
@@ -564,6 +565,8 @@ static inline bool parent_proxy(proxy_instance_t *proxy)
 	return (proxy->parent == proxy);
 }
 
+static void recruit_subproxies(proxy_instance_t *proxi, const int recruits);
+
 static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *val = NULL, *res_val, *notify_val, *tmp;
@@ -663,13 +666,14 @@ retry:
 	proxi->nonce2len = size;
 	if (parent_proxy(proxi)) {
 		/* Set the number of clients per proxy on the parent proxy */
-		int64_t clients_per_proxy = 1ll << ((size - 3) * 8);
-
+		proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
 		LOGNOTICE("Proxy %ld:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
-			  clients_per_proxy);
+			  proxi->clients_per_proxy);
+		if (proxi->clients_per_proxy == 1)
+			recruit_subproxies(proxi, 41);
 	}
 
-	LOGINFO("Found notify for proxy %ld:%d with enonce %s nonce2len %d", proxi->id,
+	LOGNOTICE("Found notify for new proxy %ld:%d with enonce %s nonce2len %d", proxi->id,
 		proxi->subid, proxi->enonce1, proxi->nonce2len);
 	ret = true;
 
