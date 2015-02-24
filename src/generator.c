@@ -85,6 +85,7 @@ struct proxy_instance {
 	server_instance_t *si;
 	bool passthrough;
 	int64_t id; /* Proxy server id*/
+	int low_id; /* Low bits of id */
 	int subid; /* Subproxy id */
 
 	const char *auth;
@@ -653,8 +654,8 @@ retry:
 	}
 	if (size < 3) {
 		if (!proxi->subid) {
-			LOGWARNING("Proxy %ld %s Nonce2 length %d too small for fast miners",
-				   proxi->id, proxi->si->url, size);
+			LOGWARNING("Proxy %d %s Nonce2 length %d too small for fast miners",
+				   proxi->low_id, proxi->si->url, size);
 		} else {
 			LOGNOTICE("Proxy %ld:%d Nonce2 length %d too small for fast miners",
 				   proxi->id, proxi->subid, size);
@@ -973,26 +974,10 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 		store_proxy(gdata, subproxy);
 }
 
-/* If the parent is no longer in use due to reconnect, we shouldn't use any of
- * the child subproxies. */
-static void drop_subproxies(proxy_instance_t *proxi)
-{
-	proxy_instance_t *subproxy, *tmp;
-
-	mutex_lock(&proxi->proxy_lock);
-	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
-		if (!parent_proxy(subproxy)) {
-			send_stratifier_deadproxy(proxi->ckp, proxi->id, subproxy->subid);
-			subproxy->disabled = true;
-			Close(subproxy->cs->fd);
-		}
-	}
-	mutex_unlock(&proxi->proxy_lock);
-}
-
 static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 {
 	server_instance_t *newsi, *si = proxi->si;
+	int64_t high_id, low_id, new_id;
 	proxy_instance_t *newproxi;
 	ckpool_t *ckp = proxi->ckp;
 	gdata_t *gdata = ckp->data;
@@ -1049,8 +1034,12 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newsi = ckzalloc(sizeof(server_instance_t));
 
 	mutex_lock(&gdata->lock);
-	newsi->id = si->id; /* Inherit the old connection's id */
-	ckp->servers[newsi->id] = newsi;
+	high_id = proxi->id >> 32; /* Use the high bits for the reconnect id */
+	high_id++;
+	high_id <<= 32;
+	low_id = proxi->id & 0x00000000FFFFFFFFll; /* Use the low bits for the master id */
+	new_id = high_id | low_id;
+	ckp->servers[low_id] = newsi;
 	newsi->url = url;
 	newsi->auth = strdup(si->auth);
 	newsi->pass = strdup(si->pass);
@@ -1063,14 +1052,14 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->ckp = ckp;
 	newproxi->cs = &newsi->cs;
 	newproxi->cs->ckp = ckp;
-	newproxi->id = newsi->id;
+	newproxi->low_id = low_id;
+	newproxi->id = new_id;
 	newproxi->subproxy_count = ++proxi->subproxy_count;
-	HASH_REPLACE_I64(gdata->proxies, id, newproxi, proxi);
+	HASH_ADD_I64(gdata->proxies, id, newproxi);
 	mutex_unlock(&gdata->lock);
 
-	/* Old proxy memory is basically lost here */
+	proxi->disabled = true;
 	prepare_proxy(newproxi);
-	drop_subproxies(proxi);
 out:
 	return ret;
 }
@@ -1247,21 +1236,21 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 
 	val = json_msg_result(buf, &res_val, &err_val);
 	if (!val) {
-		LOGWARNING("Proxy %ld:%d %s failed to get a json result in auth_stratum, got: %s",
-			   proxi->id, proxi->subid, proxi->si->url, buf);
+		LOGWARNING("Proxy %d:%d %s failed to get a json result in auth_stratum, got: %s",
+			   proxi->low_id, proxi->subid, proxi->si->url, buf);
 		goto out;
 	}
 
 	if (err_val && !json_is_null(err_val)) {
-		LOGWARNING("Proxy %ld:%d %s failed to authorise in auth_stratum due to err_val, got: %s",
-			   proxi->id, proxi->subid, proxi->si->url, buf);
+		LOGWARNING("Proxy %d:%d %s failed to authorise in auth_stratum due to err_val, got: %s",
+			   proxi->low_id, proxi->subid, proxi->si->url, buf);
 		goto out;
 	}
 	if (res_val) {
 		ret = json_is_true(res_val);
 		if (!ret) {
-			LOGWARNING("Proxy %ld:%d %s failed to authorise in auth_stratum, got: %s",
-				   proxi->id, proxi->subid, proxi->si->url, buf);
+			LOGWARNING("Proxy %d:%d %s failed to authorise in auth_stratum, got: %s",
+				   proxi->low_id, proxi->subid, proxi->si->url, buf);
 			goto out;
 		}
 	} else {
@@ -1764,8 +1753,8 @@ static void *passthrough_recv(void *arg)
 
 	if (proxy_alive(ckp, si, proxi, cs, false, epfd)) {
 		reconnect_generator(ckp);
-		LOGWARNING("Proxy %ld:%s connection established",
-			   proxi->id, proxi->si->url);
+		LOGWARNING("Proxy %d:%s connection established",
+			   proxi->low_id, proxi->si->url);
 	}
 	alive = proxi->alive;
 
@@ -1970,7 +1959,7 @@ static void setup_proxies(ckpool_t *ckp, gdata_t *gdata)
 
 		si = ckp->servers[i];
 		proxi = si->data;
-		proxi->id = i;
+		proxi->id = proxi->low_id = i;
 		HASH_ADD_I64(gdata->proxies, id, proxi);
 		if (ckp->passthrough) {
 			create_pthread(&proxi->pth_precv, passthrough_recv, proxi);
@@ -1991,8 +1980,10 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 
 		mutex_lock(&gdata->lock);
 		HASH_ITER(hh, gdata->proxies, proxi, tmp) {
+			if (proxi->disabled)
+				continue;
 			if (proxi->alive || subproxies_alive(proxi)) {
-				if (!ret || proxi->id < ret->id)
+				if (!ret || proxi->low_id < ret->low_id)
 					ret = proxi;
 			}
 		}
@@ -2029,8 +2020,8 @@ reconnect:
 		proxi = cproxy;
 		if (!ckp->passthrough) {
 			connsock_t *cs = proxi->cs;
-			LOGWARNING("Successfully connected to proxy %ld %s:%s as proxy",
-				   proxi->id, cs->url, cs->port);
+			LOGWARNING("Successfully connected to proxy %d %s:%s as proxy",
+				   proxi->low_id, cs->url, cs->port);
 			dealloc(buf);
 			ASPRINTF(&buf, "proxy=%ld", proxi->id);
 			async_send_proc(ckp, ckp->stratifier, buf);
@@ -2134,7 +2125,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	for (i = 0; i < ckp->proxies; i++) {
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
 		si = ckp->servers[i];
-		si->id = i;
 		si->url = strdup(ckp->proxyurl[i]);
 		si->auth = strdup(ckp->proxyauth[i]);
 		si->pass = strdup(ckp->proxypass[i]);

@@ -306,6 +306,7 @@ struct proxy_base {
 	proxy_t *next; /* For retired subproxies */
 	proxy_t *prev;
 	int64_t id;
+	int low_id;
 	int subid;
 
 	double diff;
@@ -1027,6 +1028,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int64_t id)
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
 
 	proxy->id = id;
+	proxy->low_id = id & 0xFFFFFFFF;
 	proxy->sdata = duplicate_sdata(sdata);
 	proxy->sdata->subproxy = proxy;
 	proxy->sdata->verbose = true;
@@ -1191,20 +1193,22 @@ static proxy_t *current_proxy(sdata_t *sdata)
 	return proxy;
 }
 
-static void dead_parent_proxy(sdata_t *sdata, const int64_t id)
+static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 {
 	stratum_instance_t *client, *tmp;
 	int reconnects = 0;
 	int64_t headroom;
 	proxy_t *proxy;
 
+	proxy = existing_subproxy(sdata, id, subid);
+	if (proxy)
+		proxy->dead = true;
+	LOGINFO("Stratifier dropping clients from proxy %ld:%d", id, subid);
 	headroom = current_headroom(sdata, &proxy);
-	if (!proxy)
-		return;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->proxyid != id || client->subproxyid)
+		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
 		headroom--;
 		reconnects++;
@@ -1216,55 +1220,18 @@ static void dead_parent_proxy(sdata_t *sdata, const int64_t id)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld",
-			  reconnects, id);
+		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld:%d", reconnects,
+			  id, subid);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
-	}
-}
-
-static void new_proxy(sdata_t *sdata, const int64_t id)
-{
-	proxy_t *proxy, *subproxy, *tmp, *proxy_list = NULL;
-	bool exists = false, current = false;
-
-	mutex_lock(&sdata->proxy_lock);
-	HASH_FIND_I64(sdata->proxies, &id, proxy);
-	if (proxy) {
-		exists = true;
-		HASH_DEL(sdata->proxies, proxy);
-		DL_APPEND(sdata->retired_proxies, proxy);
-		if (proxy == sdata->proxy)
-			current = true;
-		proxy_list = proxy->subproxies;
-		HASH_DELETE(sh, proxy_list, proxy);
-		proxy->subproxies = NULL;
-	}
-	proxy = __generate_proxy(sdata, id);
-	if (current)
-		sdata->proxy = proxy;
-	/* The old proxy had subproxies on its list so steal its list and add
-	 * ourselves to it. */
-	if (proxy_list) {
-		HASH_DELETE(sh, proxy->subproxies, proxy);
-		proxy->subproxies = proxy_list;
-		HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
-		HASH_ITER(sh, proxy->subproxies, subproxy, tmp)
-			subproxy->parent = proxy;
-	}
-	mutex_unlock(&sdata->proxy_lock);
-
-	if (exists) {
-		LOGNOTICE("Stratifier replaced old proxy %ld", id);
-		dead_parent_proxy(sdata, id);
 	}
 }
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
+	proxy_t *proxy, *old = NULL;
 	const char *buf;
-	proxy_t *proxy;
 	int64_t id = 0;
 	int subid = 0;
 	json_t *val;
@@ -1289,13 +1256,19 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		return;
 	}
 
-	if (!subid) {
-		new_proxy(sdata, id);
+	if (!subid)
 		LOGNOTICE("Got updated subscribe for proxy %ld", id);
-	} else
+	else
 		LOGINFO("Got updated subscribe for proxy %ld:%d", id, subid);
 
-	proxy = subproxy_by_id(sdata, id, subid);
+	/* Is this a replacement for an existing proxy id? */
+	old = existing_subproxy(sdata, id, subid);
+	if (old) {
+		dead_proxyid(sdata, id, subid);
+		proxy = old;
+		proxy->dead = false;
+	} else
+		proxy = subproxy_by_id(sdata, id, subid);
 	dsdata = proxy->sdata;
 
 	ck_wlock(&dsdata->workbase_lock);
@@ -1322,6 +1295,12 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	proxy->clients = 0;
 	proxy->enonce1u.u64 = 0;
 	ck_wunlock(&dsdata->workbase_lock);
+
+	/* Is this a replacement proxy for the current one */
+	mutex_lock(&sdata->proxy_lock);
+	if (sdata->proxy && sdata->proxy->low_id == proxy->low_id)
+		sdata->proxy = proxy;
+	mutex_unlock(&sdata->proxy_lock);
 
 	if (subid) {
 		LOGINFO("Upstream pool %ld:%d extranonce2 length %d, max proxy clients %"PRId64,
@@ -2246,38 +2225,11 @@ static void set_proxy(sdata_t *sdata, const char *buf)
 
 static void dead_proxy(sdata_t *sdata, const char *buf)
 {
-	stratum_instance_t *client, *tmp;
-	int64_t headroom, id = 0;
-	int reconnects = 0;
-	proxy_t *proxy;
+	int64_t id = 0;
 	int subid = 0;
 
 	sscanf(buf, "deadproxy=%ld:%d", &id, &subid);
-	proxy = existing_subproxy(sdata, id, subid);
-	if (proxy)
-		proxy->dead = true;
-	LOGNOTICE("Stratifier dropping clients from proxy %ld:%d", id, subid);
-	headroom = current_headroom(sdata, &proxy);
-
-	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->proxyid != id || client->subproxyid != subid)
-			continue;
-		headroom--;
-		reconnects++;
-		if (client->reconnect && headroom > 0)
-			reconnect_client(sdata, client);
-		else
-			client->reconnect = true;
-	}
-	ck_runlock(&sdata->instance_lock);
-
-	if (reconnects) {
-		LOGNOTICE("%d clients flagged to reconnect from dead proxy %ld:%d", reconnects,
-			  id, subid);
-		if (headroom < 42)
-			generator_recruit(sdata->ckp);
-	}
+	dead_proxyid(sdata, id, subid);
 }
 
 /* Must hold a reference */
