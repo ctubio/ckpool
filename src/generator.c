@@ -965,6 +965,9 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	if (parent_proxy(subproxy))
 		return;
 
+	if (proxi->alive && proxi->clients_per_proxy == 1 && HASH_CNT(sh, proxi->subproxies) < 42)
+		recruit_subproxies(proxi, 1);
+
 	mutex_lock(&proxi->proxy_lock);
 	subproxy->disabled = true;
 	/* Make sure subproxy is still in the list */
@@ -1993,7 +1996,12 @@ static void *proxy_recv(void *arg)
 			/* If it's not a method it should be a share result */
 			if (!parse_share(subproxy, cs->buf))
 				LOGWARNING("Unhandled stratum message: %s", cs->buf);
-		} while (read_socket_line(cs, 0) > 0);
+		} while ((ret = read_socket_line(cs, 0)) > 0);
+		if (ret < 0) {
+			LOGNOTICE("Proxy %ld:%d %s failed to epoll/read_socket_line in proxy_recv",
+				  proxi->id, subproxy->subid, subproxy->si->url);
+			disable_subproxy(gdata, proxi, subproxy);
+		}
 	}
 
 	return NULL;
