@@ -1414,7 +1414,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	current_id = current->id;
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (!proxy->subid && proxy->id == current_id)
+	if (proxy->id == current_id)
 		reconnect_clients(sdata);
 	clean |= new_block;
 	LOGINFO("Proxy %ld:%d broadcast updated stratum notify with%s clean", id,
