@@ -1725,7 +1725,8 @@ retry:
 	if (alive) {
 		if (--parent->recruit > 0)
 			recruit = true;
-	}
+	} else /* Reset so the next request will try again */
+		parent->recruit = 0;
 	mutex_unlock(&parent->proxy_lock);
 
 	if (recruit)
