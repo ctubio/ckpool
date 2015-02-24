@@ -1163,7 +1163,8 @@ static void reconnect_clients(sdata_t *sdata)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id)
 			continue;
-		headroom--;
+		if (--headroom < 0)
+			break;
 		reconnects++;
 		if (client->reconnect)
 			reconnect_client(sdata, client);
@@ -1177,7 +1178,8 @@ static void reconnect_clients(sdata_t *sdata)
 			  proxy->id);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
-	}
+	} else if (headroom < 0)
+			generator_recruit(sdata->ckp);
 }
 
 static proxy_t *current_proxy(sdata_t *sdata)
@@ -2251,7 +2253,8 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		headroom--;
+		if (--headroom < 0)
+			break;
 		reconnects++;
 		if (client->reconnect)
 			reconnect_client(sdata, client);
@@ -2265,7 +2268,8 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 			  id, subid);
 		if (headroom < 42)
 			generator_recruit(sdata->ckp);
-	}
+	} else if (headroom < 0)
+			generator_recruit(sdata->ckp);
 }
 
 /* Must hold a reference */
