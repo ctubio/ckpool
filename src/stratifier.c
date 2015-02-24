@@ -281,7 +281,6 @@ struct stratum_instance {
 	proxy_t *proxy; /* Proxy this is bound to in proxy mode */
 	int64_t proxyid; /* Which proxy id  */
 	int subproxyid; /* Which subproxy */
-	int64_t notify_id; /* Which notify_id from the subproxy did we join */
 };
 
 struct share {
@@ -1271,6 +1270,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	} else
 		proxy = subproxy_by_id(sdata, id, subid);
 	dsdata = proxy->sdata;
+	proxy->notify_id = -1; /* Reset this so we can detect its first notify */
 
 	ck_wlock(&dsdata->workbase_lock);
 	proxy->subscribed = true;
@@ -1412,8 +1412,14 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %ld changed to %s", id, dsdata->lastswaphash);
 	}
 
-	if (parent_proxy(proxy) && proxy == current_proxy(sdata))
-		reconnect_clients(sdata);
+	/* Is this the first notify from this proxy? If so, we know we have
+	 * more room and can reconnect clients if we're a subproxy of the
+	 * current proxy. */
+	if (proxy->notify_id == -1) {
+		proxy->notify_id = wb->id;
+		if (proxy->parent == current_proxy(sdata))
+			reconnect_clients(sdata);
+	}
 	clean |= new_block;
 	LOGINFO("Proxy %ld:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
