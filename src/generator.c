@@ -1840,8 +1840,8 @@ static void *proxy_recv(void *arg)
 	}
 
 	if (proxy_alive(ckp, si, proxi, cs, false, epfd)) {
-		LOGWARNING("Proxy %ld:%s connection established",
-			   proxi->id, proxi->si->url);
+		LOGWARNING("Proxy %d:%s connection established",
+			   proxi->low_id, proxi->si->url);
 	}
 	alive = proxi->alive;
 	reconnect_generator(ckp);
@@ -1858,8 +1858,8 @@ static void *proxy_recv(void *arg)
 			while (!subproxies_alive(proxi)) {
 				reconnect_proxy(proxi);
 				if (alive) {
-					LOGWARNING("Proxy %ld:%s failed, attempting reconnect",
-						   proxi->id, proxi->si->url);
+					LOGWARNING("Proxy %d:%s failed, attempting reconnect",
+						   proxi->low_id, proxi->si->url);
 					alive = false;
 					reconnect_generator(ckp);
 				}
@@ -1870,7 +1870,7 @@ static void *proxy_recv(void *arg)
 		/* Wait 30 seconds before declaring this upstream pool alive
 		 * to prevent switching to unstable pools. */
 		if (!alive && (!current_proxy(gdata) || time(NULL) - proxi->reconnect_time > 30)) {
-			LOGWARNING("Proxy %ld:%s recovered", proxi->id, proxi->si->url);
+			LOGWARNING("Proxy %d:%s recovered", proxi->low_id, proxi->si->url);
 			proxi->reconnect_time = 0;
 			reconnect_generator(ckp);
 			alive = true;
@@ -1920,8 +1920,8 @@ static void *proxy_recv(void *arg)
 				 * pool is up */
 				disable_subproxy(gdata, proxi, subproxy);
 				if (parent_proxy(subproxy)) {
-					LOGWARNING("Proxy %ld:%s reconnect issue, dropping existing connection",
-						   subproxy->id, subproxy->si->url);
+					LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
+						   subproxy->low_id, subproxy->si->url);
 					break;
 				} else
 					recruit_subproxy(proxi);
