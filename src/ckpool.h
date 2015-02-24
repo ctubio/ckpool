@@ -21,22 +21,13 @@
 
 typedef struct ckpool_instance ckpool_t;
 
-typedef struct ckmsg ckmsg_t;
-
 struct ckmsg {
-	ckmsg_t *next;
-	ckmsg_t *prev;
+	struct ckmsg *next;
+	struct ckmsg *prev;
 	void *data;
 };
 
-typedef struct ckwqmsg ckwqmsg_t;
-
-struct ckwqmsg {
-	ckwqmsg_t *next;
-	ckwqmsg_t *prev;
-	void *data;
-	void (*func)(ckpool_t *, void *);
-};
+typedef struct ckmsg ckmsg_t;
 
 struct ckmsgq {
 	ckpool_t *ckp;
@@ -50,18 +41,6 @@ struct ckmsgq {
 };
 
 typedef struct ckmsgq ckmsgq_t;
-
-struct ckwq {
-	ckpool_t *ckp;
-	char name[16];
-	pthread_t pth;
-	mutex_t *lock;
-	pthread_cond_t *cond;
-	ckwqmsg_t *wqmsgs;
-	int64_t messages;
-};
-
-typedef struct ckwq ckwq_t;
 
 struct proc_instance {
 	ckpool_t *ckp;
@@ -222,9 +201,7 @@ struct ckpool_instance {
 
 ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
 ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, const int count);
-ckwq_t *create_ckwqs(ckpool_t *ckp, const char *name, const int count);
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
-void ckwq_add(ckwq_t *ckwq, const void *func, void *data);
 bool ckmsgq_empty(ckmsgq_t *ckmsgq);
 
 ckpool_t *global_ckp;
