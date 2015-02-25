@@ -94,7 +94,6 @@ struct proxy_instance {
 	char *enonce1;
 	char *enonce1bin;
 	int nonce1len;
-	char *sessionid;
 	int nonce2len;
 
 	tv_t last_message;
@@ -102,7 +101,6 @@ struct proxy_instance {
 	double diff;
 	tv_t last_share;
 
-	bool no_sessionid; /* Doesn't support session id resume on subscribe */
 	bool no_params; /* Doesn't want any parameters on subscribe */
 
 	bool notified; /* Has this proxy received any notifies yet */
@@ -619,16 +617,6 @@ retry:
 		goto out;
 	}
 
-	/* Free up old data in place if we are re-subscribing */
-	old = proxi->sessionid;
-	proxi->sessionid = NULL;
-	if (!proxi->no_params && !proxi->no_sessionid && json_array_size(notify_val) > 1) {
-		/* Copy the session id if one exists. */
-		string = json_string_value(json_array_get(notify_val, 1));
-		if (string)
-			proxi->sessionid = strdup(string);
-	}
-	free(old);
 	tmp = json_array_get(res_val, 1);
 	if (!tmp || !json_is_string(tmp)) {
 		LOGWARNING("Failed to parse enonce1 in parse_subscribe");
@@ -693,14 +681,8 @@ static bool subscribe_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	json_t *req;
 
 retry:
-	/* Attempt to reconnect if the pool supports resuming */
-	if (proxi->sessionid) {
-		JSON_CPACK(req, "{s:i,s:s,s:[s,s]}",
-				"id", 0,
-				"method", "mining.subscribe",
-				"params", PACKAGE"/"VERSION, proxi->sessionid);
-	/* Then attempt to connect with just the client description */
-	} else if (!proxi->no_params) {
+	/* Attempt to connect with the client description */
+	if (!proxi->no_params) {
 		JSON_CPACK(req, "{s:i,s:s,s:[s]}",
 				"id", 0,
 				"method", "mining.subscribe",
@@ -728,16 +710,9 @@ retry:
 			   proxi->id, proxi->subid, proxi->si->url);
 		goto out;
 	}
-	if (proxi->sessionid) {
-		LOGINFO("Proxy %ld:%d %s failed sessionid reconnect in subscribe_stratum, retrying without",
-			proxi->id, proxi->subid, proxi->si->url);
-		proxi->no_sessionid = true;
-		dealloc(proxi->sessionid);
-	} else {
-		LOGINFO("Proxy %ld:%d %s failed connecting with parameters in subscribe_stratum, retrying without",
-			proxi->id, proxi->subid, proxi->si->url);
-		proxi->no_params = true;
-	}
+	LOGINFO("Proxy %ld:%d %s failed connecting with parameters in subscribe_stratum, retrying without",
+		proxi->id, proxi->subid, proxi->si->url);
+	proxi->no_params = true;
 	ret = connect_proxy(cs);
 	if (!ret) {
 		LOGNOTICE("Proxy %ld:%d %s failed to reconnect in subscribe_stratum",
@@ -2267,7 +2242,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		proxi = si->data;
 		free(proxi->enonce1);
 		free(proxi->enonce1bin);
-		free(proxi->sessionid);
 		pthread_cancel(proxi->pth_psend);
 		pthread_cancel(proxi->pth_precv);
 		join_pthread(proxi->pth_psend);

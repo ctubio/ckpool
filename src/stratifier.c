@@ -2640,7 +2640,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			client->useragent = strdup(buf);
 		else
 			client->useragent = ckzalloc(1); // Set to ""
-		if (arr_size > 1) {
+		if (arr_size > 1 && !ckp->proxy) {
 			/* This would be the session id for reconnect, it will
 			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
