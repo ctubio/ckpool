@@ -1824,18 +1824,18 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		if (sdata != ckp_sdata && client->sdata != sdata)
 			continue;
 
+		/* Look for clients that may have been dropped which the stratifer has
+		* not been informed about and ask the connector of they still exist */
+		if (client->dropped) {
+			connector_test_client(ckp, client->id);
+			continue;
+		}
 		/* Test for clients that haven't authed in over a minute and drop them */
 		if (!client->authorised) {
 			if (now_t > client->start_time + 60) {
 				client->dropped = true;
 				connector_drop_client(ckp, client->id);
 			}
-			continue;
-		}
-		/* Look for clients that may have been dropped which the stratifer has
-		* not been informed about and ask the connector of they still exist */
-		if (client->dropped) {
-			connector_test_client(ckp, client->id);
 			continue;
 		}
 		if (client->reconnect) {
