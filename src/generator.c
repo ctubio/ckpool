@@ -671,7 +671,7 @@ retry:
 		LOGNOTICE("Proxy %ld:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
 			  proxi->clients_per_proxy);
 		if (proxi->clients_per_proxy == 1)
-			recruit_subproxies(proxi, 41);
+			recruit_subproxies(proxi, 1);
 	}
 
 	LOGNOTICE("Found notify for new proxy %ld:%d with enonce %s nonce2len %d", proxi->id,
@@ -965,9 +965,6 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	send_stratifier_deadproxy(gdata->ckp, subproxy->id, subproxy->subid);
 	if (parent_proxy(subproxy))
 		return;
-
-	if (proxi->alive && proxi->clients_per_proxy == 1 && HASH_CNT(sh, proxi->subproxies) < 42)
-		recruit_subproxies(proxi, 1);
 
 	mutex_lock(&proxi->proxy_lock);
 	subproxy->disabled = true;
