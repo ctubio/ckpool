@@ -2004,7 +2004,7 @@ static void *proxy_recv(void *arg)
 					if (parent_proxy(subproxy)) {
 						LOGWARNING("Proxy %d:%s reconnect issue, dropping existing connection",
 							subproxy->low_id, subproxy->si->url);
-						break;
+						goto out;
 					}
 				}
 				continue;
@@ -2014,7 +2014,7 @@ static void *proxy_recv(void *arg)
 				LOGWARNING("Unhandled stratum message: %s", cs->buf);
 		} while ((ret = read_socket_line(cs, 0)) > 0);
 	}
-
+out:
 	mutex_lock(&proxi->proxy_lock);
 	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
 		subproxy->disabled = true;
