@@ -1523,6 +1523,7 @@ static void *proxy_send(void *arg)
 	connsock_t *cs = proxy->cs;
 	ckpool_t *ckp = cs->ckp;
 	gdata_t *gdata = ckp->data;
+	stratum_msg_t *msg = NULL;
 
 	rename_proc("proxysend");
 
@@ -1531,7 +1532,6 @@ static void *proxy_send(void *arg)
 		proxy_instance_t *subproxy;
 		notify_instance_t *ni;
 		json_t *jobid = NULL;
-		stratum_msg_t *msg;
 		bool ret = true;
 		int subid = 0;
 		json_t *val;
@@ -1548,6 +1548,11 @@ static void *proxy_send(void *arg)
 		tv_to_ts(&abs, &now);
 		abs.tv_sec++;
 
+		if (unlikely(msg)) {
+			json_decref(msg->json_msg);
+			free(msg);
+		}
+
 		mutex_lock(&proxy->psend_lock);
 		if (!proxy->psends)
 			cond_timedwait(&proxy->psend_cond, &proxy->psend_lock, &abs);
@@ -1559,10 +1564,22 @@ static void *proxy_send(void *arg)
 		if (!msg)
 			continue;
 
-		json_get_int(&subid, msg->json_msg, "subproxy");
-		json_get_int64(&id, msg->json_msg, "jobid");
-		json_get_int64(&proxyid, msg->json_msg, "proxy");
-		json_get_int64(&client_id, msg->json_msg, "client_id");
+		if (unlikely(!json_get_int(&subid, msg->json_msg, "subproxy"))) {
+			LOGWARNING("Failed to find subproxy in proxy_send msg");
+			continue;
+		}
+		if (unlikely(!json_get_int64(&id, msg->json_msg, "jobid"))) {
+			LOGWARNING("Failed to find jobid in proxy_send msg");
+			continue;
+		}
+		if (unlikely(!json_get_int64(&proxyid, msg->json_msg, "proxy"))) {
+			LOGWARNING("Failed to find proxy in proxy_send msg");
+			continue;
+		}
+		if (unlikely(!json_get_int64(&client_id, msg->json_msg, "client_id"))) {
+			LOGWARNING("Failed to find client_id in proxy_send msg");
+			continue;
+		}
 		if (unlikely(proxyid != proxy->id)) {
 			LOGWARNING("Proxysend for proxy %ld got message for proxy %ld!",
 				   proxy->id, proxyid);
@@ -1595,11 +1612,9 @@ static void *proxy_send(void *arg)
 			LOGNOTICE("Failed to find subproxy %ld:%d to send message to",
 				  proxy->id, subid);
 		}
-		json_decref(msg->json_msg);
-		free(msg);
 		if (!ret && subproxy) {
 			LOGNOTICE("Proxy %ld:%d %s failed to send msg in proxy_send, dropping to reconnect",
-				  proxy->id, proxy->subid, proxy->si->url);
+				  id, subid, proxy->si->url);
 			disable_subproxy(gdata, proxy, subproxy);
 		}
 	}
