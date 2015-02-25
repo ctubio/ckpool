@@ -108,6 +108,7 @@ struct proxy_instance {
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
 	bool reconnecting; /* Testing in progress */
+	bool redirecting; /* Children have received a reconnect */
 	int recruit; /* Recruiting in progress */
 	bool alive;
 
@@ -988,8 +989,8 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 {
 	server_instance_t *newsi, *si = proxi->si;
+	proxy_instance_t *parent, *newproxi;
 	int64_t high_id, low_id, new_id;
-	proxy_instance_t *newproxi;
 	ckpool_t *ckp = proxi->ckp;
 	gdata_t *gdata = ckp->data;
 	const char *new_url;
@@ -1035,17 +1036,22 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	LOGINFO("Processing reconnect request to %s", url);
 
 	ret = true;
-	proxi->reconnect = true;
 
-	/* If this isn't a parent proxy, simply set the reconnect bool allowing
-	 * it to be disabled. More will be recruited if necessary */
-	if (!parent_proxy(proxi))
-		goto out;
+	/* If this isn't a parent proxy, recruit a new parent! */
+	parent = proxi->parent;
+	if (parent != proxi) {
+		proxi->reconnect = true;
+		/* Do we already know this proxy is redirecting? */
+		if (parent->redirecting)
+			goto out;
+		proxi = parent;
+		proxi->redirecting = true;
+	} else
+		proxi->redirecting = false;
 
 	newsi = ckzalloc(sizeof(server_instance_t));
 
 	mutex_lock(&gdata->lock);
-	HASH_DEL(gdata->proxies, proxi);
 	high_id = proxi->id >> 32; /* Use the high bits for the reconnect id */
 	high_id++;
 	high_id <<= 32;
@@ -1068,9 +1074,13 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 	newproxi->id = new_id;
 	newproxi->subproxy_count = ++proxi->subproxy_count;
 	HASH_ADD_I64(gdata->proxies, id, newproxi);
+	if (!proxi->redirecting) {
+		proxi->disabled = true;
+		HASH_DEL(gdata->proxies, proxi);
+		proxi->reconnect = true;
+	}
 	mutex_unlock(&gdata->lock);
 
-	proxi->disabled = true;
 	prepare_proxy(newproxi);
 out:
 	return ret;
