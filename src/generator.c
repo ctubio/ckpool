@@ -109,7 +109,7 @@ struct proxy_instance {
 	bool reconnect; /* We need to drop and reconnect */
 	bool reconnecting; /* Testing in progress */
 	bool redirecting; /* Children have received a reconnect */
-	int recruit; /* Recruiting in progress */
+	int64_t recruit; /* No of recruiting requests in progress */
 	bool alive;
 
 	mutex_t notify_lock;
@@ -572,6 +572,7 @@ static bool parse_subscribe(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *val = NULL, *res_val, *notify_val, *tmp;
 	bool parsed, ret = false;
+	proxy_instance_t *parent;
 	int retries = 0, size;
 	const char *string;
 	char *buf, *old;
@@ -665,14 +666,14 @@ retry:
 		}
 	}
 	proxi->nonce2len = size;
-	if (parent_proxy(proxi)) {
-		/* Set the number of clients per proxy on the parent proxy */
-		proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
-		LOGNOTICE("Proxy %ld:%s clients per proxy: %"PRId64, proxi->id, proxi->si->url,
-			  proxi->clients_per_proxy);
-		if (proxi->clients_per_proxy == 1)
-			recruit_subproxies(proxi, 1);
-	}
+	proxi->clients_per_proxy = 1ll << ((size - 3) * 8);
+	parent = proxi->parent;
+
+	mutex_lock(&parent->proxy_lock);
+	parent->recruit -= proxi->clients_per_proxy;
+	if (parent->recruit < 0)
+		parent->recruit = 0;
+	mutex_unlock(&parent->proxy_lock);
 
 	LOGNOTICE("Found notify for new proxy %ld:%d with enonce %s nonce2len %d", proxi->id,
 		proxi->subid, proxi->enonce1, proxi->nonce2len);
@@ -1733,10 +1734,9 @@ retry:
 		add_subproxy(parent, proxy);
 
 	mutex_lock(&parent->proxy_lock);
-	if (alive) {
-		if (--parent->recruit > 0)
-			recruit = true;
-	} else /* Reset so the next request will try again */
+	if (alive && parent->recruit > 0)
+		recruit = true;
+	else /* Reset so the next request will try again */
 		parent->recruit = 0;
 	mutex_unlock(&parent->proxy_lock);
 
