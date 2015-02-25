@@ -535,10 +535,6 @@ void *async_send_proc(void *arg)
 		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
 		goto out;
 	}
-	if (unlikely(!msg || !strlen(msg))) {
-		LOGERR("Attempted to send null message to socket %s in send_proc", path);
-		goto out;
-	}
 	/* At startup the pid fields are not set up before some processes are
 	 * forked so they never inherit them. */
 	if (unlikely(!pi->pid)) {
@@ -580,9 +576,14 @@ out_nofail:
  * closing the socket immediately. */
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	struct proc_message *pm = ckalloc(sizeof(struct proc_message));
+	struct proc_message *pm;
 	pthread_t pth;
 
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
+		return;
+	}
+	pm = ckalloc(sizeof(struct proc_message));
 	pm->pi = pi;
 	pm->msg = strdup(msg);
 	pm->file = file;
