@@ -1970,6 +1970,7 @@ static void *proxy_recv(void *arg)
 		/* Wait 30 seconds before declaring this upstream pool alive
 		 * to prevent switching to unstable pools. */
 		if (!alive && (!current_proxy(gdata) || time(NULL) - proxi->reconnect_time > 30)) {
+			reconnect_generator(ckp);
 			LOGWARNING("Proxy %d:%s recovered", proxi->low_id, proxi->si->url);
 			proxi->reconnect_time = 0;
 			alive = true;
