@@ -1885,6 +1885,7 @@ static bool subproxies_alive(proxy_instance_t *proxy)
 static void *proxy_recv(void *arg)
 {
 	proxy_instance_t *proxi = (proxy_instance_t *)arg;
+	proxy_instance_t *subproxy, *tmp;
 	server_instance_t *si = proxi->si;
 	connsock_t *cs = proxi->cs;
 	ckpool_t *ckp = proxi->ckp;
@@ -1909,12 +1910,12 @@ static void *proxy_recv(void *arg)
 	reconnect_generator(ckp);
 
 	while (42) {
-		proxy_instance_t *subproxy = proxi;
 		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
 		time_t now;
 		int ret;
 
+		subproxy = proxi;
 		if (!proxi->alive) {
 			reconnect_proxy(proxi);
 			while (!subproxies_alive(proxi)) {
@@ -1995,6 +1996,18 @@ static void *proxy_recv(void *arg)
 				LOGWARNING("Unhandled stratum message: %s", cs->buf);
 		} while ((ret = read_socket_line(cs, 0)) > 0);
 	}
+
+	mutex_lock(&proxi->proxy_lock);
+	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
+		subproxy->disabled = true;
+		send_stratifier_deadproxy(ckp, subproxy->id, subproxy->subid);
+		if (subproxy->cs->fd > 0) {
+			epoll_ctl(epfd, EPOLL_CTL_DEL, subproxy->cs->fd, NULL);
+			Close(subproxy->cs->fd);
+		}
+		HASH_DELETE(sh, proxi->subproxies, subproxy);
+	}
+	mutex_unlock(&proxi->proxy_lock);
 
 	return NULL;
 }
