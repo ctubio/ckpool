@@ -964,6 +964,10 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 {
 	subproxy->alive = false;
 	send_stratifier_deadproxy(gdata->ckp, subproxy->id, subproxy->subid);
+	if (subproxy->cs->fd > 0) {
+		epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, subproxy->cs->fd, NULL);
+		Close(subproxy->cs->fd);
+	}
 	if (parent_proxy(subproxy))
 		return;
 
@@ -971,13 +975,8 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 	subproxy->disabled = true;
 	/* Make sure subproxy is still in the list */
 	subproxy = __subproxy_by_id(proxi, subproxy->subid);
-	if (subproxy) {
-		if (subproxy->cs->fd > 0) {
-			epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, subproxy->cs->fd, NULL);
-			Close(subproxy->cs->fd);
-		}
+	if (likely(subproxy))
 		HASH_DELETE(sh, proxi->subproxies, subproxy);
-	}
 	mutex_unlock(&proxi->proxy_lock);
 
 	if (subproxy)
