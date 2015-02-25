@@ -325,7 +325,6 @@ struct proxy_base {
 	int64_t max_clients;
 	int64_t bound_clients;
 	int64_t headroom;
-	enonce1_t enonce1u;
 
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
@@ -1314,10 +1313,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		proxy->enonce1varlen = 0;
 	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
 	proxy->max_clients = 1ll << (proxy->enonce1varlen * 8);
-	/* Reset the enonce1u in case this is a resubscribe of an existing
-	 * parent proxy. */
 	proxy->clients = 0;
-	proxy->enonce1u.u64 = 0;
 	ck_wunlock(&dsdata->workbase_lock);
 
 	/* Is this a replacement proxy for the current one */
@@ -1553,7 +1549,6 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 			if (!subproxy->bound_clients && !subproxy->dead) {
 				/* Reset the counter to reuse this proxy */
 				subproxy->clients = 0;
-				subproxy->enonce1u.u64 = 0;
 				continue;
 			}
 			if (proxy == subproxy)
@@ -2467,7 +2462,6 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 
 		mutex_lock(&ckp_sdata->proxy_lock);
 		proxy = sdata->subproxy;
-		enonce1u = &proxy->enonce1u;
 		client->proxyid = proxy->id;
 		client->subproxyid = proxy->subid;
 		mutex_unlock(&ckp_sdata->proxy_lock);
@@ -2476,8 +2470,8 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 			LOGWARNING("Proxy reached max clients %"PRId64, proxy->max_clients);
 			return false;
 		}
-	} else
-		enonce1u = &sdata->enonce1u;
+	}
+	enonce1u = &ckp_sdata->enonce1u;
 
 	/* Extract the enonce1varlen from the current workbase which may be
 	 * a different workbase to when we __fill_enonce1data but the value
@@ -2487,7 +2481,7 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 	ck_runlock(&sdata->workbase_lock);
 
 	/* instance_lock protects enonce1u. Recruiting extra proxies should
-	 * prevent these ever locking out.*/
+	 * prevent these ever running out.*/
 	ck_wlock(&ckp_sdata->instance_lock);
 	switch(enonce1varlen) {
 		case 8:
