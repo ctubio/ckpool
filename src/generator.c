@@ -2308,6 +2308,7 @@ int generator(proc_instance_t *pi)
 				ret = 1;
 				goto out;
 			}
+			cksleep_ms(10);
 			buf = send_recv_proc(ckp->stratifier, "ping");
 		} while (!buf);
 		dealloc(buf);
