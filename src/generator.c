@@ -1978,7 +1978,10 @@ static void *proxy_recv(void *arg)
 		if (likely(ret > 0)) {
 			subproxy = event.data.ptr;
 			cs = subproxy->cs;
-			ret = read_socket_line(cs, 5);
+			if (event.events & EPOLLHUP)
+				ret = -1;
+			else
+				ret = read_socket_line(cs, 5);
 		}
 		if (ret < 1) {
 			LOGNOTICE("Proxy %ld:%d %s failed to epoll/read_socket_line in proxy_recv",
