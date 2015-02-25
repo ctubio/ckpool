@@ -1171,7 +1171,7 @@ static void generator_recruit(const ckpool_t *ckp, const int recruits)
 static void reconnect_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmpclient;
-	int reconnects = 0;
+	int reconnects = 0, hard = 0;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -1186,9 +1186,12 @@ static void reconnect_clients(sdata_t *sdata)
 		if (headroom-- < 1)
 			continue;
 		reconnects++;
-		if (client->reconnect)
+		/* Limit reconnects sent concurrently to prevent a flood of new
+		 * connections */
+		if (client->reconnect && hard <= SOMAXCONN / 2) {
+			hard++;
 			reconnect_client(sdata, client);
-		else
+		} else
 			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
@@ -1217,7 +1220,7 @@ static proxy_t *current_proxy(sdata_t *sdata)
 static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 {
 	stratum_instance_t *client, *tmp;
-	int reconnects = 0;
+	int reconnects = 0, hard = 0;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -1234,9 +1237,10 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 		if (headroom-- < 1)
 			continue;
 		reconnects++;
-		if (client->reconnect)
+		if (client->reconnect && hard <= SOMAXCONN / 2) {
+			hard++;
 			reconnect_client(sdata, client);
-		else
+		} else
 			client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
@@ -1808,6 +1812,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 	stratum_instance_t *client, *tmp;
 	ckmsg_t *bulk_send = NULL;
 	time_t now_t = time(NULL);
+	int hard_reconnect = 0;
 	ckmsgq_t *ssends;
 
 	if (unlikely(!val)) {
@@ -1839,7 +1844,10 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 			continue;
 		}
 		if (client->reconnect) {
-			reconnect_client(ckp_sdata, client);
+			if (hard_reconnect <= SOMAXCONN / 2) {
+				hard_reconnect++;
+				reconnect_client(ckp_sdata, client);
+			}
 			continue;
 		}
 
