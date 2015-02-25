@@ -988,11 +988,11 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 {
 	server_instance_t *newsi, *si = proxi->si;
 	proxy_instance_t *parent, *newproxi;
+	bool sameurl = false, ret = false;
 	int64_t high_id, low_id, new_id;
 	ckpool_t *ckp = proxi->ckp;
 	gdata_t *gdata = ckp->data;
 	const char *new_url;
-	bool ret = false;
 	int new_port;
 	char *url;
 
@@ -1029,14 +1029,23 @@ static bool parse_reconnect(proxy_instance_t *proxi, json_t *val)
 			goto out;
 		}
 		ASPRINTF(&url, "%s:%d", new_url, new_port);
-	} else
+	} else {
 		url = strdup(si->url);
+		sameurl = true;
+	}
 	LOGINFO("Processing reconnect request to %s", url);
 
 	ret = true;
+	parent = proxi->parent;
+	/* If this is the same url we don't need to replace any existing
+	 * parents, just drop the connection and allow a new one to be
+	 * recruited. */
+	if (sameurl) {
+		disable_subproxy(gdata, parent, proxi);
+		goto out;
+	}
 
 	/* If this isn't a parent proxy, recruit a new parent! */
-	parent = proxi->parent;
 	if (parent != proxi) {
 		proxi->reconnect = true;
 		/* Do we already know this proxy is redirecting? */
