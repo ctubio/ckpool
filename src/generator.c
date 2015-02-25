@@ -1393,7 +1393,6 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	if (unlikely(!proxy)) {
 		LOGNOTICE("Client %"PRId64" sending shares to non existent proxy %ld, dropping",
 			  client_id, id);
-		send_stratifier_deadproxy(ckp, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
 		goto out;
 	}
@@ -1401,14 +1400,12 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	if (unlikely(!proxi)) {
 		LOGNOTICE("Client %"PRId64" sending shares to non existent subproxy %ld:%d, dropping",
 			  client_id, id, subid);
-		send_stratifier_deadproxy(ckp, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
 		goto out;
 	}
 	if (!proxi->alive) {
 		LOGNOTICE("Client %"PRId64" sending shares to dead subproxy %ld:%d, dropping",
 			  client_id, id, subid);
-		send_stratifier_deadproxy(ckp, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
 		goto out;
 	}
