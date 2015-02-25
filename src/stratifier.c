@@ -1234,10 +1234,8 @@ static void dead_proxyid(sdata_t *sdata, const int64_t id, const int subid)
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
-		if (headroom-- < 1)
-			continue;
 		reconnects++;
-		if (client->reconnect && hard <= SOMAXCONN / 2) {
+		if (headroom-- > 0 && client->reconnect && hard <= SOMAXCONN / 2) {
 			hard++;
 			reconnect_client(sdata, client);
 		} else
