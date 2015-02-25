@@ -3125,8 +3125,13 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	if (ret) {
 		client->authorised = ret;
 		user->authorised = ret;
-		LOGNOTICE("Authorised client %"PRId64" worker %s as user %s", client->id, buf,
-			  user->username);
+		if (ckp->proxy) {
+			LOGNOTICE("Authorised client %"PRId64" to proxy %ld:%d, worker %s as user %s",
+				  client->id, client->proxyid, client->subproxyid, buf, user->username);
+		} else {
+			LOGNOTICE("Authorised client %"PRId64" worker %s as user %s",
+				  client->id, buf, user->username);
+		}
 		user->auth_backoff = 3; /* Reset auth backoff time */
 	} else {
 		LOGNOTICE("Client %"PRId64" worker %s failed to authorise as user %s", client->id, buf,
