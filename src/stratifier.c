@@ -1567,7 +1567,7 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 	mutex_unlock(&sdata->proxy_lock);
 
 	if (dead)
-		LOGNOTICE("Stratifier discarded %d dead proxies", dead);
+		LOGINFO("Stratifier discarded %d dead proxies", dead);
 }
 
 /* Enter with instance_lock held */
