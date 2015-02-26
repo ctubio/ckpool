@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.000"
+#define CKDB_VERSION DB_VERSION"-1.001"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -340,7 +340,7 @@ enum cmd_values {
 	CMD_STATS,
 	CMD_PPLNS,
 	CMD_PPLNS2,
-	CMD_PAYOUT,
+	CMD_PAYOUTS,
 	CMD_USERSTATUS,
 	CMD_MARKS,
 	CMD_END
@@ -1182,6 +1182,7 @@ extern K_LIST *payouts_free;
 extern K_STORE *payouts_store;
 extern cklock_t process_pplns_lock;
 
+// N.B. status should be checked under r/w lock
 #define PAYOUTS_GENERATED 'G'
 #define PAYOUTS_GENERATED_STR "G"
 #define PAYGENERATED(_status) ((_status)[0] == PAYOUTS_GENERATED)
@@ -1754,7 +1755,7 @@ extern cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_payouts(int32_t height, char *blockhash);
 extern K_ITEM *find_last_payouts();
 extern K_ITEM *find_payoutid(int64_t payoutid);
-extern void process_pplns(int32_t height, char *blockhash, tv_t *now);
+extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b);
 extern void dsp_userstats(K_ITEM *item, FILE *stream);

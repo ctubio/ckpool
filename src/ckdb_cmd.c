@@ -4030,6 +4030,165 @@ shazbot:
 	return strdup(reply);
 }
 
+static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
+			 char *by, char *code, char *inet,
+			 __maybe_unused tv_t *cd, K_TREE *trf_root)
+{
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char msg[1024] = "";
+	K_ITEM *i_action, *i_payoutid, *i_height, *i_blockhash, *i_addrdate;
+	K_ITEM *p_item, *p2_item, *old_p2_item;
+	PAYOUTS *payouts, *payouts2, *old_payouts2;
+	char *action;
+	int64_t payoutid = -1;
+	int32_t height = 0;
+	char blockhash[TXT_BIG+1];
+	tv_t addrdate;
+	bool ok = true;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_action = require_name(trf_root, "action", 1, NULL, reply, siz);
+	if (!i_action)
+		return strdup(reply);
+	action = transfer_data(i_action);
+
+	if (strcasecmp(action, "generated") == 0) {
+		/* Change the status of a processing payout to generated
+		 * Require payoutid
+		 * Use this if the payout process completed but the end txn,
+		 *  that only updates the payout to generated, failed */
+		i_payoutid = require_name(trf_root, "payoutid", 1,
+					  (char *)intpatt, reply, siz);
+		if (!i_payoutid)
+			return strdup(reply);
+		TXT_TO_BIGINT("payoutid", transfer_data(i_payoutid), payoutid);
+
+		K_WLOCK(payouts_free);
+		p_item = find_payoutid(payoutid);
+		if (!p_item) {
+			K_WUNLOCK(payouts_free);
+			snprintf(reply, siz,
+				 "no payout with id %"PRId64, payoutid);
+			return strdup(reply);
+		}
+		DATA_PAYOUTS(payouts, p_item);
+		if (!PAYPROCESSING(payouts->status)) {
+			K_WUNLOCK(payouts_free);
+			snprintf(reply, siz,
+				 "status !processing (%s) for payout %"PRId64,
+				 payouts->status, payoutid);
+			return strdup(reply);
+		}
+		p2_item = k_unlink_head(payouts_free);
+		K_WUNLOCK(payouts_free);
+
+		/* There is a risk of the p_item changing while it's unlocked,
+		 *  but since this is a manual interface it's not really likely
+		 *  and there'll be an error if something goes wrong
+		 * It reports the old and new status */
+		DATA_PAYOUTS(payouts2, p2_item);
+		bzero(payouts2, sizeof(*payouts2));
+		payouts2->payoutid = payouts->payoutid;
+		payouts2->height = payouts->height;
+		STRNCPY(payouts2->blockhash, payouts->blockhash);
+		payouts2->minerreward = payouts->minerreward;
+		payouts2->workinfoidstart = payouts->workinfoidstart;
+		payouts2->workinfoidend = payouts->workinfoidend;
+		payouts2->elapsed = payouts->elapsed;
+		STRNCPY(payouts2->status, PAYOUTS_GENERATED_STR);
+		payouts2->diffwanted = payouts->diffwanted;
+		payouts2->diffused = payouts->diffused;
+		payouts2->shareacc = payouts->shareacc;
+		copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
+		payouts2->stats = strdup(payouts->stats);
+
+		ok = payouts_add(conn, true, p2_item, &old_p2_item,
+				 by, code, inet, now, NULL, false);
+		if (!ok) {
+			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
+			return strdup(reply);
+		}
+		DATA_PAYOUTS(payouts2, p2_item);
+		DATA_PAYOUTS(old_payouts2, old_p2_item);
+		snprintf(msg, sizeof(msg),
+			 "payout %"PRId64" changed from '%s' to '%s' for"
+			 "%"PRId32"/%s",
+			 payoutid, payouts2->status, old_payouts2->status,
+			 payouts2->height, payouts2->blockhash);
+/*
+	} else if (strcasecmp(action, "expire") == 0) {
+		/ TODO: Expire the payout - effectively deletes it
+		 * Require payoutid
+		 * If any payments are paid then don't allow it /
+		i_payoutid = require_name(trf_root, "payoutid", 1,
+					  (char *)intpatt, reply, siz);
+		if (!i_payoutid)
+			return strdup(reply);
+		TXT_TO_BIGINT("payoutid", transfer_data(i_payoutid), payoutid);
+
+		K_WLOCK(payouts_free);
+		p_item = find_payoutid(payoutid);
+		if (!p_item) {
+			K_WUNLOCK(payouts_free);
+			snprintf(reply, siz,
+				 "no payout with id %"PRId64, payoutid);
+			return strdup(reply);
+		}
+		p2_item = k_unlink_head(payouts_free);
+		K_WUNLOCK(payouts_free);
+
+		DATA_PAYOUTS(payouts2, p2_item);
+		bzero(payouts2, sizeof(*payouts2));
+		payouts2->payoutid = payouts->payoutid;
+
+		...
+*/
+	} else if (strcasecmp(action, "process") == 0) {
+		/* Generate a payout
+		 * Require height, blockhash and addrdate
+		 *  addrdate is an epoch integer
+		 *   and 0 means uses the default = block NEW createdate
+		 *   this is the date to use for payoutaddresses
+		 * Check the console for processing messages */
+		i_height = require_name(trf_root, "height", 6,
+					(char *)intpatt, reply, siz);
+		if (!i_height)
+			return strdup(reply);
+		TXT_TO_INT("height", transfer_data(i_height), height);
+
+		i_blockhash = require_name(trf_root, "blockhash", 64,
+					   (char *)hashpatt, reply, siz);
+		if (!i_blockhash)
+			return strdup(reply);
+		TXT_TO_STR("blockhash", transfer_data(i_blockhash), blockhash);
+
+		i_addrdate = require_name(trf_root, "addrdate", 1,
+					 (char *)intpatt, reply, siz);
+		if (!i_addrdate)
+			return strdup(reply);
+		TXT_TO_CTV("addrdate", transfer_data(i_addrdate), addrdate);
+
+		if (addrdate.tv_sec == 0)
+			ok = process_pplns(height, blockhash, NULL);
+		else
+			ok = process_pplns(height, blockhash, &addrdate);
+
+	} else {
+		snprintf(reply, siz, "unknown action '%s'", action);
+		LOGERR("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
+	snprintf(reply, siz, "%s.%s%s%s",
+			     ok ? "ok" : "ERR",
+			     action,
+			     msg[0] ? " " : EMPTY,
+			     msg[0] ? msg : EMPTY);
+	LOGWARNING("%s.%s", id, reply);
+	return strdup(reply);
+}
 static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 		     char *id, __maybe_unused tv_t *now,
 		     __maybe_unused char *by, __maybe_unused char *code,
@@ -4690,7 +4849,7 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_STATS,	"stats",	true,	false,	cmd_stats,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_PPLNS2,	"pplns2",	false,	false,	cmd_pplns2,	ACCESS_SYSTEM ACCESS_WEB },
-//	{ CMD_PAYOUT,	"payout",	false,	false,	cmd_payout,	ACCESS_SYSTEM },
+	{ CMD_PAYOUTS,	"payouts",	false,	false,	cmd_payouts,	ACCESS_SYSTEM },
 	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_MARKS,	"marks",	false,	false,	cmd_marks,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		NULL }

@@ -2557,11 +2557,11 @@ K_ITEM *find_payoutid(int64_t payoutid)
  N.B. process_pplns() is only automatically triggered once after the block
 	summarisation is verified, so it can always report all errors
 */
-void process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
+bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 {
 	K_TREE_CTX b_ctx[1], ss_ctx[1], wm_ctx[1], ms_ctx[1], pay_ctx[1], mu_ctx[1];
 	bool allow_aged = true, conned = false, begun = false;
-	bool countbacklimit, ok;
+	bool countbacklimit, ok = false;
 	PGconn *conn = NULL;
 	MININGPAYOUTS *miningpayouts;
 	OPTIONCONTROL *optioncontrol;
@@ -2586,7 +2586,8 @@ void process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	char ndiffbin[TXT_SML+1];
 	double diff_times, diff_add;
 	char cd_buf[CDATE_BUFSIZ];
-	tv_t begin_tv, end_tv, now;
+	tv_t end_tv = { 0L, 0L };
+	tv_t begin_tv, now;
 	char buf[1024];
 
 	/*
@@ -2624,30 +2625,30 @@ void process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		goto oku;
 	}
 	DATA_BLOCKS(blocks, b_item);
-	// If addr_cd is null, use the block NEW createdate
-	if (!addr_cd) {
-		b2_item = b_item;
-		DATA_BLOCKS(blocks2, b2_item);
-		while (b2_item && blocks2->height == height &&
-		       strcmp(blocks2->blockhash, blockhash) == 0) {
-			if (blocks2->confirmed[0] == BLOCKS_NEW) {
+	b2_item = b_item;
+	DATA_BLOCKS(blocks2, b2_item);
+	while (b2_item && blocks2->height == height &&
+	       strcmp(blocks2->blockhash, blockhash) == 0) {
+		if (blocks2->confirmed[0] == BLOCKS_NEW) {
+			copy_tv(&end_tv, &(blocks->createdate));
+			if (!addr_cd)
 				addr_cd = &(blocks2->createdate);
-				break;
-			}
-			b2_item = next_in_ktree(b_ctx);
-			DATA_BLOCKS_NULL(blocks2, b2_item);
+			break;
 		}
-		if (!addr_cd) {
-			K_RUNLOCK(blocks_free);
-			LOGEMERG("%s(): missing NEW record for block %"PRId32
-				 "/%"PRId64"/%s/%s/%"PRId64,
-				 __func__, blocks->height, blocks->workinfoid,
-				 blocks->workername, blocks->confirmed,
-				 blocks->reward);
-			goto oku;
-		}
+		b2_item = next_in_ktree(b_ctx);
+		DATA_BLOCKS_NULL(blocks2, b2_item);
 	}
 	K_RUNLOCK(blocks_free);
+	// If addr_cd was null it should've been set to the block NEW createdate
+	if (!addr_cd || end_tv.tv_sec == 0) {
+		LOGEMERG("%s(): missing %s record for block %"PRId32
+			 "/%"PRId64"/%s/%s/%"PRId64,
+			 __func__, blocks_confirmed(BLOCKS_NEW_STR),
+			 blocks->height, blocks->workinfoid,
+			 blocks->workername, blocks->confirmed,
+			 blocks->reward);
+		goto oku;
+	}
 
 	LOGDEBUG("%s(): block %"PRId32"/%"PRId64"/%s/%s/%"PRId64,
 		 __func__, blocks->height, blocks->workinfoid,
@@ -3211,6 +3212,8 @@ void process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	goto oku;
 
 shazbot:
+	ok = false;
+
 	if (begun)
 		CKPQEnd(conn, false);
 	CKPQDisco(&conn, conned);
@@ -3250,7 +3253,7 @@ oku:
 		}
 		addr_store = k_free_store(addr_store);
 	}
-	return;
+	return ok;
 }
 
 // order by userid asc,createdate asc,authid asc,expirydate desc
