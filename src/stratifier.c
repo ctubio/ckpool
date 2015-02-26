@@ -285,10 +285,10 @@ struct stratifier_data {
 
 	pool_stats_t stats;
 	/* Protects changes to pool stats */
-	pthread_mutex_t stats_lock;
+	mutex_t stats_lock;
 
 	/* Serialises sends/receives to ckdb if possible */
-	pthread_mutex_t ckdb_lock;
+	mutex_t ckdb_lock;
 
 	bool ckdb_offline;
 
@@ -336,14 +336,14 @@ struct stratifier_data {
 	cklock_t instance_lock;
 
 	share_t *shares;
-	pthread_mutex_t share_lock;
+	mutex_t share_lock;
 
 	int64_t shares_generated;
 
 	/* Linked list of block solves, added to during submission, removed on
 	 * accept/reject. It is likely we only ever have one solve on here but
 	 * you never know... */
-	pthread_mutex_t block_lock;
+	mutex_t block_lock;
 	ckmsg_t *block_solves;
 
 	/* Generator message priority */
@@ -1241,11 +1241,15 @@ static void client_drop_message(const int64_t client_id, const int dropped, cons
 	}
 }
 
+static void dec_worker(ckpool_t *ckp, user_instance_t *instance);
+
 /* Decrease the reference count of instance. */
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
 {
+	user_instance_t *user = client->user_instance;
 	int64_t client_id = client->id;
+	ckpool_t *ckp = client->ckp;
 	int dropped = 0, ref;
 
 	ck_wlock(&sdata->instance_lock);
@@ -1253,7 +1257,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref))
-		dropped = __drop_client(sdata, client, client->user_instance);
+		dropped = __drop_client(sdata, client, user);
 	ck_wunlock(&sdata->instance_lock);
 
 	client_drop_message(client_id, dropped, true);
@@ -1261,6 +1265,9 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* This should never happen */
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
+
+	if (dropped && user)
+		dec_worker(ckp, user);
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
@@ -3414,7 +3421,11 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 		if (res_val) {
 			const char *result = json_string_value(res_val);
 
-			LOGDEBUG("Received spurious response %s", result ? result : "");
+			if (!safecmp(result, "pong"))
+				LOGDEBUG("Received pong from client %"PRId64, client_id);
+			else
+				LOGDEBUG("Received spurious response %s from client %"PRId64,
+					 result ? result : "", client_id);
 			goto out;
 		}
 		send_json_err(sdata, client_id, id_val, "-3:method not found");
@@ -3676,7 +3687,7 @@ static void parse_ckdb_cmd(ckpool_t *ckp, const char *cmd)
 }
 
 /* Test a value under lock and set it, returning the original value */
-static bool test_and_set(bool *val, pthread_mutex_t *lock)
+static bool test_and_set(bool *val, mutex_t *lock)
 {
 	bool ret;
 
@@ -3688,7 +3699,7 @@ static bool test_and_set(bool *val, pthread_mutex_t *lock)
 	return ret;
 }
 
-static bool test_and_clear(bool *val, pthread_mutex_t *lock)
+static bool test_and_clear(bool *val, mutex_t *lock)
 {
 	bool ret;
 
@@ -4338,8 +4349,8 @@ int stratifier(proc_instance_t *pi)
 	ckpool_t *ckp = pi->ckp;
 	int ret = 1, threads;
 	int64_t randomiser;
+	char *buf = NULL;
 	sdata_t *sdata;
-	char *buf;
 
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
