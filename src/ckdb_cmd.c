@@ -4115,7 +4115,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		snprintf(msg, sizeof(msg),
 			 "payout %"PRId64" changed from '%s' to '%s' for"
 			 "%"PRId32"/%s",
-			 payoutid, payouts2->status, old_payouts2->status,
+			 payoutid, old_payouts2->status, payouts2->status,
 			 payouts2->height, payouts2->blockhash);
 /*
 	} else if (strcasecmp(action, "expire") == 0) {
