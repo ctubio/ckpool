@@ -3828,13 +3828,19 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t siz = sizeof(reply);
 	K_ITEM *i_height;
 	K_ITEM b_look, *b_item, *p_item, *mp_item, *pay_item, *u_item;
+	K_ITEM *w_item;
 	MININGPAYOUTS *miningpayouts;
 	PAYMENTS *payments;
 	PAYOUTS *payouts;
 	BLOCKS lookblocks, *blocks;
+	tv_t block_tv = { 0L, 0L };
+	WORKINFO *bworkinfo, *workinfo;
+	char ndiffbin[TXT_SML+1];
+	double ndiff;
 	USERS *users;
 	int32_t height;
 	K_TREE_CTX b_ctx[1], mp_ctx[1], pay_ctx[1];
+	char tv_buf[DATE_BUFSIZ];
 	size_t len, off;
 	int rows;
 	bool pok;
@@ -3851,16 +3857,36 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): height %"PRId32, __func__, height);
 
-	lookblocks.height = height;
+	lookblocks.height = height + 1;
 	lookblocks.blockhash[0] = '\0';
 	INIT_BLOCKS(&b_look);
 	b_look.data = (void *)(&lookblocks);
 	K_RLOCK(blocks_free);
-	b_item = find_after_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	b_item = find_before_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	if (!b_item) {
+		K_RUNLOCK(blocks_free);
+		snprintf(reply, siz, "ERR.no block height %"PRId32, height);
+		return strdup(reply);
+	}
+	DATA_BLOCKS(blocks, b_item);
+	while (b_item && blocks->height == height) {
+		if (blocks->confirmed[0] == BLOCKS_NEW)
+			copy_tv(&block_tv, &(blocks->createdate));
+		// Allow any state, but report it
+		if (CURRENT(&(blocks->expirydate)))
+			break;
+		b_item = prev_in_ktree(b_ctx);
+		DATA_BLOCKS_NULL(blocks, b_item);
+	}
 	K_RUNLOCK(blocks_free);
-	DATA_BLOCKS_NULL(blocks, b_item);
 	if (!b_item || blocks->height != height) {
 		snprintf(reply, siz, "ERR.no block height %"PRId32, height);
+		return strdup(reply);
+	}
+	if (block_tv.tv_sec == 0) {
+		snprintf(reply, siz, "ERR.block %"PRId32" missing '%s' record",
+				     height,
+				     blocks_confirmed(BLOCKS_NEW_STR));
 		return strdup(reply);
 	}
 	if (!CURRENT(&(blocks->expirydate))) {
@@ -3881,6 +3907,15 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 			block_extra = EMPTY;
 			break;
 	}
+
+	w_item = find_workinfo(blocks->workinfoid, NULL);
+	if (!w_item) {
+		snprintf(reply, siz, "ERR.missing block workinfo record!"
+			 " %"PRId64,
+			 blocks->workinfoid);
+		return strdup(reply);
+	}
+	DATA_WORKINFO(bworkinfo, w_item);
 
 	pok = false;
 	K_RLOCK(payouts_free);
@@ -3904,6 +3939,15 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): total %.1f want %.1f",
 		 __func__, payouts->diffused, payouts->diffwanted);
+
+	w_item = find_workinfo(payouts->workinfoidstart, NULL);
+	if (!w_item) {
+		snprintf(reply, siz, "ERR.missing begin workinfo record!"
+			 " %"PRId64,
+			 payouts->workinfoidstart);
+		return strdup(reply);
+	}
+	DATA_WORKINFO(workinfo, w_item);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
@@ -4012,7 +4056,28 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 				   "Users", FLDSEP, "", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
+	tv_to_buf(&(workinfo->createdate), tv_buf, sizeof(tv_buf));
+	snprintf(tmp, sizeof(tmp), "begin_stamp=%s%c", tv_buf, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "begin_epoch=%ld%c",
+				   workinfo->createdate.tv_sec, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	tv_to_buf(&block_tv, tv_buf, sizeof(tv_buf));
+	snprintf(tmp, sizeof(tmp), "block_stamp=%s%c", tv_buf, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "block_epoch=%ld%c", block_tv.tv_sec, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	tv_to_buf(&(payouts->lastshareacc), tv_buf, sizeof(tv_buf));
+	snprintf(tmp, sizeof(tmp), "end_stamp=%s%c", tv_buf, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "end_epoch=%ld%c",
+				   payouts->lastshareacc.tv_sec, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "%s%c", payouts->stats, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	hex2bin(ndiffbin, bworkinfo->bits, 4);
+	ndiff = diff_from_nbits(ndiffbin);
+	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c", ndiff, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "diff_want=%.1f%c",
 				   payouts->diffwanted, FLDSEP);
