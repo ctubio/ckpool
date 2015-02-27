@@ -2824,6 +2824,10 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		total_share_count += sharesummary->sharecount;
 		acc_share_count += sharesummary->shareacc;
 		total_diff += sharesummary->diffacc;
+		// TODO: add lastshareacc to sharesummary and markersummary
+		if (sharesummary->shareacc > 0 &&
+		    tv_newer(&end_tv, &(sharesummary->lastshare)))
+			copy_tv(&end_tv, &(sharesummary->lastshare));
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     sharesummary->userid,
 				     sharesummary->diffacc);
