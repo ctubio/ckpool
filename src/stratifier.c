@@ -4796,6 +4796,51 @@ static void *statsupdate(void *arg)
 		dealloc(s);
 		fclose(fp);
 
+		if (ckp->proxy && sdata->proxy) {
+			proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
+
+			mutex_lock(&sdata->proxy_lock);
+			JSON_CPACK(val, "{sI,si,si}",
+				   "current", sdata->proxy->id,
+				   "active", HASH_COUNT(sdata->proxies),
+				   "total", sdata->proxy_count);
+			mutex_unlock(&sdata->proxy_lock);
+
+			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+			json_decref(val);
+			LOGNOTICE("Proxy:%s", s);
+			dealloc(s);
+
+			mutex_lock(&sdata->proxy_lock);
+			HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
+				JSON_CPACK(val, "{sI,si,si,sI,sb}",
+					   "id", proxy->id,
+					   "priority", proxy->low_id,
+					   "subproxies", proxy->subproxy_count,
+					   "clients", proxy->combined_clients,
+					   "alive", !proxy->dead);
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+				json_decref(val);
+				LOGNOTICE("Proxies:%s", s);
+				dealloc(s);
+				HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+					JSON_CPACK(val, "{sI,si,si,sI,sI,sf,sb}",
+						   "id", subproxy->id,
+						   "subid", subproxy->subid,
+						   "nonce2len", subproxy->nonce2len,
+						   "clients", subproxy->bound_clients,
+						   "maxclients", subproxy->max_clients,
+						   "diff", subproxy->diff,
+						   "alive", !subproxy->dead);
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+				json_decref(val);
+				LOGNOTICE("subproxies:%s", s);
+				dealloc(s);
+				}
+			}
+			mutex_unlock(&sdata->proxy_lock);
+		}
+
 		ts_realtime(&ts_now);
 		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 		JSON_CPACK(val, "{ss,si,si,si,sf,sf,sf,sf,ss,ss,ss,ss}",
