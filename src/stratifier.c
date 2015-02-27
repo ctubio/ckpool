@@ -366,6 +366,14 @@ struct stratifier_data {
 
 typedef struct stratifier_data sdata_t;
 
+typedef struct json_entry json_entry_t;
+
+struct json_entry {
+	json_entry_t *next;
+	json_entry_t *prev;
+	json_t *val;
+};
+
 /* Priority levels for generator messages */
 #define GEN_LAX 0
 #define GEN_NORMAL 1
@@ -3852,7 +3860,7 @@ out:
  * avoid floods of stat data coming at once. */
 static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 {
-	ckmsg_t *json_list = NULL, *entry, *tmpentry;
+	json_entry_t *json_list = NULL, *entry, *tmpentry;
 	user_instance_t *user, *tmp;
 	char cdfield[64];
 	time_t now_t;
@@ -3913,8 +3921,8 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 					"createcode", __func__,
 					"createinet", ckp->serverurl[0]);
 			worker->notified_idle = worker->idle;
-			entry = ckalloc(sizeof(ckmsg_t));
-			entry->data = val;
+			entry = ckalloc(sizeof(json_entry_t));
+			entry->val = val;
 			DL_APPEND(json_list, entry);
 		}
 	}
@@ -3922,8 +3930,38 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 
 	/* Add all entries outside of the instance lock */
 	DL_FOREACH_SAFE(json_list, entry, tmpentry) {
-		ckdbq_add(ckp, ID_WORKERSTATS, (json_t *)entry->data);
+		ckdbq_add(ckp, ID_WORKERSTATS, entry->val);
 		DL_DELETE(json_list, entry);
+		free(entry);
+	}
+}
+
+static void add_log_entry(log_entry_t *entries, char **fname, char **buf)
+{
+	log_entry_t *entry = ckalloc(sizeof(log_entry_t));
+
+	entry->fname = *fname;
+	*fname = NULL;
+	entry->buf = *buf;
+	*buf = NULL;
+	DL_APPEND(entries, entry);
+}
+
+static void dump_log_entries(log_entry_t *entries)
+{
+	log_entry_t *entry, *tmpentry;
+	FILE *fp;
+
+	DL_FOREACH_SAFE(entries, entry, tmpentry) {
+		DL_DELETE(entries, entry);
+		fp = fopen(entry->fname, "we");
+		if (likely(!fp)) {
+			fprintf(fp, "%s", entry->buf);
+			fclose(fp);
+		} else
+			LOGERR("Failed to fopen %s in dump_log_entries", entry->fname);
+		free(entry->fname);
+		free(entry->buf);
 		free(entry);
 	}
 }
