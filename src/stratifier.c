@@ -319,6 +319,7 @@ struct proxy_base {
 	int64_t combined_clients; /* Total clients of all subproxies of a parent proxy */
 	int64_t headroom; /* Temporary variable when calculating how many more clients can bind */
 
+	int subproxy_count; /* Number of subproxies */
 	proxy_t *parent; /* Parent proxy of each subproxy */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
@@ -1046,6 +1047,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int64_t id)
 	proxy->sdata->verbose = true;
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
+	proxy->subproxy_count++;
 	HASH_ADD_I64(sdata->proxies, id, proxy);
 	sdata->proxy_count++;
 	return proxy;
@@ -1060,6 +1062,7 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	subproxy->low_id = proxy->low_id;
 	subproxy->subid = subid;
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
+	proxy->subproxy_count++;
 	subproxy->sdata = duplicate_sdata(sdata);
 	subproxy->sdata->subproxy = subproxy;
 	return subproxy;
@@ -1567,6 +1570,7 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 			}
 			dead++;
 			HASH_DELETE(sh, proxy->subproxies, subproxy);
+			proxy->subproxy_count--;
 			free_proxy(subproxy);
 		}
 	}
