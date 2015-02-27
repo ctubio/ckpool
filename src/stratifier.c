@@ -313,11 +313,13 @@ struct proxy_base {
 	bool subscribed;
 	bool notified;
 
-	int64_t clients;
-	int64_t max_clients;
-	int64_t bound_clients;
-	int64_t headroom;
+	int64_t clients; /* Incrementing client count */
+	int64_t max_clients; /* Maximum number of clients per subproxy */
+	int64_t bound_clients; /* Currently actively bound clients */
+	int64_t combined_clients; /* Total clients of all subproxies of a parent proxy */
+	int64_t headroom; /* Temporary variable when calculating how many more clients can bind */
 
+	proxy_t *parent; /* Parent proxy of each subproxy */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
 	bool dead;
@@ -943,8 +945,10 @@ static void update_base(ckpool_t *ckp, const int prio)
 
 static void __kill_instance(stratum_instance_t *client)
 {
-	if (client->proxy)
+	if (client->proxy) {
 		client->proxy->bound_clients--;
+		client->proxy->parent->combined_clients--;
+	}
 	free(client->workername);
 	free(client->useragent);
 	free(client);
@@ -1034,6 +1038,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int64_t id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
 
+	proxy->parent = proxy;
 	proxy->id = id;
 	proxy->low_id = id & 0xFFFFFFFF;
 	proxy->sdata = duplicate_sdata(sdata);
@@ -1050,6 +1055,7 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 {
 	proxy_t *subproxy = ckzalloc(sizeof(proxy_t));
 
+	subproxy->parent = proxy;
 	subproxy->id = proxy->id;
 	subproxy->low_id = proxy->low_id;
 	subproxy->subid = subid;
@@ -2474,6 +2480,7 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 		client->proxy = proxy;
 		proxy->clients++;
 		proxy->bound_clients++;
+		proxy->parent->combined_clients++;
 	}
 	ck_wunlock(&ckp_sdata->instance_lock);
 
