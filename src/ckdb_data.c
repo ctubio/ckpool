@@ -3032,10 +3032,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 					STRNCPY(pa2->payaddress, pa->payaddress);
 					pa2->payratio = pa->payratio;
 					k_add_tail(addr_store, pa_item2);
-					
-					pa_item = next_in_ktree(pay_ctx);
-					DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
 				}
+				pa_item = next_in_ktree(pay_ctx);
+				DATA_PAYMENTADDRESSES_NULL(pa, pa_item);
 			}
 		}
 		K_WUNLOCK(paymentaddresses_free);
