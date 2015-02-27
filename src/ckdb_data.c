@@ -2639,7 +2639,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	while (b2_item && blocks2->height == height &&
 	       strcmp(blocks2->blockhash, blockhash) == 0) {
 		if (blocks2->confirmed[0] == BLOCKS_NEW) {
-			copy_tv(&end_tv, &(blocks->createdate));
+			copy_tv(&end_tv, &(blocks2->createdate));
 			if (!addr_cd)
 				addr_cd = &(blocks2->createdate);
 			break;
