@@ -4150,7 +4150,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		 * Require height, blockhash and addrdate
 		 *  addrdate is an epoch integer
 		 *   and 0 means uses the default = block NEW createdate
-		 *   this is the date to use for payoutaddresses
+		 *   this is the date to use to determine payoutaddresses
 		 * Check the console for processing messages */
 		i_height = require_name(trf_root, "height", 6,
 					(char *)intpatt, reply, siz);

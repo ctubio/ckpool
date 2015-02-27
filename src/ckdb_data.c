@@ -2527,13 +2527,15 @@ K_ITEM *find_payoutid(int64_t payoutid)
     then keep stepping back until we complete the current begin_workinfoid
      (also summarising diffacc per user)
    While we are still below diff_want
-    find each workmarker and add on the full set of worksummary
+    find each next workmarker and add on the full set of worksummary
      diffacc shares (also summarising diffacc per user)
    This will give us the total number of diff1 shares (diffacc_total)
     to use for the payment calculations
    The value of diff_want defaults to the block's network difficulty
     (block_ndiff) but can be changed with diff_times and diff_add to:
 	block_ndiff * diff_times + diff_add
+    they are stored in the optioncontrol table and thus can use the
+    block number to change their values over time
     N.B. diff_times and diff_add can be zero, positive or negative
    The pplns_elapsed time of the shares is from the createdate of the
     begin_workinfoid that has shares accounted to the total,
@@ -2547,12 +2549,19 @@ K_ITEM *find_payoutid(int64_t payoutid)
 	'end' should usually be the info of the found block with the pplns
 	data going back in time to 'begin'
 
- The data processing procedure is to create a separate tree/store of
-  miningpayouts, create a seperate store of payments,
-  then actually create the payout record and transfer the miningpayouts
-  and payments to the ram table and the db
+ The data processing procedure is to:
+  create a separate tree/store of miningpayouts during the diff_used
+   calculation,
+  store the payout in the db with a 'processing' status,
+  create a seperate store of payments per miningpayout that are stored
+   in the db,
+  store each mininging payout in the db after storing the payments for the
+   given miningpayout,
+  commit that all and if it succeeds then update the ram tables for all
+   of the above
+  then update the payout status, in the db and ram, to 'generated'
 
- TODO: recheck the payout if it already exists
+ TODO: recheck the payout if it already exists?
 
  N.B. process_pplns() is only automatically triggered once after the block
 	summarisation is verified, so it can always report all errors
@@ -3014,6 +3023,13 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 						       pay_ctx);
 		if (pa_item) {
 			DATA_PAYMENTADDRESSES(pa, pa_item);
+			/* The tv_newer and tv_newer_eq are critical since:
+			 *  when a record is replaced, the expirydate is set
+			 *  to 'now' and the new record will have the same
+			 *  createdate of 'now', so to avoid possibly selecting
+			 *  both records, we get the one that was created
+			 *  before addr_cd and expires on or after addr_cd
+			 */
 			while (pa_item && pa->userid == miningpayouts->userid &&
 			       tv_newer(&(pa->createdate), addr_cd)) {
 				if (tv_newer_eq(addr_cd, &(pa->expirydate))) {
@@ -3102,8 +3118,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 					 "%s.0", users->username);
 				STRNCPY(payments->payaddress, users->username);
 				payments->amount = amount;
+				payments->diffacc = miningpayouts->diffacc;
 				used = amount;
-				k_add_head(pay_store, pay_item);
+				k_add_tail(pay_store, pay_item);
 				ok = payments_add(conn, true, pay_item,
 						  &(payments->old_item),
 						  (char *)by_default,
