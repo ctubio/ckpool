@@ -366,14 +366,6 @@ struct stratifier_data {
 
 typedef struct stratifier_data sdata_t;
 
-typedef struct json_entry json_entry_t;
-
-struct json_entry {
-	json_entry_t *next;
-	json_entry_t *prev;
-	json_t *val;
-};
-
 /* Priority levels for generator messages */
 #define GEN_LAX 0
 #define GEN_NORMAL 1
@@ -3860,7 +3852,7 @@ out:
  * avoid floods of stat data coming at once. */
 static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 {
-	json_entry_t *json_list = NULL, *entry, *tmpentry;
+	ckmsg_t *json_list = NULL, *entry, *tmpentry;
 	user_instance_t *user, *tmp;
 	char cdfield[64];
 	time_t now_t;
@@ -3921,8 +3913,8 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 					"createcode", __func__,
 					"createinet", ckp->serverurl[0]);
 			worker->notified_idle = worker->idle;
-			entry = ckalloc(sizeof(json_entry_t));
-			entry->val = val;
+			entry = ckalloc(sizeof(ckmsg_t));
+			entry->data = val;
 			DL_APPEND(json_list, entry);
 		}
 	}
@@ -3930,7 +3922,7 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 
 	/* Add all entries outside of the instance lock */
 	DL_FOREACH_SAFE(json_list, entry, tmpentry) {
-		ckdbq_add(ckp, ID_WORKERSTATS, entry->val);
+		ckdbq_add(ckp, ID_WORKERSTATS, (json_t *)entry->data);
 		DL_DELETE(json_list, entry);
 		free(entry);
 	}
