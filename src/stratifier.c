@@ -437,6 +437,29 @@ static const char *ckdb_ids[] = {
 	"heartbeat"
 };
 
+/* For storing a set of messages within another lock, allowing us to dump them
+ * to the log outside of lock */
+static void add_msg_entry(char_entry_t **entries, char **buf)
+{
+	char_entry_t *entry = ckalloc(sizeof(char_entry_t));
+
+	entry->buf = *buf;
+	*buf = NULL;
+	DL_APPEND(*entries, entry);
+}
+
+static void notice_msg_entries(char_entry_t **entries)
+{
+	char_entry_t *entry, *tmpentry;
+
+	DL_FOREACH_SAFE(*entries, entry, tmpentry) {
+		DL_DELETE(*entries, entry);
+		LOGNOTICE("%s", entry->buf);
+		free(entry->buf);
+		free(entry);
+	}
+}
+
 static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 {
 	uint64_t *u64, g64, d64 = 0;
