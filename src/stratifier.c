@@ -1685,6 +1685,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 {
 	user_instance_t *user = client->user_instance;
 	int64_t client_id = client->id;
+	ckpool_t *ckp = client->ckp;
 	int dropped = 0, ref;
 
 	ck_wlock(&sdata->instance_lock);
@@ -1703,8 +1704,8 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 
 	if (dropped) {
 		if (user)
-			dec_worker(sdata->ckp, user);
-		reap_proxies(sdata->ckp, sdata);
+			dec_worker(ckp, user);
+		reap_proxies(ckp, sdata);
 	}
 }
 
@@ -4563,6 +4564,36 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 	}
 }
 
+static void add_log_entry(log_entry_t **entries, char **fname, char **buf)
+{
+	log_entry_t *entry = ckalloc(sizeof(log_entry_t));
+
+	entry->fname = *fname;
+	*fname = NULL;
+	entry->buf = *buf;
+	*buf = NULL;
+	DL_APPEND(*entries, entry);
+}
+
+static void dump_log_entries(log_entry_t **entries)
+{
+	log_entry_t *entry, *tmpentry;
+	FILE *fp;
+
+	DL_FOREACH_SAFE(*entries, entry, tmpentry) {
+		DL_DELETE(*entries, entry);
+		fp = fopen(entry->fname, "we");
+		if (likely(fp)) {
+			fprintf(fp, "%s", entry->buf);
+			fclose(fp);
+		} else
+			LOGERR("Failed to fopen %s in dump_log_entries", entry->fname);
+		free(entry->fname);
+		free(entry->buf);
+		free(entry);
+	}
+}
+
 static void *statsupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
@@ -4582,14 +4613,14 @@ static void *statsupdate(void *arg)
 		char suffix360[16], suffix1440[16], suffix10080[16];
 		char_entry_t *char_list = NULL, *char_t, *chartmp_t;
 		stratum_instance_t *client, *tmp;
+		log_entry_t *log_entries = NULL;
 		user_instance_t *user, *tmpuser;
 		int idle_workers = 0;
-		char fname[512] = {};
+		char *fname, *s;
 		tv_t now, diff;
 		ts_t ts_now;
 		json_t *val;
 		FILE *fp;
-		char *s;
 		int i;
 
 		tv_time(&now);
@@ -4655,17 +4686,10 @@ static void *statsupdate(void *arg)
 						"lastupdate", now.tv_sec,
 						"bestshare", worker->best_diff);
 
-				snprintf(fname, 511, "%s/workers/%s", ckp->logdir, worker->workername);
-				fp = fopen(fname, "we");
-				if (unlikely(!fp)) {
-					LOGERR("Failed to fopen %s", fname);
-					continue;
-				}
+				ASPRINTF(&fname, "%s/workers/%s", ckp->logdir, worker->workername);
 				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
-				fprintf(fp, "%s", s);
-				dealloc(s);
+				add_log_entry(&log_entries, &fname, &s);
 				json_decref(val);
-				fclose(fp);
 			}
 
 			/* Decay times per user */
@@ -4705,24 +4729,21 @@ static void *statsupdate(void *arg)
 					"workers", user->workers,
 					"bestshare", user->best_diff);
 
-			snprintf(fname, 511, "%s/users/%s", ckp->logdir, user->username);
-			fp = fopen(fname, "we");
-			if (unlikely(!fp)) {
-				LOGERR("Failed to fopen %s", fname);
-				continue;
-			}
-			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-			fprintf(fp, "%s\n", s);
+			ASPRINTF(&fname, "%s/users/%s", ckp->logdir, user->username);
+			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
+			add_log_entry(&log_entries, &fname, &s);
 			if (!idle) {
 				char_t = ckalloc(sizeof(char_entry_t));
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 				ASPRINTF(&char_t->buf, "User %s:%s", user->username, s);
 				DL_APPEND(char_list, char_t);
 			}
-			dealloc(s);
 			json_decref(val);
-			fclose(fp);
 		}
 		ck_runlock(&sdata->instance_lock);
+
+		/* Dump log entries out of instance_lock */
+		dump_log_entries(&log_entries);
 
 		DL_FOREACH_SAFE(char_list, char_t, chartmp_t) {
 			LOGNOTICE("%s", char_t->buf);
@@ -4752,10 +4773,11 @@ static void *statsupdate(void *arg)
 		ghs10080 = stats->dsps10080 * nonces;
 		suffix_string(ghs10080, suffix10080, 16, 0);
 
-		snprintf(fname, 511, "%s/pool/pool.status", ckp->logdir);
+		ASPRINTF(&fname, "%s/pool/pool.status", ckp->logdir);
 		fp = fopen(fname, "we");
 		if (unlikely(!fp))
 			LOGERR("Failed to fopen %s", fname);
+		dealloc(fname);
 
 		JSON_CPACK(val, "{si,si,si,si,si,si}",
 				"runtime", diff.tv_sec,
