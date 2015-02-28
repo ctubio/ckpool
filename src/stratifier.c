@@ -4639,7 +4639,7 @@ static void *statsupdate(void *arg)
 		user_instance_t *user, *tmpuser;
 		char_entry_t *char_list = NULL;
 		int idle_workers = 0;
-		char *fname, *s;
+		char *fname, *s, *sp;
 		tv_t now, diff;
 		ts_t ts_now;
 		json_t *val;
@@ -4756,8 +4756,6 @@ static void *statsupdate(void *arg)
 			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
 			add_log_entry(&log_entries, &fname, &s);
 			if (!idle) {
-				char *sp;
-
 				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 				ASPRINTF(&sp, "User %s:%s", user->username, s);
 				dealloc(s);
@@ -4862,8 +4860,9 @@ static void *statsupdate(void *arg)
 					   "alive", !proxy->dead);
 				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
 				json_decref(val);
-				LOGNOTICE("Proxies:%s", s);
+				ASPRINTF(&sp, "Proxies:%s", s);
 				dealloc(s);
+				add_msg_entry(&char_list, &sp);
 				HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
 					JSON_CPACK(val, "{sI,si,si,sI,sI,sf,sb}",
 						   "id", subproxy->id,
@@ -4873,13 +4872,15 @@ static void *statsupdate(void *arg)
 						   "maxclients", subproxy->max_clients,
 						   "diff", subproxy->diff,
 						   "alive", !subproxy->dead);
-				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-				json_decref(val);
-				LOGNOTICE("subproxies:%s", s);
-				dealloc(s);
+					s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+					json_decref(val);
+					ASPRINTF(&sp, "Subproxies:%s", s);
+					dealloc(s);
+					add_msg_entry(&char_list, &sp);
 				}
 			}
 			mutex_unlock(&sdata->proxy_lock);
+			notice_msg_entries(&char_list);
 		}
 
 		ts_realtime(&ts_now);
