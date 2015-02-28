@@ -4634,10 +4634,10 @@ static void *statsupdate(void *arg)
 		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
-		char_entry_t *char_list = NULL, *char_t, *chartmp_t;
 		stratum_instance_t *client, *tmp;
 		log_entry_t *log_entries = NULL;
 		user_instance_t *user, *tmpuser;
+		char_entry_t *char_list = NULL;
 		int idle_workers = 0;
 		char *fname, *s;
 		tv_t now, diff;
@@ -4756,10 +4756,12 @@ static void *statsupdate(void *arg)
 			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
 			add_log_entry(&log_entries, &fname, &s);
 			if (!idle) {
-				char_t = ckalloc(sizeof(char_entry_t));
+				char *sp;
+
 				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-				ASPRINTF(&char_t->buf, "User %s:%s", user->username, s);
-				DL_APPEND(char_list, char_t);
+				ASPRINTF(&sp, "User %s:%s", user->username, s);
+				dealloc(s);
+				add_msg_entry(&char_list, &sp);
 			}
 			json_decref(val);
 		}
@@ -4767,13 +4769,7 @@ static void *statsupdate(void *arg)
 
 		/* Dump log entries out of instance_lock */
 		dump_log_entries(&log_entries);
-
-		DL_FOREACH_SAFE(char_list, char_t, chartmp_t) {
-			LOGNOTICE("%s", char_t->buf);
-			DL_DELETE(char_list, char_t);
-			free(char_t->buf);
-			dealloc(char_t);
-		}
+		notice_msg_entries(&char_list);
 
 		ghs1 = stats->dsps1 * nonces;
 		suffix_string(ghs1, suffix1, 16, 0);
