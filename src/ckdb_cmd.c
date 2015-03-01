@@ -4271,6 +4271,122 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 	LOGWARNING("%s.%s", id, reply);
 	return strdup(reply);
 }
+
+static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd,
+			  __maybe_unused K_TREE *trf_root)
+{
+	K_ITEM *i_username, *u_item, *mp_item, *po_item;
+	K_TREE_CTX ctx[1];
+	MININGPAYOUTS *mp;
+	PAYOUTS *payouts;
+	USERS *users;
+	char reply[1024] = "";
+	char tmp[1024];
+	size_t siz = sizeof(reply);
+	char *buf;
+	size_t len, off;
+	int rows;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	K_RLOCK(users_free);
+	u_item = find_users(transfer_data(i_username));
+	K_RUNLOCK(users_free);
+	if (!u_item)
+		return strdup("bad");
+	DATA_USERS(users, u_item);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	rows = 0;
+	K_RLOCK(payouts_free);
+	po_item = last_in_ktree(payouts_root, ctx);
+	DATA_PAYOUTS_NULL(payouts, po_item);
+	/* TODO: allow to see details of a single payoutid
+	 *	 if it has multiple items (percent payout user) */
+	while (po_item) {
+		if (CURRENT(&(payouts->expirydate)) &&
+		    PAYGENERATED(payouts->status)) {
+			// Not locked ... for now
+			mp_item = find_miningpayouts(payouts->payoutid,
+						     users->userid);
+			if (mp_item) {
+				DATA_MININGPAYOUTS(mp, mp_item);
+
+				bigint_to_buf(payouts->payoutid, reply,
+					      sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "payoutid:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				int_to_buf(payouts->height, reply,
+					   sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "height:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				bigint_to_buf(payouts->elapsed, reply,
+					      sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "elapsed:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				bigint_to_buf(mp->amount, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "amount:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(mp->diffacc, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "diffacc:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				bigint_to_buf(payouts->minerreward, reply,
+					      sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "minerreward:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(payouts->diffused, reply,
+					      sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "diffused:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				str_to_buf(payouts->status, reply,
+					   sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "status:%d=%s%c",
+							   rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				rows++;
+			}
+		}
+		po_item = prev_in_ktree(ctx);
+		DATA_PAYOUTS_NULL(payouts, po_item);
+	}
+	K_RUNLOCK(miningpayouts_free);
+
+	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "payoutid,height,elapsed,amount,diffacc,minerreward,diffused,status",
+		 FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "MiningPayouts", FLDSEP, "");
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	return buf;
+}
+
 static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 		     char *id, __maybe_unused tv_t *now,
 		     __maybe_unused char *by, __maybe_unused char *code,
@@ -4932,6 +5048,7 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_PPLNS2,	"pplns2",	false,	false,	cmd_pplns2,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_PAYOUTS,	"payouts",	false,	false,	cmd_payouts,	ACCESS_SYSTEM },
+	{ CMD_MPAYOUTS,	"mpayouts",	false,	false,	cmd_mpayouts,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_MARKS,	"marks",	false,	false,	cmd_marks,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		NULL }

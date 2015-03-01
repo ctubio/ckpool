@@ -63,6 +63,26 @@ function howlongago($sec)
  return $des;
 }
 #
+function howmanyhrs($sec)
+{
+ if ($sec < 60)
+	$des = $sec.'s';
+ else
+ {
+	$min = floor($sec / 60);
+	$sec -= $min * 60;
+	if ($min < 60)
+		$des = $min.'m '.$sec.'s';
+	else
+	{
+		$hr = floor($min / 60);
+		$min -= $hr * 60;
+		$des = $hr.'hr '.$min.'m '.$sec.'s';
+	}
+ }
+ return $des;
+}
+#
 function btcfmt($amt)
 {
  $amt /= 100000000;

@@ -258,6 +258,18 @@ function getPayments($user)
  return repDecode($rep);
 }
 #
+function getMPayouts($user)
+{
+ if ($user == false)
+	showIndex();
+ $flds = array('username' => $user);
+ $msg = msgEncode('mpayouts', 'mp', $flds, $user);
+ $rep = sendsockreply('getMPayments', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
+}
+#
 function getBlocks($user)
 {
  if ($user == false)
