@@ -73,6 +73,15 @@ struct char_entry {
 	char *buf;
 };
 
+typedef struct log_entry log_entry_t;
+
+struct log_entry {
+	log_entry_t *next;
+	log_entry_t *prev;
+	char *fname;
+	char *buf;
+};
+
 struct server_instance {
 	/* Hash table data */
 	UT_hash_handle hh;
