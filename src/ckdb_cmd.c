@@ -1092,9 +1092,11 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *notcd,
 			  __maybe_unused K_TREE *trf_root)
 {
-	K_ITEM *i_username, *u_item, *p_item;
+	K_ITEM *i_username, *u_item, *p_item, *p2_item, *po_item;
 	K_TREE_CTX ctx[1];
-	PAYMENTS *payments, curr;
+	K_STORE *pay_store;
+	PAYMENTS *payments, *last_payments = NULL;
+	PAYOUTS *payouts;
 	USERS *users;
 	char reply[1024] = "";
 	char tmp[1024];
@@ -1102,6 +1104,7 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char *buf;
 	size_t len, off;
 	int rows;
+	bool pok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -1116,65 +1119,71 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 		return strdup("bad");
 	DATA_USERS(users, u_item);
 
-	bzero(&curr, sizeof(curr));
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 	rows = 0;
-
-	K_RLOCK(payments_free);
+	pay_store = k_new_store(payments_free);
+	K_WLOCK(payments_free);
 	p_item = find_first_payments(users->userid, ctx);
 	DATA_PAYMENTS_NULL(payments, p_item);
 	/* TODO: allow to see details of a single payoutid
 	 *	 if it has multiple items (percent payout user) */
 	while (p_item && payments->userid == users->userid) {
 		if (CURRENT(&(payments->expirydate))) {
-			if (curr.payoutid && curr.payoutid != payments->payoutid) {
-				tv_to_buf(&(curr.paydate), reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "paydate:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				str_to_buf(curr.payaddress, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				bigint_to_buf(curr.amount, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "amount:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				rows++;
-				bzero(&curr, sizeof(curr));
+			if (!last_payments || payments->payoutid != last_payments->payoutid) {
+				p2_item = k_unlink_head(payments_free);
+				DATA_PAYMENTS_NULL(last_payments, p2_item);
+				memcpy(last_payments, payments, sizeof(*last_payments));
+				k_add_tail(pay_store, p2_item);
+			} else {
+				STRNCPY(last_payments->payaddress, "*Multiple");
+				last_payments->amount += payments->amount;
 			}
-			if (!curr.payoutid) {
-				curr.payoutid = payments->payoutid;
-				copy_tv(&(curr.paydate), &(payments->paydate));
-				STRNCPY(curr.payaddress, payments->payaddress);
-			} else
-				STRNCPY(curr.payaddress, "*Multiple");
-			curr.amount += payments->amount;
 		}
 		p_item = next_in_ktree(ctx);
 		DATA_PAYMENTS_NULL(payments, p_item);
 	}
-	K_RUNLOCK(payments_free);
-	if (curr.payoutid) {
-		tv_to_buf(&(curr.paydate), reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "paydate:%d=%s%c", rows, reply, FLDSEP);
-		APPEND_REALLOC(buf, off, len, tmp);
+	K_WUNLOCK(payments_free);
 
-		str_to_buf(curr.payaddress, reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c", rows, reply, FLDSEP);
-		APPEND_REALLOC(buf, off, len, tmp);
+	p_item = pay_store->head;
+	while (p_item) {
+		DATA_PAYMENTS(payments, p_item);
+		pok = false;
+		K_RLOCK(payouts_free);
+		po_item = find_payoutid(payments->payoutid);
+		DATA_PAYOUTS_NULL(payouts, po_item);
+		if (p_item && PAYGENERATED(payouts->status))
+			pok = true;
+		K_RUNLOCK(payouts_free);
+		if (pok) {
+			bigint_to_buf(payouts->payoutid, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "payoutid:%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
 
-		bigint_to_buf(curr.amount, reply, sizeof(reply));
-		snprintf(tmp, sizeof(tmp), "amount:%d=%s%c", rows, reply, FLDSEP);
-		APPEND_REALLOC(buf, off, len, tmp);
+			int_to_buf(payouts->height, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "height:%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
 
-		rows++;
+			str_to_buf(payments->payaddress, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			bigint_to_buf(payments->amount, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "amount:%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			tv_to_buf(&(payments->paydate), reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "paydate:%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			rows++;
+		}
+		p_item = p_item->next;
 	}
 
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "paydate,payaddress,amount", FLDSEP);
+		 "payoutid,height,payaddress,amount,paydate", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Payments", FLDSEP, "");
