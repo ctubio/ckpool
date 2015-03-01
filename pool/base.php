@@ -63,8 +63,9 @@ function howlongago($sec)
  return $des;
 }
 #
-function howmanyhrs($sec)
+function howmanyhrs($tot)
 {
+ $sec = round($tot);
  if ($sec < 60)
 	$des = $sec.'s';
  else
@@ -87,6 +88,11 @@ function btcfmt($amt)
 {
  $amt /= 100000000;
  return number_format($amt, 8);
+}
+#
+function utcd($when)
+{
+ return gmdate('Y-m-d H:i:s+00', round($when));
 }
 #
 global $sipre;

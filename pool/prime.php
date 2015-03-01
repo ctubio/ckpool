@@ -73,6 +73,7 @@ function check()
 		'User Settings' => 'userset'
 	),
 	'Workers' => array(
+		'Shifts ' => 'shifts',
 		'Workers ' => 'workers',
 		'Management' => 'workmgt',
 	),

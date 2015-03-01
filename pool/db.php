@@ -270,6 +270,18 @@ function getMPayouts($user)
  return repDecode($rep);
 }
 #
+function getShifts($user)
+{
+ if ($user == false)
+	showIndex();
+ $flds = array('username' => $user);
+ $msg = msgEncode('shifts', 'shift', $flds, $user);
+ $rep = sendsockreply('getShifts', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
+}
+#
 function getBlocks($user)
 {
  if ($user == false)

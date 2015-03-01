@@ -1569,6 +1569,34 @@ K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 	return item;
 }
 
+K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
+{
+	WORKINFO workinfo, *wi;
+	K_TREE_CTX ctx0[1];
+	K_ITEM look, *item;
+
+	if (ctx == NULL)
+		ctx = ctx0;
+
+	workinfo.workinfoid = workinfoid;
+	workinfo.expirydate.tv_sec = default_expiry.tv_sec;
+	workinfo.expirydate.tv_usec = default_expiry.tv_usec;
+
+	INIT_WORKINFO(&look);
+	look.data = (void *)(&workinfo);
+	K_RLOCK(workinfo_free);
+	item = find_after_in_ktree(workinfo_root, &look, cmp_workinfo, ctx);
+	if (item) {
+		DATA_WORKINFO(wi, item);
+		while (item && !CURRENT(&(wi->expirydate))) {
+			item = next_in_ktree(ctx);
+			DATA_WORKINFO_NULL(wi, item);
+		}
+	}
+	K_RUNLOCK(workinfo_free);
+	return item;
+}
+
 bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		  char *by, char *code, char *inet, tv_t *cd,
 		  tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,

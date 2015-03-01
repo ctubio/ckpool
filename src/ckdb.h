@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.010"
+#define CKDB_VERSION DB_VERSION"-1.011"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -343,6 +343,7 @@ enum cmd_values {
 	CMD_PPLNS2,
 	CMD_PAYOUTS,
 	CMD_MPAYOUTS,
+	CMD_SHIFTS,
 	CMD_USERSTATUS,
 	CMD_MARKS,
 	CMD_END
@@ -1719,6 +1720,7 @@ extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);
 extern cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS);
 extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
+extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
 extern bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			 char *by, char *code, char *inet, tv_t *cd,
 			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,

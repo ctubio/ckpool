@@ -4372,7 +4372,7 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 		po_item = prev_in_ktree(ctx);
 		DATA_PAYOUTS_NULL(payouts, po_item);
 	}
-	K_RUNLOCK(miningpayouts_free);
+	K_RUNLOCK(payouts_free);
 
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
@@ -4381,6 +4381,176 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "MiningPayouts", FLDSEP, "");
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	return buf;
+}
+
+static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd,
+			  __maybe_unused K_TREE *trf_root)
+{
+	K_ITEM *i_username, *u_item, ms_look, *wm_item, *ms_item, *wi_item;
+	K_TREE_CTX wm_ctx[1], ms_ctx[1];
+	WORKMARKERS *wm;
+	WORKINFO *wi;
+	MARKERSUMMARY markersummary, *ms, ms_add;
+	USERS *users;
+	char reply[1024] = "";
+	char tmp[1024];
+	size_t siz = sizeof(reply);
+	char *buf;
+	size_t len, off;
+	tv_t marker_end = { 0L, 0L };
+	int rows;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	K_RLOCK(users_free);
+	u_item = find_users(transfer_data(i_username));
+	K_RUNLOCK(users_free);
+	if (!u_item)
+		return strdup("bad");
+	DATA_USERS(users, u_item);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	INIT_MARKERSUMMARY(&ms_look);
+	ms_look.data = (void *)(&markersummary);
+	rows = 0;
+	K_RLOCK(workmarkers_free);
+	wm_item = last_in_ktree(workmarkers_workinfoid_root, wm_ctx);
+	DATA_WORKMARKERS_NULL(wm, wm_item);
+	/* TODO: allow to see details of a single payoutid
+	 *	 if it has multiple items (percent payout user) */
+	while (rows < 98 && wm_item) {
+		if (CURRENT(&(wm->expirydate)) && WMPROCESSED(wm->status)) {
+			K_RUNLOCK(workmarkers_free);
+
+			bzero(&ms_add, sizeof(ms_add));
+
+			markersummary.markerid = wm->markerid;
+			markersummary.userid = users->userid;
+			markersummary.workername = EMPTY;
+			K_RLOCK(markersummary_free);
+			ms_item = find_after_in_ktree(markersummary_root, &ms_look,
+						      cmp_markersummary, ms_ctx);
+			DATA_MARKERSUMMARY_NULL(ms, ms_item);
+			while (ms_item && ms->markerid == wm->markerid &&
+			       ms->userid == users->userid) {
+				ms_add.diffacc += ms->diffacc;
+				ms_add.diffrej += ms->diffrej;
+				ms_add.shareacc += ms->shareacc;
+				ms_add.sharerej += ms->sharerej;
+
+				ms_item = next_in_ktree(ms_ctx);
+				DATA_MARKERSUMMARY_NULL(ms, ms_item);
+			}
+			K_RUNLOCK(markersummary_free);
+
+			if (marker_end.tv_sec == 0L) {
+				wi_item = next_workinfo(wm->workinfoidend, NULL);
+				if (!wi_item) {
+					/* There's no workinfo after this shift
+					 * Unexpected ... estimate last wid+30s */
+					wi_item = find_workinfo(wm->workinfoidend, NULL);
+					if (!wi_item) {
+						// Nothing is currently locked
+						LOGERR("%s() workmarker %"PRId64"/%s."
+							" missing widend %"PRId64,
+							__func__, wm->markerid,
+							wm->description,
+							wm->workinfoidend);
+						snprintf(reply, siz, "data error 1");
+						return strdup(reply);
+					}
+					DATA_WORKINFO(wi, wi_item);
+					copy_tv(&marker_end, &(wi->createdate));
+					marker_end.tv_sec += 30;
+				} else {
+					DATA_WORKINFO(wi, wi_item);
+					copy_tv(&marker_end, &(wi->createdate));
+				}
+			}
+
+			wi_item = find_workinfo(wm->workinfoidstart, NULL);
+			if (!wi_item) {
+				// Nothing is currently locked
+				LOGERR("%s() workmarker %"PRId64"/%s. missing "
+					"widstart %"PRId64,
+					__func__, wm->markerid, wm->description,
+					wm->workinfoidstart);
+				snprintf(reply, siz, "data error 2");
+				return strdup(reply);
+			}
+			DATA_WORKINFO(wi, wi_item);
+
+			bigint_to_buf(wm->markerid, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "markerid:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			str_to_buf(wm->description, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "shift:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			ftv_to_buf(&(wi->createdate), reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "start:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			ftv_to_buf(&marker_end, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "end:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			double_to_buf(ms_add.diffacc, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "diffacc:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			double_to_buf(ms_add.diffrej, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "diffrej:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			double_to_buf(ms_add.shareacc, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "shareacc:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			double_to_buf(ms_add.sharerej, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "sharerej:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			rows++;
+
+			// Setup for next shift
+			copy_tv(&marker_end, &(wi->createdate));
+
+			K_RLOCK(workmarkers_free);
+		}
+		wm_item = prev_in_ktree(wm_ctx);
+		DATA_WORKMARKERS_NULL(wm, wm_item);
+	}
+	K_RUNLOCK(workmarkers_free);
+
+	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "markerid,shift,start,end,diffacc,diffrej,shareacc,sharerej",
+		 FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Shifts", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
@@ -5049,6 +5219,7 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_PPLNS2,	"pplns2",	false,	false,	cmd_pplns2,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_PAYOUTS,	"payouts",	false,	false,	cmd_payouts,	ACCESS_SYSTEM },
 	{ CMD_MPAYOUTS,	"mpayouts",	false,	false,	cmd_mpayouts,	ACCESS_SYSTEM ACCESS_WEB },
+	{ CMD_SHIFTS,	"shifts",	false,	false,	cmd_shifts,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_MARKS,	"marks",	false,	false,	cmd_marks,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		NULL }
