@@ -279,6 +279,7 @@ bool everyone_die = false;
 tv_t last_heartbeat;
 tv_t last_workinfo;
 tv_t last_share;
+tv_t last_share_inv;
 tv_t last_auth;
 cklock_t last_lock;
 
@@ -3250,6 +3251,7 @@ static void *listener(void *arg)
 		setnow(&last_heartbeat);
 		copy_tv(&last_workinfo, &last_heartbeat);
 		copy_tv(&last_share, &last_heartbeat);
+		copy_tv(&last_share_inv, &last_heartbeat);
 		copy_tv(&last_auth, &last_heartbeat);
 		ck_wunlock(&last_lock);
 

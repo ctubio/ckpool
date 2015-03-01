@@ -1954,8 +1954,13 @@ wiconf:
 			return strdup("failed.DATA");
 		} else {
 			// Only flag a successful share
+			int32_t errn;
+			TXT_TO_INT("errn", transfer_data(i_errn), errn);
 			ck_wlock(&last_lock);
-			setnow(&last_share);
+			if (errn == SE_NONE)
+				setnow(&last_share);
+			else
+				setnow(&last_share_inv);
 			ck_wunlock(&last_lock);
 		}
 		LOGDEBUG("%s.ok.added %s", id, transfer_data(i_nonce));
@@ -2491,6 +2496,9 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	ftv_to_buf(&last_share, reply, siz);
 	snprintf(tmp, sizeof(tmp), "lastsh=%s%c", reply, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	ftv_to_buf(&last_share_inv, reply, siz);
+	snprintf(tmp, sizeof(tmp), "lastshinv=%s%c", reply, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	ftv_to_buf(&last_auth, reply, siz);
 	ck_wunlock(&last_lock);
