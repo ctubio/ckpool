@@ -110,6 +110,8 @@ div.topd {background-color:#cff; border-color: #cff; border-style: solid; border
 .topdat {margin-left: 8px; margin-right: 24px; color:green; font-weight: bold;}
 span.login {float: right; margin-left: 8px; margin-right: 24px;}
 span.hil {color:blue;}
+span.user {color:green;}
+span.addr {color:brown;}
 span.warn {color:orange; font-weight:bold;}
 span.urg {color:red; font-weight:bold;}
 span.err {color:red; font-weight:bold; font-size:120%;}
