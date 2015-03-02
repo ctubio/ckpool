@@ -10,11 +10,12 @@ function dompayouts($data, $user)
  $pg .= "<tr class=title>";
  $pg .= "<td class=dr>Block</td>";
  $pg .= "<td class=dr>Miner Reward</td>";
- $pg .= "<td class=dr>Payout Diff</td>";
- $pg .= "<td class=dr>Elapsed</td>";
+ $pg .= "<td class=dr>N Diff</td>";
+ $pg .= "<td class=dr>N Range</td>";
+ $pg .= "<td class=dr>Pool N Avg</td>";
  $pg .= "<td class=dr>Your %</td>";
- $pg .= "<td class=dr>Your Diff</td>";
- $pg .= "<td class=dr>Your Avg Hs</td>";
+ $pg .= "<td class=dr>Your N Diff</td>";
+ $pg .= "<td class=dr>Your N Avg</td>";
  $pg .= "<td class=dr>Your BTC</td>";
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
@@ -34,6 +35,8 @@ function dompayouts($data, $user)
 		$pg .= '<td class=dr>'.difffmt($diffused).'</td>';
 		$elapsed = $ans['elapsed:'.$i];
 		$pg .= '<td class=dr>'.howmanyhrs($elapsed).'</td>';
+		$phr = $diffused * pow(2,32) / $elapsed;
+		$pg .= '<td class=dr>'.siprefmt($phr).'Hs</td>';
 		$diffacc = $ans['diffacc:'.$i];
 		$ypct = $diffacc * 100 / $diffused;
 		$pg .= '<td class=dr>'.number_format($ypct, 2).'%</td>';
