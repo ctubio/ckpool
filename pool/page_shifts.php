@@ -8,7 +8,7 @@ function doshifts($data, $user)
  $pg .= "<tr class=title>";
  $pg .= "<td class=dl>Shift</td>";
  $pg .= "<td class=dl>Start</td>";
- $pg .= "<td class=dr>Elapsed</td>";
+ $pg .= "<td class=dr>Length</td>";
  $pg .= "<td class=dr>Your Diff</td>";
  $pg .= "<td class=dr>Avg Hs</td>";
  $pg .= "<td class=dr>Shares</td>";
