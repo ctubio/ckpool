@@ -4018,6 +4018,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	K_ITEM *b_item, *u_item, *old_b_item;
 	char cd_buf[DATE_BUFSIZ];
 	char hash_dsp[16+1];
+	double hash_diff;
 	BLOCKS *row, *oldblocks;
 	USERS *users;
 	char *upd, *ins;
@@ -4038,6 +4039,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	STRNCPY(row->blockhash, blockhash);
 
 	dsp_hash(blockhash, hash_dsp, sizeof(hash_dsp));
+	hash_diff = blockhash_diff(blockhash);
 
 	K_RLOCK(blocks_free);
 	old_b_item = find_blocks(row->height, blockhash, NULL);
@@ -4307,9 +4309,12 @@ flail:
 	if (ok) {
 		char pct[16] = "?";
 		char est[16] = "";
+		char diff[16] = "";
 		K_ITEM *w_item;
 		char tmp[256];
 		bool blk;
+
+		suffix_string(hash_diff, diff, sizeof(diff)-1, 0);
 
 		switch (confirmed[0]) {
 			case BLOCKS_NEW:
@@ -4356,10 +4361,10 @@ flail:
 				break;
 		}
 
-		LOGWARNING("%s(): %sStatus: %s, Block: %s/...%s%s",
+		LOGWARNING("%s(): %sStatus: %s, Block: %s/...%s Diff %s%s",
 			   __func__, blk ? "BLOCK! " : "",
 			   blocks_confirmed(confirmed),
-			   height, hash_dsp, tmp);
+			   height, hash_dsp, diff, tmp);
 	}
 
 	return ok;

@@ -2086,6 +2086,27 @@ void _dsp_hash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS)
 	STRNCPYSIZ(buf, ptr, siz);
 }
 
+double _blockhash_diff(char *hash, WHERE_FFL_ARGS)
+{
+	uchar binhash[SHA256SIZHEX >> 1];
+	uchar swap[SHA256SIZHEX >> 1];
+	size_t len;
+
+	len = strlen(hash);
+	// code bug - check this before calling
+	if (len != SHA256SIZHEX) {
+		quitfrom(1, file, func, line,
+			 "%s() invalid hash passed - size %d (%d)",
+			 __func__, (int)len, SHA256SIZHEX);
+	}
+
+	hex2bin(binhash, hash, sizeof(binhash));
+
+	flip_32(swap, binhash);
+
+	return diff_from_target(swap);
+}
+
 void dsp_blocks(K_ITEM *item, FILE *stream)
 {
 	char createdate_buf[DATE_BUFSIZ], expirydate_buf[DATE_BUFSIZ];

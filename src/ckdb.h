@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.011"
+#define CKDB_VERSION DB_VERSION"-1.012"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1741,6 +1741,8 @@ void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
 #define dsp_hash(_hash, _buf, _siz) \
 	_dsp_hash(_hash, _buf, _siz, WHERE_FFL_HERE)
 extern void _dsp_hash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
+#define blockhash_diff(_hash) _blockhash_diff(_hash, WHERE_FFL_HERE)
+extern double _blockhash_diff(char *hash, WHERE_FFL_ARGS);
 extern void dsp_blocks(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx);
