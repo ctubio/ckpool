@@ -2565,7 +2565,7 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 			best_id = best->id;
 			best_lowid = best->low_id;
 			best_subid = best->subid;
-			if (best == current)
+			if (proxy == current)
 				break;
 		}
 	}
