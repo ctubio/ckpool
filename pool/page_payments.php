@@ -11,8 +11,9 @@ function dopayments($data, $user)
  $addr1 = '1KzFJddTvK9TQWsmWFKYJ9fRx9QeSATyrT';
 
  $pg = '<h1>Payments</h1>';
- $pg .= 'The payout transactions on blockchain are here:';
- $pg .= " <a href='$bc$addr1' target=_blank>BTC</a><br><br>";
+ $pg .= 'The payment transactions on blockchain are here:';
+ $pg .= " <a href='$bc$addr1' target=_blank>BTC</a><br>";
+ $pg .= "The payments below don't yet show when they have been sent.<br><br>";
 
  $ans = getPayments($user);
 

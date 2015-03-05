@@ -6,6 +6,11 @@ function dompayouts($data, $user)
 
  $ans = getMPayouts($user);
 
+ $pg .= "The rewards you've earned for each block the pool has found.<br>";
+ $pg .= 'See the ';
+ $pg .= makeLink('payments');
+ $pg .= "Payments</a> page for the payments you've been sent.<br><br>";
+
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
  $pg .= "<td class=dr>Block</td>";
