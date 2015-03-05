@@ -67,7 +67,7 @@ function check()
 		'Home' => ''
 	),
 	'Account' => array(
-		'MPayouts' => 'mpayouts',
+		'Rewards' => 'mpayouts',
 		'Payments' => 'payments',
 		'Settings' => 'settings',
 		'User Settings' => 'userset'

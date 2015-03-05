@@ -2,7 +2,7 @@
 #
 function dompayouts($data, $user)
 {
- $pg = '<h1>Mining Payouts</h1>';
+ $pg = '<h1>Mining Rewards</h1>';
 
  $ans = getMPayouts($user);
 
@@ -20,6 +20,7 @@ function dompayouts($data, $user)
  $pg .= "</tr>\n";
  if ($ans['STATUS'] == 'ok')
  {
+	$totamt = 0;
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
@@ -43,7 +44,22 @@ function dompayouts($data, $user)
 		$pg .= '<td class=dr>'.difffmt($diffacc).'</td>';
 		$hr = $diffacc * pow(2,32) / $elapsed;
 		$pg .= '<td class=dr>'.dsprate($hr).'</td>';
-		$pg .= '<td class=dr>'.btcfmt($ans['amount:'.$i]).'</td>';
+		$amount = $ans['amount:'.$i];
+		$totamt += $amount;
+		$pg .= '<td class=dr>'.btcfmt($amount).'</td>';
+		$pg .= "</tr>\n";
+	}
+	if ($count > 1)
+	{
+		if (($i % 2) == 0)
+			$row = 'even';
+		else
+			$row = 'odd';
+
+		$pg .= "<tr class=$row>";
+		$pg .= '<td class=dr>Total:</td>';
+		$pg .= '<td class=dl colspan=7></td>';
+		$pg .= '<td class=dr>'.btcfmt($totamt).'</td>';
 		$pg .= "</tr>\n";
 	}
  }
