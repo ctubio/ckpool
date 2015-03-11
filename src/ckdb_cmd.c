@@ -4543,12 +4543,13 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *notcd,
 			  __maybe_unused K_TREE *trf_root)
 {
-	K_ITEM *i_username, *u_item, ms_look, *wm_item, *ms_item, *wi_item;
+	K_ITEM *i_username, *u_item, *m_item, ms_look, *wm_item, *ms_item, *wi_item;
 	K_TREE_CTX wm_ctx[1], ms_ctx[1];
 	WORKMARKERS *wm;
 	WORKINFO *wi;
 	MARKERSUMMARY markersummary, *ms, ms_add;
 	USERS *users;
+	MARKS *marks = NULL;
 	char reply[1024] = "";
 	char tmp[1024];
 	size_t siz = sizeof(reply);
@@ -4583,6 +4584,19 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	while (rows < 98 && wm_item) {
 		if (CURRENT(&(wm->expirydate)) && WMPROCESSED(wm->status)) {
 			K_RUNLOCK(workmarkers_free);
+
+			K_RLOCK(marks_free);
+			m_item = find_marks(wm->workinfoidend);
+			K_RUNLOCK(marks_free);
+			DATA_MARKS_NULL(marks, m_item);
+			if (m_item == NULL) {
+				// Log it but keep going
+				LOGERR("%s() missing mark for markerid "
+					"%"PRId64"/%s widend %"PRId64,
+					__func__, wm->markerid,
+					wm->description,
+					wm->workinfoidend);
+			}
 
 			bzero(&ms_add, sizeof(ms_add));
 
@@ -4650,6 +4664,12 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			str_to_buf(wm->description, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "shift:%d=%s%c",
 						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp), "endmarkextra:%d=%s%c",
+						   rows,
+						   m_item ? marks->extra : EMPTY,
+						   FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			ftv_to_buf(&(wi->createdate), reply, sizeof(reply));

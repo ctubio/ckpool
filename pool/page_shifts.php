@@ -28,8 +28,22 @@ function doshifts($data, $user)
 			$row = 'odd';
 
 		$pg .= "<tr class=$row>";
-		$shif = preg_replace(array('/^.* to /','/^.*fin: /'), '', $ans['shift:'.$i]);
-		$pg .= "<td class=dl>$shif</td>";
+		$shifname = $ans['shift:'.$i];
+		$shif = preg_replace(array('/^.* to /','/^.*fin: /'), '', $shifname);
+		$ablock = false;
+		if (preg_match('/to.*Block.* fin/', $shifname) === true)
+			$ablock = true;
+		else
+		{
+			$shifex = $ans['endmarkextra:'.$i];
+			if (preg_match('/Block .* fin/', $shifex) === true)
+				$ablock = true;
+		}
+		if ($ablock === true)
+			$btc = ' <img src=/BTCSym.png border=0>';
+		else
+			$btc = '';
+		$pg .= "<td class=dl>$shif$btc</td>";
 		$start = $ans['start:'.$i];
 		$pg .= '<td class=dl>'.utcd($start).'</td>';
 		$nd = $ans['end:'.$i];
