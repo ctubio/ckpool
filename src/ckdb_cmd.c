@@ -811,23 +811,30 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 			   __maybe_unused K_TREE *trf_root)
 {
 	K_TREE_CTX ctx[1];
-	K_ITEM *b_item, *w_item;
+	K_ITEM *b_item;
 	BLOCKS *blocks;
 	char reply[1024] = "";
 	char tmp[1024];
-	char *buf;
+	char *buf, *desc, desc_buf[64];
 	size_t len, off;
 	int32_t height = -1;
-	tv_t first_cd = {0,0};
-	int rows, tot;
+	tv_t first_cd = {0,0}, stats_tv = {0,0}, stats_tv2 = {0,0};
+	int rows, srows, tot, seq;
+	bool has_stats;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
-	rows = 0;
+
+redo:
+	K_WLOCK(blocks_free);
+	has_stats = check_update_blocks_stats(&stats_tv);
+	K_WUNLOCK(blocks_free);
+
+	srows = rows = 0;
 	K_RLOCK(blocks_free);
-	b_item = last_in_ktree(blocks_root, ctx);
+	b_item = first_in_ktree(blocks_root, ctx);
 	tot = 0;
 	while (b_item) {
 		DATA_BLOCKS(blocks, b_item);
@@ -835,16 +842,31 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 			if (blocks->confirmed[0] != BLOCKS_ORPHAN)
 				tot++;
 		}
-		b_item = prev_in_ktree(ctx);
+		b_item = next_in_ktree(ctx);
 	}
+	seq = tot;
 	b_item = last_in_ktree(blocks_root, ctx);
 	while (b_item && rows < 42) {
 		DATA_BLOCKS(blocks, b_item);
+		/* For each block remember the initial createdate
+		 * Reverse sort order the oldest expirydate is first
+		 *  which should be the 'n' record */
 		if (height != blocks->height) {
 			height = blocks->height;
 			copy_tv(&first_cd, &(blocks->createdate));
 		}
 		if (CURRENT(&(blocks->expirydate))) {
+			if (blocks->confirmed[0] == BLOCKS_ORPHAN) {
+				snprintf(tmp, sizeof(tmp),
+					 "seq:%d=o%c",
+					 rows, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+			} else {
+				snprintf(tmp, sizeof(tmp),
+					 "seq:%d=%d%c",
+					 rows, seq--, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+			}
 			int_to_buf(blocks->height, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "height:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
@@ -900,21 +922,21 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 			snprintf(tmp, sizeof(tmp), "elapsed:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
-			w_item = find_workinfo(blocks->workinfoid, NULL);
-			if (w_item) {
-					char wdiffbin[TXT_SML+1];
-					double wdiff;
-					WORKINFO *workinfo;
-					DATA_WORKINFO(workinfo, w_item);
-					hex2bin(wdiffbin, workinfo->bits, 4);
-					wdiff = diff_from_nbits(wdiffbin);
-					snprintf(tmp, sizeof(tmp),
-						 "netdiff:%d=%.1f%c",
-						 rows, wdiff, FLDSEP);
-					APPEND_REALLOC(buf, off, len, tmp);
+			if (has_stats) {
+				snprintf(tmp, sizeof(tmp),
+					 "netdiff:%d=%.8f%cdiffratio:%d=%.8f%c"
+					 "cdf:%d=%.8f%cluck:%d=%.8f%c",
+					 rows, blocks->netdiff, FLDSEP,
+					 rows, blocks->blockdiffratio, FLDSEP,
+					 rows, blocks->blockcdf, FLDSEP,
+					 rows, blocks->blockluck, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 			} else {
 				snprintf(tmp, sizeof(tmp),
-					 "netdiff:%d=?%c", rows, FLDSEP);
+					 "netdiff:%d=?%cdiffratio:%d=?%c"
+					 "cdf:%d=?%cluck:%d=?%c",
+					 rows, FLDSEP, rows, FLDSEP,
+					 rows, FLDSEP, rows, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 			}
 
@@ -922,17 +944,81 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 		b_item = prev_in_ktree(ctx);
 	}
+	if (has_stats) {
+		seq = tot;
+		b_item = last_in_ktree(blocks_root, ctx);
+		while (b_item) {
+			DATA_BLOCKS(blocks, b_item);
+			if (CURRENT(&(blocks->expirydate)) &&
+			    blocks->confirmed[0] != BLOCKS_ORPHAN) {
+				desc = NULL;
+				if (seq == 1) {
+					snprintf(desc_buf, sizeof(desc_buf),
+						 "All - Last %d", tot);
+					desc = desc_buf;
+				} else if (seq == tot - 4) {
+					desc = "Last 5";
+				} else if (seq == tot - 9) {
+					desc = "Last 10";
+				} else if (seq == tot - 19) {
+					desc = "Last 20";
+				} else if (seq == tot - 41) {
+					desc = "Last 42";
+				}
+				if (desc) {
+					snprintf(tmp, sizeof(tmp),
+						 "s_seq:%d=%d%c"
+						 "s_desc:%d=%s%c"
+						 "s_diffratio:%d=%.8f%c"
+						 "s_diffmean:%d=%.8f%c"
+						 "s_cdferl:%d=%.8f%c"
+						 "s_luck:%d=%.8f%c",
+						 srows, seq, FLDSEP,
+						 srows, desc, FLDSEP,
+						 srows, blocks->diffratio, FLDSEP,
+						 srows, blocks->diffmean, FLDSEP,
+						 srows, blocks->cdferl, FLDSEP,
+						 srows, blocks->luck, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					srows++;
+				}
+				seq--;
+			}
+			b_item = prev_in_ktree(ctx);
+		}
+		copy_tv(&stats_tv2, &blocks_stats_time);
+	}
 	K_RUNLOCK(blocks_free);
+
+	// Only check for a redo if we used the stats values
+	if (has_stats) {
+		/* If the stats changed then redo with the new corrected values
+		 * This isn't likely at all, but it guarantees the blocks
+		 *  page shows correct information since any code that wants
+		 *  to modify the blocks table must have it under write lock
+		 *  then flag the stats as needing to be recalculated */
+		if (!tv_equal(&stats_tv, &stats_tv2)) {
+			APPEND_REALLOC_RESET(buf, off);
+			goto redo;
+		}
+	}
+
 	snprintf(tmp, sizeof(tmp),
-		 "tot=%d%crows=%d%cflds=%s%c",
-		 tot, FLDSEP,
-		 rows, FLDSEP,
-		 "height,blockhash,nonce,reward,workername,firstcreatedate,"
-		 "createdate,status,diffacc,diffinv,shareacc,shareinv,elapsed,"
-		 "netdiff", FLDSEP);
+		 "s_rows=%d%cs_flds=%s%c",
+		 srows, FLDSEP,
+		 "s_seq,s_desc,s_diffratio,s_diffmean,s_cdferl,s_luck",
+		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Blocks", FLDSEP, "");
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "seq,height,blockhash,nonce,reward,workername,firstcreatedate,"
+		 "createdate,status,diffacc,diffinv,shareacc,shareinv,elapsed,"
+		 "netdiff,diffratio,cdf,luck", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Blocks,BlockStats", FLDSEP, ",s");
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	LOGDEBUG("%s.ok.%d_blocks", id, rows);

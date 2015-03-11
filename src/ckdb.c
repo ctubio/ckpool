@@ -399,6 +399,8 @@ const char *blocks_unknown = "?Unknown?";
 K_TREE *blocks_root;
 K_LIST *blocks_free;
 K_STORE *blocks_store;
+tv_t blocks_stats_time;
+bool blocks_stats_rebuild = true;
 
 // MININGPAYOUTS
 K_TREE *miningpayouts_root;

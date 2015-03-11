@@ -3996,9 +3996,13 @@ unparam:
 			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks);
 			copy_tv(&(oldblocks->expirydate), cd);
 			blocks_root = add_to_ktree(blocks_root, old_b_item, cmp_blocks);
-		}
+			// Copy it over to avoid having to recalculate it
+			row->netdiff = oldblocks->netdiff;
+		} else
+			row->netdiff = 0;
 		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
 		k_add_head(blocks_store, b_item);
+		blocks_stats_rebuild = true;
 	}
 	K_WUNLOCK(blocks_free);
 
@@ -4300,9 +4304,13 @@ flail:
 			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks);
 			copy_tv(&(oldblocks->expirydate), cd);
 			blocks_root = add_to_ktree(blocks_root, old_b_item, cmp_blocks);
-		}
+			// Copy it over to avoid having to recalculate it
+			row->netdiff = oldblocks->netdiff;
+		} else
+			row->netdiff = 0;
 		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
 		k_add_head(blocks_store, b_item);
+		blocks_stats_rebuild = true;
 	}
 	K_WUNLOCK(blocks_free);
 
