@@ -4281,7 +4281,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		DATA_PAYOUTS(payouts2, p2_item);
 		DATA_PAYOUTS(old_payouts2, old_p2_item);
 		snprintf(msg, sizeof(msg),
-			 "payout %"PRId64" changed from '%s' to '%s' for"
+			 "payout %"PRId64" changed from '%s' to '%s' for "
 			 "%"PRId32"/%s",
 			 payoutid, old_payouts2->status, payouts2->status,
 			 payouts2->height, payouts2->blockhash);
@@ -4345,7 +4345,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		DATA_PAYOUTS(payouts2, p2_item);
 		DATA_PAYOUTS(old_payouts2, old_p2_item);
 		snprintf(msg, sizeof(msg),
-			 "payout %"PRId64" changed from '%s' to '%s' for"
+			 "payout %"PRId64" changed from '%s' to '%s' for "
 			 "%"PRId32"/%s",
 			 payoutid, old_payouts2->status, payouts2->status,
 			 payouts2->height, payouts2->blockhash);
