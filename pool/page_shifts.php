@@ -31,12 +31,12 @@ function doshifts($data, $user)
 		$shifname = $ans['shift:'.$i];
 		$shif = preg_replace(array('/^.* to /','/^.*fin: /'), '', $shifname);
 		$ablock = false;
-		if (preg_match('/to.*Block.* fin/', $shifname) === true)
+		if (preg_match('/to.*Block.* fin/', $shifname) == 1)
 			$ablock = true;
 		else
 		{
 			$shifex = $ans['endmarkextra:'.$i];
-			if (preg_match('/Block .* fin/', $shifex) === true)
+			if (preg_match('/Block .* fin/', $shifex) == 1)
 				$ablock = true;
 		}
 		if ($ablock === true)
