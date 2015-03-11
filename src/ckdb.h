@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.020"
+#define CKDB_VERSION DB_VERSION"-1.021"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1219,6 +1219,10 @@ extern cklock_t process_pplns_lock;
 #define PAYOUTS_PROCESSING 'P'
 #define PAYOUTS_PROCESSING_STR "P"
 #define PAYPROCESSING(_status) ((_status)[0] == PAYOUTS_PROCESSING)
+// An orphaned payout must be ignored
+#define PAYOUTS_ORPHAN 'O'
+#define PAYOUTS_ORPHAN_STR "O"
+#define PAYORPHAN(_status) ((_status)[0] == PAYOUTS_ORPHAN)
 
 /*
 // EVENTLOG

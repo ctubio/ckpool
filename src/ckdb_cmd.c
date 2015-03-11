@@ -4285,6 +4285,70 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			 "%"PRId32"/%s",
 			 payoutid, old_payouts2->status, payouts2->status,
 			 payouts2->height, payouts2->blockhash);
+	} else if (strcasecmp(action, "orphan") == 0) {
+		/* Change the status of a generated payout to orphaned
+		 * Require payoutid
+		 * Use this if the orphan process didn't automatically
+		 *  update a generated payout to orphaned
+		 * TODO: get orphaned blocks to automatically do this */
+		i_payoutid = require_name(trf_root, "payoutid", 1,
+					  (char *)intpatt, reply, siz);
+		if (!i_payoutid)
+			return strdup(reply);
+		TXT_TO_BIGINT("payoutid", transfer_data(i_payoutid), payoutid);
+
+		K_WLOCK(payouts_free);
+		p_item = find_payoutid(payoutid);
+		if (!p_item) {
+			K_WUNLOCK(payouts_free);
+			snprintf(reply, siz,
+				 "no payout with id %"PRId64, payoutid);
+			return strdup(reply);
+		}
+		DATA_PAYOUTS(payouts, p_item);
+		if (!PAYGENERATED(payouts->status)) {
+			K_WUNLOCK(payouts_free);
+			snprintf(reply, siz,
+				 "status !generated (%s) for payout %"PRId64,
+				 payouts->status, payoutid);
+			return strdup(reply);
+		}
+		p2_item = k_unlink_head(payouts_free);
+		K_WUNLOCK(payouts_free);
+
+		/* There is a risk of the p_item changing while it's unlocked,
+		 *  but since this is a manual interface it's not really likely
+		 *  and there'll be an error if something goes wrong
+		 * It reports the old and new status */
+		DATA_PAYOUTS(payouts2, p2_item);
+		bzero(payouts2, sizeof(*payouts2));
+		payouts2->payoutid = payouts->payoutid;
+		payouts2->height = payouts->height;
+		STRNCPY(payouts2->blockhash, payouts->blockhash);
+		payouts2->minerreward = payouts->minerreward;
+		payouts2->workinfoidstart = payouts->workinfoidstart;
+		payouts2->workinfoidend = payouts->workinfoidend;
+		payouts2->elapsed = payouts->elapsed;
+		STRNCPY(payouts2->status, PAYOUTS_ORPHAN_STR);
+		payouts2->diffwanted = payouts->diffwanted;
+		payouts2->diffused = payouts->diffused;
+		payouts2->shareacc = payouts->shareacc;
+		copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
+		payouts2->stats = strdup(payouts->stats);
+
+		ok = payouts_add(conn, true, p2_item, &old_p2_item,
+				 by, code, inet, now, NULL, false);
+		if (!ok) {
+			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
+			return strdup(reply);
+		}
+		DATA_PAYOUTS(payouts2, p2_item);
+		DATA_PAYOUTS(old_payouts2, old_p2_item);
+		snprintf(msg, sizeof(msg),
+			 "payout %"PRId64" changed from '%s' to '%s' for"
+			 "%"PRId32"/%s",
+			 payoutid, old_payouts2->status, payouts2->status,
+			 payouts2->height, payouts2->blockhash);
 /*
 	} else if (strcasecmp(action, "expire") == 0) {
 		/ TODO: Expire the payout - effectively deletes it
