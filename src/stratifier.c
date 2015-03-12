@@ -136,7 +136,6 @@ struct json_params {
 	json_t *params;
 	json_t *id_val;
 	int64_t client_id;
-	char address[INET6_ADDRSTRLEN];
 };
 
 typedef struct json_params json_params_t;
@@ -145,7 +144,6 @@ typedef struct json_params json_params_t;
 struct smsg {
 	json_t *json_msg;
 	int64_t client_id;
-	char address[INET6_ADDRSTRLEN];
 };
 
 typedef struct smsg smsg_t;
@@ -1314,13 +1312,15 @@ static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
 }
 
 /* Enter with write instance_lock held */
-static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id, const int server)
+static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id,
+						  const char *address, const int server)
 {
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
 
 	client = __recruit_stratum_instance(sdata);
 	client->id = id;
+	strcpy(client->address, address);
 	client->server = server;
 	client->diff = client->old_diff = ckp->startdiff;
 	client->ckp = ckp;
@@ -2404,8 +2404,8 @@ static void queue_delayed_auth(stratum_instance_t *client)
 }
 
 /* Needs to be entered with client holding a ref count. */
-static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val, json_t **err_val,
-			       const char *address, int *errnum)
+static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val,
+			       json_t **err_val, int *errnum)
 {
 	user_instance_t *user;
 	ckpool_t *ckp = client->ckp;
@@ -2448,7 +2448,6 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	client->user_id = user->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
-	strcpy(client->address, address);
 	/* NOTE workername is NULL prior to this so should not be used in code
 	 * till after this point */
 	client->workername = strdup(buf);
@@ -3192,7 +3191,7 @@ static void update_client(sdata_t *sdata, const stratum_instance_t *client, cons
 
 static json_params_t
 *create_json_params(const int64_t client_id, const json_t *method, const json_t *params,
-		    const json_t *id_val, const char *address)
+		    const json_t *id_val)
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
 
@@ -3200,7 +3199,6 @@ static json_params_t
 	jp->params = json_deep_copy(params);
 	jp->id_val = json_deep_copy(id_val);
 	jp->client_id = client_id;
-	strcpy(jp->address, address);
 	return jp;
 }
 
@@ -3304,7 +3302,7 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 
 /* Enter with client holding ref count */
 static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
-			 json_t *id_val, json_t *method_val, json_t *params_val, const char *address)
+			 json_t *id_val, json_t *method_val, json_t *params_val)
 {
 	const char *method;
 	char buf[256];
@@ -3314,7 +3312,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	 * most common messages will be shares so look for those first */
 	method = json_string_value(method_val);
 	if (likely(cmdmatch(method, "mining.submit") && client->authorised)) {
-		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val);
 
 		ckmsgq_add(sdata->sshareq, jp);
 		return;
@@ -3372,7 +3370,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 				  client_id, client->address);
 			return;
 		}
-		jp = create_json_params(client_id, method_val, params_val, id_val, address);
+		jp = create_json_params(client_id, method_val, params_val, id_val);
 		ckmsgq_add(sdata->sauthq, jp);
 		return;
 	}
@@ -3395,7 +3393,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 
 	/* Covers both get_transactions and get_txnhashes */
 	if (cmdmatch(method, "mining.get")) {
-		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val);
 
 		ckmsgq_add(sdata->stxnq, jp);
 		return;
@@ -3456,7 +3454,7 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 		send_json_err(sdata, client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	parse_method(sdata, client, client_id, id_val, method, params, msg->address);
+	parse_method(sdata, client, client_id, id_val, method, params);
 out:
 	free_smsg(msg);
 }
@@ -3464,6 +3462,7 @@ out:
 static void srecv_process(ckpool_t *ckp, char *buf)
 {
 	bool noid = false, dropped = false;
+	char address[INET6_ADDRSTRLEN];
 	sdata_t *sdata = ckp->data;
 	stratum_instance_t *client;
 	smsg_t *msg;
@@ -3495,7 +3494,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 		free(msg);
 		goto out;
 	}
-	strcpy(msg->address, json_string_value(val));
+	strcpy(address, json_string_value(val));
 	json_object_clear(val);
 
 	val = json_object_get(msg->json_msg, "server");
@@ -3515,7 +3514,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	if (unlikely(!client)) {
 		if (likely(!__dropped_instance(sdata, msg->client_id))) {
 			noid = true;
-			client = __stratum_add_instance(ckp, msg->client_id, server);
+			client = __stratum_add_instance(ckp, msg->client_id, address, server);
 		} else
 			dropped = true;
 	} else if (unlikely(client->dropped))
@@ -3634,7 +3633,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 		goto out;
 	}
 
-	result_val = parse_authorise(client, jp->params, &err_val, jp->address, &errnum);
+	result_val = parse_authorise(client, jp->params, &err_val, &errnum);
 	if (json_is_true(result_val)) {
 		char *buf;
 
