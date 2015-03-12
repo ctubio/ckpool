@@ -1448,9 +1448,11 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 static void drop_client(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
+	char_entry_t *entries = NULL;
 	user_instance_t *user = NULL;
 	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
+	char *msg;
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
 
@@ -1460,9 +1462,27 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 		user = client->user_instance;
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
-		if (!client->ref)
+		if (!client->ref) {
 			dropped = __drop_client(sdata, client, user);
-		else
+			switch(dropped) {
+				case 0:
+					ASPRINTF(&msg, "Unknown client %"PRId64" drop", id);
+					break;
+				case 1:
+					ASPRINTF(&msg, "Client %"PRId64" user %s worker %s disconnected",
+						 id, user->username, client->workername);
+					break;
+				case 2:
+					ASPRINTF(&msg, "Client %"PRId64" user %s worker %s dropped",
+						 id, user->username, client->workername);
+					break;
+				case 3:
+					ASPRINTF(&msg, "Workerless client %"PRId64" dropped",
+						 id);
+					break;
+			}
+			add_msg_entry(&entries, &msg);
+		} else
 			client->dropped = true;
 	}
 
@@ -1477,7 +1497,7 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	}
 	ck_wunlock(&sdata->instance_lock);
 
-	client_drop_message(id, dropped, false);
+	notice_msg_entries(&entries);
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
 }
