@@ -2470,8 +2470,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		time_t now_t = time(NULL);
 
 		if (now_t < user->failed_authtime + user->auth_backoff) {
-			LOGNOTICE("Client %"PRId64" worker %s rate limited due to failed auth attempts",
-				  client->id, buf);
+			LOGNOTICE("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
+				  client->id, client->address, buf);
 			client->dropped = true;
 			goto out;
 		}
@@ -2499,12 +2499,12 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	if (ret) {
 		client->authorised = ret;
 		user->authorised = ret;
-		LOGNOTICE("Authorised client %"PRId64" worker %s as user %s", client->id, buf,
-			  user->username);
+		LOGNOTICE("Authorised client %"PRId64" %s worker %s as user %s",
+			  client->id, client->address, buf, user->username);
 		user->auth_backoff = 3; /* Reset auth backoff time */
 	} else {
-		LOGNOTICE("Client %"PRId64" worker %s failed to authorise as user %s", client->id, buf,
-			  user->username);
+		LOGNOTICE("Client %"PRId64" %s worker %s failed to authorise as user %s",
+			  client->id, client->address, buf,user->username);
 		user->failed_authtime = time(NULL);
 		user->auth_backoff <<= 1;
 		/* Cap backoff time to 10 mins */
@@ -3332,7 +3332,8 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_t *val, *result_val;
 
 		if (unlikely(client->subscribed)) {
-			LOGNOTICE("Client %"PRId64" trying to subscribe twice", client_id);
+			LOGNOTICE("Client %"PRId64" %s trying to subscribe twice",
+				  client_id, client->address);
 			return;
 		}
 		result_val = parse_subscribe(client, client_id, params_val);
@@ -3352,7 +3353,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
-		LOGNOTICE("Adding passthrough client %"PRId64, client_id);
+		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		/* We need to inform the connector process that this client
 		 * is a passthrough and to manage its messages accordingly.
 		 * The client_id stays on the list but we won't send anything
@@ -3365,7 +3366,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 
 	/* We should only accept subscribed requests from here on */
 	if (!client->subscribed) {
-		LOGINFO("Dropping unsubscribed client %"PRId64, client_id);
+		LOGINFO("Dropping unsubscribed client %"PRId64" %s", client_id, client->address);
 		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
 		send_proc(client->ckp->connector, buf);
 		return;
@@ -3375,7 +3376,8 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_params_t *jp;
 
 		if (unlikely(client->authorised)) {
-			LOGNOTICE("Client %"PRId64" trying to authorise twice", client_id);
+			LOGNOTICE("Client %"PRId64" %s trying to authorise twice",
+				  client_id, client->address);
 			return;
 		}
 		jp = create_json_params(client_id, method_val, params_val, id_val, address);
@@ -3388,7 +3390,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
-		LOGINFO("Dropping unauthorised client %"PRId64, client_id);
+		LOGINFO("Dropping unauthorised client %"PRId64" %s", client_id, client->address);
 		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
 		send_proc(client->ckp->connector, buf);
 		return;
@@ -3407,7 +3409,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		return;
 	}
 	/* Unhandled message here */
-	LOGINFO("Unhandled client %"PRId64" method %s", client_id, method);
+	LOGINFO("Unhandled client %"PRId64" %s method %s", client_id, client->address, method);
 	return;
 }
 
@@ -3425,7 +3427,8 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 	char buf[256];
 
 	if (unlikely(client->reject == 2)) {
-		LOGINFO("Dropping client %"PRId64" tagged for lazy invalidation", client_id);
+		LOGINFO("Dropping client %"PRId64" %s tagged for lazy invalidation",
+			client_id, client->address);
 		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
 		send_proc(client->ckp->connector, buf);
 		goto out;
