@@ -1270,16 +1270,18 @@ static void client_drop_message(char **msg, const stratum_instance_t *client, co
 {
 	switch(dropped) {
 		case 1:
-			ASPRINTF(msg, "Client %"PRId64" user %s worker %s disconnected %s",
-				 id, client->user_instance->username, client->workername, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s disconnected %s",
+				 id, client->address, client->user_instance->username,
+				 client->workername, lazily ? "lazily" : "");
 			break;
 		case 2:
-			ASPRINTF(msg, "Client %"PRId64" user %s worker %s dropped %s",
-				 id, client->user_instance->username, client->workername, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s dropped %s",
+				 id, client->address, client->user_instance->username,
+				 client->workername, lazily ? "lazily" : "");
 			break;
 		case 3:
-			ASPRINTF(msg, "Workerless client %"PRId64" dropped %s",
-				 id, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
+				 id, client->address, lazily ? "lazily" : "");
 			break;
 	}
 }
