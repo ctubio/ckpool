@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.022"
+#define CKDB_VERSION DB_VERSION"-1.023"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1112,6 +1112,10 @@ typedef struct blocks {
 	double blockdiffratio;
 	double blockcdf;
 	double blockluck;
+
+	/* diffacc for range calculations - includes orphans before it
+	 * orphans have this set to 0 so they can't be double counted */
+	double diffcalc;
 
 	/* From the last found block to this one
 	 * Orphans have these set to zero */

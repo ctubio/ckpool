@@ -2425,7 +2425,26 @@ bool check_update_blocks_stats(tv_t *stats)
 		return false;
 
 	if (blocks_stats_rebuild) {
-		ok = diffacc = netsumm = diffmean = pending = 0.0;
+		/* Have to first work out the diffcalc for each block
+		 * Orphans count towards the next valid block after the orphan
+		 *  so this has to be done in the reverse order of the range
+		 *  calculations */
+		pending = 0.0;
+		b_item = first_in_ktree(blocks_root, ctx);
+		while (b_item) {
+			DATA_BLOCKS(blocks, b_item);
+			if (CURRENT(&(blocks->expirydate))) {
+				pending += blocks->diffacc;
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN)
+					blocks->diffcalc = 0.0;
+				else {
+					blocks->diffcalc = pending;
+					pending = 0.0;
+				}
+			}
+			b_item = next_in_ktree(ctx);
+		}
+		ok = diffacc = netsumm = diffmean = 0.0;
 		b_item = last_in_ktree(blocks_root, ctx);
 		while (b_item) {
 			DATA_BLOCKS(blocks, b_item);
@@ -2453,8 +2472,6 @@ bool check_update_blocks_stats(tv_t *stats)
 					hex2bin(ndiffbin, workinfo->bits, 4);
 					blocks->netdiff = diff_from_nbits(ndiffbin);
 				}
-				pending += blocks->diffacc;
-
 				/* Stats for each blocks are independent of
 				 * if they are orphans or not */
 				if (blocks->netdiff == 0.0)
@@ -2477,8 +2494,7 @@ bool check_update_blocks_stats(tv_t *stats)
 					blocks->luck = 0.0;
 				} else {
 					ok++;
-					diffacc += pending;
-					pending = 0.0;
+					diffacc += blocks->diffcalc;
 					netsumm += blocks->netdiff;
 
 					if (netsumm == 0.0)
@@ -2486,7 +2502,8 @@ bool check_update_blocks_stats(tv_t *stats)
 					else
 						blocks->diffratio = diffacc / netsumm;
 
-					diffmean = (diffmean * (ok - 1) + blocks->blockdiffratio) / ok;
+					diffmean = ((diffmean * (ok - 1)) +
+						    (blocks->diffcalc / blocks->netdiff)) / ok;
 					blocks->diffmean = diffmean;
 
 					if (diffmean == 0.0) {

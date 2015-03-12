@@ -960,10 +960,12 @@ redo:
 					desc = "Last 5";
 				} else if (seq == tot - 9) {
 					desc = "Last 10";
-				} else if (seq == tot - 19) {
-					desc = "Last 20";
-				} else if (seq == tot - 41) {
-					desc = "Last 42";
+				} else if (seq == tot - 24) {
+					desc = "Last 25";
+				} else if (seq == tot - 49) {
+					desc = "Last 50";
+				} else if (seq == tot - 99) {
+					desc = "Last 100";
 				}
 				if (desc) {
 					snprintf(tmp, sizeof(tmp),
