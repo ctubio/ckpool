@@ -2212,6 +2212,8 @@ static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
 	}
 }
 
+#define DEFAULT_AUTH_BACKOFF	(3)  /* Set initial backoff to 3 seconds */
+
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. Needs to be entered with client holding a ref
  * count. */
@@ -2237,7 +2239,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	if (!user) {
 		/* New user instance. Secondary user id will be NULL */
 		user = ckzalloc(sizeof(user_instance_t));
-		user->auth_backoff = 3; /* Set initial backoff to 3 seconds */
+		user->auth_backoff = DEFAULT_AUTH_BACKOFF;
 		strcpy(user->username, username);
 		new_user = true;
 		user->id = sdata->user_instance_id++;
@@ -2470,8 +2472,13 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		time_t now_t = time(NULL);
 
 		if (now_t < user->failed_authtime + user->auth_backoff) {
-			LOGNOTICE("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
-				  client->id, client->address, buf);
+			if (user->auth_backoff == DEFAULT_AUTH_BACKOFF) {
+				LOGNOTICE("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
+					  client->id, client->address, buf);
+			} else{
+				LOGINFO("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
+					client->id, client->address, buf);
+			}
 			client->dropped = true;
 			goto out;
 		}
@@ -2501,7 +2508,7 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		user->authorised = ret;
 		LOGNOTICE("Authorised client %"PRId64" %s worker %s as user %s",
 			  client->id, client->address, buf, user->username);
-		user->auth_backoff = 3; /* Reset auth backoff time */
+		user->auth_backoff = DEFAULT_AUTH_BACKOFF; /* Reset auth backoff time */
 	} else {
 		LOGNOTICE("Client %"PRId64" %s worker %s failed to authorise as user %s",
 			  client->id, client->address, buf,user->username);
