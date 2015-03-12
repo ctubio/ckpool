@@ -37,6 +37,9 @@
 #include <postgresql/libpq-fe.h>
 #endif
 
+#include <gsl/gsl_math.h>
+#include <gsl/gsl_cdf.h>
+
 #include "ckpool.h"
 #include "libckpool.h"
 
@@ -52,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.012"
+#define CKDB_VERSION DB_VERSION"-1.023"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -190,6 +193,11 @@ extern POOLSTATUS pool;
 		} \
 		strcpy((_dst)+(_dstoff), _src); \
 		_dstoff += _srclen; \
+	} while(0)
+
+#define APPEND_REALLOC_RESET(_buf, _off) do { \
+		(_buf)[0] = '\0'; \
+		_off = 0; \
 	} while(0)
 
 enum data_type {
@@ -1095,6 +1103,26 @@ typedef struct blocks {
 	char statsconfirmed[TXT_FLAG+1];
 	HISTORYDATECONTROLFIELDS;
 	bool ignore; // Non DB field
+
+	// Calculated only when = 0
+	double netdiff;
+
+	/* Non DB fields for the web page
+	 * Calculate them once off/recalc them when required */
+	double blockdiffratio;
+	double blockcdf;
+	double blockluck;
+
+	/* diffacc for range calculations - includes orphans before it
+	 * orphans have this set to 0 so they can't be double counted */
+	double diffcalc;
+
+	/* From the last found block to this one
+	 * Orphans have these set to zero */
+	double diffratio;
+	double diffmean;
+	double cdferl;
+	double luck;
 } BLOCKS;
 
 #define ALLOC_BLOCKS 100
@@ -1134,6 +1162,8 @@ extern const char *blocks_unknown;
 extern K_TREE *blocks_root;
 extern K_LIST *blocks_free;
 extern K_STORE *blocks_store;
+extern tv_t blocks_stats_time;
+extern bool blocks_stats_rebuild;
 
 // MININGPAYOUTS
 typedef struct miningpayouts {
@@ -1193,6 +1223,10 @@ extern cklock_t process_pplns_lock;
 #define PAYOUTS_PROCESSING 'P'
 #define PAYOUTS_PROCESSING_STR "P"
 #define PAYPROCESSING(_status) ((_status)[0] == PAYOUTS_PROCESSING)
+// An orphaned payout must be ignored
+#define PAYOUTS_ORPHAN 'O'
+#define PAYOUTS_ORPHAN_STR "O"
+#define PAYORPHAN(_status) ((_status)[0] == PAYOUTS_ORPHAN)
 
 /*
 // EVENTLOG
@@ -1750,6 +1784,7 @@ extern K_ITEM *find_prev_blocks(int32_t height);
 extern const char *blocks_confirmed(char *confirmed);
 extern void zero_on_new_block();
 extern void set_block_share_counters();
+extern bool check_update_blocks_stats(tv_t *stats);
 extern cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_miningpayouts(int64_t payoutid, int64_t userid);
 extern K_ITEM *first_miningpayouts(int64_t payoutid, K_TREE_CTX *ctx);

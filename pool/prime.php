@@ -3,6 +3,9 @@
 global $stt;
 $stt = microtime();
 #
+global $loginfailed;
+$loginfailed = false;
+#
 include_once('param.php');
 include_once('base.php');
 #

@@ -2399,6 +2399,131 @@ void set_block_share_counters()
 	LOGWARNING("%s(): Update block counters complete", __func__);
 }
 
+/* Must be under K_WLOCK(blocks_free) when called
+ * Call this before using the block stats and again check (under lock)
+ *  the blocks_stats_time didn't change after you finish processing
+ * If it has changed, redo the processing from scratch
+ * If return is false, then stats aren't available
+ * TODO: consider storing the partial calculations in the BLOCKS structure
+ *	and only recalc from the last block modified (remembered)
+ *	Will be useful with a large block history */
+bool check_update_blocks_stats(tv_t *stats)
+{
+	static int64_t last_missing_workinfoid = 0;
+	static tv_t last_message = { 0L, 0L };
+	K_TREE_CTX ctx[1];
+	K_ITEM *b_item, *w_item;
+	WORKINFO *workinfo;
+	BLOCKS *blocks;
+	char ndiffbin[TXT_SML+1];
+	double ok, diffacc, netsumm, diffmean, pending;
+	tv_t now;
+
+	/* Wait for startup_complete rather than db_load_complete
+	 * This avoids doing a 'long' lock stats update while reloading */
+	if (!startup_complete)
+		return false;
+
+	if (blocks_stats_rebuild) {
+		/* Have to first work out the diffcalc for each block
+		 * Orphans count towards the next valid block after the orphan
+		 *  so this has to be done in the reverse order of the range
+		 *  calculations */
+		pending = 0.0;
+		b_item = first_in_ktree(blocks_root, ctx);
+		while (b_item) {
+			DATA_BLOCKS(blocks, b_item);
+			if (CURRENT(&(blocks->expirydate))) {
+				pending += blocks->diffacc;
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN)
+					blocks->diffcalc = 0.0;
+				else {
+					blocks->diffcalc = pending;
+					pending = 0.0;
+				}
+			}
+			b_item = next_in_ktree(ctx);
+		}
+		ok = diffacc = netsumm = diffmean = 0.0;
+		b_item = last_in_ktree(blocks_root, ctx);
+		while (b_item) {
+			DATA_BLOCKS(blocks, b_item);
+			if (CURRENT(&(blocks->expirydate))) {
+				if (blocks->netdiff == 0) {
+					// Deadlock alert
+					K_RLOCK(workinfo_free);
+					w_item = find_workinfo(blocks->workinfoid, NULL);
+					K_RUNLOCK(workinfo_free);
+					if (!w_item) {
+						setnow(&now);
+						if (!blocks->workinfoid != last_missing_workinfoid ||
+						    tvdiff(&now, &last_message) >= 5.0) {
+							LOGEMERG("%s(): missing block workinfoid %"
+								 PRId32"/%"PRId64"/%s",
+								 __func__, blocks->height,
+								 blocks->workinfoid,
+								 blocks->confirmed);
+						}
+						last_missing_workinfoid = blocks->workinfoid;
+						copy_tv(&last_message, &now);
+						return false;
+					}
+					DATA_WORKINFO(workinfo, w_item);
+					hex2bin(ndiffbin, workinfo->bits, 4);
+					blocks->netdiff = diff_from_nbits(ndiffbin);
+				}
+				/* Stats for each blocks are independent of
+				 * if they are orphans or not */
+				if (blocks->netdiff == 0.0)
+					blocks->blockdiffratio = 0.0;
+				else
+					blocks->blockdiffratio = blocks->diffacc / blocks->netdiff;
+				blocks->blockcdf = 1.0 - exp(-1.0 * blocks->blockdiffratio);
+				if (blocks->blockdiffratio == 0.0)
+					blocks->blockluck = 0.0;
+				else
+					blocks->blockluck = 1.0 / blocks->blockdiffratio;
+
+				/* Orphans are treated as +diffacc but no block
+				 *  i.e. they simply add shares to the later block
+				 *  and have running stats set to zero */
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN) {
+					blocks->diffratio = 0.0;
+					blocks->diffmean = 0.0;
+					blocks->cdferl = 0.0;
+					blocks->luck = 0.0;
+				} else {
+					ok++;
+					diffacc += blocks->diffcalc;
+					netsumm += blocks->netdiff;
+
+					if (netsumm == 0.0)
+						blocks->diffratio = 0.0;
+					else
+						blocks->diffratio = diffacc / netsumm;
+
+					diffmean = ((diffmean * (ok - 1)) +
+						    (blocks->diffcalc / blocks->netdiff)) / ok;
+					blocks->diffmean = diffmean;
+
+					if (diffmean == 0.0) {
+						blocks->cdferl = 0.0;
+						blocks->luck = 0.0;
+					} else {
+						blocks->cdferl = gsl_cdf_gamma_P(diffmean, ok, 1.0 / ok);
+						blocks->luck = 1.0 / diffmean;
+					}
+				}
+			}
+			b_item = prev_in_ktree(ctx);
+		}
+		setnow(&blocks_stats_time);
+		blocks_stats_rebuild = false;
+	}
+	copy_tv(stats, &blocks_stats_time);
+	return true;
+}
+
 /* order by payoutid asc,userid asc,expirydate asc
  * i.e. only one payout amount per block per user */
 cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b)
