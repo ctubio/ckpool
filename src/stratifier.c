@@ -1265,19 +1265,21 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 	return ret;
 }
 
-static void client_drop_message(const int64_t client_id, const int dropped, const bool lazily)
+static void client_drop_message(char **msg, const stratum_instance_t *client, const int64_t id,
+				const int dropped, const bool lazily)
 {
 	switch(dropped) {
-		case 0:
-			break;
 		case 1:
-			LOGNOTICE("Client %"PRId64" disconnected %s", client_id, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Client %"PRId64" user %s worker %s disconnected %s",
+				 id, client->user_instance->username, client->workername, lazily ? "lazily" : "");
 			break;
 		case 2:
-			LOGNOTICE("Client %"PRId64" dropped %s", client_id, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Client %"PRId64" user %s worker %s dropped %s",
+				 id, client->user_instance->username, client->workername, lazily ? "lazily" : "");
 			break;
 		case 3:
-			LOGNOTICE("Workerless client %"PRId64" dropped %s", client_id, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Workerless client %"PRId64" dropped %s",
+				 id, lazily ? "lazily" : "");
 			break;
 	}
 }
@@ -1287,19 +1289,21 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 			      const char *func, const int line)
 {
 	user_instance_t *user = client->user_instance;
-	int64_t client_id = client->id;
+	char_entry_t *entries = NULL;
 	int dropped = 0, ref;
+	char *msg;
 
 	ck_wlock(&sdata->instance_lock);
 	ref = --client->ref;
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
-	if (unlikely(client->dropped && !ref))
+	if (unlikely(client->dropped && !ref)) {
 		dropped = __drop_client(sdata, client, user);
+		client_drop_message(&msg, client, client->id, dropped, true);
+	}
 	ck_wunlock(&sdata->instance_lock);
 
-	client_drop_message(client_id, dropped, true);
-
+	notice_msg_entries(&entries);
 	/* This should never happen */
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
@@ -1464,23 +1468,7 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 		 * now but wait till the reference is dropped */
 		if (!client->ref) {
 			dropped = __drop_client(sdata, client, user);
-			switch(dropped) {
-				case 0:
-					ASPRINTF(&msg, "Unknown client %"PRId64" drop", id);
-					break;
-				case 1:
-					ASPRINTF(&msg, "Client %"PRId64" user %s worker %s disconnected",
-						 id, user->username, client->workername);
-					break;
-				case 2:
-					ASPRINTF(&msg, "Client %"PRId64" user %s worker %s dropped",
-						 id, user->username, client->workername);
-					break;
-				case 3:
-					ASPRINTF(&msg, "Workerless client %"PRId64" dropped",
-						 id);
-					break;
-			}
+			client_drop_message(&msg, client, id, dropped, false);
 			add_msg_entry(&entries, &msg);
 		} else
 			client->dropped = true;
