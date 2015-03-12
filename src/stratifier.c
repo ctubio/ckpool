@@ -1166,19 +1166,15 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client;
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
 		if (unlikely(client->dropped))
 			client = NULL;
-		else {
-			/* Upgrade to write lock to modify client refcount */
-			ck_ulock(&sdata->instance_lock);
+		else
 			__inc_instance_ref(client);
-			ck_dwilock(&sdata->instance_lock);
-		}
 	}
-	ck_uilock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 
 	return client;
 }
@@ -1307,7 +1303,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	/* Number is in BE but we don't swap either of them */
 	hex2bin(&enonce1_64, sessionid, slen);
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->id == id)
 			continue;
@@ -1322,16 +1318,12 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 		/* Delete the entry once we are going to use it since there
 		 * will be a new instance with the enonce1_64 */
 		old_id = client->id;
-
-		/* Upgrade to write lock to disconnect */
-		ck_ulock(&sdata->instance_lock);
 		__del_disconnected(sdata, client);
-		ck_dwilock(&sdata->instance_lock);
 
 		ret = enonce1_64;
 	}
 out_unlock:
-	ck_uilock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 out:
 	if (ret)
 		LOGNOTICE("Reconnecting old instance %"PRId64" to instance %"PRId64, old_id, id);
@@ -1431,10 +1423,8 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
-	/* Upgrade to write lock */
-	ck_ulock(&sdata->instance_lock);
 	if (client && !client->dropped) {
 		user = client->user_instance;
 		ckp = client->ckp;
@@ -2207,10 +2197,8 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	if (unlikely(len > 127))
 		username[127] = '\0';
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	HASH_FIND_STR(sdata->user_instances, username, user);
-	/* Upgrade to write lock */
-	ck_ulock(&sdata->instance_lock);
 	if (!user) {
 		/* New user instance. Secondary user id will be NULL */
 		user = ckzalloc(sizeof(user_instance_t));
@@ -3493,10 +3481,8 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	json_object_clear(val);
 
 	/* Parse the message here */
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, msg->client_id);
-	/* Upgrade to write lock */
-	ck_ulock(&sdata->instance_lock);
 	/* If client_id instance doesn't exist yet, create one */
 	if (unlikely(!client)) {
 		if (likely(!__dropped_instance(sdata, msg->client_id))) {
@@ -3589,20 +3575,17 @@ static stratum_instance_t *preauth_ref_instance_by_id(sdata_t *sdata, const int6
 {
 	stratum_instance_t *client;
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
 		if (client->dropped || client->authorising || client->authorised)
 			client = NULL;
 		else {
-			/* Upgrade to write lock to modify client data */
-			ck_ulock(&sdata->instance_lock);
 			__inc_instance_ref(client);
 			client->authorising = true;
-			ck_dwilock(&sdata->instance_lock);
 		}
 	}
-	ck_uilock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 
 	return client;
 }
