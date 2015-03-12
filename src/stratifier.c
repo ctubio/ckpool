@@ -1241,48 +1241,32 @@ out:
 }
 
 /* Ret = 1 is disconnected, 2 is killed, 3 is workerless killed */
-static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
+static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user,
+			  bool lazily, char **msg)
 {
 	stratum_instance_t *old_client = NULL;
-	int ret;
 
 	__del_client(sdata, client, user);
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
-		ret = 1;
+		ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s disconnected %s",
+			 client->id, client->address, client->user_instance->username,
+			 client->workername, lazily ? "lazily" : "");
 		HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		sdata->stats.disconnected++;
 		sdata->disconnected_generated++;
 		client->disconnected_time = time(NULL);
 	} else {
-		if (client->workername)
-			ret = 2;
-		else
-			ret = 3;
-		__kill_instance(sdata, client);
-	}
-	return ret;
-}
-
-static void client_drop_message(char **msg, const stratum_instance_t *client, const int64_t id,
-				const int dropped, const bool lazily)
-{
-	switch(dropped) {
-		case 1:
-			ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s disconnected %s",
-				 id, client->address, client->user_instance->username,
-				 client->workername, lazily ? "lazily" : "");
-			break;
-		case 2:
+		if (client->workername) {
 			ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s dropped %s",
-				 id, client->address, client->user_instance->username,
+				 client->id, client->address, client->user_instance->username,
 				 client->workername, lazily ? "lazily" : "");
-			break;
-		case 3:
+		} else {
 			ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
-				 id, client->address, lazily ? "lazily" : "");
-			break;
+				 client->id, client->address, lazily ? "lazily" : "");
+		}
+		__kill_instance(sdata, client);
 	}
 }
 
@@ -1292,16 +1276,16 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 {
 	user_instance_t *user = client->user_instance;
 	char_entry_t *entries = NULL;
-	int dropped = 0, ref;
 	char *msg;
+	int ref;
 
 	ck_wlock(&sdata->instance_lock);
 	ref = --client->ref;
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref)) {
-		dropped = __drop_client(sdata, client, user);
-		client_drop_message(&msg, client, client->id, dropped, true);
+		__drop_client(sdata, client, user, true, &msg);
+		add_msg_entry(&entries, &msg);
 	}
 	ck_wunlock(&sdata->instance_lock);
 
@@ -1456,8 +1440,8 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	stratum_instance_t *client, *tmp;
 	char_entry_t *entries = NULL;
 	user_instance_t *user = NULL;
-	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
+	int aged = 0;
 	char *msg;
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
@@ -1469,8 +1453,7 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (!client->ref) {
-			dropped = __drop_client(sdata, client, user);
-			client_drop_message(&msg, client, id, dropped, false);
+			__drop_client(sdata, client, user, false, &msg);
 			add_msg_entry(&entries, &msg);
 		} else
 			client->dropped = true;
