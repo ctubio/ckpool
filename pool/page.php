@@ -163,7 +163,7 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 #
 function pgtop($info, $dotop, $user, $douser)
 {
- global $site_title;
+ global $site_title, $loginfailed;
 
  $phr = '?THs';
  $plb = '?';
@@ -288,6 +288,8 @@ function pgtop($info, $dotop, $user, $douser)
  $top .= " You need to enable javascript to use";
  $top .= " the $site_title web site.</div>";
 
+ if ($loginfailed === true)
+	$top .= '<div class=accwarn>Login Failed</div>';
  if (isset($info['u_nopayaddr']))
 	$top .= '<div class=accwarn>Please set a payout address on your account!</div>';
  if (isset($info['u_noemail']))

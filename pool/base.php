@@ -334,7 +334,9 @@ function validUserPass($user, $pass)
 	$key = 'ckp'.rand(1000000,9999999);
 	$_SESSION['ckpkey'] = $key;
 	$_SESSION[$key] = array('who' => $user, 'id' => $user);
+	return true;
  }
+ return false;
 }
 #
 function logout()
@@ -364,6 +366,8 @@ function requestRegister()
 #
 function tryLogInOut()
 {
+ global $loginfailed;
+
  // If already logged in, it will ignore User/Pass
  if (isset($_SESSION['ckpkey']))
  {
@@ -373,21 +377,29 @@ function tryLogInOut()
  }
  else
  {
-	$user = getparam('User', false);
-	if ($user !== NULL)
-		$user = loginStr($user);
-	if (nuem($user))
-		return;
-
-	$pass = getparam('Pass', false);
-	if (nuem($pass))
-		return;
-
 	$login = getparam('Login', false);
 	if (nuem($login))
 		return;
 
-	validUserPass($user, $pass);
+	$user = getparam('User', false);
+	if ($user !== NULL)
+		$user = loginStr($user);
+	if (nuem($user))
+	{
+		$loginfailed = true;
+		return;
+	}
+
+	$pass = getparam('Pass', false);
+	if (nuem($pass))
+	{
+		$loginfailed = true;
+		return;
+	}
+
+	$valid = validUserPass($user, $pass);
+	if (!$valid)
+		$loginfailed = true;
  }
 }
 #
