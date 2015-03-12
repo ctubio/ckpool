@@ -187,6 +187,7 @@ struct user_instance {
 	time_t auth_time;
 	time_t failed_authtime; /* Last time this username failed to authorise */
 	int auth_backoff; /* How long to reject any auth attempts since last failure */
+	bool throttled; /* Have we begun rejecting auth attempts */
 };
 
 /* Combined data from workers with the same workername */
@@ -1250,18 +1251,18 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
-		ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s disconnected %s",
-			 client->id, client->address, client->user_instance->username,
-			 client->workername, lazily ? "lazily" : "");
+		ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s disconnected %s",
+			 client->id, client->address, user->throttled ? "throttled " : "",
+			 user->username, client->workername, lazily ? "lazily" : "");
 		HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		sdata->stats.disconnected++;
 		sdata->disconnected_generated++;
 		client->disconnected_time = time(NULL);
 	} else {
 		if (client->workername) {
-			ASPRINTF(msg, "Client %"PRId64" %s user %s worker %s dropped %s",
-				 client->id, client->address, client->user_instance->username,
-				 client->workername, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s dropped %s",
+				 client->id, client->address, user->throttled ? "throttled " : "",
+				 user->username, client->workername, lazily ? "lazily" : "");
 		} else {
 			ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
 				 client->id, client->address, lazily ? "lazily" : "");
@@ -2455,7 +2456,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		time_t now_t = time(NULL);
 
 		if (now_t < user->failed_authtime + user->auth_backoff) {
-			if (user->auth_backoff == DEFAULT_AUTH_BACKOFF) {
+			if (!user->throttled) {
+				user->throttled = true;
 				LOGNOTICE("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
 					  client->id, client->address, buf);
 			} else{
