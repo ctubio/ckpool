@@ -326,6 +326,7 @@ struct stratifier_data {
 	 * is sorted by enonce1_64. */
 	stratum_instance_t *stratum_instances;
 	stratum_instance_t *disconnected_instances;
+	stratum_instance_t *recycled_instances;
 
 	int stratum_generated;
 	int disconnected_generated;
@@ -905,18 +906,21 @@ static void update_base(ckpool_t *ckp, const int prio)
 	create_pthread(pth, do_update, ur);
 }
 
-static void __kill_instance(stratum_instance_t *client)
+/* Instead of removing the client instance, we add it to a list of recycled
+ * clients allowing us to reuse it instead of callocing a new one */
+static void __kill_instance(sdata_t *sdata, stratum_instance_t *client)
 {
 	free(client->workername);
 	free(client->useragent);
-	free(client);
+	memset(client, 0, sizeof(stratum_instance_t));
+	DL_APPEND(sdata->recycled_instances, client);
 }
 
 static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 {
 	HASH_DEL(sdata->disconnected_instances, client);
 	sdata->stats.disconnected--;
-	__kill_instance(client);
+	__kill_instance(sdata, client);
 }
 
 /* Removes a client instance we know is on the stratum_instances list and from
@@ -941,7 +945,7 @@ static void drop_allclients(ckpool_t *ckp)
 
 		if (!client->ref) {
 			__del_client(sdata, client, client->user_instance);
-			__kill_instance(client);
+			__kill_instance(sdata, client);
 		} else
 			client->dropped = true;
 		kills++;
@@ -1215,7 +1219,7 @@ static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instan
 			ret = 2;
 		else
 			ret = 3;
-		__kill_instance(client);
+		__kill_instance(sdata, client);
 	}
 	return ret;
 }
@@ -1268,13 +1272,28 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
 
+/* If we have a no longer used stratum instance in the recycled linked list,
+ * use that, otherwise calloc a fresh one. */
+static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
+{
+	stratum_instance_t *client = sdata->recycled_instances;
+
+	if (client)
+		DL_DELETE(sdata->recycled_instances, client);
+	else {
+		client = ckzalloc(sizeof(stratum_instance_t));
+		sdata->stratum_generated++;
+	}
+	return client;
+}
+
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id, const int server)
 {
-	stratum_instance_t *client = ckzalloc(sizeof(stratum_instance_t));
+	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
 
-	sdata->stratum_generated++;
+	client = __recruit_stratum_instance(sdata);
 	client->id = id;
 	client->server = server;
 	client->diff = client->old_diff = ckp->startdiff;
