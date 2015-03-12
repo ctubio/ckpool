@@ -923,13 +923,31 @@ static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 	__kill_instance(sdata, client);
 }
 
+/* Called with instance_lock held. Note stats.users is protected by
+ * instance lock to avoid recursive locking. */
+static void __inc_worker(sdata_t *sdata, user_instance_t *instance)
+{
+	sdata->stats.workers++;
+	if (!instance->workers++)
+		sdata->stats.users++;
+}
+
+static void __dec_worker(sdata_t *sdata, user_instance_t *instance)
+{
+	sdata->stats.workers--;
+	if (!--instance->workers)
+		sdata->stats.users--;
+}
+
 /* Removes a client instance we know is on the stratum_instances list and from
  * the user client list if it's been placed on it */
 static void __del_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
 {
 	HASH_DEL(sdata->stratum_instances, client);
-	if (user)
+	if (user) {
 		DL_DELETE(user->clients, client);
+		__dec_worker(sdata, user);
+	}
 }
 
 static void drop_allclients(ckpool_t *ckp)
@@ -1241,15 +1259,12 @@ static void client_drop_message(const int64_t client_id, const int dropped, cons
 	}
 }
 
-static void dec_worker(ckpool_t *ckp, user_instance_t *instance);
-
 /* Decrease the reference count of instance. */
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
 {
 	user_instance_t *user = client->user_instance;
 	int64_t client_id = client->id;
-	ckpool_t *ckp = client->ckp;
 	int dropped = 0, ref;
 
 	ck_wlock(&sdata->instance_lock);
@@ -1265,9 +1280,6 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* This should never happen */
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
-
-	if (dropped && user)
-		dec_worker(ckp, user);
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
@@ -1410,35 +1422,12 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 	ckmsgq_add(sdata->ssends, msg);
 }
 
-static void inc_worker(ckpool_t *ckp, user_instance_t *instance)
-{
-	sdata_t *sdata = ckp->data;
-
-	mutex_lock(&sdata->stats_lock);
-	sdata->stats.workers++;
-	if (!instance->workers++)
-		sdata->stats.users++;
-	mutex_unlock(&sdata->stats_lock);
-}
-
-static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
-{
-	sdata_t *sdata = ckp->data;
-
-	mutex_lock(&sdata->stats_lock);
-	sdata->stats.workers--;
-	if (!--instance->workers)
-		sdata->stats.users--;
-	mutex_unlock(&sdata->stats_lock);
-}
-
 static void drop_client(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
 	user_instance_t *user = NULL;
 	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
-	ckpool_t *ckp = NULL;
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
 
@@ -1446,7 +1435,6 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	client = __instance_by_id(sdata, id);
 	if (client && !client->dropped) {
 		user = client->user_instance;
-		ckp = client->ckp;
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (!client->ref)
@@ -1469,11 +1457,6 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	client_drop_message(id, dropped, false);
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
-
-	/* Decrease worker count outside of instance_lock to avoid recursive
-	 * locking */
-	if (user)
-		dec_worker(ckp, user);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
@@ -2247,6 +2230,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		client->worker_instance = worker;
 	}
 	DL_APPEND(user->clients, client);
+	__inc_worker(sdata,user);
 	ck_wunlock(&sdata->instance_lock);
 
 	if (CKP_STANDALONE(ckp) && new_user)
@@ -2459,9 +2443,6 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 			goto out;
 		}
 	}
-	/* NOTE worker count incremented here for any client put onto user's
-	 * list until it's dropped */
-	inc_worker(ckp, user);
 	if (CKP_STANDALONE(ckp))
 		ret = true;
 	else {
