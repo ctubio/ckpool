@@ -2322,6 +2322,22 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	return user;
 }
 
+static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff);
+
+static void parse_worker_diffs(ckpool_t *ckp, json_t *worker_array)
+{
+	json_t *worker_entry;
+	char *workername;
+	size_t index;
+	int mindiff;
+
+	json_array_foreach(worker_array, index, worker_entry) {
+		json_get_string(&workername, worker_entry, "workername");
+		json_get_int(&mindiff, worker_entry, "difficultydefault");
+		set_worker_mindiff(ckp, workername, mindiff);
+	}
+}
+
 /* Send this to the database and parse the response to authorise a user
  * and get SUID parameters back. We don't add these requests to the sdata->ckdbqueue
  * since we have to wait for the response but this is done from the authoriser
@@ -2396,8 +2412,10 @@ static int send_recv_auth(stratum_instance_t *client)
 		if (unlikely(!val))
 			LOGWARNING("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
 		else {
+			json_t *worker_array = json_object_get(val, "workers");
+
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
-			json_get_int(&worker->mindiff, val, "difficultydefault");
+			parse_worker_diffs(ckp, worker_array);
 			client->suggest_diff = worker->mindiff;
 			if (!user->auth_time)
 				user->auth_time = time(NULL);
