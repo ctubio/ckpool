@@ -151,6 +151,8 @@ static char *restorefrom;
 // Only accessed in here
 static bool markersummary_auto;
 
+int switch_state = SWITCH_STATE_ALL;
+
 // disallow: '/' '.' '_' and FLDSEP
 const char *userpatt = "^[^/\\._"FLDSEPSTR"]*$";
 const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.-]*[A-Za-z0-9]$";

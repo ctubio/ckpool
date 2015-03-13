@@ -2388,6 +2388,15 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	setnow(&last_auth);
 	ck_wunlock(&last_lock);
 
+	if (switch_state < SWITCH_STATE_AUTHWORKERS) {
+		snprintf(reply, siz,
+			 "ok.authorise={\"secondaryuserid\":\"%s\","
+			 "\"difficultydefault\":%d}",
+			 users->secondaryuserid, workers->difficultydefault);
+		LOGDEBUG("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
 	APPEND_REALLOC_INIT(buf, off, len);
 	snprintf(reply, siz,
 		 "ok.authorise={\"secondaryuserid\":\"%s\","
@@ -2492,6 +2501,15 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	ck_wlock(&last_lock);
 	setnow(&last_auth);
 	ck_wunlock(&last_lock);
+
+	if (switch_state < SWITCH_STATE_AUTHWORKERS) {
+		snprintf(reply, siz,
+			 "ok.addrauth={\"secondaryuserid\":\"%s\","
+			 "\"difficultydefault\":%d}",
+			 users->secondaryuserid, workers->difficultydefault);
+		LOGDEBUG("%s.%s", id, reply);
+		return strdup(reply);
+	}
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	snprintf(reply, siz,
