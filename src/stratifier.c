@@ -2437,8 +2437,12 @@ static int send_recv_auth(stratum_instance_t *client)
 	}
 	if (contended)
 		LOGWARNING("Prolonged lock contention for ckdb while trying to authorise");
-	else
-		LOGWARNING("Got no auth response from ckdb :(");
+	else {
+		if (!sdata->ckdb_offline)
+			LOGWARNING("Got no auth response from ckdb :(");
+		else
+			LOGNOTICE("No auth response for %s from offline ckdb", user->username);
+	}
 out_fail:
 	ret = -1;
 out:
