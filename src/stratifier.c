@@ -136,7 +136,6 @@ struct json_params {
 	json_t *params;
 	json_t *id_val;
 	int64_t client_id;
-	char address[INET6_ADDRSTRLEN];
 };
 
 typedef struct json_params json_params_t;
@@ -145,7 +144,6 @@ typedef struct json_params json_params_t;
 struct smsg {
 	json_t *json_msg;
 	int64_t client_id;
-	char address[INET6_ADDRSTRLEN];
 };
 
 typedef struct smsg smsg_t;
@@ -187,6 +185,7 @@ struct user_instance {
 	time_t auth_time;
 	time_t failed_authtime; /* Last time this username failed to authorise */
 	int auth_backoff; /* How long to reject any auth attempts since last failure */
+	bool throttled; /* Have we begun rejecting auth attempts */
 };
 
 /* Combined data from workers with the same workername */
@@ -370,6 +369,7 @@ struct stratifier_data {
 	 * is sorted by enonce1_64. */
 	stratum_instance_t *stratum_instances;
 	stratum_instance_t *disconnected_instances;
+	stratum_instance_t *recycled_instances;
 
 	int stratum_generated;
 	int disconnected_generated;
@@ -967,7 +967,9 @@ static void update_base(ckpool_t *ckp, const int prio)
 	create_pthread(pth, do_update, ur);
 }
 
-static void __kill_instance(stratum_instance_t *client)
+/* Instead of removing the client instance, we add it to a list of recycled
+ * clients allowing us to reuse it instead of callocing a new one */
+static void __kill_instance(sdata_t *sdata, stratum_instance_t *client)
 {
 	if (client->proxy) {
 		client->proxy->bound_clients--;
@@ -975,14 +977,31 @@ static void __kill_instance(stratum_instance_t *client)
 	}
 	free(client->workername);
 	free(client->useragent);
-	free(client);
+	memset(client, 0, sizeof(stratum_instance_t));
+	DL_APPEND(sdata->recycled_instances, client);
 }
 
 static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 {
 	HASH_DEL(sdata->disconnected_instances, client);
 	sdata->stats.disconnected--;
-	__kill_instance(client);
+	__kill_instance(sdata, client);
+}
+
+/* Called with instance_lock held. Note stats.users is protected by
+ * instance lock to avoid recursive locking. */
+static void __inc_worker(sdata_t *sdata, user_instance_t *instance)
+{
+	sdata->stats.workers++;
+	if (!instance->workers++)
+		sdata->stats.users++;
+}
+
+static void __dec_worker(sdata_t *sdata, user_instance_t *instance)
+{
+	sdata->stats.workers--;
+	if (!--instance->workers)
+		sdata->stats.users--;
 }
 
 /* Removes a client instance we know is on the stratum_instances list and from
@@ -990,8 +1009,10 @@ static void __del_disconnected(sdata_t *sdata, stratum_instance_t *client)
 static void __del_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
 {
 	HASH_DEL(sdata->stratum_instances, client);
-	if (user)
+	if (user) {
 		DL_DELETE(user->clients, client);
+		__dec_worker(sdata, user);
+	}
 }
 
 static void connector_drop_client(ckpool_t *ckp, const int64_t id)
@@ -1015,7 +1036,7 @@ static void drop_allclients(ckpool_t *ckp)
 
 		if (!client->ref) {
 			__del_client(sdata, client, client->user_instance);
-			__kill_instance(client);
+			__kill_instance(sdata, client);
 		} else
 			client->dropped = true;
 		kills++;
@@ -1625,19 +1646,15 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client;
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
 		if (unlikely(client->dropped))
 			client = NULL;
-		else {
-			/* Upgrade to write lock to modify client refcount */
-			ck_ulock(&sdata->instance_lock);
+		else
 			__inc_instance_ref(client);
-			ck_dwilock(&sdata->instance_lock);
-		}
 	}
-	ck_uilock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 
 	return client;
 }
@@ -1659,91 +1676,99 @@ out:
 }
 
 /* Ret = 1 is disconnected, 2 is killed, 3 is workerless killed */
-static int __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
+static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user,
+			  bool lazily, char **msg)
 {
 	stratum_instance_t *old_client = NULL;
-	int ret;
 
 	__del_client(sdata, client, user);
 	HASH_FIND(hh, sdata->disconnected_instances, &client->enonce1_64, sizeof(uint64_t), old_client);
 	/* Only keep around one copy of the old client in server mode */
 	if (!client->ckp->proxy && !old_client && client->enonce1_64 && client->authorised) {
-		ret = 1;
+		ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s disconnected %s",
+			 client->id, client->address, user->throttled ? "throttled " : "",
+			 user->username, client->workername, lazily ? "lazily" : "");
 		HASH_ADD(hh, sdata->disconnected_instances, enonce1_64, sizeof(uint64_t), client);
 		sdata->stats.disconnected++;
 		sdata->disconnected_generated++;
 		client->disconnected_time = time(NULL);
 	} else {
-		if (client->workername)
-			ret = 2;
-		else
-			ret = 3;
-		__kill_instance(client);
-	}
-	return ret;
-}
-
-static void client_drop_message(const int64_t client_id, const int dropped, const bool lazily)
-{
-	switch(dropped) {
-		case 0:
-			break;
-		case 1:
-			LOGNOTICE("Client %"PRId64" disconnected %s", client_id, lazily ? "lazily" : "");
-			break;
-		case 2:
-			LOGNOTICE("Client %"PRId64" dropped %s", client_id, lazily ? "lazily" : "");
-			break;
-		case 3:
-			LOGNOTICE("Workerless client %"PRId64" dropped %s", client_id, lazily ? "lazily" : "");
-			break;
+		if (client->workername) {
+			if (user) {
+				ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s dropped %s",
+					client->id, client->address, user->throttled ? "throttled " : "",
+					user->username, client->workername, lazily ? "lazily" : "");
+			} else {
+				ASPRINTF(msg, "Client %"PRId64" %s no user worker %s dropped %s",
+					client->id, client->address, client->workername,
+					lazily ? "lazily" : "");
+			}
+		} else {
+			ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
+				 client->id, client->address, lazily ? "lazily" : "");
+		}
+		__kill_instance(sdata, client);
 	}
 }
-
-static void dec_worker(ckpool_t *ckp, user_instance_t *instance);
 
 /* Decrease the reference count of instance. */
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
 {
 	user_instance_t *user = client->user_instance;
-	int64_t client_id = client->id;
-	ckpool_t *ckp = client->ckp;
-	int dropped = 0, ref;
+	char_entry_t *entries = NULL;
+	bool dropped = false;
+	char *msg;
+	int ref;
 
 	ck_wlock(&sdata->instance_lock);
 	ref = --client->ref;
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
-	if (unlikely(client->dropped && !ref))
-		dropped = __drop_client(sdata, client, user);
+	if (unlikely(client->dropped && !ref)) {
+		dropped = true;
+		__drop_client(sdata, client, user, true, &msg);
+		add_msg_entry(&entries, &msg);
+	}
 	ck_wunlock(&sdata->instance_lock);
 
-	client_drop_message(client_id, dropped, true);
-
+	notice_msg_entries(&entries);
 	/* This should never happen */
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
 
-	if (dropped) {
-		if (user)
-			dec_worker(ckp, user);
-		reap_proxies(ckp, sdata);
-	}
+	if (dropped)
+		reap_proxies(sdata->ckp, sdata);
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
 
+/* If we have a no longer used stratum instance in the recycled linked list,
+ * use that, otherwise calloc a fresh one. */
+static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
+{
+	stratum_instance_t *client = sdata->recycled_instances;
+
+	if (client)
+		DL_DELETE(sdata->recycled_instances, client);
+	else {
+		client = ckzalloc(sizeof(stratum_instance_t));
+		sdata->stratum_generated++;
+	}
+	return client;
+}
+
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id,
-						  const int server)
+						  const char *address, const int server)
 {
-	stratum_instance_t *client = ckzalloc(sizeof(stratum_instance_t));
+	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
 
+	client = __recruit_stratum_instance(sdata);
 	client->start_time = time(NULL);
-	sdata->stratum_generated++;
 	client->id = id;
+	strcpy(client->address, address);
 	client->server = server;
 	client->diff = client->old_diff = ckp->startdiff;
 	client->ckp = ckp;
@@ -1774,7 +1799,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	/* Number is in BE but we don't swap either of them */
 	hex2bin(&enonce1_64, sessionid, slen);
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->id == id)
 			continue;
@@ -1789,16 +1814,12 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 		/* Delete the entry once we are going to use it since there
 		 * will be a new instance with the enonce1_64 */
 		old_id = client->id;
-
-		/* Upgrade to write lock to disconnect */
-		ck_ulock(&sdata->instance_lock);
 		__del_disconnected(sdata, client);
-		ck_dwilock(&sdata->instance_lock);
 
 		ret = enonce1_64;
 	}
 out_unlock:
-	ck_uilock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 out:
 	if (ret)
 		LOGNOTICE("Reconnecting old instance %"PRId64" to instance %"PRId64, old_id, id);
@@ -1907,47 +1928,26 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 	ckmsgq_add(sdata->ssends, msg);
 }
 
-static void inc_worker(ckpool_t *ckp, user_instance_t *instance)
-{
-	sdata_t *sdata = ckp->data;
-
-	mutex_lock(&sdata->stats_lock);
-	sdata->stats.workers++;
-	if (!instance->workers++)
-		sdata->stats.users++;
-	mutex_unlock(&sdata->stats_lock);
-}
-
-static void dec_worker(ckpool_t *ckp, user_instance_t *instance)
-{
-	sdata_t *sdata = ckp->data;
-
-	mutex_lock(&sdata->stats_lock);
-	sdata->stats.workers--;
-	if (!--instance->workers)
-		sdata->stats.users--;
-	mutex_unlock(&sdata->stats_lock);
-}
-
 static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client, *tmp;
+	char_entry_t *entries = NULL;
 	user_instance_t *user = NULL;
-	int dropped = 0, aged = 0;
 	time_t now_t = time(NULL);
+	int aged = 0;
+	char *msg;
 
 	LOGINFO("Stratifier asked to drop client %"PRId64, id);
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
-	/* Upgrade to write lock */
-	ck_ulock(&sdata->instance_lock);
-	if (client) {
+	if (client && !client->dropped) {
+		user = client->user_instance;
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (!client->ref) {
-			user = client->user_instance;
-			dropped = __drop_client(sdata, client, user);
+			__drop_client(sdata, client, user, false, &msg);
+			add_msg_entry(&entries, &msg);
 		} else
 			client->dropped = true;
 	}
@@ -1963,16 +1963,10 @@ static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 	}
 	ck_wunlock(&sdata->instance_lock);
 
-	client_drop_message(id, dropped, false);
+	notice_msg_entries(&entries);
 	if (aged)
 		LOGINFO("Aged %d disconnected instances to dead", aged);
-	/* Decrease worker count outside of instance_lock to avoid recursive
-	 * locking */
-	if (user)
-		dec_worker(ckp, user);
-
-	if (aged || dropped)
-		reap_proxies(ckp, sdata);
+	reap_proxies(ckp, sdata);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
@@ -2825,6 +2819,72 @@ static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
 	}
 }
 
+#define DEFAULT_AUTH_BACKOFF	(3)  /* Set initial backoff to 3 seconds */
+
+static user_instance_t *__create_user(sdata_t *sdata, const char *username)
+{
+	user_instance_t *user = ckzalloc(sizeof(user_instance_t));
+
+	user->auth_backoff = DEFAULT_AUTH_BACKOFF;
+	strcpy(user->username, username);
+	user->id = sdata->user_instance_id++;
+	HASH_ADD_STR(sdata->user_instances, username, user);
+	return user;
+}
+
+/* Find user by username or create one if it doesn't already exist */
+static user_instance_t *get_user(sdata_t *sdata, const char *username)
+{
+	user_instance_t *user;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_FIND_STR(sdata->user_instances, username, user);
+	if (unlikely(!user))
+		user = __create_user(sdata, username);
+	ck_wunlock(&sdata->instance_lock);
+
+	return user;
+}
+
+static worker_instance_t *__create_worker(user_instance_t *user, const char *workername)
+{
+	worker_instance_t *worker = ckzalloc(sizeof(worker_instance_t));
+
+	worker->workername = strdup(workername);
+	worker->user_instance = user;
+	DL_APPEND(user->worker_instances, worker);
+	worker->start_time = time(NULL);
+	return worker;
+}
+
+static worker_instance_t *__get_worker(user_instance_t *user, const char *workername)
+{
+	worker_instance_t *worker = NULL, *tmp;
+
+	DL_FOREACH(user->worker_instances, tmp) {
+		if (!safecmp(workername, tmp->workername)) {
+			worker = tmp;
+			break;
+		}
+	}
+	return worker;
+}
+
+/* Find worker amongst a user's workers by workername or create one if it
+ * doesn't yet exist. */
+static worker_instance_t *get_worker(sdata_t *sdata, user_instance_t *user, const char *workername)
+{
+	worker_instance_t *worker;
+
+	ck_wlock(&sdata->instance_lock);
+	worker = __get_worker(user, workername);
+	if (!worker)
+		worker = __create_worker(user, workername);
+	ck_wunlock(&sdata->instance_lock);
+
+	return worker;
+}
+
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. Needs to be entered with client holding a ref
  * count. */
@@ -2834,7 +2894,6 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	char *base_username = strdupa(workername), *username;
 	bool new_user = false, new_worker = false;
 	sdata_t *sdata = ckp->data;
-	worker_instance_t *tmp;
 	user_instance_t *user;
 	int len;
 
@@ -2845,39 +2904,23 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	if (unlikely(len > 127))
 		username[127] = '\0';
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	HASH_FIND_STR(sdata->user_instances, username, user);
-	/* Upgrade to write lock */
-	ck_ulock(&sdata->instance_lock);
 	if (!user) {
 		/* New user instance. Secondary user id will be NULL */
-		user = ckzalloc(sizeof(user_instance_t));
-		user->auth_backoff = 3; /* Set initial backoff to 3 seconds */
-		strcpy(user->username, username);
+		user = __create_user(sdata, username);
 		new_user = true;
-		user->id = sdata->user_instance_id++;
-		HASH_ADD_STR(sdata->user_instances, username, user);
 	}
 	client->user_instance = user;
-	DL_FOREACH(user->worker_instances, tmp) {
-		if (!safecmp(workername, tmp->workername)) {
-			client->worker_instance = tmp;
-			break;
-		}
-	}
+	client->worker_instance = __get_worker(user, workername);
 	/* Create one worker instance for combined data from workers of the
 	 * same name */
 	if (!client->worker_instance) {
-		worker_instance_t *worker = ckzalloc(sizeof(worker_instance_t));
-
-		worker->workername = strdup(workername);
-		worker->user_instance = user;
-		DL_APPEND(user->worker_instances, worker);
+		client->worker_instance = __create_worker(user, workername);
 		new_worker = true;
-		worker->start_time = time(NULL);
-		client->worker_instance = worker;
 	}
 	DL_APPEND(user->clients, client);
+	__inc_worker(sdata,user);
 	ck_wunlock(&sdata->instance_lock);
 
 	if (CKP_STANDALONE(ckp) && new_user)
@@ -2894,6 +2937,22 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	}
 
 	return user;
+}
+
+static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff);
+
+static void parse_worker_diffs(ckpool_t *ckp, json_t *worker_array)
+{
+	json_t *worker_entry;
+	char *workername;
+	size_t index;
+	int mindiff;
+
+	json_array_foreach(worker_array, index, worker_entry) {
+		json_get_string(&workername, worker_entry, "workername");
+		json_get_int(&mindiff, worker_entry, "difficultydefault");
+		set_worker_mindiff(ckp, workername, mindiff);
+	}
 }
 
 /* Send this to the database and parse the response to authorise a user
@@ -2970,8 +3029,10 @@ static int send_recv_auth(stratum_instance_t *client)
 		if (unlikely(!val))
 			LOGWARNING("AUTH JSON decode failed(%d): %s", err_val.line, err_val.text);
 		else {
+			json_t *worker_array = json_object_get(val, "workers");
+
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
-			json_get_int(&worker->mindiff, val, "difficultydefault");
+			parse_worker_diffs(ckp, worker_array);
 			client->suggest_diff = worker->mindiff;
 			if (!user->auth_time)
 				user->auth_time = time(NULL);
@@ -3032,14 +3093,15 @@ static void queue_delayed_auth(stratum_instance_t *client)
 }
 
 /* Needs to be entered with client holding a ref count. */
-static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val, json_t **err_val,
-			       const char *address, int *errnum)
+static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val,
+			       json_t **err_val, int *errnum)
 {
 	user_instance_t *user;
 	ckpool_t *ckp = client->ckp;
 	bool ret = false;
 	const char *buf;
 	int arr_size;
+	ts_t now;
 
 	if (unlikely(!json_is_array(params_val))) {
 		*err_val = json_string("params not an array");
@@ -3073,7 +3135,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	}
 	user = generate_user(ckp, client, buf);
 	client->user_id = user->id;
-	strcpy(client->address, address);
+	ts_realtime(&now);
+	client->start_time = now.tv_sec;
 	/* NOTE workername is NULL prior to this so should not be used in code
 	 * till after this point */
 	client->workername = strdup(buf);
@@ -3081,15 +3144,18 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		time_t now_t = time(NULL);
 
 		if (now_t < user->failed_authtime + user->auth_backoff) {
-			LOGNOTICE("Client %"PRId64" worker %s rate limited due to failed auth attempts",
-				  client->id, buf);
+			if (!user->throttled) {
+				user->throttled = true;
+				LOGNOTICE("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
+					  client->id, client->address, buf);
+			} else{
+				LOGINFO("Client %"PRId64" %s worker %s rate limited due to failed auth attempts",
+					client->id, client->address, buf);
+			}
 			client->dropped = true;
 			goto out;
 		}
 	}
-	/* NOTE worker count incremented here for any client put onto user's
-	 * list until it's dropped */
-	inc_worker(ckp, user);
 	if (CKP_STANDALONE(ckp))
 		ret = true;
 	else {
@@ -3120,10 +3186,10 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 			LOGNOTICE("Authorised client %"PRId64" worker %s as user %s",
 				  client->id, buf, user->username);
 		}
-		user->auth_backoff = 3; /* Reset auth backoff time */
+		user->auth_backoff = DEFAULT_AUTH_BACKOFF; /* Reset auth backoff time */
 	} else {
-		LOGNOTICE("Client %"PRId64" worker %s failed to authorise as user %s", client->id, buf,
-			  user->username);
+		LOGNOTICE("Client %"PRId64" %s worker %s failed to authorise as user %s",
+			  client->id, client->address, buf,user->username);
 		user->failed_authtime = time(NULL);
 		user->auth_backoff <<= 1;
 		/* Cap backoff time to 10 mins */
@@ -3828,7 +3894,7 @@ static void update_client(const stratum_instance_t *client, const int64_t client
 
 static json_params_t
 *create_json_params(const int64_t client_id, const json_t *method, const json_t *params,
-		    const json_t *id_val, const char *address)
+		    const json_t *id_val)
 {
 	json_params_t *jp = ckalloc(sizeof(json_params_t));
 
@@ -3836,47 +3902,25 @@ static json_params_t
 	jp->params = json_deep_copy(params);
 	jp->id_val = json_deep_copy(id_val);
 	jp->client_id = client_id;
-	strcpy(jp->address, address);
 	return jp;
 }
 
 static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
 {
-	worker_instance_t *worker = NULL, *tmp;
 	char *username = strdupa(workername), *ignore;
-	user_instance_t *user = NULL;
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
+	worker_instance_t *worker;
+	user_instance_t *user;
 
 	ignore = username;
 	strsep(&ignore, "._");
 
 	/* Find the user first */
-	ck_rlock(&sdata->instance_lock);
-	HASH_FIND_STR(sdata->user_instances, username, user);
-	ck_runlock(&sdata->instance_lock);
-
-	/* They may just have not connected yet */
-	if (!user) {
-		LOGINFO("Failed to find user %s in set_worker_mindiff", username);
-		return;
-	}
+	user = get_user(sdata, username);
 
 	/* Then find the matching worker user */
-	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(user->worker_instances, tmp) {
-		if (!safecmp(workername, tmp->workername)) {
-			worker = tmp;
-			break;
-		}
-	}
-	ck_runlock(&sdata->instance_lock);
-
-	/* They may just not be connected at the moment */
-	if (!worker) {
-		LOGINFO("Failed to find worker %s in set_worker_mindiff", workername);
-		return;
-	}
+	worker = get_worker(sdata, user, workername);
 
 	if (mindiff < 1) {
 		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
@@ -3940,7 +3984,7 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 
 /* Enter with client holding ref count */
 static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
-			 json_t *id_val, json_t *method_val, json_t *params_val, const char *address)
+			 json_t *id_val, json_t *method_val, json_t *params_val)
 {
 	const char *method;
 
@@ -3949,7 +3993,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	 * most common messages will be shares so look for those first */
 	method = json_string_value(method_val);
 	if (likely(cmdmatch(method, "mining.submit") && client->authorised)) {
-		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val);
 
 		ckmsgq_add(sdata->sshareq, jp);
 		return;
@@ -3959,7 +4003,8 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_t *val, *result_val;
 
 		if (unlikely(client->subscribed)) {
-			LOGNOTICE("Client %"PRId64" trying to subscribe twice", client_id);
+			LOGNOTICE("Client %"PRId64" %s trying to subscribe twice",
+				  client_id, client->address);
 			return;
 		}
 		result_val = parse_subscribe(client, client_id, params_val);
@@ -3981,7 +4026,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
 		char buf[256];
 
-		LOGNOTICE("Adding passthrough client %"PRId64, client_id);
+		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		/* We need to inform the connector process that this client
 		 * is a passthrough and to manage its messages accordingly.
 		 * The client_id stays on the list but we won't send anything
@@ -3994,7 +4039,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 
 	/* We should only accept subscribed requests from here on */
 	if (!client->subscribed) {
-		LOGINFO("Dropping unsubscribed client %"PRId64, client_id);
+		LOGINFO("Dropping unsubscribed client %"PRId64" %s", client_id, client->address);
 		connector_drop_client(client->ckp, client_id);
 		return;
 	}
@@ -4003,10 +4048,11 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_params_t *jp;
 
 		if (unlikely(client->authorised)) {
-			LOGNOTICE("Client %"PRId64" trying to authorise twice", client_id);
+			LOGNOTICE("Client %"PRId64" %s trying to authorise twice",
+				  client_id, client->address);
 			return;
 		}
-		jp = create_json_params(client_id, method_val, params_val, id_val, address);
+		jp = create_json_params(client_id, method_val, params_val, id_val);
 		ckmsgq_add(sdata->sauthq, jp);
 		return;
 	}
@@ -4016,7 +4062,7 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		/* Dropping unauthorised clients here also allows the
 		 * stratifier process to restart since it will have lost all
 		 * the stratum instance data. Clients will just reconnect. */
-		LOGINFO("Dropping unauthorised client %"PRId64, client_id);
+		LOGINFO("Dropping unauthorised client %"PRId64" %s", client_id, client->address);
 		connector_drop_client(client->ckp, client_id);
 		return;
 	}
@@ -4028,13 +4074,13 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 
 	/* Covers both get_transactions and get_txnhashes */
 	if (cmdmatch(method, "mining.get")) {
-		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val, address);
+		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val);
 
 		ckmsgq_add(sdata->stxnq, jp);
 		return;
 	}
 	/* Unhandled message here */
-	LOGINFO("Unhandled client %"PRId64" method %s", client_id, method);
+	LOGINFO("Unhandled client %"PRId64" %s method %s", client_id, client->address, method);
 	return;
 }
 
@@ -4051,7 +4097,8 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 	int64_t client_id = msg->client_id;
 
 	if (client->reject == 2 || (client->reconnect_request && time(NULL) - client->reconnect_request > 60)) {
-		LOGINFO("Dropping client %"PRId64" tagged for lazy invalidation", client_id);
+		LOGINFO("Dropping client %"PRId64" %s tagged for lazy invalidation",
+			client_id, client->address);
 		connector_drop_client(ckp, client_id);
 		goto out;
 	}
@@ -4086,7 +4133,7 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 		send_json_err(sdata, client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	parse_method(sdata, client, client_id, id_val, method, params, msg->address);
+	parse_method(sdata, client, client_id, id_val, method, params);
 out:
 	free_smsg(msg);
 }
@@ -4094,6 +4141,7 @@ out:
 static void srecv_process(ckpool_t *ckp, char *buf)
 {
 	bool noid = false, dropped = false;
+	char address[INET6_ADDRSTRLEN];
 	sdata_t *sdata = ckp->data;
 	stratum_instance_t *client;
 	smsg_t *msg;
@@ -4125,7 +4173,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 		free(msg);
 		goto out;
 	}
-	strcpy(msg->address, json_string_value(val));
+	strcpy(address, json_string_value(val));
 	json_object_clear(val);
 
 	val = json_object_get(msg->json_msg, "server");
@@ -4139,15 +4187,13 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	json_object_clear(val);
 
 	/* Parse the message here */
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, msg->client_id);
-	/* Upgrade to write lock */
-	ck_ulock(&sdata->instance_lock);
 	/* If client_id instance doesn't exist yet, create one */
 	if (unlikely(!client)) {
 		if (likely(!__dropped_instance(sdata, msg->client_id))) {
 			noid = true;
-			client = __stratum_add_instance(ckp, msg->client_id, server);
+			client = __stratum_add_instance(ckp, msg->client_id, address, server);
 		} else
 			dropped = true;
 	} else if (unlikely(client->dropped))
@@ -4240,20 +4286,17 @@ static stratum_instance_t *preauth_ref_instance_by_id(sdata_t *sdata, const int6
 {
 	stratum_instance_t *client;
 
-	ck_ilock(&sdata->instance_lock);
+	ck_wlock(&sdata->instance_lock);
 	client = __instance_by_id(sdata, id);
 	if (client) {
 		if (client->dropped || client->authorising || client->authorised)
 			client = NULL;
 		else {
-			/* Upgrade to write lock to modify client data */
-			ck_ulock(&sdata->instance_lock);
 			__inc_instance_ref(client);
 			client->authorising = true;
-			ck_dwilock(&sdata->instance_lock);
 		}
 	}
-	ck_uilock(&sdata->instance_lock);
+	ck_wunlock(&sdata->instance_lock);
 
 	return client;
 }
@@ -4274,7 +4317,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 		goto out;
 	}
 
-	result_val = parse_authorise(client, jp->params, &err_val, jp->address, &errnum);
+	result_val = parse_authorise(client, jp->params, &err_val, &errnum);
 	if (json_is_true(result_val)) {
 		char *buf;
 
