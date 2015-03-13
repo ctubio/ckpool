@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.023"
+#define CKDB_VERSION DB_VERSION"-1.030"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1726,6 +1726,7 @@ extern cmp_t cmp_useratts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_useratts(int64_t userid, char *attname);
 extern cmp_t cmp_workers(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workers(int64_t userid, char *workername);
+extern K_ITEM *first_workers(int64_t userid, K_TREE_CTX *ctx);
 extern K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *workername,
 			  char *diffdef, char *idlenotificationenabled,
 			  char *idlenotificationtime, char *by,
