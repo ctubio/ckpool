@@ -2215,6 +2215,7 @@ static user_instance_t *__create_user(sdata_t *sdata, const char *username)
 	return user;
 }
 
+/* Find user by username or create one if it doesn't already exist */
 static user_instance_t *get_user(sdata_t *sdata, const char *username)
 {
 	user_instance_t *user;
@@ -2228,6 +2229,45 @@ static user_instance_t *get_user(sdata_t *sdata, const char *username)
 	return user;
 }
 
+static worker_instance_t *__create_worker(user_instance_t *user, const char *workername)
+{
+	worker_instance_t *worker = ckzalloc(sizeof(worker_instance_t));
+
+	worker->workername = strdup(workername);
+	worker->user_instance = user;
+	DL_APPEND(user->worker_instances, worker);
+	worker->start_time = time(NULL);
+	return worker;
+}
+
+static worker_instance_t *__get_worker(user_instance_t *user, const char *workername)
+{
+	worker_instance_t *worker = NULL, *tmp;
+
+	DL_FOREACH(user->worker_instances, tmp) {
+		if (!safecmp(workername, tmp->workername)) {
+			worker = tmp;
+			break;
+		}
+	}
+	return worker;
+}
+
+/* Find worker amongst a user's workers by workername or create one if it
+ * doesn't yet exist. */
+static worker_instance_t *get_worker(sdata_t *sdata, user_instance_t *user, const char *workername)
+{
+	worker_instance_t *worker;
+
+	ck_wlock(&sdata->instance_lock);
+	worker = __get_worker(user, workername);
+	if (!worker)
+		worker = __create_worker(user, workername);
+	ck_wunlock(&sdata->instance_lock);
+
+	return worker;
+}
+
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. Needs to be entered with client holding a ref
  * count. */
@@ -2237,7 +2277,6 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	char *base_username = strdupa(workername), *username;
 	bool new_user = false, new_worker = false;
 	sdata_t *sdata = ckp->data;
-	worker_instance_t *tmp;
 	user_instance_t *user;
 	int len;
 
@@ -2256,23 +2295,12 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 		new_user = true;
 	}
 	client->user_instance = user;
-	DL_FOREACH(user->worker_instances, tmp) {
-		if (!safecmp(workername, tmp->workername)) {
-			client->worker_instance = tmp;
-			break;
-		}
-	}
+	client->worker_instance = __get_worker(user, workername);
 	/* Create one worker instance for combined data from workers of the
 	 * same name */
 	if (!client->worker_instance) {
-		worker_instance_t *worker = ckzalloc(sizeof(worker_instance_t));
-
-		worker->workername = strdup(workername);
-		worker->user_instance = user;
-		DL_APPEND(user->worker_instances, worker);
+		client->worker_instance = __create_worker(user, workername);
 		new_worker = true;
-		worker->start_time = time(NULL);
-		client->worker_instance = worker;
 	}
 	DL_APPEND(user->clients, client);
 	__inc_worker(sdata,user);
@@ -3230,11 +3258,11 @@ static json_params_t
 
 static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
 {
-	worker_instance_t *worker = NULL, *tmp;
 	char *username = strdupa(workername), *ignore;
-	user_instance_t *user = NULL;
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
+	worker_instance_t *worker;
+	user_instance_t *user;
 
 	ignore = username;
 	strsep(&ignore, "._");
@@ -3243,20 +3271,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	user = get_user(sdata, username);
 
 	/* Then find the matching worker user */
-	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(user->worker_instances, tmp) {
-		if (!safecmp(workername, tmp->workername)) {
-			worker = tmp;
-			break;
-		}
-	}
-	ck_runlock(&sdata->instance_lock);
-
-	/* They may just not be connected at the moment */
-	if (!worker) {
-		LOGINFO("Failed to find worker %s in set_worker_mindiff", workername);
-		return;
-	}
+	worker = get_worker(sdata, user, workername);
 
 	if (mindiff < 1) {
 		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
