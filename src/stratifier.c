@@ -2204,6 +2204,30 @@ static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
 
 #define DEFAULT_AUTH_BACKOFF	(3)  /* Set initial backoff to 3 seconds */
 
+static user_instance_t *__create_user(sdata_t *sdata, const char *username)
+{
+	user_instance_t *user = ckzalloc(sizeof(user_instance_t));
+
+	user->auth_backoff = DEFAULT_AUTH_BACKOFF;
+	strcpy(user->username, username);
+	user->id = sdata->user_instance_id++;
+	HASH_ADD_STR(sdata->user_instances, username, user);
+	return user;
+}
+
+static user_instance_t *get_user(sdata_t *sdata, const char *username)
+{
+	user_instance_t *user;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_FIND_STR(sdata->user_instances, username, user);
+	if (unlikely(!user))
+		user = __create_user(sdata, username);
+	ck_wunlock(&sdata->instance_lock);
+
+	return user;
+}
+
 /* This simply strips off the first part of the workername and matches it to a
  * user or creates a new one. Needs to be entered with client holding a ref
  * count. */
@@ -2228,12 +2252,8 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	HASH_FIND_STR(sdata->user_instances, username, user);
 	if (!user) {
 		/* New user instance. Secondary user id will be NULL */
-		user = ckzalloc(sizeof(user_instance_t));
-		user->auth_backoff = DEFAULT_AUTH_BACKOFF;
-		strcpy(user->username, username);
+		user = __create_user(sdata, username);
 		new_user = true;
-		user->id = sdata->user_instance_id++;
-		HASH_ADD_STR(sdata->user_instances, username, user);
 	}
 	client->user_instance = user;
 	DL_FOREACH(user->worker_instances, tmp) {
@@ -3220,15 +3240,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	strsep(&ignore, "._");
 
 	/* Find the user first */
-	ck_rlock(&sdata->instance_lock);
-	HASH_FIND_STR(sdata->user_instances, username, user);
-	ck_runlock(&sdata->instance_lock);
-
-	/* They may just have not connected yet */
-	if (!user) {
-		LOGINFO("Failed to find user %s in set_worker_mindiff", username);
-		return;
-	}
+	user = get_user(sdata, username);
 
 	/* Then find the matching worker user */
 	ck_rlock(&sdata->instance_lock);
