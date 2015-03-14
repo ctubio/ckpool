@@ -31,6 +31,7 @@
 #include "generator.h"
 #include "stratifier.h"
 #include "connector.h"
+#include "api.h"
 
 ckpool_t *global_ckp;
 
@@ -294,6 +295,17 @@ out:
 	return ret;
 }
 
+static void api_message(ckpool_t *ckp, char **buf, int *sockd)
+{
+	apimsg_t *apimsg = ckalloc(sizeof(apimsg_t));
+
+	apimsg->buf = *buf;
+	*buf = NULL;
+	apimsg->sockd = *sockd;
+	*sockd = -1;
+	ckmsgq_add(ckp->ckpapi, apimsg);
+}
+
 /* Listen for incoming global requests. Always returns a response if possible */
 static void *listener(void *arg)
 {
@@ -316,6 +328,9 @@ retry:
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
 		send_unix_msg(sockd, "failed");
+	} else if (buf[0] == '{') {
+		/* Any JSON messages received are for the RPC API to handle */
+		api_message(ckp, &buf, &sockd);
 	} else if (cmdmatch(buf, "shutdown")) {
 		LOGWARNING("Listener received shutdown message, terminating ckpool");
 		send_unix_msg(sockd, "exiting");
@@ -1684,6 +1699,7 @@ int main(int argc, char **argv)
 	launch_logger(&ckp.main);
 	ckp.logfd = fileno(ckp.logfp);
 
+	ckp.ckpapi = create_ckmsgq(&ckp, "api", &ckpool_api);
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */

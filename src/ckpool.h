@@ -135,6 +135,9 @@ struct ckpool_instance {
 	/* How many clients maximum to accept before rejecting further */
 	int maxclients;
 
+	/* API message queue */
+	ckmsgq_t *ckpapi;
+
 	/* Logger message queue NOTE: Unique per process */
 	ckmsgq_t *logger;
 	/* Process instance data of parent/child processes */
