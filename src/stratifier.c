@@ -3007,13 +3007,16 @@ static int send_recv_auth(stratum_instance_t *client)
 
 	free(json_msg);
 	if (likely(buf)) {
+		char *cmd = NULL, *secondaryuserid = NULL, *response;
 		worker_instance_t *worker = client->worker_instance;
-		char *cmd = NULL, *secondaryuserid = NULL;
-		char response[PAGESIZE] = {};
 		json_error_t err_val;
+		size_t responselen;
 		json_t *val = NULL;
 
 		LOGINFO("Got ckdb response: %s", buf);
+		responselen = strlen(buf); /* Leave ample room for response based on buf length */
+		response = alloca(responselen);
+		memset(response, 0, responselen);
 		if (unlikely(sscanf(buf, "id.%*d.%s", response) < 1 || strlen(response) < 1 || !strchr(response, '='))) {
 			if (cmdmatch(response, "failed"))
 				goto out;
@@ -3051,8 +3054,12 @@ static int send_recv_auth(stratum_instance_t *client)
 	}
 	if (contended)
 		LOGWARNING("Prolonged lock contention for ckdb while trying to authorise");
-	else
-		LOGWARNING("Got no auth response from ckdb :(");
+	else {
+		if (!sdata->ckdb_offline)
+			LOGWARNING("Got no auth response from ckdb :(");
+		else
+			LOGNOTICE("No auth response for %s from offline ckdb", user->username);
+	}
 out_fail:
 	ret = -1;
 out:

@@ -2308,15 +2308,18 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				char *code, char *inet, tv_t *cd,
 				K_TREE *trf_root)
 {
+	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
-	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *u_item, *oc_item;
+	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *u_item, *oc_item, *w_item;
 	USERS *users = NULL;
 	char *username;
 	WORKERS *workers = NULL;
 	OPTIONCONTROL *optioncontrol;
-	bool ok;
+	size_t len, off;
+	char *buf;
+	bool ok, first;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -2378,18 +2381,51 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!ok) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
-	} else {
-		// Only flag a successful auth
-		ck_wlock(&last_lock);
-		setnow(&last_auth);
-		ck_wunlock(&last_lock);
 	}
+
+	// Only flag a successful auth
+	ck_wlock(&last_lock);
+	setnow(&last_auth);
+	ck_wunlock(&last_lock);
+
+	if (switch_state < SWITCH_STATE_AUTHWORKERS) {
+		snprintf(reply, siz,
+			 "ok.authorise={\"secondaryuserid\":\"%s\","
+			 "\"difficultydefault\":%d}",
+			 users->secondaryuserid, workers->difficultydefault);
+		LOGDEBUG("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
+	APPEND_REALLOC_INIT(buf, off, len);
 	snprintf(reply, siz,
 		 "ok.authorise={\"secondaryuserid\":\"%s\","
-		 "\"difficultydefault\":%d}",
-		 users->secondaryuserid, workers->difficultydefault);
-	LOGDEBUG("%s.%s", id, reply);
-	return strdup(reply);
+		 "\"workers\":[",
+		 users->secondaryuserid);
+	APPEND_REALLOC(buf, off, len, reply);
+	first = true;
+	K_RLOCK(workers_free);
+	w_item = first_workers(users->userid, ctx);
+	DATA_WORKERS_NULL(workers, w_item);
+	while (w_item && workers->userid == users->userid) {
+		if (CURRENT(&(workers->expirydate))) {
+			snprintf(reply, siz,
+				 "%s{\"workername\":\"%s\","
+				 "\"difficultydefault\":%"PRId32"}",
+				 first ? EMPTY : ",",
+				 workers->workername,
+				 workers->difficultydefault);
+			APPEND_REALLOC(buf, off, len, reply);
+			first = false;
+		}
+		w_item = next_in_ktree(ctx);
+		DATA_WORKERS_NULL(workers, w_item);
+	}
+	K_RUNLOCK(workers_free);
+	APPEND_REALLOC(buf, off, len, "]}");
+
+	LOGDEBUG("%s.%s", id, buf);
+	return buf;
 }
 
 static char *cmd_auth(PGconn *conn, char *cmd, char *id,
@@ -2404,13 +2440,16 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 				char *code, char *inet, tv_t *cd,
 				K_TREE *trf_root)
 {
+	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
-	K_ITEM *i_enonce1, *i_useragent, *i_preauth;
+	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *w_item;
 	USERS *users = NULL;
 	WORKERS *workers = NULL;
-	bool ok;
+	size_t len, off;
+	char *buf;
+	bool ok, first;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -2456,18 +2495,51 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!ok) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
-	} else {
-		// Only flag a successful auth
-		ck_wlock(&last_lock);
-		setnow(&last_auth);
-		ck_wunlock(&last_lock);
 	}
+
+	// Only flag a successful auth
+	ck_wlock(&last_lock);
+	setnow(&last_auth);
+	ck_wunlock(&last_lock);
+
+	if (switch_state < SWITCH_STATE_AUTHWORKERS) {
+		snprintf(reply, siz,
+			 "ok.addrauth={\"secondaryuserid\":\"%s\","
+			 "\"difficultydefault\":%d}",
+			 users->secondaryuserid, workers->difficultydefault);
+		LOGDEBUG("%s.%s", id, reply);
+		return strdup(reply);
+	}
+
+	APPEND_REALLOC_INIT(buf, off, len);
 	snprintf(reply, siz,
 		 "ok.addrauth={\"secondaryuserid\":\"%s\","
-		 "\"difficultydefault\":%d}",
-		 users->secondaryuserid, workers->difficultydefault);
-	LOGDEBUG("%s.%s", id, reply);
-	return strdup(reply);
+		 "\"workers\":[",
+		 users->secondaryuserid);
+	APPEND_REALLOC(buf, off, len, reply);
+	first = true;
+	K_RLOCK(workers_free);
+	w_item = first_workers(users->userid, ctx);
+	DATA_WORKERS_NULL(workers, w_item);
+	while (w_item && workers->userid == users->userid) {
+		if (CURRENT(&(workers->expirydate))) {
+			snprintf(reply, siz,
+				 "%s{\"workername\":\"%s\","
+				 "\"difficultydefault\":%"PRId32"}",
+				 first ? EMPTY : ",",
+				 workers->workername,
+				 workers->difficultydefault);
+			APPEND_REALLOC(buf, off, len, reply);
+			first = false;
+		}
+		w_item = next_in_ktree(ctx);
+		DATA_WORKERS_NULL(workers, w_item);
+	}
+	K_RUNLOCK(workers_free);
+	APPEND_REALLOC(buf, off, len, "]}");
+
+	LOGDEBUG("%s.%s", id, buf);
+	return buf;
 }
 
 static char *cmd_addrauth(PGconn *conn, char *cmd, char *id,
