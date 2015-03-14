@@ -2142,7 +2142,19 @@ retry:
 		goto retry;
 	}
 	LOGDEBUG("Proxy received request: %s", buf);
-	if (cmdmatch(buf, "shutdown")) {
+	if (likely(buf[0] == '{')) {
+		if (ckp->passthrough)
+			passthrough_add_send(proxi, buf);
+		else {
+			/* Anything remaining should be share submissions */
+			json_t *val = json_loads(buf, 0, NULL);
+
+			if (unlikely(!val))
+				LOGWARNING("Generator received invalid json message: %s", buf);
+			else
+				submit_share(gdata, val);
+		}
+	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
 	} else if (cmdmatch(buf, "reconnect")) {
@@ -2162,13 +2174,7 @@ retry:
 		/* Anything remaining should be stratum messages */
 		passthrough_add_send(proxi, buf);
 	} else {
-		/* Anything remaining should be share submissions */
-		json_t *val = json_loads(buf, 0, NULL);
-
-		if (unlikely(!val))
-			LOGWARNING("Generator received unrecognised message: %s", buf);
-		else
-			submit_share(gdata, val);
+		LOGWARNING("Generator received unrecognised message: %s", buf);
 	}
 	goto retry;
 out:
