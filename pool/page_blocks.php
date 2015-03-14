@@ -182,6 +182,12 @@ function doblocks($data, $user)
 		if ($stat == 'Orphan')
 			$stara = '<span class=st1>*</span>';
 
+		$statsconf = $ans['statsconf:'.$i];
+		if ($statsconf == 'Y')
+			$approx = '';
+		else
+			$approx = '~';
+
 		$diffacc = $ans['diffacc:'.$i];
 		$acc = number_format($diffacc, 0);
 
@@ -200,7 +206,7 @@ function doblocks($data, $user)
 			if ($stat != 'Orphan')
 				$nettot += $netdiff;
 
-			$cdfdsp = number_format($cdf, 2);
+			$cdfdsp = number_format($cdf, 3);
 		}
 		else
 		{
@@ -218,9 +224,9 @@ function doblocks($data, $user)
 			$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
 		 $pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
 		 $pg .= "<td class=dl$ex>".utcd($ans['firstcreatedate:'.$i]).'</td>';
-		 $pg .= "<td class=dr$ex>".$stat.'</td>';
-		 $pg .= "<td class=dr>$stara$acc</td>";
-		 $pg .= "<td class=dr$bg>$bpct</td>";
+		 $pg .= "<td class=dr$ex>$stat</td>";
+		 $pg .= "<td class=dr>$stara$approx$acc</td>";
+		 $pg .= "<td class=dr$bg>$approx$bpct</td>";
 		 $pg .= "<td class=dr>$cdfdsp</td>";
 		 $pg .= "</tr>\n";
 		}
