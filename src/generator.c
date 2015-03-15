@@ -12,6 +12,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <jansson.h>
+#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -2090,11 +2091,22 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 	return ret;
 }
 
+static void send_json_response(json_t *val, const int sockd)
+{
+	char *response;
+
+	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+	if (!response)
+		return;
+	json_decref(val);
+	send_unix_msg(sockd, response);
+	free(response);
+}
+
 static void send_list(gdata_t *gdata, const int sockd)
 {
 	proxy_instance_t *proxy, *tmp;
 	json_t *val, *array_val;
-	char *response;
 
 	array_val = json_array();
 
@@ -2116,10 +2128,34 @@ static void send_list(gdata_t *gdata, const int sockd)
 	mutex_unlock(&gdata->lock);
 
 	JSON_CPACK(val, "{so}", "proxies", array_val);
-	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-	json_decref(val);
-	send_unix_msg(sockd, response);
-	free(response);
+	send_json_response(val, sockd);
+}
+
+static json_t *_json_encode_errormsg(json_error_t *err_val, const char *func)
+{
+	json_t *ret;
+	char *buf;
+
+	ASPRINTF(&buf, "Failed to JSON decode in %s (%d):%s",  func, err_val->line, err_val->text);
+	JSON_CPACK(ret, "{ss}", "errormsg", buf);
+	free(buf);
+	return ret;
+}
+
+#define json_encode_errormsg(err_val) _json_encode_errormsg(err_val, __func__)
+
+static json_t *json_errormsg(const char *fmt, ...)
+{
+	char *buf = NULL;
+	json_t *ret;
+	va_list ap;
+
+	va_start(ap, fmt);
+	VASPRINTF(&buf, fmt, ap);
+	va_end(ap);
+	JSON_CPACK(ret, "{ss}", "errormsg", buf);
+	free(buf);
+	return ret;
 }
 
 static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
@@ -2127,24 +2163,22 @@ static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 	proxy_instance_t *proxy, *subproxy, *tmp;
 	json_t *val = NULL, *array_val;
 	json_error_t err_val;
-	char *response;
 	int64_t id;
 
 	array_val = json_array();
 
 	val = json_loads(buf, 0, NULL);
 	if (unlikely(!val)) {
-		LOGWARNING("Failed to JSON decode sublist \"%s\" (%d):%s", buf,
-			   err_val.line, err_val.text);
+		val = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (unlikely(!json_get_int64(&id, val, "id"))) {
-		LOGWARNING("Failed to get ID in send_sublist JSON: %s", buf);
+		val = json_errormsg("Failed to get ID in send_sublist JSON: %s", buf);
 		goto out;
 	}
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
-		LOGWARNING("Failed to find proxy %"PRId64" in send_sublist", id);
+		val = json_errormsg("Failed to find proxy %"PRId64" in send_sublist", id);
 		goto out;
 	}
 
@@ -2164,20 +2198,16 @@ static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 	}
 	mutex_unlock(&gdata->lock);
 
-out:
 	JSON_CPACK(val, "{so}", "subproxies", array_val);
-	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-	if (val)
-		json_decref(val);
-	send_unix_msg(sockd, response);
-	free(response);
+out:
+	send_json_response(val, sockd);
 }
 
 static void add_proxy(ckpool_t *ckp, const int num);
 
 static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
 {
-	char *url = NULL, *auth = NULL, *pass = NULL, *response;
+	char *url = NULL, *auth = NULL, *pass = NULL;
 	proxy_instance_t *proxy;
 	json_error_t err_val;
 	json_t *val = NULL;
@@ -2185,8 +2215,7 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 
 	val = json_loads(buf, 0, NULL);
 	if (unlikely(!val)) {
-		LOGWARNING("Failed to JSON decode addproxy \"%s\" (%d):%s", buf,
-			   err_val.line, err_val.text);
+		val = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	json_get_string(&url, val, "url");
@@ -2213,9 +2242,7 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	JSON_CPACK(val, "{sI,ss,ss,ss}",
 		   "id", proxy->id, "url", url, "auth", auth, "pass", pass);
 out:
-	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-	send_unix_msg(sockd, response);
-	free(response);
+	send_json_response(val, sockd);
 }
 
 static int proxy_loop(proc_instance_t *pi)
