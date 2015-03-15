@@ -2173,6 +2173,51 @@ out:
 	free(response);
 }
 
+static void add_proxy(ckpool_t *ckp, const int num);
+
+static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
+{
+	char *url = NULL, *auth = NULL, *pass = NULL, *response;
+	proxy_instance_t *proxy;
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id;
+
+	val = json_loads(buf, 0, NULL);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to JSON decode addproxy \"%s\" (%d):%s", buf,
+			   err_val.line, err_val.text);
+		goto out;
+	}
+	json_get_string(&url, val, "url");
+	json_get_string(&auth, val, "auth");
+	json_get_string(&pass, val, "pass");
+	json_decref(val);
+	if (unlikely(!url || !auth || !pass)) {
+		LOGWARNING("Failed to decode url/auth/pass in addproxy %s", buf);
+		goto out;
+	}
+
+	mutex_lock(&gdata->lock);
+	id = ckp->proxies++;
+	ckp->proxyurl[id] = strdup(url);
+	ckp->proxyauth[id] = strdup(auth);
+	ckp->proxypass[id] = strdup(pass);
+	add_proxy(ckp, id);
+	proxy = ckp->servers[id]->data;
+	proxy->id = proxy->low_id = id;
+	HASH_ADD_I64(gdata->proxies, id, proxy);
+	mutex_unlock(&gdata->lock);
+
+	prepare_proxy(proxy);
+	JSON_CPACK(val, "{sI,ss,ss,ss}",
+		   "id", proxy->id, "url", url, "auth", auth, "pass", pass);
+out:
+	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+	send_unix_msg(sockd, response);
+	free(response);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2241,6 +2286,8 @@ retry:
 		send_list(gdata, sockd);
 	} else if (cmdmatch(buf, "sublist")) {
 		send_sublist(gdata, sockd, buf + 8);
+	} else if (cmdmatch(buf, "addproxy")) {
+		parse_addproxy(ckp, gdata, sockd, buf + 9);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
