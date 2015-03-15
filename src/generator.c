@@ -12,7 +12,6 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <jansson.h>
-#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -2118,33 +2117,6 @@ static void send_list(gdata_t *gdata, const int sockd)
 
 	JSON_CPACK(val, "{so}", "proxies", array_val);
 	send_api_response(val, sockd);
-}
-
-static json_t *_json_encode_errormsg(json_error_t *err_val, const char *func)
-{
-	json_t *ret;
-	char *buf;
-
-	ASPRINTF(&buf, "Failed to JSON decode in %s (%d):%s",  func, err_val->line, err_val->text);
-	JSON_CPACK(ret, "{ss}", "errormsg", buf);
-	free(buf);
-	return ret;
-}
-
-#define json_encode_errormsg(err_val) _json_encode_errormsg(err_val, __func__)
-
-static json_t *json_errormsg(const char *fmt, ...)
-{
-	char *buf = NULL;
-	json_t *ret;
-	va_list ap;
-
-	va_start(ap, fmt);
-	VASPRINTF(&buf, fmt, ap);
-	va_end(ap);
-	JSON_CPACK(ret, "{ss}", "errormsg", buf);
-	free(buf);
-	return ret;
 }
 
 static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
