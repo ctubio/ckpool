@@ -22,6 +22,7 @@
 #include "bitcoin.h"
 #include "uthash.h"
 #include "utlist.h"
+#include "api.h"
 
 struct notify_instance {
 	/* Hash table data */
@@ -2091,18 +2092,6 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 	return ret;
 }
 
-static void send_json_response(json_t *val, const int sockd)
-{
-	char *response;
-
-	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-	if (!response)
-		return;
-	json_decref(val);
-	send_unix_msg(sockd, response);
-	free(response);
-}
-
 static void send_list(gdata_t *gdata, const int sockd)
 {
 	proxy_instance_t *proxy, *tmp;
@@ -2128,7 +2117,7 @@ static void send_list(gdata_t *gdata, const int sockd)
 	mutex_unlock(&gdata->lock);
 
 	JSON_CPACK(val, "{so}", "proxies", array_val);
-	send_json_response(val, sockd);
+	send_api_response(val, sockd);
 }
 
 static json_t *_json_encode_errormsg(json_error_t *err_val, const char *func)
@@ -2200,7 +2189,7 @@ static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 
 	JSON_CPACK(val, "{so}", "subproxies", array_val);
 out:
-	send_json_response(val, sockd);
+	send_api_response(val, sockd);
 }
 
 static void add_proxy(ckpool_t *ckp, const int num);
@@ -2242,7 +2231,7 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	JSON_CPACK(val, "{sI,ss,ss,ss}",
 		   "id", proxy->id, "url", url, "auth", auth, "pass", pass);
 out:
-	send_json_response(val, sockd);
+	send_api_response(val, sockd);
 }
 
 static int proxy_loop(proc_instance_t *pi)
