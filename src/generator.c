@@ -2090,6 +2090,38 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 	return ret;
 }
 
+static void send_list(gdata_t *gdata, const int sockd)
+{
+	proxy_instance_t *proxy, *tmp;
+	json_t *val, *array_val;
+	char *response;
+
+	array_val = json_array();
+
+	mutex_lock(&gdata->lock);
+	HASH_ITER(hh, gdata->proxies, proxy, tmp) {
+		JSON_CPACK(val, "{sI,si,ss,ss,sf,sb,sb,sb,si}",
+			"id", proxy->id, "low_id", proxy->low_id,
+			"auth", proxy->auth, "pass", proxy->pass,
+			"diff", proxy->diff, "notified", proxy->notified,
+			"disabled", proxy->disabled, "alive", proxy->alive,
+			"subproxies", proxy->subproxy_count);
+		if (proxy->enonce1) {
+			json_set_string(val, "enonce1", proxy->enonce1);
+			json_set_int(val, "nonce1len", proxy->nonce1len);
+			json_set_int(val, "nonce2len", proxy->nonce2len);
+		}
+		json_array_append_new(array_val, val);
+	}
+	mutex_unlock(&gdata->lock);
+
+	JSON_CPACK(val, "{so}", "proxies", array_val);
+	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+	json_decref(val);
+	send_unix_msg(sockd, response);
+	free(response);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2154,6 +2186,8 @@ retry:
 			else
 				submit_share(gdata, val);
 		}
+	} else if (cmdmatch(buf, "list")) {
+		send_list(gdata, sockd);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
