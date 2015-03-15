@@ -2122,6 +2122,57 @@ static void send_list(gdata_t *gdata, const int sockd)
 	free(response);
 }
 
+static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
+{
+	proxy_instance_t *proxy, *subproxy, *tmp;
+	json_t *val = NULL, *array_val;
+	json_error_t err_val;
+	char *response;
+	int64_t id;
+
+	array_val = json_array();
+
+	val = json_loads(buf, 0, NULL);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to JSON decode sublist \"%s\" (%d):%s", buf,
+			   err_val.line, err_val.text);
+		goto out;
+	}
+	if (unlikely(!json_get_int64(&id, val, "id"))) {
+		LOGWARNING("Failed to get ID in send_sublist JSON: %s", buf);
+		goto out;
+	}
+	proxy = proxy_by_id(gdata, id);
+	if (unlikely(!proxy)) {
+		LOGWARNING("Failed to find proxy %"PRId64" in send_sublist", id);
+		goto out;
+	}
+
+	mutex_lock(&gdata->lock);
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		JSON_CPACK(val, "{si,ss,ss,sf,sb,sb,sb}",
+			"subid", subproxy->id,
+			"auth", subproxy->auth, "pass", subproxy->pass,
+			"diff", subproxy->diff, "notified", subproxy->notified,
+			"disabled", subproxy->disabled, "alive", subproxy->alive);
+		if (subproxy->enonce1) {
+			json_set_string(val, "enonce1", subproxy->enonce1);
+			json_set_int(val, "nonce1len", subproxy->nonce1len);
+			json_set_int(val, "nonce2len", subproxy->nonce2len);
+		}
+		json_array_append_new(array_val, val);
+	}
+	mutex_unlock(&gdata->lock);
+
+out:
+	JSON_CPACK(val, "{so}", "subproxies", array_val);
+	response = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+	if (val)
+		json_decref(val);
+	send_unix_msg(sockd, response);
+	free(response);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2188,6 +2239,8 @@ retry:
 		}
 	} else if (cmdmatch(buf, "list")) {
 		send_list(gdata, sockd);
+	} else if (cmdmatch(buf, "sublist")) {
+		send_sublist(gdata, sockd, buf + 8);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
@@ -2204,9 +2257,6 @@ retry:
 		recruit_subproxy(proxi, buf);
 	} else if (cmdmatch(buf, "dropproxy")) {
 		drop_proxy(gdata, buf);
-	} else if (ckp->passthrough) {
-		/* Anything remaining should be stratum messages */
-		passthrough_add_send(proxi, buf);
 	} else {
 		LOGWARNING("Generator received unrecognised message: %s", buf);
 	}
