@@ -2208,34 +2208,41 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 	return ret;
 }
 
+static void add_proxy(ckpool_t *ckp, const int num)
+{
+	proxy_instance_t *proxy;
+	server_instance_t *si;
+
+	ckp->servers = realloc(ckp->servers, sizeof(server_instance_t *) * (num + 1));
+	ckp->servers[num] = ckzalloc(sizeof(server_instance_t));
+	si = ckp->servers[num];
+	si->url = strdup(ckp->proxyurl[num]);
+	si->auth = strdup(ckp->proxyauth[num]);
+	si->pass = strdup(ckp->proxypass[num]);
+	proxy = ckzalloc(sizeof(proxy_instance_t));
+	si->data = proxy;
+	proxy->auth = si->auth;
+	proxy->pass = si->pass;
+	proxy->si = si;
+	proxy->ckp = ckp;
+	proxy->cs = &si->cs;
+	proxy->cs->ckp = ckp;
+	mutex_init(&proxy->notify_lock);
+	mutex_init(&proxy->share_lock);
+}
+
 static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
 	gdata_t *gdata = ckp->data;
-	proxy_instance_t *proxi;
+	proxy_instance_t *proxy;
 	server_instance_t *si;
 	int i, ret;
 
 	mutex_init(&gdata->lock);
 
 	/* Create all our proxy structures and pointers */
-	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->proxies);
-	for (i = 0; i < ckp->proxies; i++) {
-		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
-		si = ckp->servers[i];
-		si->url = strdup(ckp->proxyurl[i]);
-		si->auth = strdup(ckp->proxyauth[i]);
-		si->pass = strdup(ckp->proxypass[i]);
-		proxi = ckzalloc(sizeof(proxy_instance_t));
-		si->data = proxi;
-		proxi->auth = si->auth;
-		proxi->pass = si->pass;
-		proxi->si = si;
-		proxi->ckp = ckp;
-		proxi->cs = &si->cs;
-		proxi->cs->ckp = ckp;
-		mutex_init(&proxi->notify_lock);
-		mutex_init(&proxi->share_lock);
-	}
+	for (i = 0; i < ckp->proxies; i++)
+		add_proxy(ckp, i);
 
 	LOGWARNING("%s generator ready", ckp->name);
 
@@ -2245,13 +2252,13 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	for (i = 0; i < ckp->proxies; i++) {
 		si = ckp->servers[i];
 		Close(si->cs.fd);
-		proxi = si->data;
-		free(proxi->enonce1);
-		free(proxi->enonce1bin);
-		pthread_cancel(proxi->pth_psend);
-		pthread_cancel(proxi->pth_precv);
-		join_pthread(proxi->pth_psend);
-		join_pthread(proxi->pth_precv);
+		proxy = si->data;
+		free(proxy->enonce1);
+		free(proxy->enonce1bin);
+		pthread_cancel(proxy->pth_psend);
+		pthread_cancel(proxy->pth_precv);
+		join_pthread(proxy->pth_psend);
+		join_pthread(proxy->pth_precv);
 		dealloc(si->data);
 		dealloc(si->url);
 		dealloc(si->auth);
