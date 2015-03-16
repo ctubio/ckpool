@@ -49,6 +49,6 @@ var tda=0;
 for(var i=0;i<rows;i++){var s=parseFloat(d['start:'+i]);var e=parseFloat(d['end:'+i]);var da=parseFloat(d['diffacc:'+i]);tda+=da;var ths=(da/(e-s))*Math.pow(2,32)/Math.pow(10,12);d['ths:'+i]=ths;if(ymin==-1||ymin>ths){ymin=ths}if(ths>ymax)ymax=ths;d['nx:'+i]=sn(i,d['shift:'+i]);if(xmin==-1||xmin>s){xmin=s}if(xmax<e){xmax=e}d['vx:'+i]=(s+e)/2.0};
 var tav=(tda/(xmax-xmin))*Math.pow(2,32)/Math.pow(10,12);
 var p5=(ymax-ymin)*0.05;ymax+=p5;ymin-=p5;if(ymin<0){ymin=0}
-ggr(c,0.8,0.9,'THs',rows,xmin,xmax,0,ymax,d,'nx:','vx:','ths:',tav);
+ggr(c,0.8,0.9,'THs',rows,xmin,xmax,ymin,ymax,d,'nx:','vx:','ths:',tav);
 }
 function dodrw(d){if(hasCan()){gdrw(sep(d))}}
