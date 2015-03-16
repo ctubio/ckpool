@@ -182,11 +182,15 @@ function doblocks($data, $user)
 		if ($stat == 'Orphan')
 			$stara = '<span class=st1>*</span>';
 
-		$statsconf = $ans['statsconf:'.$i];
-		if ($statsconf == 'Y')
-			$approx = '';
+		if (isset($ans['statsconf:'.$i]))
+		{
+			if ($ans['statsconf:'.$i] == 'Y')
+				$approx = '';
+			else
+				$approx = '~';
+		}
 		else
-			$approx = '~';
+			$approx = '';
 
 		$diffacc = $ans['diffacc:'.$i];
 		$acc = number_format($diffacc, 0);
