@@ -1290,12 +1290,12 @@ out:
 	return ret;
 }
 
-static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int64_t id)
+static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 {
 	proxy_instance_t *proxi;
 
 	mutex_lock(&gdata->lock);
-	HASH_FIND_I64(gdata->proxies, &id, proxi);
+	HASH_FIND_INT(gdata->proxies, &id, proxi);
 	mutex_unlock(&gdata->lock);
 
 	return proxi;
