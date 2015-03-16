@@ -2094,7 +2094,7 @@ static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 
 	array_val = json_array();
 
-	val = json_loads(buf, 0, NULL);
+	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
 		val = json_encode_errormsg(&err_val);
 		goto out;
@@ -2140,7 +2140,7 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	json_t *val = NULL;
 	int id;
 
-	val = json_loads(buf, 0, NULL);
+	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
 		val = json_encode_errormsg(&err_val);
 		goto out;
@@ -2150,7 +2150,7 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	json_get_string(&pass, val, "pass");
 	json_decref(val);
 	if (unlikely(!url || !auth || !pass)) {
-		LOGWARNING("Failed to decode url/auth/pass in addproxy %s", buf);
+		val = json_errormsg("Failed to decode url/auth/pass in addproxy %s", buf);
 		goto out;
 	}
 
