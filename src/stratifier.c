@@ -27,6 +27,7 @@
 #include "stratifier.h"
 #include "uthash.h"
 #include "utlist.h"
+#include "api.h"
 
 /* Consistent across all pool instances */
 static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
@@ -2276,6 +2277,40 @@ static void lazy_reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 	}
 }
 
+static user_instance_t *get_user(sdata_t *sdata, const char *username);
+
+static void getuser(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *username = NULL;
+	user_instance_t *user;
+	json_error_t err_val;
+	json_t *val = NULL;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&username, val, "user")) {
+		val = json_errormsg("Failed to find user key");
+		goto out;
+	}
+	if (!strlen(username)) {
+		val = json_errormsg("Zero length user key");
+		goto out;
+	}
+	user = get_user(sdata, username);
+	JSON_CPACK(val, "{ss,sI,si,sf,sf,sf,sf,sf,sf,si}",
+		   "user", user->username, "id", user->id, "workers", user->workers,
+	    "bestdiff", user->best_diff, "dsps1", user->dsps1, "dsps5", user->dsps5,
+	    "dsps60", user->dsps60, "dsps1440", user->dsps1440, "dsps10080", user->dsps10080,
+	    "lastshare", user->last_update.tv_sec);
+out:
+	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
 {
 	stratum_instance_t *client;
@@ -2360,6 +2395,11 @@ retry:
 		msg = stratifier_stats(ckp, sdata);
 		send_unix_msg(sockd, msg);
 		Close(sockd);
+		goto retry;
+	}
+	/* Parse API commands here to return a message to sockd */
+	if (cmdmatch(buf, "getuser")) {
+		getuser(sdata, buf + 8, &sockd);
 		goto retry;
 	}
 
