@@ -2120,6 +2120,7 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	proxy = __add_proxy(ckp, gdata, id);
 	mutex_unlock(&gdata->lock);
 
+	LOGNOTICE("Adding proxy %d:%s", id, proxy->url);
 	prepare_proxy(proxy);
 	JSON_CPACK(val, "{si,ss,ss,ss}",
 		   "id", proxy->id, "url", url, "auth", auth, "pass", pass);
@@ -2178,6 +2179,7 @@ static void parse_delproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	JSON_CPACK(val, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
 		   "auth", proxy->auth, "pass", proxy->pass);
 
+	LOGNOTICE("Deleting proxy %d:%s", proxy->id, proxy->url);
 	delete_proxy(gdata, proxy);
 	reconnect_generator(ckp);
 out:
@@ -2208,7 +2210,7 @@ static void parse_ableproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd,
 		   "auth", proxy->auth, "pass", proxy->pass);
 	if (proxy->disabled != disable) {
 		proxy->disabled = disable;
-		LOGNOTICE("%sabling proxy %d", disable ? "Dis" : "En", id);
+		LOGNOTICE("%sabling proxy %d:%s", disable ? "Dis" : "En", id, proxy->url);
 	}
 	if (disable) {
 		disable_subproxy(gdata, proxy, proxy);
