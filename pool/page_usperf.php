@@ -20,6 +20,7 @@ function dousperf($data, $user)
 	$pg .= ">shift lines&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=tkey onclick='godrw()'>time key&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=tlines onclick='godrw()'>time lines&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=over onclick='godrw()'>key overlap&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=smooth onclick='godrw()'>smooth&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=zerob onclick='godrw()'>zero based</div>";
 	$pg .= "<div id=can0><canvas id=can width=1 height=1>";
