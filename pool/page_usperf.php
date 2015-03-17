@@ -13,10 +13,13 @@ function dousperf($data, $user)
  $pg = '<h1>User Shift Performance</h1><br>';
  if ($ans['STATUS'] == 'ok' and $ans['DATA'] != '')
  {
-	$pg .= "<div><input type=checkbox id=vlines onclick='godrw()'";
+	$pg .= "<div><input type=checkbox id=skey onclick='godrw()' checked>shift key&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=slines onclick='godrw()'";
 	if ($vlines)
 		$pg .= ' checked';
-	$pg .= ">verticle lines&nbsp;";
+	$pg .= ">shift lines&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=tkey onclick='godrw()'>time key&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=tlines onclick='godrw()'>time lines&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=smooth onclick='godrw()'>smooth&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=zerob onclick='godrw()'>zero based</div>";
 	$pg .= "<div id=can0><canvas id=can width=1 height=1>";
