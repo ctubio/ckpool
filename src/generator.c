@@ -1990,9 +1990,9 @@ static void *userproxy_recv(void *arg)
 	}
 
 	while (42) {
+		proxy_instance_t *proxy, *parent;
 		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
-		proxy_instance_t *proxy;
 		connsock_t *cs;
 		time_t now;
 		int ret;
@@ -2013,27 +2013,27 @@ static void *userproxy_recv(void *arg)
 			continue;
 		}
 		now = time(NULL);
+		parent = proxy->parent;
 
-		/* Age old notifications older than 10 mins old */
-		mutex_lock(&proxy->notify_lock);
-		HASH_ITER(hh, proxy->notify_instances, ni, tmp) {
-			if (HASH_COUNT(proxy->notify_instances) < 3)
+		mutex_lock(&parent->notify_lock);
+		HASH_ITER(hh, parent->notify_instances, ni, tmp) {
+			if (HASH_COUNT(parent->notify_instances) < 3)
 				break;
 			if (ni->notify_time < now - 600) {
-				HASH_DEL(proxy->notify_instances, ni);
+				HASH_DEL(parent->notify_instances, ni);
 				clear_notify(ni);
 			}
 		}
-		mutex_unlock(&proxy->notify_lock);
+		mutex_unlock(&parent->notify_lock);
 
 		/* Similary with shares older than 2 mins without response */
-		mutex_lock(&proxy->share_lock);
-		HASH_ITER(hh, proxy->shares, share, tmpshare) {
+		mutex_lock(&parent->share_lock);
+		HASH_ITER(hh, parent->shares, share, tmpshare) {
 			if (share->submit_time < now - 120) {
-				HASH_DEL(proxy->shares, share);
+				HASH_DEL(parent->shares, share);
 			}
 		}
-		mutex_unlock(&proxy->share_lock);
+		mutex_unlock(&parent->share_lock);
 
 		do {
 			/* proxy may have been recycled here if it is not a
