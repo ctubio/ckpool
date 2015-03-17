@@ -1628,6 +1628,8 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 	/* Has this proxy already been reconnected? */
 	if (cs->fd > 0)
 		return true;
+	if (proxi->disabled)
+		return false;
 	if (!extract_sockaddr(proxi->url, &cs->url, &cs->port)) {
 		LOGWARNING("Failed to extract address from %s", proxi->url);
 		goto out;
@@ -1861,8 +1863,8 @@ static bool subproxies_alive(proxy_instance_t *proxy)
 static void *proxy_recv(void *arg)
 {
 	proxy_instance_t *proxi = (proxy_instance_t *)arg;
-	proxy_instance_t *subproxy, *tmp;
 	connsock_t *cs = &proxi->cs;
+	proxy_instance_t *subproxy;
 	ckpool_t *ckp = proxi->ckp;
 	gdata_t *gdata = ckp->data;
 	struct epoll_event event;
@@ -1962,17 +1964,6 @@ static void *proxy_recv(void *arg)
 					  subproxy->id, subproxy->subid, cs->buf);
 		} while ((ret = read_socket_line(cs, 0)) > 0);
 	}
-
-	HASH_ITER(sh, proxi->subproxies, subproxy, tmp) {
-		subproxy->disabled = true;
-		send_stratifier_deadproxy(ckp, subproxy->id, subproxy->subid);
-		if (subproxy->cs.fd > 0) {
-			epoll_ctl(epfd, EPOLL_CTL_DEL, subproxy->cs.fd, NULL);
-			Close(subproxy->cs.fd);
-		}
-		HASH_DELETE(sh, proxi->subproxies, subproxy);
-	}
-	mutex_unlock(&proxi->proxy_lock);
 
 	return NULL;
 }
@@ -2193,6 +2184,41 @@ out:
 	send_api_response(val, sockd);
 }
 
+static void parse_ableproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd,
+			      const char *buf, bool disable)
+{
+	proxy_instance_t *proxy;
+
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id = -1;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	json_get_int(&id, val, "id");
+	proxy = proxy_by_id(gdata, id);
+	if (!proxy) {
+		val = json_errormsg("Proxy id %d not found", id);
+		goto out;
+	}
+	JSON_CPACK(val, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
+		   "auth", proxy->auth, "pass", proxy->pass);
+	if (proxy->disabled != disable) {
+		proxy->disabled = disable;
+		LOGNOTICE("%sabling proxy %d", disable ? "Dis" : "En", id);
+	}
+	if (disable) {
+		disable_subproxy(gdata, proxy, proxy);
+		reconnect_generator(ckp);
+	} else
+		reconnect_proxy(proxy);
+out:
+	send_api_response(val, sockd);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2263,6 +2289,10 @@ retry:
 		parse_addproxy(ckp, gdata, sockd, buf + 9);
 	} else if (cmdmatch(buf, "delproxy")) {
 		parse_delproxy(ckp, gdata, sockd, buf + 9);
+	} else if (cmdmatch(buf, "enableproxy")) {
+		parse_ableproxy(ckp, gdata, sockd, buf + 12, false);
+	} else if (cmdmatch(buf, "disableproxy")) {
+		parse_ableproxy(ckp, gdata, sockd, buf + 13, true);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
