@@ -1556,6 +1556,12 @@ static void *proxy_send(void *arg)
 				   proxyid);
 			continue;
 		}
+		subproxy = subproxy_by_id(proxy, subid);
+		if (unlikely(!subproxy)) {
+			LOGWARNING("Proxysend for got message for non-existent subproxy %d:%d",
+				   proxyid, subid);
+			continue;
+		}
 
 		mutex_lock(&proxy->notify_lock);
 		HASH_FIND_INT(proxy->notify_instances, &id, ni);
@@ -1563,27 +1569,22 @@ static void *proxy_send(void *arg)
 			jobid = json_copy(ni->jobid);
 		mutex_unlock(&proxy->notify_lock);
 
-		subproxy = subproxy_by_id(proxy, subid);
-		if (unlikely(!subproxy)) {
-			LOGWARNING("Proxysend for got message for non-existent subproxy %d:%d",
-				   proxyid, subid);
-			continue;
-		}
-		cs = &subproxy->cs;
-		if (jobid) {
-			JSON_CPACK(val, "{s[soooo]soss}", "params", proxy->auth, jobid,
-					json_object_dup(msg->json_msg, "nonce2"),
-					json_object_dup(msg->json_msg, "ntime"),
-					json_object_dup(msg->json_msg, "nonce"),
-					"id", json_object_dup(msg->json_msg, "id"),
-					"method", "mining.submit");
-			ret = send_json_msg(cs, val);
-			json_decref(val);
-		} else {
+		if (unlikely(!jobid)) {
 			stratifier_reconnect_client(ckp, client_id);
 			LOGNOTICE("Proxy %d:%s failed to find matching jobid in proxysend",
 				  proxy->id, proxy->url);
+			continue;
 		}
+
+		cs = &subproxy->cs;
+		JSON_CPACK(val, "{s[soooo]soss}", "params", proxy->auth, jobid,
+				json_object_dup(msg->json_msg, "nonce2"),
+				json_object_dup(msg->json_msg, "ntime"),
+				json_object_dup(msg->json_msg, "nonce"),
+				"id", json_object_dup(msg->json_msg, "id"),
+				"method", "mining.submit");
+		ret = send_json_msg(cs, val);
+		json_decref(val);
 		if (!ret) {
 			LOGNOTICE("Proxy %d:%d %s failed to send msg in proxy_send, dropping to reconnect",
 				  proxy->id, subid, proxy->url);
