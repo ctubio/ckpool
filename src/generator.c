@@ -961,6 +961,7 @@ static void store_proxy(gdata_t *gdata, proxy_instance_t *proxy)
 	LOGINFO("Recycling data from proxy %d:%d", proxy->id, proxy->subid);
 
 	mutex_lock(&gdata->lock);
+	dealloc(proxy->enonce1);
 	dealloc(proxy->url);
 	dealloc(proxy->auth);
 	dealloc(proxy->pass);
@@ -1497,6 +1498,8 @@ static void *proxy_send(void *arg)
 	stratum_msg_t *msg = NULL;
 
 	rename_proc("proxysend");
+
+	pthread_detach(pthread_self());
 
 	while (42) {
 		proxy_instance_t *subproxy;
@@ -2127,8 +2130,65 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	mutex_unlock(&gdata->lock);
 
 	prepare_proxy(proxy);
-	JSON_CPACK(val, "{sI,ss,ss,ss}",
+	JSON_CPACK(val, "{si,ss,ss,ss}",
 		   "id", proxy->id, "url", url, "auth", auth, "pass", pass);
+out:
+	send_api_response(val, sockd);
+}
+
+static void delete_proxy(gdata_t *gdata, proxy_instance_t *proxy)
+{
+	proxy_instance_t *subproxy;
+
+	/* Remove the proxy from the master list first */
+	mutex_lock(&gdata->lock);
+	HASH_DEL(gdata->proxies, proxy);
+	/* Disable all its threads */
+	pthread_cancel(proxy->pth_psend);
+	pthread_cancel(proxy->pth_precv);
+	Close(proxy->cs.fd);
+	mutex_unlock(&gdata->lock);
+
+	/* Recycle all its subproxies */
+	do {
+		mutex_lock(&proxy->proxy_lock);
+		subproxy = proxy->subproxies;
+		if (subproxy)
+			HASH_DELETE(sh, proxy->subproxies, subproxy);
+		mutex_unlock(&proxy->proxy_lock);
+
+		if (subproxy && proxy != subproxy)
+			store_proxy(gdata, subproxy);
+	} while (subproxy);
+
+	/* Recycle the proxy itself */
+	store_proxy(gdata, proxy);
+}
+
+static void parse_delproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
+{
+	proxy_instance_t *proxy;
+
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id = -1;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	json_get_int(&id, val, "id");
+	proxy = proxy_by_id(gdata, id);
+	if (!proxy) {
+		val = json_errormsg("Proxy id %d not found", id);
+		goto out;
+	}
+	JSON_CPACK(val, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
+		   "auth", proxy->auth, "pass", proxy->pass);
+
+	delete_proxy(gdata, proxy);
+	reconnect_generator(ckp);
 out:
 	send_api_response(val, sockd);
 }
@@ -2201,6 +2261,8 @@ retry:
 		send_sublist(gdata, sockd, buf + 8);
 	} else if (cmdmatch(buf, "addproxy")) {
 		parse_addproxy(ckp, gdata, sockd, buf + 9);
+	} else if (cmdmatch(buf, "delproxy")) {
+		parse_delproxy(ckp, gdata, sockd, buf + 9);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
@@ -2300,8 +2362,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 		free(proxy->enonce1bin);
 		pthread_cancel(proxy->pth_psend);
 		pthread_cancel(proxy->pth_precv);
-		join_pthread(proxy->pth_psend);
-		join_pthread(proxy->pth_precv);
 		dealloc(proxy->url);
 		dealloc(proxy->auth);
 		dealloc(proxy->pass);
