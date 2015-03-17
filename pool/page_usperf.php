@@ -6,19 +6,25 @@ function dousperf($data, $user)
 
  $iCrap = strpos($_SERVER['HTTP_USER_AGENT'],'iP');
  if ($iCrap)
-	$ok = 0;
+	$vlines = false;
  else
-	$ok = 1;
+	$vlines = true;
 
  $pg = '<h1>User Shift Performance</h1><br>';
  if ($ans['STATUS'] == 'ok' and $ans['DATA'] != '')
  {
+	$pg .= "<div><input type=checkbox id=vlines onclick='godrw()'";
+	if ($vlines)
+		$pg .= ' checked';
+	$pg .= ">verticle lines&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=smooth onclick='godrw()'>smooth&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=zerob onclick='godrw()'>zero based</div>";
 	$pg .= "<div id=can0><canvas id=can width=1 height=1>";
 	$pg .= "A graph will show here if your browser supports html5/canvas";
 	$pg .= "</canvas></div>\n";
 	$data = str_replace(array("\\","'"), array("\\\\","\\'"), $ans['DATA']);
 	$pg .= "<script src='/can.js'></script>\n";
-	$pg .= "<script type='text/javascript'>dodrw($ok,'$data');</script>\n";
+	$pg .= "<script type='text/javascript'>function godrw(){dodrw('$data')};godrw();</script>\n";
  }
 
  return $pg;
