@@ -1246,18 +1246,45 @@ static void reconnect_clients(sdata_t *sdata)
 		generator_recruit(sdata->ckp, -headroom);
 }
 
-#if 0
-static proxy_t *current_proxy(sdata_t *sdata)
+static bool __subproxies_alive(proxy_t *proxy)
 {
-	proxy_t *proxy;
+	proxy_t *subproxy, *tmp;
+	bool alive = false;
+
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		if (!subproxy->dead) {
+			alive = true;
+			break;
+		}
+	}
+	return alive;
+}
+
+/* Iterate over the current global proxy list and see if the current one is
+ * the highest priority alive one. Uses ckp sdata */
+static void check_bestproxy(sdata_t *sdata)
+{
+	proxy_t *proxy, *tmp;
+	int changed_id = -1;
 
 	mutex_lock(&sdata->proxy_lock);
-	proxy = sdata->proxy;
+	if (sdata->proxy && !__subproxies_alive(sdata->proxy))
+		sdata->proxy = NULL;
+	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
+		if (!__subproxies_alive(proxy))
+			continue;
+		if (!sdata->proxy || sdata->proxy->id > proxy->id) {
+			sdata->proxy = proxy;
+			changed_id = proxy->id;
+		}
+	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	return proxy;
+	if (changed_id != -1) {
+		LOGNOTICE("Stratifier setting active proxy to %d", changed_id);
+		reconnect_clients(sdata);
+	}
 }
-#endif
 
 static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 {
@@ -1269,6 +1296,7 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 	proxy = existing_subproxy(sdata, id, subid);
 	if (proxy)
 		proxy->dead = true;
+	check_bestproxy(sdata);
 	LOGINFO("Stratifier dropping clients from proxy %d:%d", id, subid);
 	headroom = current_headroom(sdata, &proxy);
 
@@ -1380,7 +1408,6 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	bool new_block = false, clean;
 	proxy_t *proxy, *current;
 	int i, id = 0, subid = 0;
-	int64_t current_id;
 	char header[228];
 	const char *buf;
 	workbase_t *wb;
@@ -1471,11 +1498,9 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	current = sdata->proxy;
 	if (unlikely(!current))
 		current = sdata->proxy = proxy;
-	current_id = current->id;
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (!proxy->subid && proxy->id == current_id)
-		reconnect_clients(sdata);
+	check_bestproxy(sdata);
 	clean |= new_block;
 	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
@@ -2229,24 +2254,6 @@ static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 	stratum_add_send(sdata, json_msg, client->id);
 }
 
-/* Sets the currently active proxy. Clients will be told to reconnect once the
- * first notify data comes from this proxy. Even if we are already bound to
- * this proxy we are only given this message if all clients must move. */
-static void set_proxy(sdata_t *sdata, const char *buf)
-{
-	int id = 0;
-	proxy_t *proxy;
-
-	sscanf(buf, "proxy=%d", &id);
-
-	mutex_lock(&sdata->proxy_lock);
-	proxy = __proxy_by_id(sdata, id);
-	sdata->proxy = proxy;
-	mutex_unlock(&sdata->proxy_lock);
-
-	LOGNOTICE("Stratifier setting active proxy to %d", id);
-}
-
 static void dead_proxy(sdata_t *sdata, const char *buf)
 {
 	int id = 0, subid = 0;
@@ -2442,8 +2449,6 @@ retry:
 		block_reject(sdata, buf + 8);
 	} else if (cmdmatch(buf, "reconnect")) {
 		request_reconnect(sdata, buf);
-	} else if (cmdmatch(buf, "proxy")) {
-		set_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "deadproxy")) {
 		dead_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
@@ -2548,6 +2553,8 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 
 static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *client, const char *msg);
 
+#define maxint 2147483647
+
 /* Choose the stratifier data for a new client. Use the main ckp_sdata except
  * in proxy mode where we find a subproxy based on the current proxy with room
  * for more clients. Signal the generator to recruit more subproxies if we are
@@ -2564,7 +2571,7 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 		LOGWARNING("No proxy available yet to generate subscribes");
 		return NULL;
 	}
-	best_id = ckp_sdata->proxy_count;
+	best_id = maxint;
 
 	mutex_lock(&ckp_sdata->proxy_lock);
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
@@ -2598,8 +2605,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 
 	if (best_id != current->id || current->headroom < 2)
 		generator_recruit(ckp, 1);
-	if (best_id == ckp_sdata->proxy_count) {
-		LOGNOTICE("Temporarily insufficient subproxies to accept more clients");
+	if (best_id == maxint) {
+		LOGWARNING("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
 	}
 	best = subproxy_by_id(ckp_sdata, best_id, best_subid);
