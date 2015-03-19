@@ -2681,10 +2681,14 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	n2len = sdata->workbases->enonce2varlen;
 	ck_runlock(&sdata->workbase_lock);
 
-	/* Send a blank sessionid in proxy mode so clients don't think we have
+	/* Send a random sessionid in proxy mode so clients don't think we have
 	 * resumed if enonce1 ends up matching on reconnect. */
 	if (ckp->proxy) {
-		JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", "", client->enonce1,
+		unsigned int now = time(NULL);
+		char nowx[12];
+
+		sprintf(nowx, "%x", now);
+		JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", nowx, client->enonce1,
 				n2len);
 	} else {
 		JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
