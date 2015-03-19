@@ -869,14 +869,21 @@ do {                                                                            
             (sizeof(UT_hash_table))                                 +            \
             (HASH_BLOOM_BYTELEN)))
 
+/* HASH_ITERATE and HASH_FOREACH are not safe for deletion */
+#define HASH_ITERATE(head,el) HASH_ITERATE2(hh,head,el)
+#define HASH_FOREACH(hh,head,el) HASH_ITERATE2(hh,head,el)
 #ifdef NO_DECLTYPE
 #define HASH_ITER(hh,head,el,tmp)                                                \
 for((el)=(head), (*(char**)(&(tmp)))=(char*)((head)?(head)->hh.next:NULL);       \
   el; (el)=(tmp),(*(char**)(&(tmp)))=(char*)((tmp)?(tmp)->hh.next:NULL)) 
+#define HASH_ITERATE2(hh,head,el) \
+for ((el)=(head); ((head)!= NULL); (head)=(head)->hh.next)
 #else
 #define HASH_ITER(hh,head,el,tmp)                                                \
 for((el)=(head),(tmp)=DECLTYPE(el)((head)?(head)->hh.next:NULL);                 \
   el; (el)=(tmp),(tmp)=DECLTYPE(el)((tmp)?(tmp)->hh.next:NULL))
+#define HASH_ITERATE2(hh,head,el) \
+for ((el)=(head); ((head)!= NULL); (head)=DECLTYPE(el)(head)->hh.next)
 #endif
 
 /* obtain a count of items in the hash */
