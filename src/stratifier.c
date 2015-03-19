@@ -2998,6 +2998,7 @@ static int send_recv_auth(stratum_instance_t *client)
 	sdata_t *sdata = ckp->data;
 	char *buf = NULL, *json_msg;
 	bool contended = false;
+	size_t responselen = 0;
 	char cdfield[64];
 	int ret = 1;
 	json_t *val;
@@ -3037,15 +3038,16 @@ static int send_recv_auth(stratum_instance_t *client)
 		contended = true;
 
 	free(json_msg);
-	if (likely(buf)) {
+	/* Leave ample room for response based on buf length */
+	if (likely(buf))
+		responselen = strlen(buf);
+	if (likely(responselen > 0)) {
 		char *cmd = NULL, *secondaryuserid = NULL, *response;
 		worker_instance_t *worker = client->worker_instance;
 		json_error_t err_val;
-		size_t responselen;
 		json_t *val = NULL;
 
 		LOGINFO("Got ckdb response: %s", buf);
-		responselen = strlen(buf); /* Leave ample room for response based on buf length */
 		response = alloca(responselen);
 		memset(response, 0, responselen);
 		if (unlikely(sscanf(buf, "id.%*d.%s", response) < 1 || strlen(response) < 1 || !strchr(response, '='))) {
@@ -4446,6 +4448,7 @@ static bool test_and_clear(bool *val, mutex_t *lock)
 static void ckdbq_process(ckpool_t *ckp, char *msg)
 {
 	sdata_t *sdata = ckp->data;
+	size_t responselen = 0;
 	char *buf = NULL;
 
 	while (!buf) {
@@ -4465,9 +4468,12 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 
 	/* Process any requests from ckdb that are heartbeat responses with
 	 * specific requests. */
-	if (likely(buf)) {
-		char response[PAGESIZE] = {};
+	if (likely(buf))
+		responselen = strlen(buf);
+	if (likely(responselen > 0)) {
+		char *response = alloca(responselen);
 
+		memset(response, 0, responselen);
 		sscanf(buf, "id.%*d.%s", response);
 		if (safecmp(response, "ok")) {
 			char *cmd;

@@ -902,6 +902,11 @@ redo:
 				 blocks_confirmed(blocks->confirmed), FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			snprintf(tmp, sizeof(tmp),
+				 "statsconf:%d=%s%c", rows,
+				 blocks->statsconfirmed, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
 			double_to_buf(blocks->diffacc, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "diffacc:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
@@ -1016,8 +1021,8 @@ redo:
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
 		 "seq,height,blockhash,nonce,reward,workername,firstcreatedate,"
-		 "createdate,status,diffacc,diffinv,shareacc,shareinv,elapsed,"
-		 "netdiff,diffratio,cdf,luck", FLDSEP);
+		 "createdate,status,statsconf,diffacc,diffinv,shareacc,"
+		 "shareinv,elapsed,netdiff,diffratio,cdf,luck", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Blocks,BlockStats", FLDSEP, ",s");
@@ -5446,7 +5451,7 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_WORKERSTAT,"workerstats",	false,	true,	cmd_workerstats,ACCESS_POOL },
 	{ CMD_BLOCK,	"block",	false,	true,	cmd_blocks,	ACCESS_POOL },
 	{ CMD_BLOCKLIST,"blocklist",	false,	false,	cmd_blocklist,	ACCESS_WEB },
-	{ CMD_BLOCKSTATUS,"blockstatus",false,	false,	cmd_blockstatus,ACCESS_WEB },
+	{ CMD_BLOCKSTATUS,"blockstatus",false,	false,	cmd_blockstatus,ACCESS_SYSTEM },
 	{ CMD_NEWID,	"newid",	false,	false,	cmd_newid,	ACCESS_SYSTEM },
 	{ CMD_PAYMENTS,	"payments",	false,	false,	cmd_payments,	ACCESS_WEB },
 	{ CMD_WORKERS,	"workers",	false,	false,	cmd_workers,	ACCESS_WEB },
