@@ -1186,14 +1186,14 @@ static proxy_t *existing_subproxy(sdata_t *sdata, const int id, const int subid)
 /* Set proxy to the current proxy and calculate how much headroom it has */
 static int64_t current_headroom(sdata_t *sdata, proxy_t **proxy)
 {
+	proxy_t *subproxy, *tmp;
 	int64_t headroom = 0;
-	proxy_t *subproxy;
 
 	mutex_lock(&sdata->proxy_lock);
 	*proxy = sdata->proxy;
 	if (!*proxy)
 		goto out_unlock;
-	HASH_FOREACH(sh, (*proxy)->subproxies, subproxy) {
+	HASH_ITER(sh, (*proxy)->subproxies, subproxy, tmp) {
 		if (subproxy->dead)
 			continue;
 		headroom += subproxy->max_clients - subproxy->clients;
@@ -1220,8 +1220,8 @@ static void generator_recruit(const ckpool_t *ckp, const int recruits)
  * switched lazily. */
 static void reconnect_clients(sdata_t *sdata)
 {
+	stratum_instance_t *client, *tmpclient;
 	int reconnects = 0, hard = 0;
-	stratum_instance_t *client;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -1230,7 +1230,7 @@ static void reconnect_clients(sdata_t *sdata)
 		return;
 
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->stratum_instances, client) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
 		if (client->proxyid == proxy->id)
 			continue;
 		if (headroom-- < 1)
@@ -1256,10 +1256,10 @@ static void reconnect_clients(sdata_t *sdata)
 
 static bool __subproxies_alive(proxy_t *proxy)
 {
+	proxy_t *subproxy, *tmp;
 	bool alive = false;
-	proxy_t *subproxy;
 
-	HASH_FOREACH(sh, proxy->subproxies, subproxy) {
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
 		if (!subproxy->dead) {
 			alive = true;
 			break;
@@ -1272,13 +1272,13 @@ static bool __subproxies_alive(proxy_t *proxy)
  * the highest priority alive one. Uses ckp sdata */
 static void check_bestproxy(sdata_t *sdata)
 {
+	proxy_t *proxy, *tmp;
 	int changed_id = -1;
-	proxy_t *proxy;
 
 	mutex_lock(&sdata->proxy_lock);
 	if (sdata->proxy && !__subproxies_alive(sdata->proxy))
 		sdata->proxy = NULL;
-	HASH_ITERATE(sdata->proxies, proxy) {
+	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
 		if (!__subproxies_alive(proxy))
 			continue;
 		if (!sdata->proxy || sdata->proxy->id > proxy->id) {
@@ -1296,8 +1296,8 @@ static void check_bestproxy(sdata_t *sdata)
 
 static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 {
+	stratum_instance_t *client, *tmp;
 	int reconnects = 0, hard = 0;
-	stratum_instance_t *client;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -1309,7 +1309,7 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 	headroom = current_headroom(sdata, &proxy);
 
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->stratum_instances, client) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id || client->subproxyid != subid)
 			continue;
 		reconnects++;
@@ -1522,7 +1522,7 @@ static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
 static void update_diff(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
-	stratum_instance_t *client;
+	stratum_instance_t *client, *tmp;
 	double old_diff, diff;
 	int id = 0, subid = 0;
 	const char *buf;
@@ -1576,7 +1576,7 @@ static void update_diff(ckpool_t *ckp, const char *cmd)
 	/* If the diff has dropped, iterate over all the clients and check
 	 * they're at or below the new diff, and update it if not. */
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->stratum_instances, client) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->proxyid != id)
 			continue;
 		if (client->subproxyid != subid)
@@ -1610,14 +1610,14 @@ static void free_proxy(proxy_t *proxy)
  * those. */
 static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 {
-	proxy_t *proxy, *subproxy, *subtmp;
+	proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
 	int dead = 0;
 
 	if (!ckp->proxy)
 		return;
 
 	mutex_lock(&sdata->proxy_lock);
-	HASH_ITERATE(sdata->proxies, proxy) {
+	HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
 		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
 			if (!subproxy->bound_clients && !subproxy->dead) {
 				/* Reset the counter to reuse this proxy */
@@ -1690,10 +1690,10 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
 /* Has this client_id already been used and is now in one of the dropped lists */
 static bool __dropped_instance(sdata_t *sdata, const int64_t id)
 {
-	stratum_instance_t *client;
+	stratum_instance_t *client, *tmp;
 	bool ret = false;
 
-	HASH_ITERATE(sdata->disconnected_instances, client) {
+	HASH_ITER(hh, sdata->disconnected_instances, client, tmp) {
 		if (unlikely(client->id == id)) {
 			ret = true;
 			goto out;
@@ -1810,8 +1810,8 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 
 static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, const int64_t id)
 {
+	stratum_instance_t *client, *tmp;
 	uint64_t enonce1_64 = 0, ret = 0;
-	stratum_instance_t *client;
 	int64_t old_id = 0;
 	int slen;
 
@@ -1828,7 +1828,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	hex2bin(&enonce1_64, sessionid, slen);
 
 	ck_wlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->stratum_instances, client) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		if (client->id == id)
 			continue;
 		if (client->enonce1_64 == enonce1_64) {
@@ -1877,7 +1877,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 {
 	ckpool_t *ckp = sdata->ckp;
 	sdata_t *ckp_sdata = ckp->data;
-	stratum_instance_t *client;
+	stratum_instance_t *client, *tmp;
 	ckmsg_t *bulk_send = NULL;
 	time_t now_t = time(NULL);
 	int hard_reconnect = 0;
@@ -1890,7 +1890,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 
 	/* Use this locking as an opportunity to test other clients. */
 	ck_rlock(&ckp_sdata->instance_lock);
-	HASH_ITERATE(ckp_sdata->stratum_instances, client) {
+	HASH_ITER(hh, ckp_sdata->stratum_instances, client, tmp) {
 		ckmsg_t *client_msg;
 		smsg_t *msg;
 
@@ -2011,7 +2011,7 @@ static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
 static void request_reconnect(sdata_t *sdata, const char *cmd)
 {
 	char *port = strdupa(cmd), *url = NULL;
-	stratum_instance_t *client;
+	stratum_instance_t *client, *tmp;
 	json_t *json_msg;
 
 	strsep(&port, ":");
@@ -2031,7 +2031,7 @@ static void request_reconnect(sdata_t *sdata, const char *cmd)
 	/* Tag all existing clients as dropped now so they can be removed
 	 * lazily */
 	ck_wlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->stratum_instances, client) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		client->dropped = true;
 	}
 	ck_wunlock(&sdata->instance_lock);
@@ -2039,14 +2039,14 @@ static void request_reconnect(sdata_t *sdata, const char *cmd)
 
 static void reset_bestshares(sdata_t *sdata)
 {
-	stratum_instance_t *client;
-	user_instance_t *user;
+	user_instance_t *user, *tmpuser;
+	stratum_instance_t *client, *tmp;
 
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->stratum_instances, client) {
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 		client->best_diff = 0;
 	}
-	HASH_ITERATE(sdata->user_instances, user) {
+	HASH_ITER(hh, sdata->user_instances, user, tmpuser) {
 		worker_instance_t *worker;
 
 		user->best_diff = 0;
@@ -2569,7 +2569,7 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
  * running out of room. */
 static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 {
-	proxy_t *current, *proxy, *subproxy, *best = NULL;
+	proxy_t *current, *proxy, *subproxy, *best = NULL, *tmp, *tmpsub;
 	int best_subid = 0, best_id;
 
 	if (!ckp->proxy || ckp->passthrough)
@@ -2582,12 +2582,12 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	best_id = maxint;
 
 	mutex_lock(&ckp_sdata->proxy_lock);
-	HASH_ITERATE(ckp_sdata->proxies, proxy) {
+	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
 		int64_t max_headroom;
 
 		best = NULL;
 		proxy->headroom = max_headroom = 0;
-		HASH_FOREACH(sh, proxy->subproxies, subproxy) {
+		HASH_ITER(sh, proxy->subproxies, subproxy, tmpsub) {
 			int64_t subproxy_headroom;
 
 			if (subproxy->dead)
@@ -4618,7 +4618,7 @@ out:
 static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 {
 	json_entry_t *json_list = NULL, *entry, *tmpentry;
-	user_instance_t *user;
+	user_instance_t *user, *tmp;
 	char cdfield[64];
 	time_t now_t;
 	ts_t ts_now;
@@ -4636,7 +4636,7 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 	now_t = ts_now.tv_sec;
 
 	ck_rlock(&sdata->instance_lock);
-	HASH_ITERATE(sdata->user_instances, user) {
+	HASH_ITER(hh, sdata->user_instances, user, tmp) {
 		worker_instance_t *worker;
 		uint8_t cycle_mask;
 
@@ -4740,10 +4740,10 @@ static void *statsupdate(void *arg)
 		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
+		stratum_instance_t *client, *tmp;
 		log_entry_t *log_entries = NULL;
+		user_instance_t *user, *tmpuser;
 		char_entry_t *char_list = NULL;
-		stratum_instance_t *client;
-		user_instance_t *user;
 		int idle_workers = 0;
 		char *fname, *s, *sp;
 		tv_t now, diff;
@@ -4756,7 +4756,7 @@ static void *statsupdate(void *arg)
 		timersub(&now, &stats->start_time, &diff);
 
 		ck_rlock(&sdata->instance_lock);
-		HASH_ITERATE(sdata->stratum_instances, client) {
+		HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 			if (!client_active(client))
 				continue;
 
@@ -4776,7 +4776,7 @@ static void *statsupdate(void *arg)
 			}
 		}
 
-		HASH_ITERATE(sdata->user_instances, user) {
+		HASH_ITER(hh, sdata->user_instances, user, tmpuser) {
 			worker_instance_t *worker;
 			bool idle = false;
 
@@ -4942,7 +4942,7 @@ static void *statsupdate(void *arg)
 		fclose(fp);
 
 		if (ckp->proxy && sdata->proxy) {
-			proxy_t *proxy, *subproxy;
+			proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
 
 			mutex_lock(&sdata->proxy_lock);
 			JSON_CPACK(val, "{sI,si,si}",
@@ -4957,7 +4957,7 @@ static void *statsupdate(void *arg)
 			dealloc(s);
 
 			mutex_lock(&sdata->proxy_lock);
-			HASH_ITERATE(sdata->proxies, proxy) {
+			HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
 				JSON_CPACK(val, "{sI,si,sI,sb}",
 					   "id", proxy->id,
 					   "subproxies", proxy->subproxy_count,
@@ -4968,7 +4968,7 @@ static void *statsupdate(void *arg)
 				ASPRINTF(&sp, "Proxies:%s", s);
 				dealloc(s);
 				add_msg_entry(&char_list, &sp);
-				HASH_FOREACH(sh, proxy->subproxies, subproxy) {
+				HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
 					JSON_CPACK(val, "{sI,si,si,sI,sI,sf,sb}",
 						   "id", subproxy->id,
 						   "subid", subproxy->subid,
