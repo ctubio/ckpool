@@ -1303,11 +1303,10 @@ static void send_subscribe(ckpool_t *ckp, proxy_instance_t *proxi)
 	json_t *json_msg;
 	char *msg, *buf;
 
-	JSON_CPACK(json_msg, "{sIsisssi}",
-			     "proxy", proxi->id,
-			     "subproxy", proxi->subid,
-			     "enonce1", proxi->enonce1,
-			     "nonce2len", proxi->nonce2len);
+	JSON_CPACK(json_msg, "{ss,ss,ss,sI,si,ss,si}",
+		   "url", proxi->url, "auth", proxi->auth, "pass", proxi->pass,
+		   "proxy", proxi->id, "subproxy", proxi->subid,
+		   "enonce1", proxi->enonce1, "nonce2len", proxi->nonce2len);
 	msg = json_dumps(json_msg, JSON_NO_UTF8);
 	json_decref(json_msg);
 	ASPRINTF(&buf, "subscribe=%s", msg);

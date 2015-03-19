@@ -302,6 +302,9 @@ struct proxy_base {
 
 	double diff;
 
+	char url[128];
+	char auth[128];
+	char pass[128];
 	char enonce1[32];
 	uchar enonce1bin[16];
 	int enonce1constlen;
@@ -1378,6 +1381,12 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	ck_wlock(&dsdata->workbase_lock);
 	proxy->subscribed = true;
 	proxy->diff = ckp->startdiff;
+	memset(proxy->url, 0, 128);
+	memset(proxy->auth, 0, 128);
+	memset(proxy->pass, 0, 128);
+	strncpy(proxy->url, json_string_value(json_object_get(val, "url")), 127);
+	strncpy(proxy->auth, json_string_value(json_object_get(val, "auth")), 127);
+	strncpy(proxy->pass, json_string_value(json_object_get(val, "pass")), 127);
 	/* Length is checked by generator */
 	strcpy(proxy->enonce1, json_string_value(json_object_get(val, "enonce1")));
 	proxy->enonce1constlen = strlen(proxy->enonce1) / 2;
@@ -1397,11 +1406,11 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	ck_wunlock(&dsdata->workbase_lock);
 
 	if (subid) {
-		LOGINFO("Upstream pool %d:%d extranonce2 length %d, max proxy clients %"PRId64,
-			id, subid, proxy->nonce2len, proxy->max_clients);
+		LOGINFO("Upstream pool %s %d:%d extranonce2 length %d, max proxy clients %"PRId64,
+			proxy->url, id, subid, proxy->nonce2len, proxy->max_clients);
 	} else {
-		LOGNOTICE("Upstream pool %d extranonce2 length %d, max proxy clients %"PRId64,
-			  id, proxy->nonce2len, proxy->max_clients);
+		LOGNOTICE("Upstream pool %s %d extranonce2 length %d, max proxy clients %"PRId64,
+			  proxy->url, id, proxy->nonce2len, proxy->max_clients);
 	}
 	json_decref(val);
 }
