@@ -10,7 +10,7 @@ function dousperf($data, $user)
  else
 	$vlines = true;
 
- $pg = '<h1>User Shift Performance</h1><br>';
+ $pg = '<h1>User Shift Reward Performance</h1><br>';
  if ($ans['STATUS'] == 'ok' and $ans['DATA'] != '')
  {
 	$pg .= "<div><input type=checkbox id=skey onclick='godrw()' checked>shift key&nbsp;";
@@ -22,7 +22,8 @@ function dousperf($data, $user)
 	$pg .= "&nbsp;<input type=checkbox id=tlines onclick='godrw()'>time lines&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=over onclick='godrw()'>key overlap&nbsp;";
 	$pg .= "&nbsp;<input type=checkbox id=smooth onclick='godrw()'>smooth&nbsp;";
-	$pg .= "&nbsp;<input type=checkbox id=zerob onclick='godrw()'>zero based</div>";
+	$pg .= "&nbsp;<input type=checkbox id=zerob onclick='godrw()'>zero based&nbsp;";
+	$pg .= "&nbsp;<input type=checkbox id=utc onclick='godrw()' checked>utc</div>";
 	$pg .= "<div id=can0><canvas id=can width=1 height=1>";
 	$pg .= "A graph will show here if your browser supports html5/canvas";
 	$pg .= "</canvas></div>\n";
