@@ -298,6 +298,7 @@ struct proxy_base {
 	proxy_t *prev;
 	int id;
 	int subid;
+	int priority;
 
 	double diff;
 
@@ -1079,12 +1080,18 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	return dsdata;
 }
 
+static int prio_sort(proxy_t *a, proxy_t *b)
+{
+	return (a->priority - b->priority);
+}
+
 static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
 
 	proxy->parent = proxy;
 	proxy->id = id;
+	proxy->priority = id;
 	proxy->sdata = duplicate_sdata(sdata);
 	proxy->sdata->subproxy = proxy;
 	proxy->sdata->verbose = true;
@@ -1092,6 +1099,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
 	proxy->subproxy_count++;
 	HASH_ADD_INT(sdata->proxies, id, proxy);
+	HASH_SORT(sdata->proxies, prio_sort);
 	sdata->proxy_count++;
 	return proxy;
 }
