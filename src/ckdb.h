@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.031"
+#define CKDB_VERSION DB_VERSION"-1.033"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1596,6 +1596,7 @@ extern K_STORE *marks_store;
 #define MARKTYPE_SHIFT_END 'e'
 // 'o' used for manual marks
 #define MARKTYPE_OTHER_BEGIN 'o'
+#define MARKTYPE_OTHER_BEGIN_STR "o"
 // 'f' used for manual marks
 #define MARKTYPE_OTHER_FINISH 'f'
 
