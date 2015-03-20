@@ -905,7 +905,8 @@ static void prepare_proxy(proxy_instance_t *proxi);
 
 /* Creates a duplicate instance or proxi to be used as a subproxy, ignoring
  * fields we don't use in the subproxy. */
-static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi, const char *url)
+static proxy_instance_t *create_subproxy(ckpool_t *ckp, gdata_t *gdata, proxy_instance_t *proxi,
+					 const char *url)
 {
 	proxy_instance_t *subproxy;
 
@@ -921,7 +922,7 @@ static proxy_instance_t *create_subproxy(gdata_t *gdata, proxy_instance_t *proxi
 	}
 	mutex_unlock(&gdata->lock);
 
-	subproxy->ckp = proxi->ckp;
+	subproxy->cs.ckp = subproxy->ckp = ckp;
 
 	mutex_lock(&proxi->proxy_lock);
 	subproxy->subid = ++proxi->subproxy_count;
@@ -1060,7 +1061,7 @@ static bool parse_reconnect(proxy_instance_t *proxy, json_t *val)
 		 * the url has changed. Otherwise automated recruiting will
 		 * take care of creating one if needed. */
 		if (!sameurl)
-			create_subproxy(gdata, parent, url);
+			create_subproxy(ckp, gdata, parent, url);
 		goto out;
 	}
 
@@ -1740,7 +1741,7 @@ static void *proxy_recruit(void *arg)
 
 retry:
 	recruit = false;
-	proxy = create_subproxy(gdata, parent, parent->url);
+	proxy = create_subproxy(ckp, gdata, parent, parent->url);
 	alive = proxy_alive(ckp, proxy, &proxy->cs, false, parent->epfd);
 	if (!alive) {
 		LOGNOTICE("Subproxy failed proxy_alive testing");
