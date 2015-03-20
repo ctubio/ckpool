@@ -2778,7 +2778,7 @@ static proxy_t *__best_subproxy(proxy_t *proxy)
  * in proxy mode where we find a subproxy based on the current proxy with room
  * for more clients. Signal the generator to recruit more subproxies if we are
  * running out of room. */
-static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
+static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, int userid)
 {
 	proxy_t *current, *proxy, *tmp, *best = NULL;
 
@@ -2794,10 +2794,9 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	 * priority */
 	mutex_lock(&ckp_sdata->proxy_lock);
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
-		/* FIXME: We need to check the user bound proxies though we
-		 * currently only know users after they've authorised which is
-		 * too late for this. */
-		if (!proxy->global)
+		if (proxy->userid < userid)
+			continue;
+		if (proxy->userid > userid)
 			break;
 		best = __best_subproxy(proxy);
 		if (best)
@@ -2806,10 +2805,11 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	mutex_unlock(&ckp_sdata->proxy_lock);
 
 	if (!best) {
-		LOGWARNING("Temporarily insufficient subproxies to accept more clients");
+		if (!userid)
+			LOGWARNING("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
 	}
-	if (best->id != current->id || current->headroom < 2)
+	if (!userid && (best->id != current->id || current->headroom < 2))
 		generator_recruit(ckp, 1);
 	return best->sdata;
 }
@@ -2850,17 +2850,12 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		return json_string("params not an array");
 	}
 
-	sdata = select_sdata(ckp, ckp_sdata);
+	sdata = select_sdata(ckp, ckp_sdata, 0);
 	if (unlikely(!sdata || !sdata->current_workbase)) {
 		LOGWARNING("Failed to provide subscription due to no %s", sdata ? "current workbase" : "sdata");
 		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
-	if (ckp->proxy) {
-		LOGINFO("Current %d, selecting proxy %d:%d for client %"PRId64, ckp_sdata->proxy->id,
-			sdata->subproxy->id, sdata->subproxy->subid, client->id);
-	}
-	client->sdata = sdata;
 
 	arr_size = json_array_size(params_val);
 	/* NOTE useragent is NULL prior to this so should not be used in code
@@ -2893,10 +2888,21 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 
 				sscanf(buf, "%lx", &session_id);
 				client->user_instance = user_from_sessionid(ckp_sdata, session_id);
+				if (client->user_instance) {
+					sdata_t *usdata = select_sdata(ckp, ckp_sdata, client->user_instance->id);
+
+					if (usdata)
+						sdata = usdata;
+				}
 			}
 		}
 	} else
 		client->useragent = ckzalloc(1);
+	client->sdata = sdata;
+	if (ckp->proxy) {
+		LOGINFO("Current %d, selecting proxy %d:%d for client %"PRId64, ckp_sdata->proxy->id,
+			sdata->subproxy->id, sdata->subproxy->subid, client->id);
+	}
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		if (!new_enonce1(ckp, ckp_sdata, sdata, client)) {
@@ -3101,7 +3107,7 @@ static user_instance_t *__create_user(sdata_t *sdata, const char *username)
 
 	user->auth_backoff = DEFAULT_AUTH_BACKOFF;
 	strcpy(user->username, username);
-	user->id = sdata->user_instance_id++;
+	user->id = ++sdata->user_instance_id;
 	HASH_ADD_STR(sdata->user_instances, username, user);
 	return user;
 }
