@@ -1088,6 +1088,33 @@ static int prio_sort(proxy_t *a, proxy_t *b)
 	return (a->priority - b->priority);
 }
 
+/* Priority values can be sparse, they do not need to be sequential */
+static void __set_proxy_prio(sdata_t *sdata, proxy_t *proxy, const int priority)
+{
+	proxy_t *tmpa, *tmpb, *exists = NULL;
+	int next_prio = 0;
+
+	/* See if the priority is already in use */
+	HASH_ITER(hh, sdata->proxies, tmpa, tmpb) {
+		if (tmpa->priority > priority)
+			break;
+		if (tmpa->priority == priority) {
+			exists = tmpa;
+			next_prio = exists->priority + 1;
+			break;
+		}
+	}
+	/* See if we need to push the priority of everything after exists up */
+	HASH_ITER(hh, exists, tmpa, tmpb) {
+		if (tmpa->priority > next_prio)
+			break;
+		tmpa->priority++;
+		next_prio++;
+	}
+	proxy->priority = priority;
+	HASH_SORT(sdata->proxies, prio_sort);
+}
+
 static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 {
 	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
@@ -1102,7 +1129,8 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
 	proxy->subproxy_count++;
 	HASH_ADD_INT(sdata->proxies, id, proxy);
-	HASH_SORT(sdata->proxies, prio_sort);
+	/* Set the new proxy priority to its id */
+	__set_proxy_prio(sdata, proxy, id);
 	sdata->proxy_count++;
 	return proxy;
 }
@@ -1195,6 +1223,13 @@ static proxy_t *existing_subproxy(sdata_t *sdata, const int id, const int subid)
 	mutex_unlock(&sdata->proxy_lock);
 
 	return subproxy;
+}
+
+static void set_proxy_prio(sdata_t *sdata, proxy_t *proxy, const int priority)
+{
+	mutex_lock(&sdata->proxy_lock);
+	__set_proxy_prio(sdata, proxy, priority);
+	mutex_unlock(&sdata->proxy_lock);
 }
 
 /* Set proxy to the current proxy and calculate how much headroom it has */
@@ -2336,12 +2371,30 @@ out:
 	_Close(sockd);
 }
 
+static json_t *json_proxyinfo(const proxy_t *proxy)
+{
+	const proxy_t *parent = proxy->parent;
+	json_t *val;
+
+	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,sb}",
+		   "id", proxy->id, "subid", proxy->subid, "priority", parent->priority,
+	    "diff", proxy->diff, "url", proxy->url, "auth", proxy->auth, "pass", proxy->pass,
+	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
+	    "enonce1varlen", proxy->enonce1varlen, "nonce2len", proxy->nonce2len,
+	    "enonce2varlen", proxy->enonce2varlen, "subscribed", proxy->subscribed,
+	    "notified", proxy->notified, "clients", proxy->clients, "max_clients", proxy->max_clients,
+	    "bound_clients", proxy->bound_clients, "combined_clients", parent->combined_clients,
+	    "headroom", proxy->headroom, "subproxy_count", parent->subproxy_count,
+	    "dead", proxy->dead);
+	return val;
+}
+
 static void getproxy(sdata_t *sdata, const char *buf, int *sockd)
 {
-	proxy_t *proxy, *parent;
 	json_error_t err_val;
 	json_t *val = NULL;
 	int id, subid = 0;
+	proxy_t *proxy;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
@@ -2361,17 +2414,40 @@ static void getproxy(sdata_t *sdata, const char *buf, int *sockd)
 		val = json_errormsg("Failed to find proxy %d:%d", id, subid);
 		goto out;
 	}
-	parent = proxy->parent;
-	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,sb}",
-		   "id", proxy->id, "subid", proxy->subid, "priority", parent->priority,
-	    "diff", proxy->diff, "url", proxy->url, "auth", proxy->auth, "pass", proxy->pass,
-	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
-	    "enonce1varlen", proxy->enonce1varlen, "nonce2len", proxy->nonce2len,
-	    "enonce2varlen", proxy->enonce2varlen, "subscribed", proxy->subscribed,
-	    "notified", proxy->notified, "clients", proxy->clients, "max_clients", proxy->max_clients,
-	    "bound_clients", proxy->bound_clients, "combined_clients", parent->combined_clients,
-	    "headroom", proxy->headroom, "subproxy_count", parent->subproxy_count,
-	    "dead", proxy->dead);
+	val = json_proxyinfo(proxy);
+out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void setproxy(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id, priority;
+	proxy_t *proxy;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int(&id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	if (!json_get_int(&priority, val, "priority")) {
+		val = json_errormsg("Failed to find priority key");
+		goto out;
+	}
+	proxy = existing_proxy(sdata, id);
+	if (!proxy) {
+		val = json_errormsg("Failed to find proxy %d", id);
+		goto out;
+	}
+	if (priority != proxy->priority)
+		set_proxy_prio(sdata, proxy, priority);
+	val = json_proxyinfo(proxy);
 out:
 	send_api_response(val, *sockd);
 	_Close(sockd);
@@ -2470,6 +2546,10 @@ retry:
 	}
 	if (cmdmatch(buf, "getproxy")) {
 		getproxy(sdata, buf + 9, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "setproxy")) {
+		setproxy(sdata, buf + 9, &sockd);
 		goto retry;
 	}
 
