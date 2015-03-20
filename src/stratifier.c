@@ -2814,6 +2814,26 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	return best->sdata;
 }
 
+static user_instance_t *user_from_sessionid(sdata_t *sdata, const int64_t session_id)
+{
+	user_sessionid_t *user_sessionid;
+	user_instance_t *user = NULL;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_FIND_I64(sdata->user_sessionids, &session_id, user_sessionid);
+	if (user_sessionid)
+		HASH_DEL(sdata->user_sessionids, user_sessionid);
+	ck_wunlock(&sdata->instance_lock);
+
+	if (user_sessionid) {
+		user = user_sessionid->user;
+		LOGINFO("Found matching user %s from sessionid %lx", user->username,
+			session_id);
+		dealloc(user_sessionid);
+	}
+	return user;
+}
+
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
@@ -2853,19 +2873,26 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			client->useragent = strdup(buf);
 		else
 			client->useragent = ckzalloc(1); // Set to ""
-		if (arr_size > 1 && !ckp->proxy) {
-			/* This would be the session id for reconnect, it will
-			 * not work for clients on a proxied connection. */
+		buf = NULL;
+		if (arr_size > 1) {
 			buf = json_string_value(json_array_get(params_val, 1));
 			LOGDEBUG("Found old session id %s", buf);
-			/* Add matching here */
-			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, client_id))) {
-				sprintf(client->enonce1, "%016lx", client->enonce1_64);
-				old_match = true;
+			if (!ckp->proxy) {
+				/* This would be the session id for reconnect, it will
+				 * not work for clients on a proxied connection. */
+				if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, client_id))) {
+					sprintf(client->enonce1, "%016lx", client->enonce1_64);
+					old_match = true;
 
-				ck_rlock(&sdata->workbase_lock);
-				__fill_enonce1data(sdata->current_workbase, client);
-				ck_runlock(&sdata->workbase_lock);
+					ck_rlock(&sdata->workbase_lock);
+					__fill_enonce1data(sdata->current_workbase, client);
+					ck_runlock(&sdata->workbase_lock);
+				}
+			} else {
+				int64_t session_id = 0;
+
+				sscanf(buf, "%lx", &session_id);
+				client->user_instance = user_from_sessionid(ckp_sdata, session_id);
 			}
 		}
 	} else
