@@ -138,8 +138,7 @@ struct proxy_instance {
 struct generator_data {
 	ckpool_t *ckp;
 	mutex_t lock; /* Lock protecting linked lists */
-	proxy_instance_t *proxies; /* Hash list of all global proxies */
-	proxy_instance_t *user_proxies; /* Hash list of all user proxies */
+	proxy_instance_t *proxies; /* Hash list of all proxies */
 	proxy_instance_t *dead_proxies; /* Disabled proxies */
 
 	int proxy_notify_id;	// Globally increasing notify id
@@ -1298,8 +1297,6 @@ static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 
 	mutex_lock(&gdata->lock);
 	HASH_FIND_INT(gdata->proxies, &id, proxi);
-	if (!proxi)
-		HASH_FIND_INT(gdata->user_proxies, &id, proxi);
 	mutex_unlock(&gdata->lock);
 
 	return proxi;
@@ -2018,8 +2015,8 @@ static void *userproxy_recv(void *arg)
 		int ret;
 
 		mutex_lock(&gdata->lock);
-		HASH_ITER(hh, gdata->user_proxies, proxy, tmpproxy) {
-			if (!proxy->alive) {
+		HASH_ITER(hh, gdata->proxies, proxy, tmpproxy) {
+			if (!proxy->global && !proxy->alive) {
 				proxy->epfd = epfd;
 				reconnect_proxy(proxy);
 			}
@@ -2098,7 +2095,7 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 
 		mutex_lock(&gdata->lock);
 		HASH_ITER(hh, gdata->proxies, proxi, tmp) {
-			if (proxi->disabled)
+			if (proxi->disabled || !proxi->global)
 				continue;
 			if (proxi->alive || subproxies_alive(proxi)) {
 				if (!ret || proxi->id < ret->id)
@@ -2128,8 +2125,8 @@ static void send_list(gdata_t *gdata, const int sockd)
 
 	mutex_lock(&gdata->lock);
 	HASH_ITER(hh, gdata->proxies, proxy, tmp) {
-		JSON_CPACK(val, "{si,ss,ss,sf,sb,sb,sb,si}",
-			"id", proxy->id,
+		JSON_CPACK(val, "{si,sb,si,ss,ss,sf,sb,sb,sb,si}",
+			"id", proxy->id, "global", proxy->global, "userid", proxy->userid,
 			"auth", proxy->auth, "pass", proxy->pass,
 			"diff", proxy->diff, "notified", proxy->notified,
 			"disabled", proxy->disabled, "alive", proxy->alive,
@@ -2208,7 +2205,7 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 	proxy->ckp = ckp;
 	mutex_init(&proxy->notify_lock);
 	mutex_init(&proxy->share_lock);
-	HASH_ADD_INT(gdata->user_proxies, id, proxy);
+	HASH_ADD_INT(gdata->proxies, id, proxy);
 	return proxy;
 }
 
