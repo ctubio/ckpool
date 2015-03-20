@@ -1129,6 +1129,17 @@ static proxy_t *__existing_proxy(const sdata_t *sdata, const int id)
 	return proxy;
 }
 
+static proxy_t *existing_proxy(sdata_t *sdata, const int id)
+{
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __existing_proxy(sdata, id);
+	mutex_unlock(&sdata->proxy_lock);
+
+	return proxy;
+}
+
 /* Find proxy by id number, generate one if none exist yet by that id */
 static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
 {
@@ -2325,6 +2336,46 @@ out:
 	_Close(sockd);
 }
 
+static void getproxy(sdata_t *sdata, const char *buf, int *sockd)
+{
+	proxy_t *proxy;
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id, subid = 0;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int(&id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	json_get_int(&subid, val, "subid");
+	if (!subid)
+		proxy = existing_proxy(sdata, id);
+	else
+		proxy = existing_subproxy(sdata, id, subid);
+	if (!proxy) {
+		val = json_errormsg("Failed to find proxy %d:%d", id, subid);
+		goto out;
+	}
+	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,sb}",
+		   "id", proxy->id, "subid", proxy->subid, "priority", proxy->priority,
+	    "diff", proxy->diff, "url", proxy->url, "auth", proxy->auth, "pass", proxy->pass,
+	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
+	    "enonce1varlen", proxy->enonce1varlen, "nonce2len", proxy->nonce2len,
+	    "enonce2varlen", proxy->enonce2varlen, "subscribed", proxy->subscribed,
+	    "notified", proxy->notified, "clients", proxy->clients, "max_clients", proxy->max_clients,
+	    "bound_clients", proxy->bound_clients, "combined_clients", proxy->combined_clients,
+	    "headroom", proxy->headroom, "subproxy_count", proxy->subproxy_count,
+	    "dead", proxy->dead);
+out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
 {
 	stratum_instance_t *client;
@@ -2414,6 +2465,10 @@ retry:
 	/* Parse API commands here to return a message to sockd */
 	if (cmdmatch(buf, "getuser")) {
 		getuser(sdata, buf + 8, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "getproxy")) {
+		getproxy(sdata, buf + 9, &sockd);
 		goto retry;
 	}
 
