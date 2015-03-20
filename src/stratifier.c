@@ -2731,13 +2731,40 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 
 static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *client, const char *msg);
 
+/* Need to hold sdata->proxy_lock */
+static proxy_t *__best_subproxy(proxy_t *proxy)
+{
+	proxy_t *subproxy, *best = NULL, *tmp;
+	int64_t max_headroom;
+
+	proxy->headroom = max_headroom = 0;
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		int64_t subproxy_headroom;
+
+		if (subproxy->dead)
+			continue;
+		if (!subproxy->sdata->current_workbase)
+			continue;
+		subproxy_headroom = subproxy->max_clients - subproxy->clients;
+
+		proxy->headroom += subproxy_headroom;
+		if (subproxy_headroom > max_headroom) {
+			best = subproxy;
+			max_headroom = subproxy_headroom;
+		}
+		if (best)
+			break;
+	}
+	return best;
+}
+
 /* Choose the stratifier data for a new client. Use the main ckp_sdata except
  * in proxy mode where we find a subproxy based on the current proxy with room
  * for more clients. Signal the generator to recruit more subproxies if we are
  * running out of room. */
 static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 {
-	proxy_t *current, *proxy, *subproxy, *best = NULL, *tmp, *tmpsub;
+	proxy_t *current, *proxy, *tmp, *best = NULL;
 
 	if (!ckp->proxy || ckp->passthrough)
 		return ckp_sdata;
@@ -2751,26 +2778,12 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	 * priority */
 	mutex_lock(&ckp_sdata->proxy_lock);
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
-		int64_t max_headroom;
-
+		/* FIXME: We need to check the user bound proxies though we
+		 * currently only know users after they've authorised which is
+		 * too late for this. */
 		if (!proxy->global)
 			break;
-		proxy->headroom = max_headroom = 0;
-		HASH_ITER(sh, proxy->subproxies, subproxy, tmpsub) {
-			int64_t subproxy_headroom;
-
-			if (subproxy->dead)
-				continue;
-			if (!subproxy->sdata->current_workbase)
-				continue;
-			subproxy_headroom = subproxy->max_clients - subproxy->clients;
-
-			proxy->headroom += subproxy_headroom;
-			if (subproxy_headroom > max_headroom) {
-				best = subproxy;
-				max_headroom = subproxy_headroom;
-			}
-		}
+		best = __best_subproxy(proxy);
 		if (best)
 			break;
 	}
