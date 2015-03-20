@@ -2206,7 +2206,7 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 	proxy->ckp = ckp;
 	mutex_init(&proxy->notify_lock);
 	mutex_init(&proxy->share_lock);
-	HASH_ADD_INT(gdata->proxies, id, proxy);
+	HASH_ADD_INT(gdata->user_proxies, id, proxy);
 	return proxy;
 }
 
