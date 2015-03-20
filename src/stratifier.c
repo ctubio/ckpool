@@ -2711,9 +2711,9 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 	 * left depending on nonce2 length, we'll always get a changing value
 	 * for every next client.*/
 	ck_wlock(&ckp_sdata->instance_lock);
-	enonce1 = htole64(ckp_sdata->enonce1_64);
+	enonce1 = le64toh(ckp_sdata->enonce1_64);
 	enonce1++;
-	client->enonce1_64 = ckp_sdata->enonce1_64 = le64toh(enonce1);
+	client->enonce1_64 = ckp_sdata->enonce1_64 = htole64(enonce1);
 	if (proxy) {
 		client->proxy = proxy;
 		proxy->clients++;
