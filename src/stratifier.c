@@ -298,7 +298,13 @@ struct proxy_base {
 	proxy_t *prev;
 	int id;
 	int subid;
-	int priority;
+
+	/* Priority has the user id encoded in the high bits if it's not a
+	 * global proxy. */
+	int64_t priority;
+
+	bool global; /* Is this a global proxy */
+	int userid; /* Userid for non global proxies */
 
 	double diff;
 
@@ -1083,16 +1089,24 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 	return dsdata;
 }
 
-static int prio_sort(proxy_t *a, proxy_t *b)
+static int64_t prio_sort(proxy_t *a, proxy_t *b)
 {
 	return (a->priority - b->priority);
 }
 
 /* Priority values can be sparse, they do not need to be sequential */
-static void __set_proxy_prio(sdata_t *sdata, proxy_t *proxy, const int priority)
+static void __set_proxy_prio(sdata_t *sdata, proxy_t *proxy, int64_t priority)
 {
 	proxy_t *tmpa, *tmpb, *exists = NULL;
-	int next_prio = 0;
+	int64_t next_prio = 0;
+
+	/* Encode the userid as the high bits in priority */
+	if (!proxy->global) {
+		int64_t high_bits = proxy->userid;
+
+		high_bits <<= 32;
+		priority |= high_bits;
+	}
 
 	/* See if the priority is already in use */
 	HASH_ITER(hh, sdata->proxies, tmpa, tmpb) {
@@ -1121,7 +1135,6 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 
 	proxy->parent = proxy;
 	proxy->id = id;
-	proxy->priority = id;
 	proxy->sdata = duplicate_sdata(sdata);
 	proxy->sdata->subproxy = proxy;
 	proxy->sdata->verbose = true;
@@ -1383,9 +1396,10 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
+	int id = 0, subid = 0, userid = 0;
 	proxy_t *proxy, *old = NULL;
-	int id = 0, subid = 0;
 	const char *buf;
+	bool global;
 	json_t *val;
 
 	if (unlikely(strlen(cmd) < 11)) {
@@ -1407,6 +1421,16 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Failed to json decode subproxy value in update_subscribe %s", buf);
 		return;
 	}
+	if (unlikely(!json_get_bool(&global, val, "global"))) {
+		LOGWARNING("Failed to json decode global value in update_subscribe %s", buf);
+		return;
+	}
+	if (!global) {
+		if (unlikely(!json_get_int(&userid, val, "userid"))) {
+			LOGWARNING("Failed to json decode userid value in update_subscribe %s", buf);
+			return;
+		}
+	}
 
 	if (!subid)
 		LOGNOTICE("Got updated subscribe for proxy %d", id);
@@ -1422,9 +1446,8 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		proxy->dead = false;
 	} else
 		proxy = subproxy_by_id(sdata, id, subid);
-	dsdata = proxy->sdata;
-
-	ck_wlock(&dsdata->workbase_lock);
+	proxy->global = global;
+	proxy->userid = userid;
 	proxy->subscribed = true;
 	proxy->diff = ckp->startdiff;
 	memset(proxy->url, 0, 128);
@@ -1433,6 +1456,10 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	strncpy(proxy->url, json_string_value(json_object_get(val, "url")), 127);
 	strncpy(proxy->auth, json_string_value(json_object_get(val, "auth")), 127);
 	strncpy(proxy->pass, json_string_value(json_object_get(val, "pass")), 127);
+
+	dsdata = proxy->sdata;
+
+	ck_wlock(&dsdata->workbase_lock);
 	/* Length is checked by generator */
 	strcpy(proxy->enonce1, json_string_value(json_object_get(val, "enonce1")));
 	proxy->enonce1constlen = strlen(proxy->enonce1) / 2;
@@ -2371,13 +2398,21 @@ out:
 	_Close(sockd);
 }
 
+/* Return the user masked priority value of the proxy */
+static int proxy_prio(const proxy_t *proxy)
+{
+	int prio = proxy->priority & 0x00000000ffffffff;
+
+	return prio;
+}
+
 static json_t *json_proxyinfo(const proxy_t *proxy)
 {
 	const proxy_t *parent = proxy->parent;
 	json_t *val;
 
-	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,sb}",
-		   "id", proxy->id, "subid", proxy->subid, "priority", parent->priority,
+	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,sb,sb,si}",
+	    "id", proxy->id, "subid", proxy->subid, "priority", proxy_prio(parent),
 	    "diff", proxy->diff, "url", proxy->url, "auth", proxy->auth, "pass", proxy->pass,
 	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
 	    "enonce1varlen", proxy->enonce1varlen, "nonce2len", proxy->nonce2len,
@@ -2385,7 +2420,7 @@ static json_t *json_proxyinfo(const proxy_t *proxy)
 	    "notified", proxy->notified, "clients", proxy->clients, "max_clients", proxy->max_clients,
 	    "bound_clients", proxy->bound_clients, "combined_clients", parent->combined_clients,
 	    "headroom", proxy->headroom, "subproxy_count", parent->subproxy_count,
-	    "dead", proxy->dead);
+	    "dead", proxy->dead, "global", proxy->global, "userid", proxy->userid);
 	return val;
 }
 
@@ -2445,7 +2480,7 @@ static void setproxy(sdata_t *sdata, const char *buf, int *sockd)
 		val = json_errormsg("Failed to find proxy %d", id);
 		goto out;
 	}
-	if (priority != proxy->priority)
+	if (priority != proxy_prio(proxy))
 		set_proxy_prio(sdata, proxy, priority);
 	val = json_proxyinfo(proxy);
 out:
@@ -2718,7 +2753,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
 		int64_t max_headroom;
 
-		best = NULL;
+		if (!proxy->global)
+			break;
 		proxy->headroom = max_headroom = 0;
 		HASH_ITER(sh, proxy->subproxies, subproxy, tmpsub) {
 			int64_t subproxy_headroom;
