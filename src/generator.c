@@ -1298,6 +1298,8 @@ static proxy_instance_t *proxy_by_id(gdata_t *gdata, const int id)
 
 	mutex_lock(&gdata->lock);
 	HASH_FIND_INT(gdata->proxies, &id, proxi);
+	if (!proxi)
+		HASH_FIND_INT(gdata->user_proxies, &id, proxi);
 	mutex_unlock(&gdata->lock);
 
 	return proxi;
