@@ -2202,7 +2202,7 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 	proxy->url = url;
 	proxy->auth = auth;
 	proxy->pass = pass;
-	proxy->ckp = ckp;
+	proxy->ckp = proxy->cs.ckp = ckp;
 	mutex_init(&proxy->notify_lock);
 	mutex_init(&proxy->share_lock);
 	HASH_ADD_INT(gdata->proxies, id, proxy);
@@ -2488,7 +2488,7 @@ static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int id
 	proxy->url = strdup(ckp->proxyurl[id]);
 	proxy->auth = strdup(ckp->proxyauth[id]);
 	proxy->pass = strdup(ckp->proxypass[id]);
-	proxy->ckp = ckp;
+	proxy->ckp = proxy->cs.ckp = ckp;
 	mutex_init(&proxy->notify_lock);
 	mutex_init(&proxy->share_lock);
 	HASH_ADD_INT(gdata->proxies, id, proxy);
