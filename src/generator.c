@@ -2182,7 +2182,8 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	proxy_instance_t *proxy;
 	json_error_t err_val;
 	json_t *val = NULL;
-	int id;
+	int id, userid;
+	bool global;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
@@ -2197,6 +2198,10 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 		val = json_errormsg("Failed to decode url/auth/pass in addproxy %s", buf);
 		goto out;
 	}
+	if (json_get_int(&userid, val, "userid"))
+		global = false;
+	else
+		global = true;
 
 	mutex_lock(&gdata->lock);
 	id = ckp->proxies++;
@@ -2209,7 +2214,10 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 	proxy = __add_proxy(ckp, gdata, id);
 	mutex_unlock(&gdata->lock);
 
-	LOGNOTICE("Adding proxy %d:%s", id, proxy->url);
+	if (global)
+		LOGNOTICE("Adding global proxy %d:%s", id, proxy->url);
+	else
+		LOGNOTICE("Adding user %d proxy %d:%s", userid, id, proxy->url);
 	prepare_proxy(proxy);
 	JSON_CPACK(val, "{si,ss,ss,ss}",
 		   "id", proxy->id, "url", url, "auth", auth, "pass", pass);
