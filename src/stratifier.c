@@ -340,6 +340,15 @@ struct proxy_base {
 	bool dead;
 };
 
+typedef struct user_sessionid user_sessionid_t;
+
+struct user_sessionid {
+	UT_hash_handle hh;
+	int64_t session_id;
+	user_instance_t *user;
+	time_t added;
+};
+
 struct stratifier_data {
 	ckpool_t *ckp;
 
@@ -414,6 +423,7 @@ struct stratifier_data {
 	proxy_t *proxies; /* Hashlist of all proxies */
 	mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
+	user_sessionid_t *user_sessionids;
 };
 
 typedef struct json_entry json_entry_t;
@@ -3338,6 +3348,20 @@ static void queue_delayed_auth(stratum_instance_t *client)
 	ckdbq_add(ckp, ID_AUTH, val);
 }
 
+static void add_user_sessionid(ckpool_t *ckp, int64_t session_id, user_instance_t *user)
+{
+	user_sessionid_t *user_sessionid = ckalloc(sizeof(user_sessionid_t));
+	sdata_t *sdata = ckp->data;
+
+	user_sessionid->session_id = session_id;
+	user_sessionid->user = user;
+	user_sessionid->added = time(NULL);
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_ADD_I64(sdata->user_sessionids, session_id, user_sessionid);
+	ck_wunlock(&sdata->instance_lock);
+}
+
 /* Needs to be entered with client holding a ref count. */
 static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val,
 			       json_t **err_val, int *errnum)
@@ -3380,6 +3404,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		goto out;
 	}
 	user = generate_user(ckp, client, buf);
+	if (ckp->proxy)
+		add_user_sessionid(ckp, client->session_id, user);
 	client->user_id = user->id;
 	ts_realtime(&now);
 	client->start_time = now.tv_sec;
