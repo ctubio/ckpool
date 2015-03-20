@@ -281,6 +281,11 @@ struct stratum_instance {
 	proxy_t *proxy; /* Proxy this is bound to in proxy mode */
 	int proxyid; /* Which proxy id  */
 	int subproxyid; /* Which subproxy */
+
+	/* What session id we gave this instance to recognise users as they
+	 * reconnect before they've sent their auth information if possible in
+	 * proxy mode instead of supporting stratum resume with it. */
+	int64_t session_id;
 };
 
 struct share {
@@ -331,7 +336,7 @@ struct proxy_base {
 	int subproxy_count; /* Number of subproxies */
 	proxy_t *parent; /* Parent proxy of each subproxy */
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
-	sdata_t *sdata; /* Unique stratifer data for each subproxy */
+	sdata_t *sdata; /* Unique stratifier data for each subproxy */
 	bool dead;
 };
 
@@ -374,6 +379,7 @@ struct stratifier_data {
 	ckmsgq_t *stxnq;	// Transaction requests
 
 	int64_t user_instance_id;
+	int64_t session_id;
 
 	/* Stratum_instances hashlist is stored by id, whereas disconnected_instances
 	 * is sorted by enonce1_64. */
@@ -2874,13 +2880,17 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	ck_runlock(&sdata->workbase_lock);
 
 	/* Send a random sessionid in proxy mode so clients don't think we have
-	 * resumed if enonce1 ends up matching on reconnect. */
+	 * resumed if enonce1 ends up matching on reconnect but we can use it
+	 * to recognise users reconnecting before they authorise. */
 	if (ckp->proxy) {
-		unsigned int now = time(NULL);
-		char nowx[12];
+		char sessionid[20];
 
-		sprintf(nowx, "%x", now);
-		JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", nowx, client->enonce1,
+		ck_wlock(&ckp_sdata->instance_lock);
+		client->session_id = ckp_sdata->session_id++;
+		ck_wunlock(&ckp_sdata->instance_lock);
+
+		sprintf(sessionid, "%lx", client->session_id);
+		JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", sessionid, client->enonce1,
 				n2len);
 	} else {
 		JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", client->enonce1, client->enonce1,
@@ -5389,6 +5399,8 @@ int stratifier(proc_instance_t *pi)
 	randomiser <<= 32;
 	if (!ckp->proxy)
 		sdata->blockchange_id = sdata->workbase_id = randomiser;
+	else
+		sdata->session_id = randomiser;
 
 	if (!ckp->serverurls) {
 		ckp->serverurl[0] = "127.0.0.1";
