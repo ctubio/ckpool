@@ -1544,6 +1544,41 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	json_decref(val);
 }
 
+/* Check how much headroom the userid proxies have and reconnect any clients
+ * that are not bound to it */
+static void check_userproxies(sdata_t *sdata, const int userid)
+{
+	int64_t headroom = userproxy_headroom(sdata, userid);
+	stratum_instance_t *client, *tmpclient;
+	int reconnects = 0, hard = 0;
+
+	if (!headroom)
+		return;
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->user_id != userid)
+			continue;
+		if (client->sdata && client->sdata->proxy && client->sdata->proxy->userid == userid)
+			continue;
+		if (headroom-- < 1)
+			continue;
+		reconnects++;
+		if (client->reconnect && hard <= SOMAXCONN / 2) {
+			hard++;
+			reconnect_client(sdata, client);
+		} else
+			client->reconnect = true;
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (reconnects) {
+		LOGNOTICE("%d clients flagged for reconnect to user %d proxies",
+			  reconnects, userid);
+	}
+	/* FIXME: Recruit extra user proxies when headroom < 0 */
+}
+
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
@@ -1638,6 +1673,8 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	if (proxy->global)
 		check_bestproxy(sdata);
+	else
+		check_userproxies(sdata, proxy->userid);
 	clean |= new_block;
 	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
