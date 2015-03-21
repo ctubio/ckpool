@@ -3457,10 +3457,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 			if (client->sdata && client->sdata->proxy && client->sdata->proxy->global) {
 				sdata_t *ckp_sdata = ckp->data;
 
-				if (userproxy_headroom(ckp_sdata, client->user_id)) {
-					LOGWARNING("reconnecting to user!");
+				if (userproxy_headroom(ckp_sdata, client->user_id))
 					reconnect_client(ckp_sdata, client);
-				}
 			}
 		} else {
 			LOGNOTICE("Authorised client %"PRId64" worker %s as user %s",
