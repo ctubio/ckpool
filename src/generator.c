@@ -112,9 +112,6 @@ struct proxy_instance {
 	int64_t recruit; /* No of recruiting requests in progress */
 	bool alive;
 
-	mutex_t notify_lock;
-	notify_instance_t *notify_instances;
-
 	pthread_t pth_precv;
 
 	ckmsgq_t *passsends;	// passthrough sends
@@ -146,6 +143,9 @@ struct generator_data {
 	pthread_cond_t psend_cond;
 
 	stratum_msg_t *psends;
+
+	mutex_t notify_lock;
+	notify_instance_t *notify_instances;
 
 	mutex_t share_lock;
 	share_msg_t *shares;
@@ -780,7 +780,6 @@ static void reconnect_generator(const ckpool_t *ckp)
 static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
-	proxy_instance_t *proxy = proxi->parent;
 	gdata_t *gdata = proxi->ckp->data;
 	char *coinbase1, *coinbase2;
 	const char *jobidbuf;
@@ -844,10 +843,10 @@ static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 	ni->notify_time = time(NULL);
 
 	/* Add the notify instance to the parent proxy list, not the subproxy */
-	mutex_lock(&proxy->notify_lock);
+	mutex_lock(&gdata->notify_lock);
 	ni->id = gdata->proxy_notify_id++;
-	HASH_ADD_INT(proxy->notify_instances, id, ni);
-	mutex_unlock(&proxy->notify_lock);
+	HASH_ADD_INT(gdata->notify_instances, id, ni);
+	mutex_unlock(&gdata->notify_lock);
 
 	send_notify(ckp, proxi, ni);
 out:
@@ -1608,11 +1607,11 @@ static void *proxy_send(void *arg)
 			continue;
 		}
 
-		mutex_lock(&proxy->notify_lock);
-		HASH_FIND_INT(proxy->notify_instances, &id, ni);
+		mutex_lock(&gdata->notify_lock);
+		HASH_FIND_INT(gdata->notify_instances, &id, ni);
 		if (ni)
 			jobid = json_copy(ni->jobid);
-		mutex_unlock(&proxy->notify_lock);
+		mutex_unlock(&gdata->notify_lock);
 
 		if (unlikely(!jobid)) {
 			stratifier_reconnect_client(ckp, client_id);
@@ -1944,16 +1943,16 @@ static void *proxy_recv(void *arg)
 		now = time(NULL);
 
 		/* Age old notifications older than 10 mins old */
-		mutex_lock(&proxi->notify_lock);
-		HASH_ITER(hh, proxi->notify_instances, ni, tmp) {
-			if (HASH_COUNT(proxi->notify_instances) < 3)
+		mutex_lock(&gdata->notify_lock);
+		HASH_ITER(hh, gdata->notify_instances, ni, tmp) {
+			if (HASH_COUNT(gdata->notify_instances) < 3)
 				break;
 			if (ni->notify_time < now - 600) {
-				HASH_DEL(proxi->notify_instances, ni);
+				HASH_DEL(gdata->notify_instances, ni);
 				clear_notify(ni);
 			}
 		}
-		mutex_unlock(&proxi->notify_lock);
+		mutex_unlock(&gdata->notify_lock);
 
 		/* Similary with shares older than 2 mins without response */
 		mutex_lock(&gdata->share_lock);
@@ -2014,7 +2013,7 @@ static void *userproxy_recv(void *arg)
 	}
 
 	while (42) {
-		proxy_instance_t *proxy, *tmpproxy, *parent;
+		proxy_instance_t *proxy, *tmpproxy;
 		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
 		connsock_t *cs;
@@ -2046,18 +2045,17 @@ static void *userproxy_recv(void *arg)
 			continue;
 		}
 		now = time(NULL);
-		parent = proxy->parent;
 
-		mutex_lock(&parent->notify_lock);
-		HASH_ITER(hh, parent->notify_instances, ni, tmp) {
-			if (HASH_COUNT(parent->notify_instances) < 3)
+		mutex_lock(&gdata->notify_lock);
+		HASH_ITER(hh, gdata->notify_instances, ni, tmp) {
+			if (HASH_COUNT(gdata->notify_instances) < 3)
 				break;
 			if (ni->notify_time < now - 600) {
-				HASH_DEL(parent->notify_instances, ni);
+				HASH_DEL(gdata->notify_instances, ni);
 				clear_notify(ni);
 			}
 		}
-		mutex_unlock(&parent->notify_lock);
+		mutex_unlock(&gdata->notify_lock);
 
 		/* Similary with shares older than 2 mins without response */
 		mutex_lock(&gdata->share_lock);
@@ -2210,7 +2208,6 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 	proxy->auth = auth;
 	proxy->pass = pass;
 	proxy->ckp = proxy->cs.ckp = ckp;
-	mutex_init(&proxy->notify_lock);
 	HASH_ADD_INT(gdata->proxies, id, proxy);
 	return proxy;
 }
@@ -2495,7 +2492,6 @@ static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int id
 	proxy->auth = strdup(ckp->proxyauth[id]);
 	proxy->pass = strdup(ckp->proxypass[id]);
 	proxy->ckp = proxy->cs.ckp = ckp;
-	mutex_init(&proxy->notify_lock);
 	HASH_ADD_INT(gdata->proxies, id, proxy);
 	proxy->global = true;
 	return proxy;
@@ -2508,6 +2504,7 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	int i, ret;
 
 	mutex_init(&gdata->lock);
+	mutex_init(&gdata->notify_lock);
 	mutex_init(&gdata->share_lock);
 
 	/* Create all our proxy structures and pointers */
