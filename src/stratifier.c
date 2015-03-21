@@ -1335,7 +1335,7 @@ static void generator_recruit(const ckpool_t *ckp, const int proxyid, const int 
 static void reconnect_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmpclient;
-	int reconnects = 0, hard = 0;
+	int reconnects = 0;
 	int64_t headroom;
 	proxy_t *proxy;
 
@@ -1354,16 +1354,12 @@ static void reconnect_clients(sdata_t *sdata)
 			continue;
 		if (client->proxyid == proxy->id)
 			continue;
+		if (client->reconnect)
+			continue;
 		if (headroom-- < 1)
 			continue;
 		reconnects++;
-		/* Limit reconnects sent concurrently to prevent a flood of new
-		 * connections */
-		if (client->reconnect && hard <= SOMAXCONN / 2) {
-			hard++;
-			reconnect_client(sdata, client);
-		} else
-			client->reconnect = true;
+		client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 
@@ -1585,7 +1581,7 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 {
 	int64_t headroom = proxy_headroom(sdata, userid);
 	stratum_instance_t *client, *tmpclient;
-	int reconnects = 0, hard = 0;
+	int reconnects = 0;
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
@@ -1597,14 +1593,12 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 			continue;
 		if (client->proxy->userid == userid)
 			continue;
+		if (client->reconnect)
+			continue;
 		if (headroom-- < 1)
 			continue;
 		reconnects++;
-		if (client->reconnect && hard <= SOMAXCONN / 2) {
-			hard++;
-			reconnect_client(sdata, client);
-		} else
-			client->reconnect = true;
+		client->reconnect = true;
 	}
 	ck_runlock(&sdata->instance_lock);
 
