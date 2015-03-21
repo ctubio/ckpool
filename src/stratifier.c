@@ -1985,7 +1985,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			/* This would be the session id for reconnect, it will
 			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
-			LOGWARNING("Found old session id %s", buf);
+			LOGDEBUG("Found old session id %s", buf);
 			/* Add matching here */
 			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, &client->session_id, client_id))) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
