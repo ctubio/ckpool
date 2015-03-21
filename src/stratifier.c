@@ -2854,9 +2854,10 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, const int 
 		LOGWARNING("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
 	}
-	if (best->global && (best->id != current->id || current->headroom < 2))
-		generator_recruit(ckp, current->id, 1);
-	else if (userid) {
+	if (!userid) {
+		if (best->id != current->id || current_headroom(ckp_sdata, &proxy) < 2)
+			generator_recruit(ckp, current->id, 1);
+	} else {
 		if (proxy_headroom(ckp_sdata, userid) < 2)
 			generator_recruit(ckp, best->id, 1);
 	}
