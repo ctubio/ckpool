@@ -160,7 +160,7 @@ typedef struct stratum_instance stratum_instance_t;
 struct user_instance {
 	UT_hash_handle hh;
 	char username[128];
-	int64_t id;
+	int id;
 	char *secondaryuserid;
 	bool btcaddress;
 
@@ -385,7 +385,7 @@ struct stratifier_data {
 	ckmsgq_t *sauthq;	// Stratum authorisations
 	ckmsgq_t *stxnq;	// Transaction requests
 
-	int64_t user_instance_id;
+	int user_instance_id;
 
 	stratum_instance_t *stratum_instances;
 	stratum_instance_t *recycled_instances;
