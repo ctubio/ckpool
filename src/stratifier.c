@@ -1165,7 +1165,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	proxy->parent = proxy;
 	proxy->id = id;
 	proxy->sdata = duplicate_sdata(sdata);
-	proxy->sdata->proxy = proxy->sdata->subproxy = proxy;
+	proxy->sdata->subproxy = proxy;
 	proxy->sdata->verbose = true;
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
@@ -1187,7 +1187,7 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
 	proxy->subproxy_count++;
 	subproxy->sdata = duplicate_sdata(sdata);
-	proxy->sdata->proxy = subproxy->sdata->subproxy = subproxy;
+	subproxy->sdata->subproxy = subproxy;
 	return subproxy;
 }
 
@@ -1344,10 +1344,12 @@ static void reconnect_clients(sdata_t *sdata)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->dropped)
+			continue;
 		if (!client->authorised)
 			continue;
 		/* This client is bound to a user proxy */
-		if (client->sdata && client->sdata->proxy && client->sdata->proxy->userid)
+		if (client->proxy->userid)
 			continue;
 		if (client->proxyid == proxy->id)
 			continue;
@@ -1586,11 +1588,13 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->dropped)
+			continue;
 		if (!client->authorised)
 			continue;
 		if (client->user_id != userid)
 			continue;
-		if (client->sdata && client->sdata->proxy && client->sdata->proxy->userid == userid)
+		if (client->proxy->userid == userid)
 			continue;
 		if (headroom-- < 1)
 			continue;
