@@ -1333,12 +1333,13 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	return client;
 }
 
-static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid, const int64_t id)
+static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid,
+					      int *session_id, const int64_t id)
 {
-	int session_id, slen;
 	session_t *session;
 	int64_t old_id = 0;
 	uint64_t ret = 0;
+	int slen;
 
 	if (!sessionid)
 		goto out;
@@ -1349,10 +1350,11 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	if (!validhex(sessionid))
 		goto out;
 
-	sscanf(sessionid, "%x", &session_id);
+	sscanf(sessionid, "%x", session_id);
+	LOGDEBUG("Testing for sessionid %s %x", sessionid, *session_id);
 
 	ck_wlock(&sdata->instance_lock);
-	HASH_FIND_INT(sdata->disconnected_sessions, &session_id, session);
+	HASH_FIND_INT(sdata->disconnected_sessions, session_id, session);
 	if (!session)
 		goto out_unlock;
 	HASH_DEL(sdata->disconnected_sessions, session);
@@ -1983,9 +1985,9 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			/* This would be the session id for reconnect, it will
 			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
-			LOGDEBUG("Found old session id %s", buf);
+			LOGWARNING("Found old session id %s", buf);
 			/* Add matching here */
-			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, client_id))) {
+			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, &client->session_id, client_id))) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
 
@@ -2015,7 +2017,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		n2len = sdata->workbases->enonce2varlen;
 	else
 		n2len = 8;
-	sprintf(sessionid, "%x", client->session_id);
+	sprintf(sessionid, "%08x", client->session_id);
 	JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", sessionid, client->enonce1,
 			n2len);
 	ck_runlock(&sdata->workbase_lock);
