@@ -1571,7 +1571,7 @@ static void recruit_best_userproxy(sdata_t *sdata, const int userid, const int r
 	mutex_unlock(&sdata->proxy_lock);
 
 	if (best)
-		generator_recruit(sdata->ckp, proxy->id, recruits);
+		generator_recruit(sdata->ckp, best->id, recruits);
 }
 
 /* Check how much headroom the userid proxies have and reconnect any clients
