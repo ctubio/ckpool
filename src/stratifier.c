@@ -1165,7 +1165,7 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	proxy->parent = proxy;
 	proxy->id = id;
 	proxy->sdata = duplicate_sdata(sdata);
-	proxy->sdata->subproxy = proxy;
+	proxy->sdata->proxy = proxy->sdata->subproxy = proxy;
 	proxy->sdata->verbose = true;
 	/* subid == 0 on parent proxy */
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
@@ -1187,7 +1187,7 @@ static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int su
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
 	proxy->subproxy_count++;
 	subproxy->sdata = duplicate_sdata(sdata);
-	subproxy->sdata->subproxy = subproxy;
+	proxy->sdata->proxy = subproxy->sdata->subproxy = subproxy;
 	return subproxy;
 }
 
@@ -1290,6 +1290,26 @@ static int64_t current_headroom(sdata_t *sdata, proxy_t **proxy)
 		headroom += subproxy->max_clients - subproxy->clients;
 	}
 out_unlock:
+	mutex_unlock(&sdata->proxy_lock);
+
+	return headroom;
+}
+
+static int64_t userproxy_headroom(sdata_t *sdata, const int userid)
+{
+	proxy_t *proxy, *subproxy, *tmp, *subtmp;
+	int64_t headroom = 0;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
+		if (proxy->userid != userid)
+			continue;
+		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+			if (subproxy->dead)
+				continue;
+			headroom += subproxy->max_clients - subproxy->clients;
+		}
+	}
 	mutex_unlock(&sdata->proxy_lock);
 
 	return headroom;
@@ -1400,10 +1420,11 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 	proxy_t *proxy;
 
 	proxy = existing_subproxy(sdata, id, subid);
-	if (proxy)
+	if (proxy) {
 		proxy->dead = true;
-	if (proxy->global)
-		check_bestproxy(sdata);
+		if (proxy->global)
+			check_bestproxy(sdata);
+	}
 	LOGINFO("Stratifier dropping clients from proxy %d:%d", id, subid);
 	headroom = current_headroom(sdata, &proxy);
 
@@ -3433,6 +3454,14 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		if (ckp->proxy) {
 			LOGNOTICE("Authorised client %"PRId64" to proxy %d:%d, worker %s as user %s",
 				  client->id, client->proxyid, client->subproxyid, buf, user->username);
+			if (client->sdata && client->sdata->proxy && client->sdata->proxy->global) {
+				sdata_t *ckp_sdata = ckp->data;
+
+				if (userproxy_headroom(ckp_sdata, client->user_id)) {
+					LOGWARNING("reconnecting to user!");
+					reconnect_client(ckp_sdata, client);
+				}
+			}
 		} else {
 			LOGNOTICE("Authorised client %"PRId64" worker %s as user %s",
 				  client->id, buf, user->username);
