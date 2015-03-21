@@ -1779,12 +1779,19 @@ static void recruit_subproxies(proxy_instance_t *proxi, const int recruits)
 }
 
 /* Queue up to the requested amount */
-static void recruit_subproxy(proxy_instance_t *proxi, const char *buf)
+static void recruit_subproxy(gdata_t *gdata, const char *buf)
 {
-	int recruits = 1;
+	int recruits = 1, id = 0;
+	proxy_instance_t *proxy;
 
-	sscanf(buf, "recruit=%d", &recruits);
-	recruit_subproxies(proxi, recruits);
+	sscanf(buf, "recruit=%d:%d", &id, &recruits);
+	proxy = proxy_by_id(gdata, id);
+	if (unlikely(!proxy)) {
+		LOGNOTICE("Generator failed to find proxy id %d to recruit subproxies",
+			  id);
+		return;
+	}
+	recruit_subproxies(proxy, recruits);
 }
 
 static void *proxy_reconnect(void *arg)
@@ -2442,7 +2449,7 @@ retry:
 		LOGDEBUG("Proxy received ping request");
 		send_unix_msg(sockd, "pong");
 	} else if (cmdmatch(buf, "recruit")) {
-		recruit_subproxy(proxi, buf);
+		recruit_subproxy(gdata, buf);
 	} else if (cmdmatch(buf, "dropproxy")) {
 		drop_proxy(gdata, buf);
 	} else {
