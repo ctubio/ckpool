@@ -343,6 +343,7 @@ struct session {
 	int session_id;
 	uint64_t enonce1_64;
 	int64_t client_id;
+	int userid;
 	time_t added;
 };
 
@@ -1040,6 +1041,7 @@ static void __disconnect_session(sdata_t *sdata, const stratum_instance_t *clien
 	session->enonce1_64 = client->enonce1_64;
 	session->session_id = client->session_id;
 	session->client_id = client->id;
+	session->userid = client->user_instance->id;
 	session->added = now_t;
 	HASH_ADD_INT(sdata->disconnected_sessions, session_id, session);
 	sdata->stats.disconnected++;
@@ -1878,28 +1880,15 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	return client;
 }
 
-static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid,
-					      int *session_id, const int64_t id)
+static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const int session_id,
+					      const int64_t id)
 {
 	session_t *session;
 	int64_t old_id = 0;
 	uint64_t ret = 0;
-	int slen;
-
-	if (!sessionid)
-		goto out;
-	slen = strlen(sessionid) / 2;
-	if (slen < 1 || slen > 4)
-		goto out;
-
-	if (!validhex(sessionid))
-		goto out;
-
-	sscanf(sessionid, "%x", session_id);
-	LOGDEBUG("Testing for sessionid %s %x", sessionid, *session_id);
 
 	ck_wlock(&sdata->instance_lock);
-	HASH_FIND_INT(sdata->disconnected_sessions, session_id, session);
+	HASH_FIND_INT(sdata->disconnected_sessions, &session_id, session);
 	if (!session)
 		goto out_unlock;
 	HASH_DEL(sdata->disconnected_sessions, session);
@@ -1909,7 +1898,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	dealloc(session);
 out_unlock:
 	ck_wunlock(&sdata->instance_lock);
-out:
+
 	if (ret)
 		LOGNOTICE("Reconnecting old instance %"PRId64" to instance %"PRId64, old_id, id);
 	return ret;
@@ -2775,6 +2764,24 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	return best->sdata;
 }
 
+static int int_from_sessionid(const char *sessionid)
+{
+	int ret = 0, slen;
+
+	if (!sessionid)
+		goto out;
+	slen = strlen(sessionid) / 2;
+	if (slen < 1 || slen > 4)
+		goto out;
+
+	if (!validhex(sessionid))
+		goto out;
+
+	sscanf(sessionid, "%x", &ret);
+out:
+	return ret;
+}
+
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
@@ -2808,6 +2815,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	/* NOTE useragent is NULL prior to this so should not be used in code
 	 * till after this point */
 	if (arr_size > 0) {
+		int session_id = 0;
 		const char *buf;
 
 		buf = json_string_value(json_array_get(params_val, 0));
@@ -2815,13 +2823,15 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			client->useragent = strdup(buf);
 		else
 			client->useragent = ckzalloc(1); // Set to ""
-		if (arr_size > 1 && !ckp->proxy) {
+		if (arr_size > 1) {
 			/* This would be the session id for reconnect, it will
 			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
-			LOGDEBUG("Found old session id %s", buf);
-			/* Add matching here */
-			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, &client->session_id, client_id))) {
+			session_id = int_from_sessionid(buf);
+		}
+		if (!ckp->proxy && session_id) {
+			LOGDEBUG("Found old session id %d", session_id);
+			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, session_id, client_id))) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
 
