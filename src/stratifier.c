@@ -1373,6 +1373,8 @@ static void check_bestproxy(sdata_t *sdata)
 	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
 		if (!__subproxies_alive(proxy))
 			continue;
+		if (!proxy->global)
+			break;
 		if (proxy != sdata->proxy) {
 			sdata->proxy = proxy;
 			changed_id = proxy->id;
@@ -1397,7 +1399,8 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 	proxy = existing_subproxy(sdata, id, subid);
 	if (proxy)
 		proxy->dead = true;
-	check_bestproxy(sdata);
+	if (proxy->global)
+		check_bestproxy(sdata);
 	LOGINFO("Stratifier dropping clients from proxy %d:%d", id, subid);
 	headroom = current_headroom(sdata, &proxy);
 
@@ -1609,7 +1612,8 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
 	}
 
-	check_bestproxy(sdata);
+	if (proxy->global)
+		check_bestproxy(sdata);
 	clean |= new_block;
 	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
