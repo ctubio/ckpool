@@ -267,7 +267,7 @@ struct stratum_instance {
 
 	char *useragent;
 	char *workername;
-	int64_t user_id;
+	int user_id;
 	int server; /* Which server is this instance bound to */
 
 	ckpool_t *ckp;
@@ -1041,7 +1041,7 @@ static void __disconnect_session(sdata_t *sdata, const stratum_instance_t *clien
 	session->enonce1_64 = client->enonce1_64;
 	session->session_id = client->session_id;
 	session->client_id = client->id;
-	session->userid = client->user_instance->id;
+	session->userid = client->user_id;
 	session->added = now_t;
 	HASH_ADD_INT(sdata->disconnected_sessions, session_id, session);
 	sdata->stats.disconnected++;
@@ -2782,6 +2782,25 @@ out:
 	return ret;
 }
 
+static int userid_from_sessionid(sdata_t *sdata, const int session_id)
+{
+	session_t *session;
+	int ret = 0;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_FIND_INT(sdata->disconnected_sessions, &session_id, session);
+	if (!session)
+		goto out_unlock;
+	HASH_DEL(sdata->disconnected_sessions, session);
+	sdata->stats.disconnected--;
+	ret = session->userid;
+	dealloc(session);
+out_unlock:
+	ck_wunlock(&sdata->instance_lock);
+
+	return ret;
+}
+
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
@@ -2828,9 +2847,9 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
 			session_id = int_from_sessionid(buf);
+			LOGDEBUG("Found old session id %d", session_id);
 		}
 		if (!ckp->proxy && session_id) {
-			LOGDEBUG("Found old session id %d", session_id);
 			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, session_id, client_id))) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
@@ -2839,6 +2858,9 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 				__fill_enonce1data(sdata->current_workbase, client);
 				ck_runlock(&sdata->workbase_lock);
 			}
+		} else if (ckp->proxy && session_id) {
+			/* Use the session_id to tell us which user this was */
+			client->user_id = userid_from_sessionid(ckp_sdata, session_id);
 		}
 	} else
 		client->useragent = ckzalloc(1);
@@ -3031,7 +3053,7 @@ static user_instance_t *__create_user(sdata_t *sdata, const char *username)
 
 	user->auth_backoff = DEFAULT_AUTH_BACKOFF;
 	strcpy(user->username, username);
-	user->id = sdata->user_instance_id++;
+	user->id = ++sdata->user_instance_id;
 	HASH_ADD_STR(sdata->user_instances, username, user);
 	return user;
 }
