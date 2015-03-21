@@ -2728,7 +2728,7 @@ static proxy_t *__best_subproxy(proxy_t *proxy)
  * in proxy mode where we find a subproxy based on the current proxy with room
  * for more clients. Signal the generator to recruit more subproxies if we are
  * running out of room. */
-static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
+static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, const int userid)
 {
 	proxy_t *current, *proxy, *tmp, *best = NULL;
 
@@ -2744,10 +2744,9 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata)
 	 * priority */
 	mutex_lock(&ckp_sdata->proxy_lock);
 	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
-		/* FIXME: We need to check the user bound proxies though we
-		 * currently only know users after they've authorised which is
-		 * too late for this. */
-		if (!proxy->global)
+		if (proxy->userid < userid)
+			continue;
+		if (proxy->userid > userid)
 			break;
 		best = __best_subproxy(proxy);
 		if (best)
@@ -2818,17 +2817,12 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 		return json_string("params not an array");
 	}
 
-	sdata = select_sdata(ckp, ckp_sdata);
+	sdata = select_sdata(ckp, ckp_sdata, 0);
 	if (unlikely(!sdata || !sdata->current_workbase)) {
 		LOGWARNING("Failed to provide subscription due to no %s", sdata ? "current workbase" : "sdata");
 		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
-	if (ckp->proxy) {
-		LOGINFO("Current %d, selecting proxy %d:%d for client %"PRId64, ckp_sdata->proxy->id,
-			sdata->subproxy->id, sdata->subproxy->subid, client->id);
-	}
-	client->sdata = sdata;
 
 	arr_size = json_array_size(params_val);
 	/* NOTE useragent is NULL prior to this so should not be used in code
@@ -2854,16 +2848,31 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
 
-				ck_rlock(&sdata->workbase_lock);
+				ck_rlock(&ckp_sdata->workbase_lock);
 				__fill_enonce1data(sdata->current_workbase, client);
-				ck_runlock(&sdata->workbase_lock);
+				ck_runlock(&ckp_sdata->workbase_lock);
 			}
 		} else if (ckp->proxy && session_id) {
+			int userid;
+
 			/* Use the session_id to tell us which user this was */
-			client->user_id = userid_from_sessionid(ckp_sdata, session_id);
+			userid = userid_from_sessionid(ckp_sdata, session_id);
+			if (userid) {
+				sdata_t *user_sdata = select_sdata(ckp, ckp_sdata, userid);
+
+				if (user_sdata)
+					sdata = user_sdata;
+			}
 		}
 	} else
 		client->useragent = ckzalloc(1);
+
+	client->sdata = sdata;
+	if (ckp->proxy) {
+		LOGINFO("Current %d, selecting proxy %d:%d for client %"PRId64, ckp_sdata->proxy->id,
+			sdata->subproxy->id, sdata->subproxy->subid, client->id);
+	}
+
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
 		if (!new_enonce1(ckp, ckp_sdata, sdata, client)) {
