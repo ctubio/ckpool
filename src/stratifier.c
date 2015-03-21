@@ -1344,6 +1344,8 @@ static void reconnect_clients(sdata_t *sdata)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (!client->authorised)
+			continue;
 		/* This client is bound to a user proxy */
 		if (client->sdata && client->sdata->proxy && client->sdata->proxy->userid)
 			continue;
@@ -1584,6 +1586,8 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (!client->authorised)
+			continue;
 		if (client->user_id != userid)
 			continue;
 		if (client->sdata && client->sdata->proxy && client->sdata->proxy->userid == userid)
