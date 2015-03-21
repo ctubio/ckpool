@@ -1324,7 +1324,8 @@ static void generator_recruit(const ckpool_t *ckp, const int proxyid, const int 
 	char buf[256];
 
 	sprintf(buf, "recruit=%d:%d", proxyid, recruits);
-	LOGINFO("Stratifer requesting %d more proxies from generator", recruits);
+	LOGINFO("Stratifer requesting %d more subproxies of proxy %d from generator",
+		recruits, proxyid);
 	send_generator(ckp, buf, GEN_PRIORITY);
 }
 
