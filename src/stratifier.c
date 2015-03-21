@@ -1308,7 +1308,7 @@ static void generator_recruit(const ckpool_t *ckp, const int recruits)
 
 /* Find how much headroom we have and connect up to that many clients that are
  * not currently on this pool, setting the reconnect for the remainder to be
- * switched lazily. */
+ * switched lazily. Only reconnect clients bound to global proxies. */
 static void reconnect_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmpclient;
@@ -1322,6 +1322,9 @@ static void reconnect_clients(sdata_t *sdata)
 
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		/* This client is bound to a user proxy */
+		if (client->sdata && client->sdata->proxy && client->sdata->proxy->userid)
+			continue;
 		if (client->proxyid == proxy->id)
 			continue;
 		if (headroom-- < 1)
