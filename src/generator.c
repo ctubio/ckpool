@@ -133,6 +133,8 @@ struct generator_data {
 	mutex_t lock; /* Lock protecting linked lists */
 	proxy_instance_t *proxies; /* Hash list of all proxies */
 	proxy_instance_t *dead_proxies; /* Disabled proxies */
+	int proxies_generated;
+	int subproxies_generated;
 
 	int proxy_notify_id;	// Globally increasing notify id
 	ckmsgq_t *srvchk;	// Server check message queue
@@ -916,6 +918,7 @@ static proxy_instance_t *create_subproxy(ckpool_t *ckp, gdata_t *gdata, proxy_in
 		DL_DELETE(gdata->dead_proxies, subproxy);
 		subproxy->disabled = false;
 	} else {
+		gdata->subproxies_generated++;
 		subproxy = ckzalloc(sizeof(proxy_instance_t));
 	}
 	mutex_unlock(&gdata->lock);
@@ -2201,6 +2204,7 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 {
 	proxy_instance_t *proxy;
 
+	gdata->proxies_generated++;
 	proxy = ckzalloc(sizeof(proxy_instance_t));
 	proxy->id = id;
 	proxy->userid = userid;
@@ -2360,6 +2364,59 @@ out:
 	send_api_response(val, sockd);
 }
 
+static void send_stats(gdata_t *gdata, const int sockd)
+{
+	json_t *val = json_object(), *subval;
+	int total_objects, objects, generated;
+	proxy_instance_t *proxy;
+	int64_t memsize;
+
+	mutex_lock(&gdata->lock);
+	objects = HASH_COUNT(gdata->proxies);
+	memsize = SAFE_HASH_OVERHEAD(gdata->proxies) + sizeof(proxy_instance_t) * objects;
+	generated = gdata->proxies_generated;
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "proxies", subval);
+
+	DL_COUNT(gdata->dead_proxies, proxy, objects);
+	memsize = sizeof(proxy_instance_t) * objects;
+	JSON_CPACK(subval, "{si,si}", "count", objects, "memory", memsize);
+	json_set_object(val, "dead_proxies", subval);
+
+	total_objects = memsize = 0;
+	for (proxy = gdata->proxies; proxy; proxy=proxy->hh.next) {
+		mutex_lock(&proxy->proxy_lock);
+		total_objects += objects = HASH_COUNT(proxy->subproxies);
+		memsize += SAFE_HASH_OVERHEAD(proxy->subproxies) + sizeof(proxy_instance_t) * objects;
+		mutex_unlock(&proxy->proxy_lock);
+	}
+	generated = gdata->subproxies_generated;
+	mutex_unlock(&gdata->lock);
+
+	JSON_CPACK(subval, "{si,si,si}", "count", total_objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "subproxies", subval);
+
+	mutex_lock(&gdata->notify_lock);
+	objects = HASH_COUNT(gdata->notify_instances);
+	memsize = SAFE_HASH_OVERHEAD(gdata->notify_instances) + sizeof(notify_instance_t) * objects;
+	generated = gdata->proxy_notify_id;
+	mutex_unlock(&gdata->notify_lock);
+
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "notifies", subval);
+
+	mutex_lock(&gdata->share_lock);
+	objects = HASH_COUNT(gdata->shares);
+	memsize = SAFE_HASH_OVERHEAD(gdata->shares) + sizeof(share_msg_t) * objects;
+	generated = gdata->share_id;
+	mutex_unlock(&gdata->share_lock);
+
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "shares", subval);
+
+	send_api_response(val, sockd);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2419,6 +2476,8 @@ retry:
 			else
 				submit_share(gdata, val);
 		}
+	} else if (cmdmatch(buf, "stats")) {
+		send_stats(gdata, sockd);
 	} else if (cmdmatch(buf, "list")) {
 		send_list(gdata, sockd);
 	} else if (cmdmatch(buf, "sublist")) {
@@ -2486,6 +2545,7 @@ static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int id
 {
 	proxy_instance_t *proxy;
 
+	gdata->proxies_generated++;
 	proxy = ckzalloc(sizeof(proxy_instance_t));
 	proxy->id = id;
 	proxy->url = strdup(ckp->proxyurl[id]);
