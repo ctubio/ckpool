@@ -2902,7 +2902,8 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, const int 
 	mutex_unlock(&ckp_sdata->proxy_lock);
 
 	if (!best) {
-		LOGWARNING("Temporarily insufficient subproxies to accept more clients");
+		if (!userid)
+			LOGWARNING("Temporarily insufficient subproxies to accept more clients");
 		return NULL;
 	}
 	if (!userid) {
