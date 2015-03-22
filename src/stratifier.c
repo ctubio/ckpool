@@ -1410,10 +1410,8 @@ static void check_bestproxy(sdata_t *sdata)
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (changed_id != -1) {
+	if (changed_id != -1)
 		LOGNOTICE("Stratifier setting active proxy to %d", changed_id);
-		reconnect_clients(sdata);
-	}
 }
 
 static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
@@ -1611,6 +1609,17 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 		recruit_best_userproxy(sdata, userid, -headroom);
 }
 
+static proxy_t *best_proxy(sdata_t *sdata)
+{
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = sdata->proxy;
+	mutex_unlock(&sdata->proxy_lock);
+
+	return proxy;
+}
+
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
 	sdata_t *sdata = ckp->data, *dsdata;
@@ -1703,9 +1712,11 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
 	}
 
-	if (proxy->global)
+	if (proxy->global) {
 		check_bestproxy(sdata);
-	else
+		if (proxy->parent == best_proxy(sdata)->parent)
+			reconnect_clients(sdata);
+	} else
 		check_userproxies(sdata, proxy->userid);
 	clean |= new_block;
 	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
