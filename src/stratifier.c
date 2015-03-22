@@ -2451,9 +2451,47 @@ static void getuser(sdata_t *sdata, const char *buf, int *sockd)
 		   "user", user->username, "id", user->id, "workers", user->workers,
 	    "bestdiff", user->best_diff, "dsps1", user->dsps1, "dsps5", user->dsps5,
 	    "dsps60", user->dsps60, "dsps1440", user->dsps1440, "dsps10080", user->dsps10080,
-	    "lastshare", user->last_update.tv_sec);
+	    "lastshare", user->last_share.tv_sec);
 out:
 	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static worker_instance_t *get_worker(sdata_t *sdata, user_instance_t *user, const char *workername);
+
+static void getworker(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *tmp, *username, *workername = NULL;
+	worker_instance_t *worker;
+	user_instance_t *user;
+	json_error_t err_val;
+	json_t *val = NULL;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&workername, val, "worker")) {
+		val = json_errormsg("Failed to find worker key");
+		goto out;
+	}
+	if (!strlen(workername)) {
+		val = json_errormsg("Zero length worker key");
+		goto out;
+	}
+	tmp = strdupa(workername);
+	username = strsep(&tmp, "._");
+	user = get_user(sdata, username);
+	worker = get_worker(sdata, user, workername);
+	JSON_CPACK(val, "{ss,ss,sI,sf,sf,sf,sf,si,sf,si,sb}",
+		   "user", username, "worker", workername, "id", user->id,
+	    "dsps1", worker->dsps1, "dsps5", worker->dsps5, "dsps60", worker->dsps60,
+	    "dsps1440", worker->dsps1440, "lastshare", worker->last_share.tv_sec,
+	    "bestdiff", worker->best_diff, "mindiff", worker->mindiff, "idle", worker->idle);
+out:
+	free(workername);
 	send_api_response(val, *sockd);
 	_Close(sockd);
 }
@@ -2637,6 +2675,10 @@ retry:
 	/* Parse API commands here to return a message to sockd */
 	if (cmdmatch(buf, "getuser")) {
 		getuser(sdata, buf + 8, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "getworker")) {
+		getworker(sdata, buf + 10, &sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "getproxy")) {
