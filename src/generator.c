@@ -145,6 +145,7 @@ struct generator_data {
 	pthread_cond_t psend_cond;
 
 	stratum_msg_t *psends;
+	int psends_generated;
 
 	mutex_t notify_lock;
 	notify_instance_t *notify_instances;
@@ -1429,6 +1430,7 @@ static void submit_share(gdata_t *gdata, json_t *val)
 
 	/* Add the new message to the psend list */
 	mutex_lock(&gdata->psend_lock);
+	gdata->psends_generated++;
 	DL_APPEND(gdata->psends, msg);
 	pthread_cond_signal(&gdata->psend_cond);
 	mutex_unlock(&gdata->psend_lock);
@@ -2369,6 +2371,7 @@ static void send_stats(gdata_t *gdata, const int sockd)
 	json_t *val = json_object(), *subval;
 	int total_objects, objects, generated;
 	proxy_instance_t *proxy;
+	stratum_msg_t *msg;
 	int64_t memsize;
 
 	mutex_lock(&gdata->lock);
@@ -2413,6 +2416,15 @@ static void send_stats(gdata_t *gdata, const int sockd)
 
 	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 	json_set_object(val, "shares", subval);
+
+	mutex_lock(&gdata->psend_lock);
+	DL_COUNT(gdata->psends, msg, objects);
+	generated = gdata->psends_generated;
+	mutex_unlock(&gdata->psend_lock);
+
+	memsize = sizeof(stratum_msg_t) * objects;
+	JSON_CPACK(subval, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
+	json_set_object(val, "psends", subval);
 
 	send_api_response(val, sockd);
 }
