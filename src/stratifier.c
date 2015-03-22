@@ -1050,14 +1050,15 @@ static void __disconnect_session(sdata_t *sdata, const stratum_instance_t *clien
 
 /* Removes a client instance we know is on the stratum_instances list and from
  * the user client list if it's been placed on it */
-static void __del_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user)
+static void __del_client(sdata_t *sdata, stratum_instance_t *client)
 {
+	user_instance_t *user = client->user_instance;
+
 	HASH_DEL(sdata->stratum_instances, client);
 	if (user) {
 		DL_DELETE(user->clients, client);
 		__dec_worker(sdata, user);
 	}
-
 }
 
 static void connector_drop_client(ckpool_t *ckp, const int64_t id)
@@ -1080,7 +1081,7 @@ static void drop_allclients(ckpool_t *ckp)
 		int64_t client_id = client->id;
 
 		if (!client->ref) {
-			__del_client(sdata, client, client->user_instance);
+			__del_client(sdata, client);
 			__kill_instance(sdata, client);
 		} else
 			client->dropped = true;
@@ -1884,11 +1885,10 @@ static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
 	return client;
 }
 
-static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_instance_t *user,
-			  bool lazily, char **msg)
+static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazily, char **msg)
 {
+	user_instance_t *user = client->user_instance;
 
-	__del_client(sdata, client, user);
 	if (client->workername) {
 		if (user) {
 			ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s dropped %s",
@@ -1903,6 +1903,7 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 		ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
 				client->id, client->address, lazily ? "lazily" : "");
 	}
+	__del_client(sdata, client);
 	__kill_instance(sdata, client);
 }
 
@@ -1910,7 +1911,6 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, user_insta
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
 {
-	user_instance_t *user = client->user_instance;
 	char_entry_t *entries = NULL;
 	bool dropped = false;
 	char *msg;
@@ -1922,7 +1922,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref)) {
 		dropped = true;
-		__drop_client(sdata, client, user, true, &msg);
+		__drop_client(sdata, client, true, &msg);
 		add_msg_entry(&entries, &msg);
 	}
 	ck_wunlock(&sdata->instance_lock);
@@ -2105,7 +2105,6 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 {
 	char_entry_t *entries = NULL;
-	user_instance_t *user = NULL;
 	stratum_instance_t *client;
 	char *msg;
 
@@ -2115,11 +2114,10 @@ static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 	client = __instance_by_id(sdata, id);
 	if (client && !client->dropped) {
 		__disconnect_session(sdata, client);
-		user = client->user_instance;
 		/* If the client is still holding a reference, don't drop them
 		 * now but wait till the reference is dropped */
 		if (!client->ref) {
-			__drop_client(sdata, client, user, false, &msg);
+			__drop_client(sdata, client, false, &msg);
 			add_msg_entry(&entries, &msg);
 		} else
 			client->dropped = true;
