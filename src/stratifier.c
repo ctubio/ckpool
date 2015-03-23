@@ -2469,7 +2469,7 @@ out:
 	_Close(sockd);
 }
 
-static void getclients(sdata_t *sdata, const char *buf, int *sockd)
+static void userclients(sdata_t *sdata, const char *buf, int *sockd)
 {
 	json_t *val = NULL, *client_arr;
 	stratum_instance_t *client;
@@ -2499,9 +2499,50 @@ static void getclients(sdata_t *sdata, const char *buf, int *sockd)
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	JSON_CPACK(val, "{so}", "clients", client_arr);
+	JSON_CPACK(val, "{ss,so}", "user", username, "clients", client_arr);
 out:
 	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void workerclients(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *tmp, *username, *workername = NULL;
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&workername, val, "worker")) {
+		val = json_errormsg("Failed to find worker key");
+		goto out;
+	}
+	if (!strlen(workername)) {
+		val = json_errormsg("Zero length worker key");
+		goto out;
+	}
+	tmp = strdupa(workername);
+	username = strsep(&tmp, "._");
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		if (strcmp(client->workername, workername))
+			continue;
+		json_array_append_new(client_arr, json_integer(client->id));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "worker", workername, "clients", client_arr);
+out:
+	free(workername);
 	send_api_response(val, *sockd);
 	_Close(sockd);
 }
@@ -2730,7 +2771,11 @@ retry:
 		goto retry;
 	}
 	if (cmdmatch(buf, "userclients")) {
-		getclients(sdata, buf + 12, &sockd);
+		userclients(sdata, buf + 12, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "workerclients")) {
+		workerclients(sdata, buf + 14, &sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "getproxy")) {
