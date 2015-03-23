@@ -2585,6 +2585,59 @@ out:
 	_Close(sockd);
 }
 
+static void getclient(sdata_t *sdata, const char *buf, int *sockd)
+{
+	stratum_instance_t *client;
+	json_error_t err_val;
+	json_t *val = NULL;
+	int64_t client_id;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int64(&client_id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		val = json_errormsg("Failed to find client %"PRId64, client_id);
+		goto out;
+	}
+	/* Too many fields for a pack object, do each discretely to keep track */
+	val = json_object();
+	json_set_int(val, "id", client->id);
+	json_set_string(val, "enonce1", client->enonce1);
+	json_set_string(val, "enonce1var", client->enonce1var);
+	json_set_int(val, "enonce1_64", client->enonce1_64);
+	json_set_double(val, "diff", client->diff);
+	json_set_double(val, "dsps1", client->dsps1);
+	json_set_double(val, "dsps5", client->dsps5);
+	json_set_double(val, "dsps60", client->dsps60);
+	json_set_double(val, "dsps1440", client->dsps1440);
+	json_set_double(val, "dsps10080", client->dsps10080);
+	json_set_int(val, "lastshare", client->last_share.tv_sec);
+	json_set_int(val, "starttime", client->start_time);
+	json_set_string(val, "address", client->address);
+	json_set_bool(val, "subscribed", client->subscribed);
+	json_set_bool(val, "authorised", client->authorised);
+	json_set_bool(val, "idle", client->idle);
+	json_set_string(val, "useragent", client->useragent ? client->useragent : "");
+	json_set_string(val, "workername", client->workername ? client->workername : "");
+	json_set_int(val, "userid", client->user_id);
+	json_set_int(val, "server", client->server);
+	json_set_double(val, "bestdiff", client->best_diff);
+	json_set_int(val, "proxyid", client->proxyid);
+	json_set_int(val, "subproxyid", client->subproxyid);
+
+	dec_instance_ref(sdata, client);
+out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 /* Return the user masked priority value of the proxy */
 static int proxy_prio(const proxy_t *proxy)
 {
@@ -2762,6 +2815,10 @@ retry:
 		goto retry;
 	}
 	/* Parse API commands here to return a message to sockd */
+	if (cmdmatch(buf, "getclient")) {
+		getclient(sdata, buf + 10, &sockd);
+		goto retry;
+	}
 	if (cmdmatch(buf, "getuser")) {
 		getuser(sdata, buf + 8, &sockd);
 		goto retry;
