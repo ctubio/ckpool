@@ -2695,6 +2695,34 @@ out:
 	_Close(sockd);
 }
 
+static void proxyinfo(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_t *val = NULL, *arr_val = json_array();
+	proxy_t *proxy, *subproxy;
+	bool all = true;
+	int userid = 0;
+
+	if (buf) {
+		/* See if there's a userid specified */
+		val = json_loads(buf, 0, NULL);
+		if (json_get_int(&userid, val, "userid"))
+			all = false;
+	}
+
+	mutex_lock(&sdata->proxy_lock);
+	for (proxy = sdata->proxies; proxy; proxy = proxy->hh.next) {
+		if (!all && proxy->userid != userid)
+			continue;
+		for (subproxy = proxy->subproxies; subproxy; subproxy = subproxy->sh.next)
+			json_array_append_new(arr_val, json_proxyinfo(subproxy));
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	JSON_CPACK(val, "{so}", "proxies", arr_val);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 static void setproxy(sdata_t *sdata, const char *buf, int *sockd)
 {
 	json_error_t err_val;
@@ -2841,6 +2869,10 @@ retry:
 	}
 	if (cmdmatch(buf, "setproxy")) {
 		setproxy(sdata, buf + 9, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "proxyinfo")) {
+		proxyinfo(sdata, buf + 10, &sockd);
 		goto retry;
 	}
 
