@@ -45,12 +45,16 @@ struct notify_instance {
 
 typedef struct notify_instance notify_instance_t;
 
+typedef struct proxy_instance proxy_instance_t;
+
 struct share_msg {
 	UT_hash_handle hh;
 	int id; // Our own id for submitting upstream
 
 	int client_id;
 	time_t submit_time;
+	proxy_instance_t *proxy;
+	double diff;
 };
 
 typedef struct share_msg share_msg_t;
@@ -71,8 +75,6 @@ struct pass_msg {
 };
 
 typedef struct pass_msg pass_msg_t;
-
-typedef struct proxy_instance proxy_instance_t;
 
 /* Per proxied pool instance data */
 struct proxy_instance {
@@ -100,6 +102,10 @@ struct proxy_instance {
 	tv_t last_message;
 
 	double diff;
+	double diff_accepted;
+	double diff_rejected;
+	double total_accepted; /* Used only by parent proxy structures */
+	double total_rejected; /* "" */
 	tv_t last_share;
 
 	bool no_params; /* Doesn't want any parameters on subscribe */
@@ -1418,6 +1424,8 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	share = ckzalloc(sizeof(share_msg_t));
 	share->submit_time = time(NULL);
 	share->client_id = client_id;
+	share->proxy = proxi;
+	share->diff = proxi->diff;
 	msg->json_msg = val;
 
 	/* Add new share entry to the share hashtable */
@@ -1449,25 +1457,42 @@ static void clear_notify(notify_instance_t *ni)
 	free(ni);
 }
 
-/* FIXME: Return something useful to the stratifier based on this result? */
+static void account_shares(proxy_instance_t *proxy, const double diff, const bool result)
+{
+	proxy_instance_t *parent = proxy->parent;
+
+	mutex_lock(&parent->proxy_lock);
+	if (result) {
+		proxy->diff_accepted += diff;
+		parent->total_accepted += diff;
+	} else {
+		proxy->diff_rejected += diff;
+		parent->total_rejected += diff;
+	}
+	mutex_unlock(&parent->proxy_lock);
+}
+
 static bool parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf)
 {
+	bool ret = false, result = false;
 	json_t *val = NULL, *idval;
 	share_msg_t *share;
-	bool ret = false;
 	int64_t id;
 
 	val = json_loads(buf, 0, NULL);
-	if (!val) {
-		LOGINFO("Failed to parse json msg: %s", buf);
+	if (unlikely(!val)) {
+		LOGINFO("Failed to parse upstream json msg: %s", buf);
 		goto out;
 	}
 	idval = json_object_get(val, "id");
-	if (!idval) {
-		LOGINFO("Failed to find id in json msg: %s", buf);
+	if (unlikely(!idval)) {
+		LOGINFO("Failed to find id in upstream json msg: %s", buf);
 		goto out;
 	}
 	id = json_integer_value(idval);
+	if (unlikely(!json_get_bool(&result, val, "result"))) {
+		LOGINFO("Failed to find result in upstream json msg: %s", buf);
+	}
 
 	mutex_lock(&gdata->share_lock);
 	HASH_FIND_I64(gdata->shares, &id, share);
@@ -1481,8 +1506,12 @@ static bool parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf
 	if (!share) {
 		LOGINFO("Proxy %d:%d failed to find matching share to result: %s",
 			proxi->id, proxi->subid, buf);
+		/* We don't know what diff these shares are so assume the
+		 * current proxy diff. */
+		account_shares(share->proxy, share->proxy->diff, result);
 		goto out;
 	}
+	account_shares(share->proxy, share->diff, result);
 	LOGINFO("Proxy %d:%d share result %s from client %d", proxi->id, proxi->subid,
 		buf, share->client_id);
 	free(share);
