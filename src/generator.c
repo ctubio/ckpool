@@ -53,7 +53,6 @@ struct share_msg {
 
 	int client_id;
 	time_t submit_time;
-	proxy_instance_t *proxy;
 	double diff;
 };
 
@@ -1335,8 +1334,6 @@ static proxy_instance_t *subproxy_by_id(proxy_instance_t *proxy, const int subid
 
 	mutex_lock(&proxy->proxy_lock);
 	subproxy = __subproxy_by_id(proxy, subid);
-	if (subproxy && subproxy->disabled)
-		subproxy = NULL;
 	mutex_unlock(&proxy->proxy_lock);
 
 	return subproxy;
@@ -1424,7 +1421,6 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	share = ckzalloc(sizeof(share_msg_t));
 	share->submit_time = time(NULL);
 	share->client_id = client_id;
-	share->proxy = proxi;
 	share->diff = proxi->diff;
 	msg->json_msg = val;
 
@@ -1508,10 +1504,10 @@ static bool parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf
 			proxi->id, proxi->subid, buf);
 		/* We don't know what diff these shares are so assume the
 		 * current proxy diff. */
-		account_shares(share->proxy, share->proxy->diff, result);
+		account_shares(proxi, proxi->diff, result);
 		goto out;
 	}
-	account_shares(share->proxy, share->diff, result);
+	account_shares(proxi, share->diff, result);
 	LOGINFO("Proxy %d:%d share result %s from client %d", proxi->id, proxi->subid,
 		buf, share->client_id);
 	free(share);
@@ -2337,7 +2333,6 @@ static void delete_proxy(ckpool_t *ckp, gdata_t *gdata, proxy_instance_t *proxy)
 static void parse_delproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
 {
 	proxy_instance_t *proxy;
-
 	json_error_t err_val;
 	json_t *val = NULL;
 	int id = -1;
@@ -2365,7 +2360,6 @@ out:
 static void parse_ableproxy(gdata_t *gdata, const int sockd, const char *buf, bool disable)
 {
 	proxy_instance_t *proxy;
-
 	json_error_t err_val;
 	json_t *val = NULL;
 	int id = -1;
@@ -2458,6 +2452,60 @@ static void send_stats(gdata_t *gdata, const int sockd)
 	send_api_response(val, sockd);
 }
 
+static void parse_proxystats(gdata_t *gdata, const int sockd, const char *buf)
+{
+	proxy_instance_t *proxy;
+	json_error_t err_val;
+	bool totals = false;
+	json_t *val = NULL;
+	int id, subid = 0;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int(&id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	if (!json_get_int(&subid, val, "subid"))
+		totals = true;
+	proxy = proxy_by_id(gdata, id);
+	if (!proxy) {
+		val = json_errormsg("Proxy id %d not found", id);
+		goto out;
+	}
+	if (!totals)
+		proxy = subproxy_by_id(proxy, subid);
+	if (!proxy) {
+		val = json_errormsg("Proxy id %d:%d not found", id, subid);
+		goto out;
+	}
+	if (totals) {
+		JSON_CPACK(val, "{si,si,ss,ss,ss,ss,si,si,sf,sf,sf,si,sb,sb,sb,sb,sI,si}",
+			"id", proxy->id, "userid", proxy->userid, "url", proxy->url,
+	     "auth", proxy->auth, "pass", proxy->pass, "enonce1", proxy->enonce1 ? proxy->enonce1 : "",
+	     "nonce1len", proxy->nonce1len, "nonce2len", proxy->nonce2len, "diff", proxy->diff,
+	     "accepted", proxy->total_accepted, "rejected", proxy->total_rejected,
+	     "lastshare", proxy->last_share.tv_sec, "global", proxy->global, "notified", proxy->notified,
+	     "disabled", proxy->disabled, "alive", proxy->alive, "maxclients", proxy->clients_per_proxy,
+	     "subproxies", proxy->subproxy_count);
+	} else {
+		JSON_CPACK(val, "{si,si,si,ss,ss,ss,ss,si,si,sf,sf,sf,si,sb,sb,sb,sb,sI,si}",
+			"id", proxy->id, "subid", proxy->subid, "userid", proxy->userid, "url", proxy->url,
+	     "auth", proxy->auth, "pass", proxy->pass, "enonce1", proxy->enonce1 ? proxy->enonce1 : "",
+	     "nonce1len", proxy->nonce1len, "nonce2len", proxy->nonce2len, "diff", proxy->diff,
+	     "accepted", proxy->diff_accepted, "rejected", proxy->diff_rejected,
+	     "lastshare", proxy->last_share.tv_sec, "global", proxy->global, "notified", proxy->notified,
+	     "disabled", proxy->disabled, "alive", proxy->alive, "maxclients", proxy->clients_per_proxy,
+	     "subproxies", proxy->subproxy_count);
+
+	}
+out:
+	send_api_response(val, sockd);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2531,6 +2579,8 @@ retry:
 		parse_ableproxy(gdata, sockd, buf + 12, false);
 	} else if (cmdmatch(buf, "disableproxy")) {
 		parse_ableproxy(gdata, sockd, buf + 13, true);
+	} else if (cmdmatch(buf, "proxystats")) {
+		parse_proxystats(gdata, sockd, buf + 11);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
