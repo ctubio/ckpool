@@ -2645,6 +2645,24 @@ out:
 	_Close(sockd);
 }
 
+static void getclients(sdata_t *sdata, int *sockd)
+{
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	for (client = sdata->stratum_instances; client; client = client->hh.next) {
+		json_array_append_new(client_arr, clientinfo(client));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "clients", client_arr);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
 {
 	json_t *val = NULL, *client_arr;
@@ -2928,6 +2946,10 @@ retry:
 		goto retry;
 	}
 	/* Parse API commands here to return a message to sockd */
+	if (cmdmatch(buf, "clients")) {
+		getclients(sdata, &sockd);
+		goto retry;
+	}
 	if (cmdmatch(buf, "getclient")) {
 		getclient(sdata, buf + 10, &sockd);
 		goto retry;
