@@ -2585,29 +2585,11 @@ out:
 	_Close(sockd);
 }
 
-static void getclient(sdata_t *sdata, const char *buf, int *sockd)
+static json_t *clientinfo(const stratum_instance_t *client)
 {
-	stratum_instance_t *client;
-	json_error_t err_val;
-	json_t *val = NULL;
-	int64_t client_id;
+	json_t *val = json_object();
 
-	val = json_loads(buf, 0, &err_val);
-	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
-		goto out;
-	}
-	if (!json_get_int64(&client_id, val, "id")) {
-		val = json_errormsg("Failed to find id key");
-		goto out;
-	}
-	client = ref_instance_by_id(sdata, client_id);
-	if (!client) {
-		val = json_errormsg("Failed to find client %"PRId64, client_id);
-		goto out;
-	}
 	/* Too many fields for a pack object, do each discretely to keep track */
-	val = json_object();
 	json_set_int(val, "id", client->id);
 	json_set_string(val, "enonce1", client->enonce1);
 	json_set_string(val, "enonce1var", client->enonce1var);
@@ -2631,9 +2613,112 @@ static void getclient(sdata_t *sdata, const char *buf, int *sockd)
 	json_set_double(val, "bestdiff", client->best_diff);
 	json_set_int(val, "proxyid", client->proxyid);
 	json_set_int(val, "subproxyid", client->subproxyid);
+	return val;
+}
+
+static void getclient(sdata_t *sdata, const char *buf, int *sockd)
+{
+	stratum_instance_t *client;
+	json_error_t err_val;
+	json_t *val = NULL;
+	int64_t client_id;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int64(&client_id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		val = json_errormsg("Failed to find client %"PRId64, client_id);
+		goto out;
+	}
+	val = clientinfo(client);
 
 	dec_instance_ref(sdata, client);
 out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	char *username = NULL;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&username, val, "user")) {
+		val = json_errormsg("Failed to find user key");
+		goto out;
+	}
+	if (!strlen(username)) {
+		val = json_errormsg("Zero length user key");
+		goto out;
+	}
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		json_array_append_new(client_arr, clientinfo(client));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "user", username, "clients", client_arr);
+out:
+	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void worker_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *tmp, *username, *workername = NULL;
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&workername, val, "worker")) {
+		val = json_errormsg("Failed to find worker key");
+		goto out;
+	}
+	if (!strlen(workername)) {
+		val = json_errormsg("Zero length worker key");
+		goto out;
+	}
+	tmp = strdupa(workername);
+	username = strsep(&tmp, "._");
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		if (strcmp(client->workername, workername))
+			continue;
+		json_array_append_new(client_arr, clientinfo(client));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "worker", workername, "clients", client_arr);
+out:
+	free(workername);
 	send_api_response(val, *sockd);
 	_Close(sockd);
 }
@@ -2873,6 +2958,14 @@ retry:
 	}
 	if (cmdmatch(buf, "proxyinfo")) {
 		proxyinfo(sdata, buf + 10, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "ucinfo")) {
+		user_clientinfo(sdata, buf + 7, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "wcinfo")) {
+		worker_clientinfo(sdata, buf + 7, &sockd);
 		goto retry;
 	}
 
