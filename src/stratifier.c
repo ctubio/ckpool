@@ -2469,6 +2469,43 @@ out:
 	_Close(sockd);
 }
 
+static void getclients(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	char *username = NULL;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&username, val, "user")) {
+		val = json_errormsg("Failed to find user key");
+		goto out;
+	}
+	if (!strlen(username)) {
+		val = json_errormsg("Zero length user key");
+		goto out;
+	}
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		json_array_append_new(client_arr, json_integer(client->id));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "clients", client_arr);
+out:
+	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 static worker_instance_t *get_worker(sdata_t *sdata, user_instance_t *user, const char *workername);
 
 static void getworker(sdata_t *sdata, const char *buf, int *sockd)
@@ -2690,6 +2727,10 @@ retry:
 	}
 	if (cmdmatch(buf, "getworker")) {
 		getworker(sdata, buf + 10, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "userclients")) {
+		getclients(sdata, buf + 12, &sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "getproxy")) {
