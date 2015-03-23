@@ -2651,7 +2651,7 @@ static json_t *json_proxyinfo(const proxy_t *proxy)
 	const proxy_t *parent = proxy->parent;
 	json_t *val;
 
-	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,sb,sb,si}",
+	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,si,sb,sb,si}",
 	    "id", proxy->id, "subid", proxy->subid, "priority", proxy_prio(parent),
 	    "diff", proxy->diff, "url", proxy->url, "auth", proxy->auth, "pass", proxy->pass,
 	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
