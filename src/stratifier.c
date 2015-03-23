@@ -2437,6 +2437,18 @@ static void lazy_reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 
 static user_instance_t *get_user(sdata_t *sdata, const char *username);
 
+static json_t *userinfo(const user_instance_t *user)
+{
+	json_t *val;
+
+	JSON_CPACK(val, "{ss,sI,si,sf,sf,sf,sf,sf,sf,si}",
+		   "user", user->username, "id", user->id, "workers", user->workers,
+	    "bestdiff", user->best_diff, "dsps1", user->dsps1, "dsps5", user->dsps5,
+	    "dsps60", user->dsps60, "dsps1440", user->dsps1440, "dsps10080", user->dsps10080,
+	    "lastshare", user->last_share.tv_sec);
+	return val;
+}
+
 static void getuser(sdata_t *sdata, const char *buf, int *sockd)
 {
 	char *username = NULL;
@@ -2458,11 +2470,7 @@ static void getuser(sdata_t *sdata, const char *buf, int *sockd)
 		goto out;
 	}
 	user = get_user(sdata, username);
-	JSON_CPACK(val, "{ss,sI,si,sf,sf,sf,sf,sf,sf,si}",
-		   "user", user->username, "id", user->id, "workers", user->workers,
-	    "bestdiff", user->best_diff, "dsps1", user->dsps1, "dsps5", user->dsps5,
-	    "dsps60", user->dsps60, "dsps1440", user->dsps1440, "dsps10080", user->dsps10080,
-	    "lastshare", user->last_share.tv_sec);
+	val = userinfo(user);
 out:
 	free(username);
 	send_api_response(val, *sockd);
@@ -2610,6 +2618,24 @@ static void getworkers(sdata_t *sdata, int *sockd)
 	ck_runlock(&sdata->instance_lock);
 
 	JSON_CPACK(val, "{so}", "workers", worker_arr);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void getusers(sdata_t *sdata, int *sockd)
+{
+	json_t *val = NULL, *user_array;
+	user_instance_t *user;
+
+	user_array = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	for (user = sdata->user_instances; user; user = user->hh.next) {
+		json_array_append_new(user_array, userinfo(user));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "users", user_array);
 	send_api_response(val, *sockd);
 	_Close(sockd);
 }
@@ -2981,6 +3007,10 @@ retry:
 	}
 	if (cmdmatch(buf, "workers")) {
 		getworkers(sdata, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "users")) {
+		getusers(sdata, &sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "getclient")) {
