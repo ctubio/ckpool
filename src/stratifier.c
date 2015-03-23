@@ -2549,6 +2549,18 @@ out:
 
 static worker_instance_t *get_worker(sdata_t *sdata, user_instance_t *user, const char *workername);
 
+static json_t *workerinfo(const user_instance_t *user, const worker_instance_t *worker)
+{
+	json_t *val;
+
+	JSON_CPACK(val, "{ss,ss,sI,sf,sf,sf,sf,si,sf,si,sb}",
+		   "user", user->username, "worker", worker->workername, "id", user->id,
+	    "dsps1", worker->dsps1, "dsps5", worker->dsps5, "dsps60", worker->dsps60,
+	    "dsps1440", worker->dsps1440, "lastshare", worker->last_share.tv_sec,
+	    "bestdiff", worker->best_diff, "mindiff", worker->mindiff, "idle", worker->idle);
+	return val;
+}
+
 static void getworker(sdata_t *sdata, const char *buf, int *sockd)
 {
 	char *tmp, *username, *workername = NULL;
@@ -2574,13 +2586,30 @@ static void getworker(sdata_t *sdata, const char *buf, int *sockd)
 	username = strsep(&tmp, "._");
 	user = get_user(sdata, username);
 	worker = get_worker(sdata, user, workername);
-	JSON_CPACK(val, "{ss,ss,sI,sf,sf,sf,sf,si,sf,si,sb}",
-		   "user", username, "worker", workername, "id", user->id,
-	    "dsps1", worker->dsps1, "dsps5", worker->dsps5, "dsps60", worker->dsps60,
-	    "dsps1440", worker->dsps1440, "lastshare", worker->last_share.tv_sec,
-	    "bestdiff", worker->best_diff, "mindiff", worker->mindiff, "idle", worker->idle);
+	val = workerinfo(user, worker);
 out:
 	free(workername);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void getworkers(sdata_t *sdata, int *sockd)
+{
+	json_t *val = NULL, *worker_arr;
+	worker_instance_t *worker;
+	user_instance_t *user;
+
+	worker_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	for (user = sdata->user_instances; user; user = user->hh.next) {
+		DL_FOREACH(user->worker_instances, worker) {
+			json_array_append_new(worker_arr, workerinfo(user, worker));
+		}
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "workers", worker_arr);
 	send_api_response(val, *sockd);
 	_Close(sockd);
 }
@@ -2948,6 +2977,10 @@ retry:
 	/* Parse API commands here to return a message to sockd */
 	if (cmdmatch(buf, "clients")) {
 		getclients(sdata, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "workers")) {
+		getworkers(sdata, &sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "getclient")) {
