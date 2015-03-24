@@ -2445,6 +2445,21 @@ static void lazy_reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 	}
 }
 
+static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
+{
+	stratum_instance_t *client;
+
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		LOGINFO("reconnect_client_id failed to find client %"PRId64, client_id);
+		return;
+	}
+	lazy_reconnect_client(sdata, client);
+	dec_instance_ref(sdata, client);
+}
+
+/* API commands */
+
 static user_instance_t *get_user(sdata_t *sdata, const char *username);
 
 static json_t *userinfo(const user_instance_t *user)
@@ -2924,17 +2939,24 @@ out:
 	_Close(sockd);
 }
 
-static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
+static void get_poolstats(sdata_t *sdata, int *sockd)
 {
-	stratum_instance_t *client;
+	pool_stats_t *stats = &sdata->stats;
+	json_t *val;
 
-	client = ref_instance_by_id(sdata, client_id);
-	if (!client) {
-		LOGINFO("reconnect_client_id failed to find client %"PRId64, client_id);
-		return;
-	}
-	lazy_reconnect_client(sdata, client);
-	dec_instance_ref(sdata, client);
+	mutex_lock(&sdata->stats_lock);
+	JSON_CPACK(val, "{si,si,si,si,si,sI,sf,sf,sf,sf,sI,sI,sf,sf,sf,sf,sf,sf,sf}",
+		   "start", stats->start_time.tv_sec, "update", stats->last_update.tv_sec,
+	    "workers", stats->workers, "users", stats->users, "disconnected", stats->disconnected,
+	    "shares", stats->accounted_shares, "sps1", stats->sps1, "sps5", stats->sps5,
+	    "sps15", stats->sps15, "sps60", stats->sps60, "accepted", stats->accounted_diff_shares,
+	    "rejected", stats->accounted_rejects, "dsps1", stats->dsps1, "dsps5", stats->dsps5,
+	    "dsps15", stats->dsps15, "dsps60", stats->dsps60, "dsps360", stats->dsps360,
+	    "dsps1440", stats->dsps1440, "dsps10080", stats->dsps10080);
+	mutex_unlock(&sdata->stats_lock);
+
+	send_api_response(val, *sockd);
+	_Close(sockd);
 }
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
@@ -3049,6 +3071,10 @@ retry:
 	}
 	if (cmdmatch(buf, "setproxy")) {
 		setproxy(sdata, buf + 9, &sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "poolstats")) {
+		get_poolstats(sdata, &sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "proxyinfo")) {
