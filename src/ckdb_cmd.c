@@ -4902,8 +4902,10 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(idcontrol, 1, 0);
 	USEINFO(optioncontrol, 1, 1);
 	USEINFO(workinfo, 1, 1);
-	USEINFO(shares, 1, 1);
-	USEINFO(shareerrors, 1, 1);
+	// Trees don't share items so count as 1 tree
+	USEINFO(shares, 2, 1);
+	// Trees don't share items so count as 1 tree
+	USEINFO(shareerrors, 2, 1);
 	USEINFO(sharesummary, 1, 2);
 	USEINFO(workmarkers, 1, 2);
 	USEINFO(markersummary, 1, 2);

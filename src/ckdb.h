@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.035"
+#define CKDB_VERSION DB_VERSION"-1.040"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -226,6 +226,7 @@ enum data_type {
 	TYPE_BIGINT,
 	TYPE_INT,
 	TYPE_TV,
+	TYPE_BTV,
 	TYPE_TVS,
 	TYPE_CTV,
 	TYPE_FTV,
@@ -721,7 +722,7 @@ typedef struct transfer {
 // Suggest malloc use MMAP - 1913 = largest under 2MB
 #define ALLOC_TRANSFER 1913
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 16
+#define CULL_TRANSFER 64
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
@@ -747,7 +748,7 @@ extern tv_t missing_secuser_max;
 typedef struct users {
 	int64_t userid;
 	char username[TXT_BIG+1];
-	char usertrim[TXT_BIG+1]; // Non DB field
+	char usertrim[TXT_BIG+1]; // non-DB field
 	// Anything in 'status' fails mining authentication
 	char status[TXT_BIG+1];
 	char emailaddress[TXT_BIG+1];
@@ -843,7 +844,7 @@ typedef struct paymentaddresses {
 	char payaddress[TXT_BIG+1];
 	int32_t payratio;
 	HISTORYDATECONTROLFIELDS;
-	bool match; // Non-db field
+	bool match; // non-DB field
 } PAYMENTADDRESSES;
 
 #define ALLOC_PAYMENTADDRESSES 1024
@@ -873,7 +874,7 @@ typedef struct payments {
 	char committxn[TXT_BIG+1];
 	char commitblockhash[TXT_BIG+1];
 	HISTORYDATECONTROLFIELDS;
-	K_ITEM *old_item; // Non-db field
+	K_ITEM *old_item; // non-DB field
 } PAYMENTS;
 
 #define ALLOC_PAYMENTS 1024
@@ -1024,6 +1025,8 @@ typedef struct shares {
 	char error[TXT_SML+1];
 	char secondaryuserid[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
+	int32_t redo; // non-DB field
+	int32_t oldcount; // non-DB field
 } SHARES;
 
 #define ALLOC_SHARES 10000
@@ -1034,6 +1037,13 @@ typedef struct shares {
 extern K_TREE *shares_root;
 extern K_LIST *shares_free;
 extern K_STORE *shares_store;
+// shares unexpectedly before the workinfo
+extern K_TREE *shares_early_root;
+extern K_STORE *shares_early_store;
+
+/* Once a share is this old, it can only once more be
+    check for it's workinfoid and then be discarded */
+#define EARLYSHARESLIMIT 60.0
 
 // SHAREERRORS shareerrors.id.json={...}
 typedef struct shareerrors {
@@ -1045,9 +1055,11 @@ typedef struct shareerrors {
 	char error[TXT_SML+1];
 	char secondaryuserid[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
+	int32_t redo; // non-DB field
+	int32_t oldcount; // non-DB field
 } SHAREERRORS;
 
-#define ALLOC_SHAREERRORS 10000
+#define ALLOC_SHAREERRORS 1000
 #define LIMIT_SHAREERRORS 0
 #define INIT_SHAREERRORS(_item) INIT_GENERIC(_item, shareerrors)
 #define DATA_SHAREERRORS(_var, _item) DATA_GENERIC(_var, _item, shareerrors, true)
@@ -1055,6 +1067,9 @@ typedef struct shareerrors {
 extern K_TREE *shareerrors_root;
 extern K_LIST *shareerrors_free;
 extern K_STORE *shareerrors_store;
+// shareerrors unexpectedly before the workinfo
+extern K_TREE *shareerrors_early_root;
+extern K_STORE *shareerrors_early_store;
 
 // SHARESUMMARY
 typedef struct sharesummary {
@@ -1123,12 +1138,12 @@ typedef struct blocks {
 	int64_t elapsed;
 	char statsconfirmed[TXT_FLAG+1];
 	HISTORYDATECONTROLFIELDS;
-	bool ignore; // Non DB field
+	bool ignore; // non-DB field
 
 	// Calculated only when = 0
 	double netdiff;
 
-	/* Non DB fields for the web page
+	/* non-DB fields for the web page
 	 * Calculate them once off/recalc them when required */
 	double blockdiffratio;
 	double blockcdf;
@@ -1193,7 +1208,7 @@ typedef struct miningpayouts {
 	double diffacc;
 	int64_t amount;
 	HISTORYDATECONTROLFIELDS;
-	K_ITEM *old_item; // Non-db field
+	K_ITEM *old_item; // non-DB field
 } MININGPAYOUTS;
 
 #define ALLOC_MININGPAYOUTS 1000
@@ -1305,11 +1320,11 @@ typedef struct poolstats {
 	double hashrate5m;
 	double hashrate1hr;
 	double hashrate24hr;
-	bool stored; // Non-db field
+	bool stored; // non-DB field
 	SIMPLEDATECONTROLFIELDS;
 } POOLSTATS;
 
-#define ALLOC_POOLSTATS 10000
+#define ALLOC_POOLSTATS 1000
 #define LIMIT_POOLSTATS 0
 #define INIT_POOLSTATS(_item) INIT_GENERIC(_item, poolstats)
 #define DATA_POOLSTATS(_var, _item) DATA_GENERIC(_var, _item, poolstats, true)
@@ -1336,7 +1351,7 @@ typedef struct userstats {
 	double hashrate5m;
 	double hashrate1hr;
 	double hashrate24hr;
-	bool idle; // Non-db field
+	bool idle; // non-DB field
 	char summarylevel[TXT_FLAG+1]; // SUMMARY_NONE in RAM
 	int32_t summarycount;
 	tv_t statsdate;
@@ -1348,7 +1363,7 @@ typedef struct userstats {
  * createdate batch, and thus could move all (complete) records
  * matching the createdate from userstats_eos_store into the tree */
 
-#define ALLOC_USERSTATS 10000
+#define ALLOC_USERSTATS 1000
 #define LIMIT_USERSTATS 0
 #define INIT_USERSTATS(_item) INIT_GENERIC(_item, userstats)
 #define DATA_USERSTATS(_var, _item) DATA_GENERIC(_var, _item, userstats, true)
@@ -1689,6 +1704,7 @@ extern char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz,
 #define ctv_to_buf(_data, _buf, _siz) _ctv_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 #define ftv_to_buf(_data, _buf, _siz) _ftv_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 #define tvs_to_buf(_data, _buf, _siz) _tvs_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
+#define btv_to_buf(_data, _buf, _siz) _btv_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 //#define blob_to_buf(_data, _buf, _siz) _blob_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 #define double_to_buf(_data, _buf, _siz) _double_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 
@@ -1702,6 +1718,8 @@ extern char *_ctv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 extern char *_ftv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 // Convert tv to seconds (ignore uS)
 extern char *_tvs_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
+// Convert tv to (brief) DD HH:MM:SS
+extern char *_btv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 /* unused yet
 extern char *_blob_to_buf(char *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 */

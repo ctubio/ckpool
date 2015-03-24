@@ -379,11 +379,15 @@ double current_ndiff;
 K_TREE *shares_root;
 K_LIST *shares_free;
 K_STORE *shares_store;
+K_TREE *shares_early_root;
+K_STORE *shares_early_store;
 
 // SHAREERRORS shareerrors.id.json={...}
 K_TREE *shareerrors_root;
 K_LIST *shareerrors_free;
 K_STORE *shareerrors_store;
+K_TREE *shareerrors_early_root;
+K_STORE *shareerrors_early_store;
 
 // SHARESUMMARY
 K_TREE *sharesummary_root;
@@ -995,12 +999,16 @@ static void alloc_storage()
 	shares_free = k_new_list("Shares", sizeof(SHARES),
 					ALLOC_SHARES, LIMIT_SHARES, true);
 	shares_store = k_new_store(shares_free);
+	shares_early_store = k_new_store(shares_free);
 	shares_root = new_ktree();
+	shares_early_root = new_ktree();
 
 	shareerrors_free = k_new_list("ShareErrors", sizeof(SHAREERRORS),
 					ALLOC_SHAREERRORS, LIMIT_SHAREERRORS, true);
 	shareerrors_store = k_new_store(shareerrors_free);
+	shareerrors_early_store = k_new_store(shareerrors_free);
 	shareerrors_root = new_ktree();
+	shareerrors_early_root = new_ktree();
 
 	sharesummary_free = k_new_list("ShareSummary", sizeof(SHARESUMMARY),
 					ALLOC_SHARESUMMARY, LIMIT_SHARESUMMARY, true);
@@ -1106,6 +1114,11 @@ static void alloc_storage()
 
 static void dealloc_storage()
 {
+	SHAREERRORS *shareerrors;
+	SHARES *shares;
+	K_ITEM *s_item;
+	char *st = NULL;
+
 	LOGWARNING("%s() logqueue ...", __func__);
 
 	FREE_LISTS(logqueue);
@@ -1151,7 +1164,47 @@ static void dealloc_storage()
 	FREE_STORE_DATA(sharesummary);
 	FREE_LIST_DATA(sharesummary);
 
+	if (shareerrors_early_store->count > 0) {
+		LOGERR("%s() *** shareerrors_early count %d ***",
+			__func__, shareerrors_early_store->count);
+		s_item = shareerrors_early_store->head;
+		while (s_item) {
+			DATA_SHAREERRORS(shareerrors, s_item);
+			LOGERR("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
+				__func__,
+				shareerrors->workinfoid,
+				st = safe_text(shareerrors->workername),
+				shareerrors->errn,
+				shareerrors->error,
+				shareerrors->createdate.tv_sec,
+				shareerrors->createdate.tv_usec);
+			FREENULL(st);
+			s_item = s_item->next;
+		}
+	}
+	FREE_TREE(shareerrors_early);
+	FREE_STORE(shareerrors_early);
 	FREE_ALL(shareerrors);
+	if (shares_early_store->count > 0) {
+		LOGERR("%s() *** shares_early count %d ***",
+			__func__, shares_early_store->count);
+		s_item = shares_early_store->head;
+		while (s_item) {
+			DATA_SHARES(shares, s_item);
+			LOGERR("%s(): %"PRId64"/%s/%s/%"PRId32"/%ld,%ld",
+				__func__,
+				shares->workinfoid,
+				st = safe_text(shares->workername),
+				shares->nonce,
+				shares->errn,
+				shares->createdate.tv_sec,
+				shares->createdate.tv_usec);
+			FREENULL(st);
+			s_item = s_item->next;
+		}
+	}
+	FREE_TREE(shares_early);
+	FREE_STORE(shares_early);
 	FREE_ALL(shares);
 
 	LOGWARNING("%s() workinfo ...", __func__);

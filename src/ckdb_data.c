@@ -417,6 +417,14 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 					   tm.tm_sec,
 					   (((tv_t *)data)->tv_usec));
 			break;
+		case TYPE_BTV:
+			gmtime_r(&(((tv_t *)data)->tv_sec), &tm);
+			snprintf(buf, siz, "%02d %02d:%02d:%02d",
+					   tm.tm_mday,
+					   tm.tm_hour,
+					   tm.tm_min,
+					   tm.tm_sec);
+			break;
 		case TYPE_CTV:
 			snprintf(buf, siz, "%ld,%ld",
 					   (((tv_t *)data)->tv_sec),
@@ -474,6 +482,12 @@ char *_ftv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 char *_tvs_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
 	return _data_to_buf(TYPE_TVS, (void *)data, buf, siz, WHERE_FFL_PASS);
+}
+
+// Convert tv to (brief) DD HH:MM:SS
+char *_btv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
+{
+	return _data_to_buf(TYPE_BTV, (void *)data, buf, siz, WHERE_FFL_PASS);
 }
 
 /* unused yet
