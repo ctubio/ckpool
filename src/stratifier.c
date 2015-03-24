@@ -2840,7 +2840,7 @@ static json_t *json_proxyinfo(const proxy_t *proxy)
 	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
 	    "enonce1varlen", proxy->enonce1varlen, "nonce2len", proxy->nonce2len,
 	    "enonce2varlen", proxy->enonce2varlen, "subscribed", proxy->subscribed,
-	    "notified", proxy->notified, "clients", proxy->clients, "max_clients", proxy->max_clients,
+	    "notified", proxy->notified, "clients", proxy->clients, "maxclients", proxy->max_clients,
 	    "bound_clients", proxy->bound_clients, "combined_clients", parent->combined_clients,
 	    "headroom", proxy->headroom, "subproxy_count", parent->subproxy_count,
 	    "dead", proxy->dead, "global", proxy->global, "userid", proxy->userid);
