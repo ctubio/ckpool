@@ -110,7 +110,6 @@ struct proxy_instance {
 	bool no_params; /* Doesn't want any parameters on subscribe */
 
 	bool global;	/* Part of the global list of proxies */
-	bool notified; /* Has this proxy received any notifies yet */
 	bool disabled; /* Subproxy no longer to be used */
 	bool reconnect; /* We need to drop and reconnect */
 	bool reconnecting; /* Testing of parent in progress */
@@ -2160,10 +2159,10 @@ static void send_list(gdata_t *gdata, const int sockd)
 
 	mutex_lock(&gdata->lock);
 	HASH_ITER(hh, gdata->proxies, proxy, tmp) {
-		JSON_CPACK(val, "{si,sb,si,ss,ss,sf,sb,sb,sb,si}",
+		JSON_CPACK(val, "{si,sb,si,ss,ss,sf,sb,sb,si}",
 			"id", proxy->id, "global", proxy->global, "userid", proxy->userid,
 			"auth", proxy->auth, "pass", proxy->pass,
-			"diff", proxy->diff, "notified", proxy->notified,
+			"diff", proxy->diff,
 			"disabled", proxy->disabled, "alive", proxy->alive,
 			"subproxies", proxy->subproxy_count);
 		if (proxy->enonce1) {
@@ -2205,10 +2204,10 @@ static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 
 	mutex_lock(&gdata->lock);
 	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
-		JSON_CPACK(val, "{si,ss,ss,sf,sb,sb,sb}",
+		JSON_CPACK(val, "{si,ss,ss,sf,sb,sb}",
 			"subid", subproxy->id,
 			"auth", subproxy->auth, "pass", subproxy->pass,
-			"diff", subproxy->diff, "notified", subproxy->notified,
+			"diff", subproxy->diff,
 			"disabled", subproxy->disabled, "alive", subproxy->alive);
 		if (subproxy->enonce1) {
 			json_set_string(val, "enonce1", subproxy->enonce1);
@@ -2482,26 +2481,30 @@ static void parse_proxystats(gdata_t *gdata, const int sockd, const char *buf)
 		val = json_errormsg("Proxy id %d:%d not found", id, subid);
 		goto out;
 	}
+	val = json_object();
+	json_set_int(val, "id", proxy->id);
+	json_set_int(val, "userid", proxy->userid);
+	json_set_string(val, "url", proxy->url);
+	json_set_string(val, "auth", proxy->auth);
+	json_set_string(val, "pass", proxy->pass);
+	json_set_string(val, "enonce1", proxy->enonce1 ? proxy->enonce1 : "");
+	json_set_int(val, "nonce1len", proxy->nonce1len);
+	json_set_int(val, "nonce2len", proxy->nonce2len);
+	json_set_double(val, "diff", proxy->diff);
 	if (totals) {
-		JSON_CPACK(val, "{si,si,ss,ss,ss,ss,si,si,sf,sf,sf,si,sb,sb,sb,sb,sI,si}",
-			"id", proxy->id, "userid", proxy->userid, "url", proxy->url,
-	     "auth", proxy->auth, "pass", proxy->pass, "enonce1", proxy->enonce1 ? proxy->enonce1 : "",
-	     "nonce1len", proxy->nonce1len, "nonce2len", proxy->nonce2len, "diff", proxy->diff,
-	     "accepted", proxy->total_accepted, "rejected", proxy->total_rejected,
-	     "lastshare", proxy->last_share.tv_sec, "global", proxy->global, "notified", proxy->notified,
-	     "disabled", proxy->disabled, "alive", proxy->alive, "maxclients", proxy->clients_per_proxy,
-	     "subproxies", proxy->subproxy_count);
+		json_set_double(val, "accepted", proxy->total_accepted);
+		json_set_double(val, "rejected", proxy->total_rejected);
 	} else {
-		JSON_CPACK(val, "{si,si,si,ss,ss,ss,ss,si,si,sf,sf,sf,si,sb,sb,sb,sb,sI,si}",
-			"id", proxy->id, "subid", proxy->subid, "userid", proxy->userid, "url", proxy->url,
-	     "auth", proxy->auth, "pass", proxy->pass, "enonce1", proxy->enonce1 ? proxy->enonce1 : "",
-	     "nonce1len", proxy->nonce1len, "nonce2len", proxy->nonce2len, "diff", proxy->diff,
-	     "accepted", proxy->diff_accepted, "rejected", proxy->diff_rejected,
-	     "lastshare", proxy->last_share.tv_sec, "global", proxy->global, "notified", proxy->notified,
-	     "disabled", proxy->disabled, "alive", proxy->alive, "maxclients", proxy->clients_per_proxy,
-	     "subproxies", proxy->subproxy_count);
-
+		json_set_double(val, "accepted", proxy->diff_accepted);
+		json_set_double(val, "rejected", proxy->diff_rejected);
 	}
+	json_set_int(val, "lastshare", proxy->last_share.tv_sec);
+	json_set_bool(val, "global", proxy->global);
+	json_set_bool(val, "disabled", proxy->disabled);
+	json_set_bool(val, "alive", proxy->alive);
+	json_set_int(val, "maxclients", proxy->clients_per_proxy);
+	if (parent_proxy(proxy))
+		json_set_int(val, "subproxies", proxy->subproxy_count);
 out:
 	send_api_response(val, sockd);
 }
