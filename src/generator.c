@@ -568,7 +568,7 @@ out:
 	return buf;
 }
 
-static inline bool parent_proxy(proxy_instance_t *proxy)
+static inline bool parent_proxy(const proxy_instance_t *proxy)
 {
 	return (proxy->parent == proxy);
 }
@@ -2451,6 +2451,35 @@ static void send_stats(gdata_t *gdata, const int sockd)
 	send_api_response(val, sockd);
 }
 
+static json_t *proxystats(const proxy_instance_t *proxy)
+{
+	json_t *val;
+
+	val = json_object();
+	json_set_int(val, "id", proxy->id);
+	json_set_int(val, "userid", proxy->userid);
+	json_set_string(val, "url", proxy->url);
+	json_set_string(val, "auth", proxy->auth);
+	json_set_string(val, "pass", proxy->pass);
+	json_set_string(val, "enonce1", proxy->enonce1 ? proxy->enonce1 : "");
+	json_set_int(val, "nonce1len", proxy->nonce1len);
+	json_set_int(val, "nonce2len", proxy->nonce2len);
+	json_set_double(val, "diff", proxy->diff);
+	if (parent_proxy(proxy)) {
+		json_set_double(val, "total_accepted", proxy->total_accepted);
+		json_set_double(val, "total_rejected", proxy->total_rejected);
+		json_set_int(val, "subproxies", proxy->subproxy_count);
+	}
+	json_set_double(val, "accepted", proxy->diff_accepted);
+	json_set_double(val, "rejected", proxy->diff_rejected);
+	json_set_int(val, "lastshare", proxy->last_share.tv_sec);
+	json_set_bool(val, "global", proxy->global);
+	json_set_bool(val, "disabled", proxy->disabled);
+	json_set_bool(val, "alive", proxy->alive);
+	json_set_int(val, "maxclients", proxy->clients_per_proxy);
+	return val;
+}
+
 static void parse_proxystats(gdata_t *gdata, const int sockd, const char *buf)
 {
 	proxy_instance_t *proxy;
@@ -2481,30 +2510,7 @@ static void parse_proxystats(gdata_t *gdata, const int sockd, const char *buf)
 		val = json_errormsg("Proxy id %d:%d not found", id, subid);
 		goto out;
 	}
-	val = json_object();
-	json_set_int(val, "id", proxy->id);
-	json_set_int(val, "userid", proxy->userid);
-	json_set_string(val, "url", proxy->url);
-	json_set_string(val, "auth", proxy->auth);
-	json_set_string(val, "pass", proxy->pass);
-	json_set_string(val, "enonce1", proxy->enonce1 ? proxy->enonce1 : "");
-	json_set_int(val, "nonce1len", proxy->nonce1len);
-	json_set_int(val, "nonce2len", proxy->nonce2len);
-	json_set_double(val, "diff", proxy->diff);
-	if (totals) {
-		json_set_double(val, "accepted", proxy->total_accepted);
-		json_set_double(val, "rejected", proxy->total_rejected);
-	} else {
-		json_set_double(val, "accepted", proxy->diff_accepted);
-		json_set_double(val, "rejected", proxy->diff_rejected);
-	}
-	json_set_int(val, "lastshare", proxy->last_share.tv_sec);
-	json_set_bool(val, "global", proxy->global);
-	json_set_bool(val, "disabled", proxy->disabled);
-	json_set_bool(val, "alive", proxy->alive);
-	json_set_int(val, "maxclients", proxy->clients_per_proxy);
-	if (parent_proxy(proxy))
-		json_set_int(val, "subproxies", proxy->subproxy_count);
+	val = proxystats(proxy);
 out:
 	send_api_response(val, sockd);
 }
