@@ -408,16 +408,18 @@ struckout:
 }
 
 static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
-			   char *by, char *code, char *inet,
-			   __maybe_unused tv_t *notcd, K_TREE *trf_root)
+			   char *by, char *code, char *inet, tv_t *cd,
+			   K_TREE *trf_root)
 {
-	K_ITEM *i_username, *i_workername, *i_diffdef, *u_item, *w_item;
+	K_ITEM *i_username, *i_workername, *i_diffdef, *i_oldworkers;
+	K_ITEM *u_item, *ua_item, *w_item;
 	HEARTBEATQUEUE *heartbeatqueue;
 	K_ITEM *hq_item;
 	char workername_buf[32]; // 'workername:' + digits
 	char diffdef_buf[32]; // 'difficultydefault:' + digits
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	USERATTS *useratts;
 	WORKERS *workers;
 	USERS *users;
 	int32_t difficultydefault;
@@ -447,6 +449,37 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 
 		// Default answer if no problems
 		answer = strdup("updated");
+
+		i_oldworkers = optional_name(trf_root, "oldworkers",
+					     1, NULL, reply, siz);
+		if (i_oldworkers) {
+			bool update = false;
+			int64_t new_ow = atol(transfer_data(i_oldworkers));
+
+			K_RLOCK(useratts_free);
+			ua_item = find_useratts(users->userid, USER_OLD_WORKERS);
+			K_RUNLOCK(useratts_free);
+			if (!ua_item) {
+				if (new_ow != USER_OLD_WORKERS_DEFAULT)
+					update = true;
+			} else {
+				DATA_USERATTS(useratts, ua_item);
+				if (new_ow != useratts->attnum)
+					update = true;
+			}
+			if (update) {
+				ua_item = useratts_add(conn, users->username,
+							USER_OLD_WORKERS, EMPTY,
+							EMPTY, EMPTY,
+							transfer_data(i_oldworkers),
+							EMPTY, EMPTY, EMPTY,
+							by, code, inet, cd,
+							trf_root, false);
+				if (!ua_item)
+					reason = "Invalid";
+			}
+			goto kazuki;
+		}
 
 		// Loop through the list of workers and do any changes
 		for (workernum = 0; workernum < 9999; workernum++) {
@@ -524,6 +557,7 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 		}
 	}
 
+kazuki:
 struckout:
 	if (reason) {
 		if (answer)
@@ -1336,8 +1370,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	DATA_WORKERS_NULL(workers, w_item);
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
-			ws_item = find_workerstatus(users->userid, workers->workername,
-						    __FILE__, __func__, __LINE__);
+			ws_item = get_workerstatus(users->userid, workers->workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
 				t_diffacc += workerstatus->diffacc;
@@ -1520,10 +1553,13 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	WORKERS lookworkers, *workers;
 	WORKERSTATUS *workerstatus;
 	USERSTATS *userstats;
+	USERATTS *useratts;
 	USERS *users;
 	char reply[1024] = "";
 	char tmp[1024];
+	int64_t oldworkers = USER_OLD_WORKERS_DEFAULT;
 	size_t siz = sizeof(reply);
+	tv_t last_share;
 	char *buf;
 	size_t len, off;
 	bool stats, percent;
@@ -1561,6 +1597,14 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (percent)
 		return cmd_percent(cmd, id, now, users);
 
+	K_RLOCK(useratts_free);
+	ua_item = find_useratts(users->userid, USER_OLD_WORKERS);
+	K_RUNLOCK(useratts_free);
+	if (ua_item) {
+		DATA_USERATTS(useratts, ua_item);
+		oldworkers = useratts->attnum;
+	}
+
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 	snprintf(tmp, sizeof(tmp), "blockacc=%.1f%c",
@@ -1569,6 +1613,13 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "blockreward=%"PRId64"%c",
 				   pool.reward, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "oldworkers=%"PRId64"%c",
+				   oldworkers, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	if (oldworkers > 0)
+		oldworkers *= 24L * 60L * 60L;
+	else
+		oldworkers = now->tv_sec + 1;
 
 	INIT_WORKERS(&w_look);
 
@@ -1582,157 +1633,169 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	rows = 0;
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
-			str_to_buf(workers->workername, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+			ws_item = get_workerstatus(users->userid, workers->workername);
+			if (ws_item) {
+				DATA_WORKERSTATUS(workerstatus, ws_item);
+				K_RLOCK(workerstatus_free);
+				copy_tv(&last_share, &(workerstatus->last_share));
+				K_RUNLOCK(workerstatus_free);
+			} else
+				last_share.tv_sec = last_share.tv_usec = 0L;
 
-			int_to_buf(workers->difficultydefault, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "difficultydefault:%d=%s%c", rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+			if (tvdiff(now, &last_share) < oldworkers) {
+				str_to_buf(workers->workername, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			str_to_buf(workers->idlenotificationenabled, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "idlenotificationenabled:%d=%s%c", rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+				int_to_buf(workers->difficultydefault, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "difficultydefault:%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			int_to_buf(workers->idlenotificationtime, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "idlenotificationtime:%d=%s%c", rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+				str_to_buf(workers->idlenotificationenabled, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "idlenotificationenabled:%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			if (stats) {
-				double w_hashrate5m, w_hashrate1hr;
-				double w_hashrate24hr;
-				int64_t w_elapsed;
-				tv_t w_lastshare;
-				double w_lastdiff, w_diffacc, w_diffinv;
-				double w_diffsta, w_diffdup;
-				double w_diffhi, w_diffrej;
-				double w_shareacc, w_shareinv;
-				double w_sharesta, w_sharedup;
-				double w_sharehi, w_sharerej;
+				int_to_buf(workers->idlenotificationtime, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "idlenotificationtime:%d=%s%c", rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-				w_hashrate5m = w_hashrate1hr =
-				w_hashrate24hr = 0.0;
-				w_elapsed = -1;
-				w_lastshare.tv_sec = 0;
-				w_lastdiff = w_diffacc = w_diffinv =
-				w_diffsta = w_diffdup =
-				w_diffhi = w_diffrej =
-				w_shareacc = w_shareinv =
-				w_sharesta = w_sharedup =
-				w_sharehi = w_sharerej = 0;
+				if (stats) {
+					double w_hashrate5m, w_hashrate1hr;
+					double w_hashrate24hr;
+					int64_t w_elapsed;
+					tv_t w_lastshare;
+					double w_lastdiff, w_diffacc, w_diffinv;
+					double w_diffsta, w_diffdup;
+					double w_diffhi, w_diffrej;
+					double w_shareacc, w_shareinv;
+					double w_sharesta, w_sharedup;
+					double w_sharehi, w_sharerej;
 
-				ws_item = find_workerstatus(users->userid, workers->workername,
-							    __FILE__, __func__, __LINE__);
-				if (ws_item) {
-					DATA_WORKERSTATUS(workerstatus, ws_item);
-					w_lastshare.tv_sec = workerstatus->last_share.tv_sec;
-					w_lastdiff = workerstatus->last_diff;
-					w_diffacc = workerstatus->diffacc;
-					w_diffinv = workerstatus->diffinv;
-					w_diffsta = workerstatus->diffsta;
-					w_diffdup = workerstatus->diffdup;
-					w_diffhi  = workerstatus->diffhi;
-					w_diffrej = workerstatus->diffrej;
-					w_shareacc = workerstatus->shareacc;
-					w_shareinv = workerstatus->shareinv;
-					w_sharesta = workerstatus->sharesta;
-					w_sharedup = workerstatus->sharedup;
-					w_sharehi = workerstatus->sharehi;
-					w_sharerej = workerstatus->sharerej;
-				}
+					w_hashrate5m = w_hashrate1hr =
+					w_hashrate24hr = 0.0;
+					w_elapsed = -1;
 
-				/* TODO: workers_root userid+worker is ordered
-				 *  so no 'find' should be needed -
-				 *  just cmp to last 'unused us_item' userid+worker
-				 *  then step it forward to be the next ready 'unused' */
-				K_RLOCK(userstats_free);
-				us_item = find_userstats(users->userid, workers->workername);
-				if (us_item) {
-					DATA_USERSTATS(userstats, us_item);
-					if (tvdiff(now, &(userstats->statsdate)) < USERSTATS_PER_S) {
-						w_hashrate5m += userstats->hashrate5m;
-						w_hashrate1hr += userstats->hashrate1hr;
-						w_hashrate24hr += userstats->hashrate24hr;
-						if (w_elapsed == -1 || w_elapsed > userstats->elapsed)
-							w_elapsed = userstats->elapsed;
+					if (!ws_item) {
+						w_lastshare.tv_sec = 0;
+						w_lastdiff = w_diffacc = w_diffinv =
+						w_diffsta = w_diffdup =
+						w_diffhi = w_diffrej =
+						w_shareacc = w_shareinv =
+						w_sharesta = w_sharedup =
+						w_sharehi = w_sharerej = 0;
+					} else {
+						DATA_WORKERSTATUS(workerstatus, ws_item);
+						// It's bad to read possibly changing data
+						K_RLOCK(workerstatus_free);
+						w_lastshare.tv_sec = workerstatus->last_share.tv_sec;
+						w_lastdiff = workerstatus->last_diff;
+						w_diffacc = workerstatus->diffacc;
+						w_diffinv = workerstatus->diffinv;
+						w_diffsta = workerstatus->diffsta;
+						w_diffdup = workerstatus->diffdup;
+						w_diffhi  = workerstatus->diffhi;
+						w_diffrej = workerstatus->diffrej;
+						w_shareacc = workerstatus->shareacc;
+						w_shareinv = workerstatus->shareinv;
+						w_sharesta = workerstatus->sharesta;
+						w_sharedup = workerstatus->sharedup;
+						w_sharehi = workerstatus->sharehi;
+						w_sharerej = workerstatus->sharerej;
+						K_RUNLOCK(workerstatus_free);
 					}
+
+					/* TODO: workers_root userid+worker is ordered
+					 *  so no 'find' should be needed -
+					 *  just cmp to last 'unused us_item' userid+worker
+					 *  then step it forward to be the next ready 'unused' */
+					K_RLOCK(userstats_free);
+					us_item = find_userstats(users->userid, workers->workername);
+					if (us_item) {
+						DATA_USERSTATS(userstats, us_item);
+						if (tvdiff(now, &(userstats->statsdate)) < USERSTATS_PER_S) {
+							w_hashrate5m += userstats->hashrate5m;
+							w_hashrate1hr += userstats->hashrate1hr;
+							w_hashrate24hr += userstats->hashrate24hr;
+							if (w_elapsed == -1 || w_elapsed > userstats->elapsed)
+								w_elapsed = userstats->elapsed;
+						}
+					}
+					K_RUNLOCK(userstats_free);
+
+					double_to_buf(w_hashrate5m, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_hashrate5m:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_hashrate1hr, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_hashrate24hr, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_hashrate24hr:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					bigint_to_buf(w_elapsed, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_elapsed:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					int_to_buf((int)(w_lastshare.tv_sec), reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_lastshare:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_lastdiff, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_lastdiff:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_diffacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_diffacc:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_diffinv, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_diffinv:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_diffsta, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_diffsta:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_diffdup, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_diffdup:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_diffhi, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_diffhi:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_diffrej, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_diffrej:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_shareacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_shareacc:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_shareinv, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_shareinv:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_sharesta, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_sharesta:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_sharedup, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_sharedup:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_sharehi, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_sharehi:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_sharerej, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_sharerej:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
 				}
-				K_RUNLOCK(userstats_free);
-
-				double_to_buf(w_hashrate5m, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_hashrate5m:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_hashrate1hr, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_hashrate24hr, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_hashrate24hr:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				bigint_to_buf(w_elapsed, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_elapsed:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				int_to_buf((int)(w_lastshare.tv_sec), reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_lastshare:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_lastdiff, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_lastdiff:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_diffacc, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_diffacc:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_diffinv, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_diffinv:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_diffsta, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_diffsta:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_diffdup, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_diffdup:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_diffhi, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_diffhi:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_diffrej, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_diffrej:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_shareacc, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_shareacc:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_shareinv, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_shareinv:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_sharesta, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_sharesta:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_sharedup, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_sharedup:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_sharehi, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_sharehi:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				double_to_buf(w_sharerej, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "w_sharerej:%d=%s%c", rows, reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
+				rows++;
 			}
-
-			rows++;
 		}
 		w_item = next_in_ktree(w_ctx);
 		DATA_WORKERS_NULL(workers, w_item);
