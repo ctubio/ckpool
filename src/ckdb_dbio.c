@@ -2806,7 +2806,8 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 					 shares->createdate.tv_sec,
 					 shares->createdate.tv_usec);
 				FREENULL(st);
-				return false;
+				// Reloading a share already summarised
+				return true;
 			}
 
 			if (!sharesummary->reset) {
