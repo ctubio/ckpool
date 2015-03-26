@@ -750,58 +750,28 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
    TODO: combine set_block_share_counters() with this? */
 void workerstatus_ready()
 {
-	K_TREE_CTX ws_ctx[1], ss_ctx[1], ms_ctx[1];
-	K_ITEM *ws_item, us_look, ss_look, *us_item, *ss_item;
-	K_ITEM *ms_item, ms_look, *wm_item;
-	USERSTATS *userstats;
-	SHARESUMMARY looksharesummary, *sharesummary;
-	MARKERSUMMARY *markersummary;
+	K_TREE_CTX ws_ctx[1];
+	K_ITEM *ws_item, *ms_item, *ss_item;
 	WORKERSTATUS *workerstatus;
+	MARKERSUMMARY *markersummary;
+	SHARESUMMARY *sharesummary;
 
 	LOGWARNING("%s(): Updating workerstatus...", __func__);
 
-	INIT_USERSTATS(&us_look);
-	INIT_MARKERSUMMARY(&ms_look);
-	INIT_SHARESUMMARY(&ss_look);
 	ws_item = first_in_ktree(workerstatus_root, ws_ctx);
 	while (ws_item) {
 		DATA_WORKERSTATUS(workerstatus, ws_item);
 
-		// Zero or one
-		K_RLOCK(userstats_free);
-		us_item = find_userstats(workerstatus->userid,
-					 workerstatus->workername);
-		K_RUNLOCK(userstats_free);
-		if (us_item) {
-			DATA_USERSTATS(userstats, us_item);
-			if (userstats->idle) {
-				if (tv_newer(&(workerstatus->last_idle),
-					     &(userstats->statsdate))) {
-					copy_tv(&(workerstatus->last_idle),
-						&(userstats->statsdate));
-				}
-			} else {
-				if (tv_newer(&(workerstatus->last_stats),
-					     &(userstats->statsdate))) {
-					copy_tv(&(workerstatus->last_stats),
-						&(userstats->statsdate));
-				}
-			}
-		}
-
 		K_RLOCK(markersummary_free);
-		// This is the last one
+		// This is the last share datestamp
 		ms_item = find_markersummary_userid(workerstatus->userid,
-						    workerstatus->workername, ms_ctx);
+						    workerstatus->workername,
+						    NULL);
 		K_RUNLOCK(markersummary_free);
 		if (ms_item) {
 			DATA_MARKERSUMMARY(markersummary, ms_item);
-			K_RLOCK(workmarkers_free);
-			wm_item = find_workmarkerid(markersummary->markerid,
-						    false, MARKER_PROCESSED);
-			K_RUNLOCK(workmarkers_free);
-			if (wm_item &&
-			    tv_newer(&(workerstatus->last_share), &(markersummary->lastshare))) {
+			if (tv_newer(&(workerstatus->last_share),
+				     &(markersummary->lastshare))) {
 				copy_tv(&(workerstatus->last_share),
 					&(markersummary->lastshare));
 				workerstatus->last_diff =
@@ -809,14 +779,9 @@ void workerstatus_ready()
 			}
 		}
 
-		// The last one
-		looksharesummary.userid = workerstatus->userid;
-		looksharesummary.workername = workerstatus->workername;
-		looksharesummary.workinfoid = MAXID;
-		ss_look.data = (void *)(&looksharesummary);
 		K_RLOCK(sharesummary_free);
-		ss_item = find_before_in_ktree(sharesummary_root, &ss_look,
-					       cmp_sharesummary, ss_ctx);
+		ss_item = find_last_sharesummary(workerstatus->userid,
+						 workerstatus->workername);
 		K_RUNLOCK(sharesummary_free);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -1929,6 +1894,28 @@ K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t workinfoid)
 	INIT_SHARESUMMARY(&look);
 	look.data = (void *)(&sharesummary);
 	return find_in_ktree(sharesummary_root, &look, cmp_sharesummary, ctx);
+}
+
+K_ITEM *find_last_sharesummary(int64_t userid, char *workername)
+{
+	SHARESUMMARY look_sharesummary, *sharesummary;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *item;
+
+	look_sharesummary.userid = userid;
+	look_sharesummary.workername = workername;
+	look_sharesummary.workinfoid = MAXID;
+
+	INIT_SHARESUMMARY(&look);
+	look.data = (void *)(&look_sharesummary);
+	item = find_before_in_ktree(sharesummary_root, &look, cmp_sharesummary, ctx);
+	if (item) {
+		DATA_SHARESUMMARY(sharesummary, item);
+		if (sharesummary->userid != userid ||
+		    strcmp(sharesummary->workername, workername) != 0)
+			item = NULL;
+	}
+	return item;
 }
 
 /* TODO: markersummary checking?
@@ -3577,7 +3564,7 @@ void dsp_markersummary(K_ITEM *item, FILE *stream)
 	}
 }
 
-// order by markerid asc,userid asc,workername asc
+// order by markerid asc,userid asc,workername asc (has no expirydate)
 cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b)
 {
 	MARKERSUMMARY *ma, *mb;
@@ -3592,7 +3579,7 @@ cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-// order by userid asc,workername asc,lastshare asc
+// order by userid asc,workername asc,lastshare asc (has no expirydate)
 cmp_t cmp_markersummary_userid(K_ITEM *a, K_ITEM *b)
 {
 	MARKERSUMMARY *ma, *mb;
@@ -3607,11 +3594,16 @@ cmp_t cmp_markersummary_userid(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-// Finds the last markersummary for the worker but also returns the CTX
-K_ITEM *find_markersummary_userid(int64_t userid, char *workername, K_TREE_CTX *ctx)
+// Finds the last markersummary for the worker and optionally return the CTX
+K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
+				  K_TREE_CTX *ctx)
 {
+	K_TREE_CTX ctx0[1];
 	K_ITEM look, *ms_item = NULL;
 	MARKERSUMMARY markersummary, *ms;
+
+	if (ctx == NULL)
+		ctx = ctx0;
 
 	markersummary.userid = userid;
 	markersummary.workername = workername;

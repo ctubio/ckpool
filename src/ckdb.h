@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.040"
+#define CKDB_VERSION DB_VERSION"-1.041"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1808,6 +1808,7 @@ extern cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
 extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
 extern K_ITEM *find_sharesummary(int64_t userid, char *workername,
 				 int64_t workinfoid);
+extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
 extern void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			   char *by, char *code, char *inet, tv_t *cd);
 #define dbhash2btchash(_hash, _buf, _siz) \
