@@ -9,6 +9,7 @@ for(var i=0;i<rows;i++){var s=parseFloat(d['start:'+i]);var e=parseFloat(d['end:
 var tav=(tda/(xmax-xmin))*Math.pow(2,32)/Math.pow(10,12);
 var p5=(ymax-ymin)*0.05;ymax+=p5;ymin-=p5;if(ymin<0){ymin=0}
 if(c['zerob']){ymin=0}
+ghg(c,xmax-xmin);
 ggr(c,0.9,0.9,'TH/s',rows,xmin,xmax,ymin,ymax,d,'nx:','vx:','ths:',tav)}
 c={};
 function dodrw(data,cbx){if(hasCan()){gdrw(c,sep(data),cbx)}}
@@ -40,7 +41,11 @@ function dousperf($data, $user)
 
 	$pg .= '<div>';
 	foreach ($cbx as $nam => $txt)
-		$pg .= "&nbsp;<input type=checkbox id=$nam onclick='gact(this)'>$txt&nbsp;";
+	{
+		$pg .= ' <span class=nb>';
+		$pg .= "<input type=checkbox id=$nam onclick='gact(this)'>";
+		$pg .= "$txt&nbsp;</span>";
+	}
 
 	$pg .= '</div>';
 	$pg .= '<div id=can0><canvas id=can width=1 height=1>';
