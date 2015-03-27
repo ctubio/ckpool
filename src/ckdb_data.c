@@ -709,8 +709,10 @@ K_ITEM *get_workerstatus(int64_t userid, char *workername)
 
 /* Worker loading/creation calls this with create = true
  * All others with create = false since the workerstatus should exist
- * Failure is a code bug and a reported error, but handled anyway
+ * If it is missing, it will check for and create the worker if needed
+ *  and create a new workerstatus and return it
  * This has 2 sets of file/func/line to allow 2 levels of traceback
+ *  to see why it happened
  */
 K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 				  bool create, const char *file2,
@@ -718,32 +720,55 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 				  WHERE_FFL_ARGS)
 {
 	WORKERSTATUS *row;
-	K_ITEM *item;
+	K_ITEM *ws_item, *w_item = NULL;
+	bool ws_err = false, w_err = false;
+	tv_t now;
 
-	item = get_workerstatus(userid, workername);
-	if (!item) {
+	ws_item = get_workerstatus(userid, workername);
+	if (!ws_item) {
 		if (!create) {
-			LOGEMERG("%s(): Missing workerstatus %"PRId64"/%s"
-				 WHERE_FFL WHERE_FFL,
-				 __func__, userid, workername,
-				 file2, func2, line2, WHERE_FFL_PASS);
-			return NULL;
+			ws_err = true;
+
+			w_item = find_workers(userid, workername);
+			if (!w_item) {
+				w_err = true;
+				setnow(&now);
+				w_item = workers_add(NULL, userid, workername,
+						     NULL, NULL, NULL,
+						     by_default,
+						     (char *)__func__,
+						     (char *)inet_default,
+						     &now, NULL);
+			}
 		}
 
 		K_WLOCK(workerstatus_free);
-		item = k_unlink_head(workerstatus_free);
+		ws_item = k_unlink_head(workerstatus_free);
 
-		DATA_WORKERSTATUS(row, item);
+		DATA_WORKERSTATUS(row, ws_item);
 
 		bzero(row, sizeof(*row));
 		row->userid = userid;
 		STRNCPY(row->workername, workername);
 
-		workerstatus_root = add_to_ktree(workerstatus_root, item, cmp_workerstatus);
-		k_add_head(workerstatus_store, item);
+		workerstatus_root = add_to_ktree(workerstatus_root, ws_item, cmp_workerstatus);
+		k_add_head(workerstatus_store, ws_item);
 		K_WUNLOCK(workerstatus_free);
+
+		if (ws_err) {
+			LOGERR("%s(): CREATED Missing workerstatus %"PRId64"/%s"
+				WHERE_FFL WHERE_FFL,
+				__func__, userid, workername,
+				file2, func2, line2, WHERE_FFL_PASS);
+			if (w_err) {
+				LOGERR("%s(): %s Missing worker %"PRId64"/%s",
+					__func__,
+					w_item ? "CREATED" : "FAILED TO CREATE",
+					userid, workername);
+			}
+		}
 	}
-	return item;
+	return ws_item;
 }
 
 /* All data is loaded, now update workerstatus fields
