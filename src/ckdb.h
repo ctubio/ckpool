@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.044"
+#define CKDB_VERSION DB_VERSION"-1.045"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -175,6 +175,12 @@ extern POOLSTATUS pool;
 // TAB
 #define FLDSEP 0x09
 #define FLDSEPSTR "\011"
+
+#define WORKSEP1 '.'
+#define WORKSEP1STR "."
+#define WORKSEP1PATT "\\."
+#define WORKSEP2 '_'
+#define WORKSEP2STR "_"
 
 #define MAXID 0x7fffffffffffffffLL
 
@@ -838,6 +844,16 @@ extern K_STORE *workers_store;
 // 0 means it's not set and will be flagged disabled
 #define IDLENOTIFICATIONTIME_DEF 0
 #define IDLENOTIFICATIONTIME_DEF_STR STRINT(IDLENOTIFICATIONTIME_DEF)
+
+#define WORKERS_SEL_SEP ','
+#define WORKERS_SEL_SEP_STR ","
+/* There are 2 special select workernames
+ * A DB workername can't accidentally match them
+ *  when including the WORKSEPx at the front of the workername,
+ *  since these 2 don't start with WORKSEP1 or WORKSEP2 */
+#define WORKERS_ALL "all"
+// Empty has a value rather than "", so that "" means nothing selected
+#define WORKERS_EMPTY "noname"
 
 // PAYMENTADDRESSES
 typedef struct paymentaddresses {

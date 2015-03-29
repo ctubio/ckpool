@@ -4679,13 +4679,96 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+/* Find the offset, in list, of the workername
+ * -1 means NULL list, empty list or not found */
+static int worker_offset(char **list, char *workername)
+{
+	char *c1, *c2;
+	int i;
+
+	if (!list || !(*list))
+		return -1;
+
+	/* Find the start of the workername including the SEP */
+	c1 = strchr(workername, WORKSEP1);
+	c2 = strchr(workername, WORKSEP2);
+	if (c1 || c2) {
+		if (!c1 || (c1 && c2 && (c2 < c1)))
+			c1 = c2;
+	}
+	// No workername after the username
+	if (!c1)
+		c1 = WORKERS_EMPTY;
+	for (i = 0; list[i]; i++) {
+		if (strcmp(c1, list[i]) == 0)
+			return i;
+	}
+	return -1;
+}
+
+/* Some arbitrarily large limit, increase it if needed
+    (doesn't need to be very large) */
+#define SELECT_LIMIT 63
+
+/* select is a string of workernames separated by WORKERS_SEL_SEP
+ * Return an array of strings of select broken up
+ * The array is terminated by NULL
+ *  and will have 0 elements if select is NULL/empty
+ * The count of the first occurrence of WORKERS_ALL is returned in *all_count,
+ *  or -1 if WORKERS_ALL isn't found */
+static char **select_list(char *select, int *all_count)
+{
+	size_t len, offset, siz;
+	char **list = NULL;
+	int count;
+	char *end;
+
+	*all_count = -1;
+
+	siz = sizeof(char *) * (SELECT_LIMIT + 1);
+	list = malloc(siz);
+	if (!list)
+		quithere(1, "malloc (%d) OOM", (int)siz);
+	list[0] = NULL;
+
+	if (select == NULL || *select == '\0')
+		return list;
+
+	len = strlen(select);
+	count = 0;
+	offset = 0;
+	while (offset < len) {
+		if (select[offset] == WORKERS_SEL_SEP)
+			offset++;
+		else {
+			list[count] = select + offset;
+			list[count+1] = NULL;
+			end = strchr(list[count], WORKERS_SEL_SEP);
+			if (end != NULL) {
+				offset = 1 + end - select;
+				*end = '\0';
+			}
+
+			if (*all_count == -1 &&
+			    strcasecmp(list[count], WORKERS_ALL) == 0) {
+				*all_count = count;
+			}
+
+			if (end == NULL || ++count > SELECT_LIMIT)
+				break;
+		}
+	}
+	return list;
+}
+
 static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
 			  __maybe_unused tv_t *notcd,
 			  __maybe_unused K_TREE *trf_root)
 {
-	K_ITEM *i_username, *u_item, *m_item, ms_look, *wm_item, *ms_item, *wi_item;
+	K_ITEM *i_username, *i_select;
+	K_ITEM *u_item, *m_item, ms_look, *wm_item, *ms_item, *wi_item;
 	K_TREE_CTX wm_ctx[1], ms_ctx[1];
 	WORKMARKERS *wm;
 	WORKINFO *wi;
@@ -4695,10 +4778,13 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char reply[1024] = "";
 	char tmp[1024];
 	size_t siz = sizeof(reply);
+	char *select = NULL;
+	char **selects = NULL;
+	bool used[SELECT_LIMIT];
 	char *buf;
 	size_t len, off;
 	tv_t marker_end = { 0L, 0L };
-	int rows;
+	int rows, want, i, where_all;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -4712,6 +4798,21 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!u_item)
 		return strdup("bad");
 	DATA_USERS(users, u_item);
+
+	i_select = optional_name(trf_root, "select", 1, NULL, reply, siz);
+	if (i_select)
+		select = strdup(transfer_data(i_select));
+
+	selects = select_list(select, &where_all);
+	// Nothing selected = all
+	if (*selects == NULL) {
+		where_all = 0;
+		selects[0] = WORKERS_ALL;
+		selects[1] = NULL;
+	}
+
+	if (where_all >= 0)
+		used[where_all] = true;
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
@@ -4756,6 +4857,30 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 				ms_add.shareacc += ms->shareacc;
 				ms_add.sharerej += ms->sharerej;
 
+				want = worker_offset(selects, ms->workername);
+				if (want >= 0) {
+					used[want] = true;
+					double_to_buf(ms->diffacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_diffacc:%d=%s%c",
+								   want, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(ms->diffrej, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_diffrej:%d=%s%c",
+								   want, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(ms->shareacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_shareacc:%d=%s%c",
+								   want, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(ms->sharerej, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_sharerej:%d=%s%c",
+								   want, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+				}
+
 				ms_item = next_in_ktree(ms_ctx);
 				DATA_MARKERSUMMARY_NULL(ms, ms_item);
 			}
@@ -4775,7 +4900,9 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							wm->description,
 							wm->workinfoidend);
 						snprintf(reply, siz, "data error 1");
-						return strdup(reply);
+						free(buf);
+						free(selects);
+						return(strdup(reply));
 					}
 					DATA_WORKINFO(wi, wi_item);
 					copy_tv(&marker_end, &(wi->createdate));
@@ -4794,13 +4921,15 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 					__func__, wm->markerid, wm->description,
 					wm->workinfoidstart);
 				snprintf(reply, siz, "data error 2");
-				return strdup(reply);
+				free(buf);
+				free(selects);
+				return(strdup(reply));
 			}
 			DATA_WORKINFO(wi, wi_item);
 
 			bigint_to_buf(wm->markerid, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "markerid:%d=%s%c",
-						   rows, reply, FLDSEP);
+					   rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			str_to_buf(wm->description, reply, sizeof(reply));
@@ -4824,27 +4953,33 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 						   rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
-			double_to_buf(ms_add.diffacc, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "diffacc:%d=%s%c",
-						   rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+			if (where_all >= 0) {
+				double_to_buf(ms_add.diffacc, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_diffacc:%d=%s%c",
+							   where_all, rows,
+							   reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			double_to_buf(ms_add.diffrej, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "diffrej:%d=%s%c",
-						   rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+				double_to_buf(ms_add.diffrej, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_diffrej:%d=%s%c",
+							   where_all, rows,
+							   reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			double_to_buf(ms_add.shareacc, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "shareacc:%d=%s%c",
-						   rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+				double_to_buf(ms_add.shareacc, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_shareacc:%d=%s%c",
+							   where_all, rows,
+							   reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			double_to_buf(ms_add.sharerej, reply, sizeof(reply));
-			snprintf(tmp, sizeof(tmp), "sharerej:%d=%s%c",
-						   rows, reply, FLDSEP);
-			APPEND_REALLOC(buf, off, len, tmp);
+				double_to_buf(ms_add.sharerej, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_sharerej:%d=%s%c",
+							   where_all, rows,
+							   reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
 
-			rows++;
+				rows++;
+			}
 
 			// Setup for next shift
 			copy_tv(&marker_end, &(wi->createdate));
@@ -4856,17 +4991,55 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	K_RUNLOCK(workmarkers_free);
 
+	for (i = 0; selects[i]; i++) {
+		if (used[i]) {
+			snprintf(tmp, sizeof(tmp),
+				 "%d_worker=%s%c",
+				 i, selects[i], FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp),
+				 "%d_flds=%s%c", i,
+				 "diffacc,diffrej,shareacc,sharerej", FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+	}
+
+	// Missing if all isn't selected
+	if (where_all >= 0) {
+		snprintf(tmp, sizeof(tmp), "prefix_all=%d_%c",
+					   where_all, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+	}
+
+	/* rows is an upper limit of rows in each worker
+	 * 'all' starts at 0 and finishes at rows-1
+	 * other workers start >= 0 and finish <= rows-1 */
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
-		 rows, FLDSEP,
-		 "markerid,shift,start,end,diffacc,diffrej,shareacc,sharerej",
-		 FLDSEP);
+				   rows, FLDSEP,
+				   "markerid,shift,start,end", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Shifts", FLDSEP, "");
+	snprintf(tmp, sizeof(tmp), "arn=%s", "Shifts");
 	APPEND_REALLOC(buf, off, len, tmp);
+	for (i = 0; selects[i]; i++) {
+		if (used[i]) {
+			snprintf(tmp, sizeof(tmp), ",Worker_%d", i);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+	}
+
+	snprintf(tmp, sizeof(tmp), "%carp=", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	for (i = 0; selects[i]; i++) {
+		if (used[i]) {
+			snprintf(tmp, sizeof(tmp), ",%d_", i);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+	}
 
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
-	return buf;
+	free(selects);
+	return(buf);
 }
 
 static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,

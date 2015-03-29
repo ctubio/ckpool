@@ -4,8 +4,8 @@ function uspg()
 {
 $g = "function gdrw(c,d,cbx){gc(c);ghrs(c);gopt(c,cbx);
 gfs(c,'white');gss(c,'#0000c0');glw(c,2);gbd(c);
-var rows=d['rows'],ymin=-1,ymax=0,xmin=-1,xmax=0,tda=0;
-for(var i=0;i<rows;i++){var s=parseFloat(d['start:'+i]);var e=parseFloat(d['end:'+i]);var da=parseFloat(d['diffacc:'+i]);tda+=da;var ths=(da/(e-s))*Math.pow(2,32)/Math.pow(10,12);d['ths:'+i]=ths;if(ymin==-1||ymin>ths){ymin=ths}if(ths>ymax)ymax=ths;d['nx:'+i]=sn(i,d['shift:'+i]);if(xmin==-1||xmin>s){xmin=s}if(xmax<e){xmax=e}d['vx:'+i]=(s+e)/2.0};
+var rows=d['rows'],ymin=-1,ymax=0,xmin=-1,xmax=0,tda=0,pre=d['prefix_all'];
+for(var i=0;i<rows;i++){var s=parseFloat(d['start:'+i]);var e=parseFloat(d['end:'+i]);var da=parseFloat(d[pre+'diffacc:'+i]);tda+=da;var ths=(da/(e-s))*Math.pow(2,32)/Math.pow(10,12);d['ths:'+i]=ths;if(ymin==-1||ymin>ths){ymin=ths}if(ths>ymax)ymax=ths;d['nx:'+i]=sn(i,d['shift:'+i]);if(xmin==-1||xmin>s){xmin=s}if(xmax<e){xmax=e}d['vx:'+i]=(s+e)/2.0};
 var tav=(tda/(xmax-xmin))*Math.pow(2,32)/Math.pow(10,12);
 var p5=(ymax-ymin)*0.05;ymax+=p5;ymin-=p5;if(ymin<0){ymin=0}
 if(c['zerob']){ymin=0}

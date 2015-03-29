@@ -153,8 +153,8 @@ static bool markersummary_auto;
 
 int switch_state = SWITCH_STATE_ALL;
 
-// disallow: '/' '.' '_' and FLDSEP
-const char *userpatt = "^[^/\\._"FLDSEPSTR"]*$";
+// disallow: '/' WORKSEP1 WORKSEP2 and FLDSEP
+const char *userpatt = "^[^/"WORKSEP1PATT WORKSEP2STR FLDSEPSTR"]*$";
 const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.-]*[A-Za-z0-9]$";
 const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 const char *intpatt = "^[0-9][0-9]*$";
