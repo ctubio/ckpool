@@ -1516,6 +1516,43 @@ K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height)
 	return best;
 }
 
+/*
+ * Get a setting value for the given setting name
+ * First check if there is a USERATTS attnum value != 0
+ * If not, check if there is an OPTIONCONTROL record (can be any value)
+ * If not, return the default
+ * WARNING OPTIONCONTROL is time dependent,
+ *  i.e. ensure now and pool.height are correct (e.g. during a reload)
+ */
+int64_t user_sys_setting(int64_t userid, char *setting_name,
+			 int64_t setting_default, tv_t *now)
+{
+	OPTIONCONTROL *optioncontrol;
+	K_ITEM *ua_item, *oc_item;
+	USERATTS *useratts;
+
+	if (userid != 0) {
+		K_RLOCK(useratts_free);
+		ua_item = find_useratts(userid, setting_name);
+		K_RUNLOCK(useratts_free);
+		if (ua_item) {
+			DATA_USERATTS(useratts, ua_item);
+			if (useratts->attnum != 0)
+				return useratts->attnum;
+		}
+	}
+
+	K_RLOCK(optioncontrol_free);
+	oc_item = find_optioncontrol(setting_name, now, pool.height);
+	K_RUNLOCK(optioncontrol_free);
+	if (oc_item) {
+		DATA_OPTIONCONTROL(optioncontrol, oc_item);
+		return (int64_t)atol(optioncontrol->optionvalue);
+	}
+
+	return setting_default;
+}
+
 // order by workinfoid asc,expirydate asc
 cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b)
 {
@@ -2721,7 +2758,7 @@ K_ITEM *find_last_payouts()
 			return p_item;
 		p_item = prev_in_ktree(ctx);
 	}
-	return p_item;
+	return NULL;
 }
 
 K_ITEM *find_payoutid(int64_t payoutid)
@@ -2737,6 +2774,43 @@ K_ITEM *find_payoutid(int64_t payoutid)
 	INIT_PAYOUTS(&look);
 	look.data = (void *)(&payouts);
 	return find_in_ktree(payouts_id_root, &look, cmp_payouts_id, ctx);
+}
+
+/* Values from payout stats, returns -1 if statname isn't found
+ * If code needs a value then it probably really should be a new payouts field
+ *  rather than stored in the stats passed to the pplns2 web page
+ *  but anyway ... */
+double payout_stats(PAYOUTS *payouts, char *statname)
+{
+	char buf[1024]; // If a number is bigger than this ... bad luck
+	double ret = -1.0;
+	size_t numlen, len = strlen(statname);
+	char *pos, *tab;
+
+	pos = payouts->stats;
+	while (pos && *pos) {
+		if (strncmp(pos, statname, len) == 0 && pos[len] == '=') {
+			pos += len+1;
+			// They should only contain +ve numbers
+			if (*pos && isdigit(*pos)) {
+				tab = strchr(pos, '\t');
+				if (!tab)
+					numlen = strlen(pos);
+				else
+					numlen = tab - pos;
+				if (numlen >= sizeof(buf))
+					numlen = sizeof(buf) - 1;
+				STRNCPYSIZ(buf, pos, numlen);
+				// ctv will only return the seconds
+				ret = atof(buf);
+			}
+			break;
+		}
+		pos = strchr(pos, '\t');
+		if (pos)
+			pos++;
+	}
+	return ret;
 }
 
 /* Find the block_workinfoid of the block requested

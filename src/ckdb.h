@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.045"
+#define CKDB_VERSION DB_VERSION"-1.046"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1282,6 +1282,12 @@ extern cklock_t process_pplns_lock;
 #define PAYOUTS_ORPHAN_STR "O"
 #define PAYORPHAN(_status) ((_status)[0] == PAYOUTS_ORPHAN)
 
+// Default number of shifts (payouts) to display on web
+#define SHIFTS_DEFAULT 99
+/* OptionControl can override it
+ * UserAtts can also at the user level */
+#define SHIFTS_SETTING_NAME "ShiftsPageSize"
+
 /*
 // EVENTLOG
 typedef struct eventlog {
@@ -1806,6 +1812,8 @@ extern cmp_t cmp_accountbalance(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_accountbalance(int64_t userid);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height);
+extern int64_t user_sys_setting(int64_t userid, char *setting_name,
+				int64_t setting_default, tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
 #define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
 extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);
@@ -1856,6 +1864,7 @@ extern cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_payouts(int32_t height, char *blockhash);
 extern K_ITEM *find_last_payouts();
 extern K_ITEM *find_payoutid(int64_t payoutid);
+extern double payout_stats(PAYOUTS *payouts, char *statname);
 extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b);

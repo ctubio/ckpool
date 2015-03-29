@@ -4762,17 +4762,17 @@ static char **select_list(char *select, int *all_count)
 }
 
 static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
-			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  tv_t *now, __maybe_unused char *by,
 			  __maybe_unused char *code, __maybe_unused char *inet,
-			  __maybe_unused tv_t *notcd,
-			  __maybe_unused K_TREE *trf_root)
+			  __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
 	K_ITEM *i_username, *i_select;
-	K_ITEM *u_item, *m_item, ms_look, *wm_item, *ms_item, *wi_item;
+	K_ITEM *u_item, *p_item, *m_item, ms_look, *wm_item, *ms_item, *wi_item;
 	K_TREE_CTX wm_ctx[1], ms_ctx[1];
 	WORKMARKERS *wm;
 	WORKINFO *wi;
 	MARKERSUMMARY markersummary, *ms, ms_add;
+	PAYOUTS *payouts;
 	USERS *users;
 	MARKS *marks = NULL;
 	char reply[1024] = "";
@@ -4785,6 +4785,8 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t len, off;
 	tv_t marker_end = { 0L, 0L };
 	int rows, want, i, where_all;
+	int64_t maxrows;
+	double wm_count;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -4798,6 +4800,20 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!u_item)
 		return strdup("bad");
 	DATA_USERS(users, u_item);
+
+	maxrows = user_sys_setting(users->userid, SHIFTS_SETTING_NAME,
+				   SHIFTS_DEFAULT, now);
+
+	K_RLOCK(payouts_free);
+	p_item = find_last_payouts();
+	K_RUNLOCK(payouts_free);
+	if (p_item) {
+		DATA_PAYOUTS(payouts, p_item);
+		wm_count = payout_stats(payouts, "wm_count");
+		wm_count *= 1.42;
+		if (maxrows < wm_count)
+			maxrows = wm_count;
+	}
 
 	i_select = optional_name(trf_root, "select", 1, NULL, reply, siz);
 	if (i_select)
@@ -4824,7 +4840,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	DATA_WORKMARKERS_NULL(wm, wm_item);
 	/* TODO: allow to see details of a single payoutid
 	 *	 if it has multiple items (percent payout user) */
-	while (rows < 98 && wm_item) {
+	while (rows < (maxrows - 1) && wm_item) {
 		if (CURRENT(&(wm->expirydate)) && WMPROCESSED(wm->status)) {
 			K_RUNLOCK(workmarkers_free);
 
