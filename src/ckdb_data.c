@@ -2800,7 +2800,7 @@ double payout_stats(PAYOUTS *payouts, char *statname)
 					numlen = tab - pos;
 				if (numlen >= sizeof(buf))
 					numlen = sizeof(buf) - 1;
-				STRNCPYSIZ(buf, pos, numlen);
+				STRNCPYSIZ(buf, pos, numlen+1);
 				// ctv will only return the seconds
 				ret = atof(buf);
 			}
