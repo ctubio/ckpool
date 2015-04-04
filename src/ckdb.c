@@ -3348,6 +3348,7 @@ static void *listener(void *arg)
 	K_ITEM *wq_item;
 	time_t now;
 	int wqcount, wqgot;
+	char ooo_buf[256];
 	tv_t wq_stt, wq_fin;
 	double min, sec;
 	int left;
@@ -3381,6 +3382,8 @@ static void *listener(void *arg)
 		wqcount = workqueue_store->count;
 		K_RUNLOCK(workqueue_store);
 
+		LOGWARNING("reload shares OoO %s", ooo_status(ooo_buf, sizeof(ooo_buf)));
+
 		LOGWARNING("%s(): ckdb ready, queue %d", __func__, wqcount);
 
 		/* Until startup_complete, the values should be ignored
@@ -3395,14 +3398,14 @@ static void *listener(void *arg)
 		ck_wunlock(&last_lock);
 
 		startup_complete = true;
+
+		setnow(&wq_stt);
+		conn = dbconnect();
+		now = time(NULL);
+		wqgot = 0;
 	}
 
-	setnow(&wq_stt);
-
 	// Process queued work
-	conn = dbconnect();
-	now = time(NULL);
-	wqgot = 0;
 	while (!everyone_die) {
 		K_WLOCK(workqueue_store);
 		wq_item = k_unlink_head(workqueue_store);

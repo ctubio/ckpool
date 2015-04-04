@@ -3683,6 +3683,18 @@ flail:
 static int64_t ooof0, ooof, oool0, oool;
 #define OOOLIMIT -2.0
 
+/* This isn't locked so it is possible - but very unlikely -
+ *  to get an invalid set of numbers if any ooo variables change
+ *  during the snprintf, but that will simply display a wrong number */
+char *ooo_status(char *buf, size_t siz)
+{
+	snprintf(buf, siz,
+		 "F%"PRId64":%"PRId64"/L%"PRId64":%"PRId64"/%.1f/T%"PRId64,
+		 ooof, ooof0, oool, oool0, OOOLIMIT,
+		 ooof + ooof0 + oool + oool0);
+	return buf;
+}
+
 bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 				char *by, char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS)
 {
@@ -3701,6 +3713,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 	bool must_update = false, conned = false;
 	double diff = 0;
 	char *st = NULL, *db = NULL;
+	char ooo_buf[256];
 
 	LOGDEBUG("%s(): update", __func__);
 
@@ -3812,22 +3825,20 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 			// don't LOG '=' in case shares come from ckpool with the same timestamp
 			if (td < 0.0) {
 				char *tmp1, *tmp2;
-				int level;
-				// DEBUG only for shares out of order up to OOOLIMIT seconds
+				int level = LOG_DEBUG;
+				// WARNING for shares exceeding the OOOLIMIT but not during startup
 				if (td < OOOLIMIT) {
-					level = LOG_WARNING;
 					ooof++;
-				} else {
-					level = LOG_DEBUG;
+					if (startup_complete)
+						level = LOG_WARNING;
+				} else
 					ooof0++;
-				}
 				LOGMSG(level, "%s(): OoO %s createdate (%s) is < summary"
-					" firstshare (%s) (F%"PRId64":%"PRId64
-					"/L%"PRId64":%"PRId64"/%.1f)",
+					" firstshare (%s) (%s)",
 					__func__, s_row ? "shares" : "shareerrors",
 					(tmp1 = ctv_to_buf(sharecreatedate, NULL, 0)),
 					(tmp2 = ctv_to_buf(&(row->firstshare), NULL, 0)),
-					ooof, ooof0, oool, oool0, OOOLIMIT);
+					ooo_status(ooo_buf, sizeof(ooo_buf)));
 				free(tmp2);
 				free(tmp1);
 				row->firstshare.tv_sec = sharecreatedate->tv_sec;
@@ -3842,22 +3853,20 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 				row->lastdiffacc = diff;
 			} else {
 				char *tmp1, *tmp2;
-				int level;
-				// DEBUG only for shares out of order up to OOOLIMIT seconds
+				int level = LOG_DEBUG;
+				// WARNING for shares exceeding the OOOLIMIT but not during startup
 				if (td < OOOLIMIT) {
-					level = LOG_WARNING;
 					oool++;
-				} else {
-					level = LOG_DEBUG;
+					if (startup_complete)
+						level = LOG_WARNING;
+				} else
 					oool0++;
-				}
 				LOGMSG(level, "%s(): OoO %s createdate (%s) is < summary"
-					" lastshare (%s) (F%"PRId64":%"PRId64
-					"/L%"PRId64":%"PRId64"/%.1f)",
+					" lastshare (%s) (%s)",
 					__func__, s_row ? "shares" : "shareerrors",
 					(tmp1 = ctv_to_buf(sharecreatedate, NULL, 0)),
 					(tmp2 = ctv_to_buf(&(row->lastshare), NULL, 0)),
-					ooof, ooof0, oool, oool0, OOOLIMIT);
+					ooo_status(ooo_buf, sizeof(ooo_buf)));
 				free(tmp2);
 				free(tmp1);
 			}
