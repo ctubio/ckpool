@@ -54,8 +54,6 @@ function addGBase()
  $g = "function hasCan(){var c0=document.getElementById('can0');c=document.getElementById('can');return !!(c0&&c&&c.getContext&&c.getContext('2d'));}
 function sep(d){ans={};var ar=d.split('\\t');var l=ar.length;for(var i=0;i<l;i++){var e=ar[i].indexOf('=');ans[ar[i].substr(0,e)]=ar[i].substr(e+1)};return ans}
 function dfmt(c,e){var d=new Date(e*1000);var DD,HH,MM;if(c['utc']){DD=d.getUTCDate();HH=d.getUTCHours();MM=d.getUTCMinutes()}else{DD=d.getDate();HH=d.getHours();MM=d.getMinutes()}var ans=''+DD+'/';if(HH<10){ans+='0'}ans+=''+HH+':';if(MM<10){ans+='0'}ans+=''+MM;return ans}
-function gcn(n){var ans='',d=document.cookie;if(d){var c0=d.indexOf(n+'='),cs=d.indexOf(' '+n+'=');if(c0==0||cs>0){if(cs>0){c0=cs+1}var c=d.substr(c0).split(';',1);var e=c[0].indexOf('=');if(e>0){ans=c[0].substr(e+1)}}}return ans}
-function scnv(n,v){var d=new Date();d.setTime(d.getTime()+(864*Math.pow(10,8)));document.cookie=n+'='+v+'; expires='+d.toUTCString()+'; path=/'}
 function ccb(c,n){var e=document.getElementById(n);c[n]=(e&&e.checked)}
 function gch(z,zm){if(z<0.5){return 0.5}if(z>(zm-0.5)){return(zm-0.5)}return z}
 function gchx(c,x){return gch(x*c['xm']+c['xo'],c['ctx'].canvas.width)}
@@ -193,10 +191,16 @@ function pghead($css_marker, $script_marker, $name)
  $head .= "<meta content='IE=edge' http-equiv='X-UA-Compatible'>";
  $head .= "<meta content='width=device-width, initial-scale=1' name='viewport'>";
 
- $head .= "<script type='text/javascript'>\n";
- $head .= "function jst(){document.getElementById('jst').style.visibility='hidden';}\n";
- $head .= "window.onpaint=jst();\n</script>\n";
-
+ $head .= "<script type='text/javascript'>
+function gcn(n){var ans='',d=document.cookie;if(d){var c0=d.indexOf(n+'='),cs=d.indexOf(' '+n+'=');if(c0==0||cs>0){if(cs>0){c0=cs+1}var c=d.substr(c0).split(';',1);var e=c[0].indexOf('=');if(e>0){ans=c[0].substr(e+1)}}}return ans}
+function scnv(n,v){var d=new Date();d.setTime(d.getTime()+(864*Math.pow(10,8)));document.cookie=n+'='+v+'; expires='+d.toUTCString()+'; path=/'}
+function ni(e,o){if(e){if(o==0){e.defd=e.style.display;e.style.display='none'}else{e.style.display=e.defd}}}
+function domin(o){var e=document.getElementById('minicb');if(e){if(o==0){e.checked=true}else{e.checked=false}};for(var i=0;i<10;i++){e=document.getElementById('mini'+i);ni(e,o)}}
+function mini(){var hm=gcn('mini');if(hm==''){domin(1)}else{domin(0)}}
+function md(e){var c='';if(e.checked){c='y'}scnv('mini',c);mini()}
+function jst(){document.getElementById('jst').style.visibility='hidden';}
+window.onpaint=jst();
+</script>\n";
  $head .= "<style type='text/css'>
 input[type=checkbox] {vertical-align: -2px;}
 form {display: inline-block;}
@@ -314,7 +318,7 @@ function pgtop($info, $dotop, $user, $douser)
 					$min -= ($hr * 60);
 					$plb = $hr.'h';
 					if ($min > 0)
-						$plb .= ' '.$min.'m';
+						$plb .= '&nbsp;'.$min.'m';
 				}
 			}
 		}
@@ -333,7 +337,7 @@ function pgtop($info, $dotop, $user, $douser)
 			$nlb = $min.'m';
 			$s = $sec - $min * 60;
 			if ($s > 0)
-				$nlb .= " ${s}s";
+				$nlb .= "&nbsp;${s}s";
 		}
 	}
 
@@ -387,9 +391,9 @@ function pgtop($info, $dotop, $user, $douser)
 	}
  }
 
- $top = "<div class=jst id=jst>&nbsp;Javascript isn't enabled.";
+ $top = "<noscript><div class=jst id=jst>&nbsp;Javascript isn't enabled.";
  $top .= " You need to enable javascript to use";
- $top .= " the $site_title web site.</div>";
+ $top .= " the $site_title web site.</div></noscript>";
 
  if ($loginfailed === true)
 	$top .= '<div class=accwarn>Login Failed</div>';
@@ -445,14 +449,14 @@ function pgtop($info, $dotop, $user, $douser)
 	$top .= '<table cellpadding=1 cellspacing=0 border=0>';
 	$top .= "<tr><td class=topdes>$lh</td></tr>";
 	$top .= "<tr><td class=topdes>$ls</td></tr>";
-	$top .= "<tr><td class=topdes>$lw</td></tr></table>";
+	$top .= "<tr id=mini0><td class=topdes>$lw</td></tr></table>";
 	$top .= '</td><td>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
 	$top .= '<tr><td class=topdes>CKPool:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$phr</td></tr>";
 	$top .= '<tr><td class=topdes>Shares:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$pac</td></tr>";
-	$top .= '<tr><td class=topdes>Invalid:&nbsp;</td>';
+	$top .= '<tr id=mini1><td class=topdes>Invalid:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$per</td></tr></table>";
 	$top .= '</td><td>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
@@ -460,9 +464,9 @@ function pgtop($info, $dotop, $user, $douser)
 	$top .= '<td class=topdesl>Block</td></tr>';
 	$top .= '<tr><td class=topdes>Pool:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$plb</td></tr>";
-	$top .= '<tr><td class=topdes>Network:&nbsp;</td>';
+	$top .= '<tr id=mini2><td class=topdes>Network:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$nlb</td></tr></table>";
-	$top .= '</td><td>';
+	$top .= '</td><td id=mini3>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
 	$top .= '<tr><td class=topdes>Users:&nbsp;</td>';
 	$top .= '<td class=topdat>&nbsp;'.$info['users'].'</td></tr>';
@@ -572,7 +576,7 @@ function pgmenu($menus)
 #
 function pgbody($info, $page, $menu, $dotop, $user, $douser)
 {
- $body = '<body onload="jst()"';
+ $body = '<body onload="mini();jst()"';
  if ($page == 'index')
 	$body .= ' background=/BTC20.png';
  $body .= '><div class=page>';
