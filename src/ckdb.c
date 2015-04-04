@@ -3022,8 +3022,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 								 (char *)__func__,
 								 inet_default,
 								 &cd, trf_root);
-				if (ans)
-					free(ans);
+				FREENULL(ans);
 				break;
 			default:
 				// Force this switch to be updated if new cmds are added
@@ -3292,7 +3291,7 @@ static void process_queued(PGconn *conn, K_ITEM *wq_item)
 							    &(workqueue->now), workqueue->by,
 							    workqueue->code, workqueue->inet,
 							    &(workqueue->cd), workqueue->trf_root);
-		free(ans);
+		FREENULL(ans);
 	}
 
 	if (last_buf)
