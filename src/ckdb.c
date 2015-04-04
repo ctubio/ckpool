@@ -1245,6 +1245,8 @@ static bool setup_data()
 	K_TREE_CTX ctx[1];
 	K_ITEM look, *found;
 	WORKINFO wi, *wic, *wif;
+	tv_t db_stt, db_fin, rel_stt, rel_fin;
+	double min, sec;
 
 	cklock_init(&fpm_lock);
 	cksem_init(&socketer_sem);
@@ -1252,6 +1254,8 @@ static bool setup_data()
 	cond_init(&wq_waitcond);
 
 	alloc_storage();
+
+	setnow(&db_stt);
 
 	if (!getdata1() || everyone_die)
 		return false;
@@ -1272,10 +1276,24 @@ static bool setup_data()
 	if (!getdata3() || everyone_die)
 		return false;
 
+	setnow(&db_fin);
+	sec = tvdiff(&db_fin, &db_stt);
+	min = floor(sec / 60.0);
+	sec -= min * 60.0;
+	LOGWARNING("dbload complete %.0fm %.3fs", min, sec);
+
 	db_load_complete = true;
+
+	setnow(&rel_stt);
 
 	if (!reload() || everyone_die)
 		return false;
+
+	setnow(&rel_fin);
+	sec = tvdiff(&rel_fin, &rel_stt);
+	min = floor(sec / 60.0);
+	sec -= min * 60.0;
+	LOGWARNING("reload complete %.0fm %.3fs", min, sec);
 
 	set_block_share_counters();
 
@@ -3330,6 +3348,9 @@ static void *listener(void *arg)
 	K_ITEM *wq_item;
 	time_t now;
 	int wqcount, wqgot;
+	tv_t wq_stt, wq_fin;
+	double min, sec;
+	int left;
 
 	logqueue_free = k_new_list("LogQueue", sizeof(LOGQUEUE),
 					ALLOC_LOGQUEUE, LIMIT_LOGQUEUE, true);
@@ -3376,6 +3397,8 @@ static void *listener(void *arg)
 		startup_complete = true;
 	}
 
+	setnow(&wq_stt);
+
 	// Process queued work
 	conn = dbconnect();
 	now = time(NULL);
@@ -3383,7 +3406,11 @@ static void *listener(void *arg)
 	while (!everyone_die) {
 		K_WLOCK(workqueue_store);
 		wq_item = k_unlink_head(workqueue_store);
+		left = workqueue_store->count;
 		K_WUNLOCK(workqueue_store);
+
+		if (left == 0 && wq_stt.tv_sec != 0L)
+			setnow(&wq_fin);
 
 		/* Don't keep a connection for more than ~10s or ~10000 items
 		 *  but always have a connection open */
@@ -3398,7 +3425,19 @@ static void *listener(void *arg)
 			wqgot++;
 			process_queued(conn, wq_item);
 			tick();
-		} else {
+		}
+
+		if (left == 0 && wq_stt.tv_sec != 0L) {
+			sec = tvdiff(&wq_fin, &wq_stt);
+			min = floor(sec / 60.0);
+			sec -= min * 60.0;
+			LOGWARNING("reload queue completed %.0fm %.3fs", min, sec);
+			// Used as the flag to display the message once
+			wq_stt.tv_sec = 0L;
+		}
+
+
+		if (!wq_item) {
 			const ts_t tsdiff = {0, 420000000};
 			tv_t now;
 			ts_t abs;
