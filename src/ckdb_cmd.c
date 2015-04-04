@@ -4827,6 +4827,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 		selects[1] = NULL;
 	}
 
+	bzero(used, sizeof(used));
 	if (where_all >= 0)
 		used[where_all] = true;
 
@@ -4993,9 +4994,8 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   where_all, rows,
 							   reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
-
-				rows++;
 			}
+			rows++;
 
 			// Setup for next shift
 			copy_tv(&marker_end, &(wi->createdate));

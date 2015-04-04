@@ -309,11 +309,13 @@ function getMPayouts($user)
  return repDecode($rep);
 }
 #
-function getShifts($user)
+function getShifts($user, $workers = null)
 {
  if ($user == false)
 	showIndex();
  $flds = array('username' => $user);
+ if ($workers !== null)
+	$flds['select'] = $workers;
  $msg = msgEncode('shifts', 'shift', $flds, $user);
  $rep = sendsockreply('getShifts', $msg);
  if (!$rep)
@@ -321,11 +323,13 @@ function getShifts($user)
  return repDecode($rep);
 }
 #
-function getShiftData($user)
+function getShiftData($user, $workers = null)
 {
  if ($user == false)
 	showIndex();
  $flds = array('username' => $user);
+ if ($workers !== null)
+	$flds['select'] = $workers;
  $msg = msgEncode('shifts', 'shift', $flds, $user);
  $rep = sendsockreply('getShifts', $msg);
  if (!$rep)

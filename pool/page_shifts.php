@@ -20,7 +20,7 @@ function doshifts($data, $user)
  else
  {
 	$pre = $ans['prefix_all'];
- 
+
 	$count = $ans['rows'];
 	$pg = '<h1>Last '.($count+1).' Shifts</h1>'.$pg;
 	for ($i = 0; $i < $count; $i++)
