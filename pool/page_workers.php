@@ -38,7 +38,7 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 	{
 		$days = intval($ans['oldworkers']);
 		if ($days != 0)
-			$title = '&nbsp;(last '.$days.' day'.
+			$title = '&nbsp;(active during the last '.$days.' day'.
 				 (($days==1)?'':'s').')';
 	}
 	$all = array();
@@ -178,7 +178,7 @@ function doworker($data, $user)
  $pg .= worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate,
 			$blockacc, $blockreward);
 
- if ($blockacc > 0 && $blockreward > 0)
+ if (false && $blockacc > 0 && $blockreward > 0)
  {
 	$btc = btcfmt($totdiff / $blockacc * $blockreward);
 	$pg .= '<tr><td colspan=8 class=dc>';
