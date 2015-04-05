@@ -198,7 +198,7 @@ function ni(e,o){if(e){if(o==0){e.defd=e.style.display;e.style.display='none'}el
 function domin(o){var e=document.getElementById('minicb');if(e){if(o==0){e.checked=true}else{e.checked=false}};for(var i=0;i<10;i++){e=document.getElementById('mini'+i);ni(e,o)}}
 function mini(){var hm=gcn('mini');if(hm==''){domin(1)}else{domin(0)}}
 function md(e){var c='';if(e.checked){c='y'}scnv('mini',c);mini()}
-function jst(){document.getElementById('jst').style.visibility='hidden';}
+function jst(){var e=document.getElementById('jst');if(e){e.style.visibility='hidden'}}
 window.onpaint=jst();
 </script>\n";
  $head .= "<style type='text/css'>
