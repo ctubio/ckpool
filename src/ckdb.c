@@ -2653,8 +2653,8 @@ static void *socketer(__maybe_unused void *arg)
 						snprintf(reply, sizeof(reply), "%s.%ld.?.", id, now.tv_sec);
 						send_unix_msg(sockd, reply);
 						break;
-					case CMD_SHUTDOWN:
-						LOGWARNING("Listener received shutdown message, terminating ckdb");
+					case CMD_TERMINATE:
+						LOGWARNING("Listener received terminate message, terminating ckdb");
 						snprintf(reply, sizeof(reply), "%s.%ld.ok.exiting", id, now.tv_sec);
 						send_unix_msg(sockd, reply);
 						everyone_die = true;
@@ -2990,7 +2990,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_REPLY:
 				break;
 			// Shouldn't be there
-			case CMD_SHUTDOWN:
+			case CMD_TERMINATE:
 			case CMD_PING:
 			case CMD_VERSION:
 			case CMD_LOGLEVEL:
@@ -3198,7 +3198,7 @@ static bool reload_from(tv_t *start)
 
 		LOGWARNING("%s(): %sread %"PRIu64" line%s from %s",
 			   __func__,
-			   everyone_die ? "Shutdown, aborting - " : "",
+			   everyone_die ? "Terminate, aborting - " : "",
 			   count, count == 1 ? "" : "s",
 			   filename);
 		total += count;
@@ -4284,7 +4284,7 @@ int main(int argc, char **argv)
 		sigaction(SIGTERM, &handler, NULL);
 		sigaction(SIGINT, &handler, NULL);
 
-		/* Shutdown from here if the listener is sent a shutdown message */
+		/* Terminate from here if the listener is sent a terminate message */
 		join_pthread(ckp.pth_listener);
 	}
 
@@ -4299,9 +4299,9 @@ int main(int argc, char **argv)
 		curr = time(NULL);
 		if (curr - start > 4) {
 			if (curr - trigger > 4) {
-				msg = "Shutdown initial delay";
+				msg = "Terminate initial delay";
 			} else if (curr - trigger > 2) {
-				msg = "Shutdown delay";
+				msg = "Terminate delay";
 			}
 		}
 		if (msg) {

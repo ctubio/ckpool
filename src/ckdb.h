@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.051"
+#define CKDB_VERSION DB_VERSION"-1.052"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -343,7 +343,7 @@ extern char *id_default;
 enum cmd_values {
 	CMD_UNSET,
 	CMD_REPLY, // Means something was wrong - send back reply
-	CMD_SHUTDOWN,
+	CMD_TERMINATE,
 	CMD_PING,
 	CMD_VERSION,
 	CMD_LOGLEVEL,

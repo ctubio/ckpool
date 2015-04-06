@@ -2227,9 +2227,9 @@ seconf:
 			return strdup("failed.DATA");
 		} else {
 			/* Don't slow down the reload - do them later
-			 * N.B. this means if you abort/shutdown the reload,
+			 * N.B. this means if you abort/terminate the reload,
 			 * next restart will again go back to the oldest
-			 * unaged sharesummary due to a pool shutdown */
+			 * unaged sharesummary due to a pool terminate */
 			if (!reloading) {
 				// Aging is a queued item thus the reply is ignored
 				auto_age_older(conn, workinfoid,
@@ -5653,7 +5653,7 @@ dame:
  *	ping
  *	.STAMP.ok.pong
  *
- *	shutdown
+ *	terminate
  *	.STAMP.ok.exiting
  *
  *   With an ID
@@ -5683,7 +5683,7 @@ dame:
 
 //	  cmd_val	cmd_str		noid	createdate func		access
 struct CMDS ckdb_cmds[] = {
-	{ CMD_SHUTDOWN,	"shutdown",	true,	false,	NULL,		ACCESS_SYSTEM },
+	{ CMD_TERMINATE, "terminate",	true,	false,	NULL,		ACCESS_SYSTEM },
 	{ CMD_PING,	"ping",		true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
 	{ CMD_VERSION,	"version",	true,	false,	NULL,		ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
 	{ CMD_LOGLEVEL,	"loglevel",	true,	false,	NULL,		ACCESS_SYSTEM },
