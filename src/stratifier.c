@@ -2375,14 +2375,20 @@ static int send_recv_auth(stratum_instance_t *client)
 		worker_instance_t *worker = client->worker_instance;
 		json_error_t err_val;
 		json_t *val = NULL;
+		int offset = 0;
 
 		LOGINFO("Got ckdb response: %s", buf);
 		response = alloca(responselen);
 		memset(response, 0, responselen);
-		if (unlikely(sscanf(buf, "id.%*d.%s", response) < 1 || strlen(response) < 1 || !strchr(response, '='))) {
+		if (unlikely(sscanf(buf, "id.%*d.%c%n", response, &offset) < 1)) {
+			LOGWARNING("Got1 unparseable ckdb auth response: %s", buf);
+			goto out_fail;
+		}
+		strcpy(response+1, buf+offset);
+		if (!strchr(response, '=')) {
 			if (cmdmatch(response, "failed"))
 				goto out;
-			LOGWARNING("Got unparseable ckdb auth response: %s", buf);
+			LOGWARNING("Got2 unparseable ckdb auth response: %s", buf);
 			goto out_fail;
 		}
 		cmd = response;
@@ -3782,21 +3788,25 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 		responselen = strlen(buf);
 	if (likely(responselen > 0)) {
 		char *response = alloca(responselen);
+		int offset = 0;
 
 		memset(response, 0, responselen);
-		sscanf(buf, "id.%*d.%s", response);
-		if (safecmp(response, "ok")) {
-			char *cmd;
+		if (sscanf(buf, "id.%*d.%c%n", response, &offset) > 0) {
+			strcpy(response+1, buf+offset);
+			if (safecmp(response, "ok")) {
+				char *cmd;
 
-			cmd = response;
-			strsep(&cmd, ".");
-			LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
-			if (cmdmatch(cmd, "heartbeat=")) {
-				strsep(&cmd, "=");
-				parse_ckdb_cmd(ckp, cmd);
-			}
+				cmd = response;
+				strsep(&cmd, ".");
+				LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
+				if (cmdmatch(cmd, "heartbeat=")) {
+					strsep(&cmd, "=");
+					parse_ckdb_cmd(ckp, cmd);
+				}
+			} else
+				LOGWARNING("Got ckdb failure response: %s", buf);
 		} else
-			LOGWARNING("Got failed ckdb response: %s", buf);
+			LOGWARNING("Got bad ckdb response: %s", buf);
 		free(buf);
 	}
 }
