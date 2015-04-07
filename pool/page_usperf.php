@@ -6,10 +6,11 @@ $g = "function gdrw(c,d,cbx){gc(c);ghrs(c);gopt(c,cbx);
 gfs(c,'white');gss(c,'#0000c0');glw(c,2);gbd(c);
 var rows=d['rows'],ymin=-1,ymax=0,xmin=-1,xmax=0,tda=[];
 var w=d['arp'].split(',');var cols=d['cols'].split(',');
-for(var i=0;i<rows;i++){tda[i]=0;var s=parseFloat(d['start:'+i]);var e=parseFloat(d['end:'+i]);d['nx:'+i]=sn(i,d['shift:'+i]);if(xmin==-1||xmin>s){xmin=s}if(xmax<e){xmax=e}d['vx:'+i]=(s+e)/2.0;
-for(var j=1;j<w.length;j++){var pre=w[j];var ths=0,nam=pre+'diffacc:'+i;if(d[nam]){var da=parseFloat(d[nam]);var ths=(da/(e-s))*Math.pow(2,32)/Math.pow(10,12);tda[i]+=da}d[pre+'ths:'+i]=ths;if(ymin==-1||ymin>ths){ymin=ths}if(ths>ymax)ymax=ths;document.getElementById('worker'+j).value=d[pre+'worker']}
+for(var j=1;j<w.length;j++){tda[j-1]=0}
+for(var i=0;i<rows;i++){var s=parseFloat(d['start:'+i]);var e=parseFloat(d['end:'+i]);d['nx:'+i]=sn(i,d['shift:'+i]);if(xmin==-1||xmin>s){xmin=s}if(xmax<e){xmax=e}d['vx:'+i]=(s+e)/2.0;
+for(var j=1;j<w.length;j++){var pre=w[j];var ths=0,nam=pre+'diffacc:'+i;if(d[nam]){var da=parseFloat(d[nam]);ths=(da/(e-s))*Math.pow(2,32)/Math.pow(10,9);tda[j-1]+=da}d[pre+'ths:'+i]=ths;if(ymin==-1||ymin>ths){ymin=ths}if(ths>ymax)ymax=ths;document.getElementById('worker'+j).value=d[pre+'worker']}
 }
-for(var i=0;i<rows;i++){tda[i]*=(Math.pow(2,32)/Math.pow(10,12)/(xmax-xmin))}
+for(var j=1;j<w.length;j++){tda[j-1]*=(Math.pow(2,32)/Math.pow(10,9)/(xmax-xmin))}
 var p5=(ymax-ymin)*0.05;ymax+=p5;ymin-=p5;if(ymin<0){ymin=0}
 if(c['zerob']){ymin=0}
 ghg(c,xmax-xmin);
