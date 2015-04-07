@@ -98,9 +98,8 @@ for(var i=0;i<xn;i++){var x=ar[vx+i];var y=ar[w[j]+vy+i];var xo=(x-x0)/(x1-x0);v
 else{for(var j=1;j<w.length;j++){var f=1;gss(c,cols[j-1]);
 for(var i=0;i<xn;i++){var x=ar[vx+i];var y=ar[w[j]+vy+i];var xo=(x-x0)/(x1-x0);var yo=(y-y0)/(y1-y0);if(f==1){gbe(c,xo,yo);f=0}else{gln(c,xo,yo)}}gst(c);}}
 glw(c,1);
-if(av>0){gss(c,'red');var y=(av-y0)/(y1-y0);
-gbe(c,0,y);gln(c,1,y);gst(c);
-var t=''+av.toFixed(2)+'av';gfz(c,1,y,1,0,t,'red','left')}
+for(var j=1;j<w.length;j++){if(av[j-1]>0){gss(c,'red');var y=(av[j-1]-y0)/(y1-y0);gbe(c,0,y);gln(c,1,y);gst(c);
+var t=''+av[j-1].toFixed(2)+'av';gfz(c,1,y,1,0,t,cols[j-1],'left')}}
 if(c['tkey']){var col,hrl=c['hrs'].length;for(var i=0;i<hrl;i++){if(c['hr']==i){col='red'}else{col='black'}gfz(c,1,0,c['xo']-c['pxe'],hi*(i+1)*2,''+c['hrs'][i],col,'end')}for(var i=0;i<c['hln'].length;i++){if(c['hl']==i){col='red'}else{col='black'}gfz(c,1,0,c['xo']-c['pxe'],hi*(i+2+hrl)*2,''+c['hrs'][i],col,'end')}}
 }
 function sn(i,shi){if(shi.indexOf(' Shift ')<0){return ''+(i%10)}else{return shi.replace(/.* ([a-z])[a-z]*$/,'$1')}}
