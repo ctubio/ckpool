@@ -623,7 +623,7 @@ static char *ckdb_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const int idty
 
 	/* Set the atomically incrementing sequence number */
 	mutex_lock(&sdata->ckdb_msg_lock);
-	json_set_int(val, "seq", sdata->ckdb_seq++);
+	json_set_int(val, "seqall", sdata->ckdb_seq++);
 	mutex_unlock(&sdata->ckdb_msg_lock);
 
 	json_msg = json_dumps(val, JSON_COMPACT);
