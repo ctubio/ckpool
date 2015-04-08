@@ -1943,7 +1943,7 @@ void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff)
 	row->complete[1] = '\0';
 }
 
-K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t workinfoid)
+K_ITEM *_find_sharesummary(int64_t userid, char *workername, int64_t workinfoid, bool pool)
 {
 	SHARESUMMARY sharesummary;
 	K_TREE_CTX ctx[1];
@@ -1955,7 +1955,13 @@ K_ITEM *find_sharesummary(int64_t userid, char *workername, int64_t workinfoid)
 
 	INIT_SHARESUMMARY(&look);
 	look.data = (void *)(&sharesummary);
-	return find_in_ktree(sharesummary_root, &look, cmp_sharesummary, ctx);
+	if (pool) {
+		return find_in_ktree(sharesummary_pool_root, &look,
+				     cmp_sharesummary, ctx);
+	} else {
+		return find_in_ktree(sharesummary_root, &look,
+				     cmp_sharesummary, ctx);
+	}
 }
 
 K_ITEM *find_last_sharesummary(int64_t userid, char *workername)
@@ -3719,23 +3725,40 @@ K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
 	return ms_item;
 }
 
-K_ITEM *find_markersummary(int64_t workinfoid, int64_t userid, char *workername)
+K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
+			    int64_t userid, char *workername, bool pool)
 {
 	K_ITEM look, *wm_item, *ms_item = NULL;
 	MARKERSUMMARY markersummary;
 	WORKMARKERS *wm;
 	K_TREE_CTX ctx[1];
 
-	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
-	if (wm_item) {
-		DATA_WORKMARKERS(wm, wm_item);
-		markersummary.markerid = wm->markerid;
+	if (markerid == 0) {
+		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+		if (wm_item) {
+			DATA_WORKMARKERS(wm, wm_item);
+			markerid = wm->markerid;
+		}
+	} else {
+		wm_item = find_workmarkerid(markerid, false, MARKER_PROCESSED);
+		if (!wm_item)
+			markerid = 0;
+	}
+
+	if (markerid != 0) {
+		markersummary.markerid = markerid;
 		markersummary.userid = userid;
 		markersummary.workername = workername;
 
 		INIT_MARKERSUMMARY(&look);
 		look.data = (void *)(&markersummary);
-		ms_item = find_in_ktree(markersummary_root, &look, cmp_markersummary, ctx);
+		if (pool) {
+			ms_item = find_in_ktree(markersummary_pool_root, &look,
+						cmp_markersummary, ctx);
+		} else {
+			ms_item = find_in_ktree(markersummary_root, &look,
+						cmp_markersummary, ctx);
+		}
 	}
 
 	return ms_item;

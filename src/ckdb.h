@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.052"
+#define CKDB_VERSION DB_VERSION"-1.060"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1135,6 +1135,9 @@ extern K_TREE *sharesummary_root;
 extern K_TREE *sharesummary_workinfoid_root;
 extern K_LIST *sharesummary_free;
 extern K_STORE *sharesummary_store;
+// Pool total sharesummary stats
+extern K_TREE *sharesummary_pool_root;
+extern K_STORE *sharesummary_pool_store;
 
 // BLOCKS block.id.json={...}
 typedef struct blocks {
@@ -1537,6 +1540,9 @@ extern K_TREE *markersummary_root;
 extern K_TREE *markersummary_userid_root;
 extern K_LIST *markersummary_free;
 extern K_STORE *markersummary_store;
+// Pool total markersummary stats
+extern K_TREE *markersummary_pool_root;
+extern K_STORE *markersummary_pool_store;
 
 // WORKMARKERS
 typedef struct workmarkers {
@@ -1832,8 +1838,16 @@ extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
 extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
-extern K_ITEM *find_sharesummary(int64_t userid, char *workername,
-				 int64_t workinfoid);
+#define find_sharesummary(_userid, _workername, _workinfoid) \
+	_find_sharesummary(_userid, _workername, _workinfoid, false)
+#define find_sharesummary_p(_workinfoid) \
+	_find_sharesummary(KANO, EMPTY, _workinfoid, true)
+#define POOL_SS(_row) do { \
+		_row->userid = KANO; \
+		_row->workername = strdup(EMPTY); \
+	} while (0)
+extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
+				  int64_t workinfoid, bool pool);
 extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
 extern void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 			   char *by, char *code, char *inet, tv_t *cd);
@@ -1876,8 +1890,16 @@ extern cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_markersummary_userid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
 					 K_TREE_CTX *ctx);
-extern K_ITEM *find_markersummary(int64_t workinfoid, int64_t userid,
-				  char *workername);
+#define find_markersummary(_workinfoid, _userid, _workername) \
+	_find_markersummary(0, _workinfoid, _userid, _workername, false)
+#define find_markersummary_p(_markerid) \
+	_find_markersummary(_markerid, 0, KANO, EMPTY, true)
+#define POOL_MS(_row) do { \
+		_row->userid = KANO; \
+		_row->workername = strdup(EMPTY); \
+	} while (0)
+extern K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
+				   int64_t userid, char *workername, bool pool);
 extern bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 				 tv_t *cd, K_TREE *trf_root);
 extern void dsp_workmarkers(K_ITEM *item, FILE *stream);

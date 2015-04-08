@@ -5158,8 +5158,10 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(shares, 2, 1);
 	// Trees don't share items so count as 1 tree
 	USEINFO(shareerrors, 2, 1);
+	// _pool doesn't share items so is included
 	USEINFO(sharesummary, 1, 2);
 	USEINFO(workmarkers, 1, 2);
+	// _pool doesn't share items so is included
 	USEINFO(markersummary, 1, 2);
 	USEINFO(marks, 1, 1);
 	USEINFO(blocks, 1, 1);

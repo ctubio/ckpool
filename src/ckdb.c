@@ -215,6 +215,9 @@ bool confirm_sharesummary;
 /* Optional workinfoid range -Y to supply when confirming sharesummaries
  * N.B. if you specify -Y it will enable -y, so -y isn't also required
  *
+ * TODO: update to include markersummaries
+ *	-Y/-y isn't currently usable since it won't work without the update
+ *
  * Default (NULL) is to confirm all aged sharesummaries
  * Default should normally be used every time
  *  The below options are mainly for debugging or
@@ -394,6 +397,9 @@ K_TREE *sharesummary_root;
 K_TREE *sharesummary_workinfoid_root;
 K_LIST *sharesummary_free;
 K_STORE *sharesummary_store;
+// Pool total sharesummary stats
+K_TREE *sharesummary_pool_root;
+K_STORE *sharesummary_pool_store;
 
 // BLOCKS block.id.json={...}
 const char *blocks_new = "New";
@@ -454,6 +460,9 @@ K_TREE *markersummary_root;
 K_TREE *markersummary_userid_root;
 K_LIST *markersummary_free;
 K_STORE *markersummary_store;
+// Pool total markersummary stats
+K_TREE *markersummary_pool_root;
+K_STORE *markersummary_pool_store;
 
 // WORKMARKERS
 K_TREE *workmarkers_root;
@@ -1016,6 +1025,8 @@ static void alloc_storage()
 	sharesummary_root = new_ktree();
 	sharesummary_workinfoid_root = new_ktree();
 	sharesummary_free->dsp_func = dsp_sharesummary;
+	sharesummary_pool_store = k_new_store(sharesummary_free);
+	sharesummary_pool_root = new_ktree();
 
 	blocks_free = k_new_list("Blocks", sizeof(BLOCKS),
 					ALLOC_BLOCKS, LIMIT_BLOCKS, true);
@@ -1062,6 +1073,8 @@ static void alloc_storage()
 	markersummary_root = new_ktree();
 	markersummary_userid_root = new_ktree();
 	markersummary_free->dsp_func = dsp_markersummary;
+	markersummary_pool_store = k_new_store(markersummary_free);
+	markersummary_pool_root = new_ktree();
 
 	workmarkers_free = k_new_list("WorkMarkers", sizeof(WORKMARKERS),
 					ALLOC_WORKMARKERS, LIMIT_WORKMARKERS, true);
@@ -1134,6 +1147,9 @@ static void dealloc_storage()
 
 	LOGWARNING("%s() markersummary ...", __func__);
 
+	FREE_TREE(markersummary_pool);
+	k_list_transfer_to_tail(markersummary_pool_store, markersummary_store);
+	FREE_STORE(markersummary_pool);
 	FREE_TREE(markersummary_userid);
 	FREE_TREE(markersummary);
 	FREE_STORE_DATA(markersummary);
@@ -1159,6 +1175,9 @@ static void dealloc_storage()
 
 	LOGWARNING("%s() sharesummary ...", __func__);
 
+	FREE_TREE(sharesummary_pool);
+	k_list_transfer_to_tail(sharesummary_pool_store, sharesummary_store);
+	FREE_STORE(sharesummary_pool);
 	FREE_TREE(sharesummary_workinfoid);
 	FREE_TREE(sharesummary);
 	FREE_STORE_DATA(sharesummary);
