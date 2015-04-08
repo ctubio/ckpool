@@ -110,6 +110,18 @@ function zeip()
  return $_SERVER['REMOTE_ADDR'];
 }
 #
+# user administration overrided
+function adm($user, &$msg)
+{
+ global $fld_sep, $val_sep;
+ if ($user == 'Kano')
+ {
+	$admin = getparam('admin', true);
+	if (!nuem($admin))
+		$msg .= $fld_sep . 'admin' . $val_sep . $admin;
+ }
+}
+#
 function fldEncode($flds, $name, $first)
 {
  global $fld_sep, $val_sep;
@@ -134,6 +146,7 @@ function msgEncode($cmd, $id, $fields, $user)
  $msg .= 'createcode' . $val_sep . 'php' . $fld_sep;
  $msg .= 'createby' . $val_sep . $user . $fld_sep;
  $msg .= 'createinet' . $val_sep . zeip();
+ adm($user, $msg);
  return $msg;
 }
 #

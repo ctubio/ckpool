@@ -9,6 +9,29 @@
 
 #include "ckdb.h"
 
+/*
+ * Allow overriding the username however the username must still be present
+ * This should ONLY be used for web reporting cmds i.e. read only
+ * Current PHP allows this for a hard coded user
+ */
+static K_ITEM *adminuser(K_TREE *trf_root, char *reply, size_t siz)
+{
+	K_ITEM *i_username, *i_admin;
+	char reply2[1024] = "";
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
+				  reply, siz);
+	if (!i_username)
+		return NULL;
+
+	i_admin = optional_name(trf_root, "admin", 3, (char *)userpatt,
+				reply2, sizeof(reply2));
+	if (i_admin)
+		return i_admin;
+
+	return i_username;
+}
+
 static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 			 char *code, char *inet, __maybe_unused tv_t *notcd,
 			 K_TREE *trf_root)
@@ -1235,7 +1258,7 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = adminuser(trf_root, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -1567,7 +1590,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = adminuser(trf_root, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -4584,7 +4607,7 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = adminuser(trf_root, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -4790,7 +4813,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = adminuser(trf_root, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -5644,7 +5667,7 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = adminuser(trf_root, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
