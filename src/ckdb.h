@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.060"
+#define CKDB_VERSION DB_VERSION"-1.061"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -382,6 +382,7 @@ enum cmd_values {
 	CMD_SHIFTS,
 	CMD_USERSTATUS,
 	CMD_MARKS,
+	CMD_PSHIFT,
 	CMD_END
 };
 
@@ -1843,8 +1844,8 @@ extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
 #define find_sharesummary_p(_workinfoid) \
 	_find_sharesummary(KANO, EMPTY, _workinfoid, true)
 #define POOL_SS(_row) do { \
-		_row->userid = KANO; \
-		_row->workername = strdup(EMPTY); \
+		(_row)->userid = KANO; \
+		(_row)->workername = strdup(EMPTY); \
 	} while (0)
 extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
 				  int64_t workinfoid, bool pool);
@@ -1895,8 +1896,8 @@ extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
 #define find_markersummary_p(_markerid) \
 	_find_markersummary(_markerid, 0, KANO, EMPTY, true)
 #define POOL_MS(_row) do { \
-		_row->userid = KANO; \
-		_row->workername = strdup(EMPTY); \
+		(_row)->userid = KANO; \
+		(_row)->workername = strdup(EMPTY); \
 	} while (0)
 extern K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 				   int64_t userid, char *workername, bool pool);

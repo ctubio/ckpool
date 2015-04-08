@@ -2818,6 +2818,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_PAYOUTS:
 					case CMD_MPAYOUTS:
 					case CMD_SHIFTS:
+					case CMD_PSHIFT:
 					case CMD_DSP:
 					case CMD_BLOCKSTATUS:
 						if (!startup_complete) {
@@ -3041,6 +3042,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_SHIFTS:
 			case CMD_USERSTATUS:
 			case CMD_MARKS:
+			case CMD_PSHIFT:
 				LOGERR("%s() Message line %"PRIu64" '%s' - invalid - ignored",
 					__func__, count, cmd);
 				break;

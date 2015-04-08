@@ -5617,6 +5617,208 @@ dame:
 	return strdup(reply);
 }
 
+// Layout the reply like cmd_shifts so the php/js code is similar
+static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_username;
+	K_ITEM *u_item, *p_item, *m_item, *wm_item, *ms_item, *wi_item;
+	K_TREE_CTX wm_ctx[1];
+	WORKMARKERS *wm;
+	WORKINFO *wi;
+	MARKERSUMMARY *ms;
+	PAYOUTS *payouts;
+	USERS *users;
+	MARKS *marks = NULL;
+	char reply[1024] = "";
+	char tmp[1024];
+	size_t siz = sizeof(reply);
+	char *buf;
+	size_t len, off;
+	tv_t marker_end = { 0L, 0L };
+	int rows;
+	int64_t maxrows;
+	double wm_count;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	K_RLOCK(users_free);
+	u_item = find_users(transfer_data(i_username));
+	K_RUNLOCK(users_free);
+	if (!u_item)
+		return strdup("bad");
+	DATA_USERS(users, u_item);
+
+	maxrows = user_sys_setting(users->userid, SHIFTS_SETTING_NAME,
+				   SHIFTS_DEFAULT, now);
+
+	K_RLOCK(payouts_free);
+	p_item = find_last_payouts();
+	K_RUNLOCK(payouts_free);
+	if (p_item) {
+		DATA_PAYOUTS(payouts, p_item);
+		wm_count = payout_stats(payouts, "wm_count");
+		wm_count *= 1.42;
+		if (maxrows < wm_count)
+			maxrows = wm_count;
+	}
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+	rows = 0;
+	K_RLOCK(workmarkers_free);
+	wm_item = last_in_ktree(workmarkers_workinfoid_root, wm_ctx);
+	DATA_WORKMARKERS_NULL(wm, wm_item);
+	while (rows < (maxrows - 1) && wm_item) {
+		if (CURRENT(&(wm->expirydate)) && WMPROCESSED(wm->status)) {
+			K_RUNLOCK(workmarkers_free);
+
+			K_RLOCK(marks_free);
+			m_item = find_marks(wm->workinfoidend);
+			K_RUNLOCK(marks_free);
+			DATA_MARKS_NULL(marks, m_item);
+			if (m_item == NULL) {
+				// Log it but keep going
+				LOGERR("%s() missing mark for markerid "
+					"%"PRId64"/%s widend %"PRId64,
+					__func__, wm->markerid,
+					wm->description,
+					wm->workinfoidend);
+			}
+
+			K_RLOCK(markersummary_free);
+			ms_item = find_markersummary_p(wm->markerid);
+			K_RUNLOCK(markersummary_free);
+			if (ms_item) {
+				DATA_MARKERSUMMARY(ms, ms_item);
+				double_to_buf(ms->diffacc, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_diffacc:%d=%s%c",
+							   0, rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(ms->diffrej, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_diffrej:%d=%s%c",
+							   0, rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(ms->shareacc, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_shareacc:%d=%s%c",
+							   0, rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				double_to_buf(ms->sharerej, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_sharerej:%d=%s%c",
+							   0, rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+			}
+
+			if (marker_end.tv_sec == 0L) {
+				wi_item = next_workinfo(wm->workinfoidend, NULL);
+				if (!wi_item) {
+					/* There's no workinfo after this shift
+					 * Unexpected ... estimate last wid+30s */
+					wi_item = find_workinfo(wm->workinfoidend, NULL);
+					if (!wi_item) {
+						// Nothing is currently locked
+						LOGERR("%s() workmarker %"PRId64"/%s."
+							" missing widend %"PRId64,
+							__func__, wm->markerid,
+							wm->description,
+							wm->workinfoidend);
+						snprintf(reply, siz, "data error 1");
+						free(buf);
+						return(strdup(reply));
+					}
+					DATA_WORKINFO(wi, wi_item);
+					copy_tv(&marker_end, &(wi->createdate));
+					marker_end.tv_sec += 30;
+				} else {
+					DATA_WORKINFO(wi, wi_item);
+					copy_tv(&marker_end, &(wi->createdate));
+				}
+			}
+
+			wi_item = find_workinfo(wm->workinfoidstart, NULL);
+			if (!wi_item) {
+				// Nothing is currently locked
+				LOGERR("%s() workmarker %"PRId64"/%s. missing "
+					"widstart %"PRId64,
+					__func__, wm->markerid, wm->description,
+					wm->workinfoidstart);
+				snprintf(reply, siz, "data error 2");
+				free(buf);
+				return(strdup(reply));
+			}
+			DATA_WORKINFO(wi, wi_item);
+
+			bigint_to_buf(wm->markerid, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "markerid:%d=%s%c",
+					   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			str_to_buf(wm->description, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "shift:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp), "endmarkextra:%d=%s%c",
+						   rows,
+						   m_item ? marks->extra : EMPTY,
+						   FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			ftv_to_buf(&(wi->createdate), reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "start:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			ftv_to_buf(&marker_end, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "end:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			rows++;
+
+			// Setup for next shift
+			copy_tv(&marker_end, &(wi->createdate));
+
+			K_RLOCK(workmarkers_free);
+		}
+		wm_item = prev_in_ktree(wm_ctx);
+		DATA_WORKMARKERS_NULL(wm, wm_item);
+	}
+	K_RUNLOCK(workmarkers_free);
+
+	snprintf(tmp, sizeof(tmp), "%d_pool=%s%c", 0, "all", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "%d_flds=%s%c",
+		 0, "diffacc,diffrej,shareacc,sharerej", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "prefix_all=%d_%c", 0, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
+				   rows, FLDSEP,
+				   "markerid,shift,start,end", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "arn=%s", "Pool Shifts");
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), ",Pool_%d", 0);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), "%carp=", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	snprintf(tmp, sizeof(tmp), ",%d_", 0);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	return(buf);
+}
+
 // TODO: limit access by having seperate sockets for each
 #define ACCESS_POOL	"p"
 #define ACCESS_SYSTEM	"s"
@@ -5727,5 +5929,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_SHIFTS,	"shifts",	false,	false,	cmd_shifts,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_MARKS,	"marks",	false,	false,	cmd_marks,	ACCESS_SYSTEM },
+	{ CMD_PSHIFT,	"pshift",	false,	false,	cmd_pshift,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_END,	NULL,		false,	false,	NULL,		NULL }
 };

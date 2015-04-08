@@ -337,6 +337,30 @@ function getShiftData($user, $workers = null)
  return repData($rep);
 }
 #
+function getPShifts($user)
+{
+ if ($user == false)
+	showIndex();
+ $flds = array('username' => $user);
+ $msg = msgEncode('pshift', 'pshift', $flds, $user);
+ $rep = sendsockreply('getPShifts', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
+}
+#
+function getPShiftData($user)
+{
+ if ($user == false)
+	showIndex();
+ $flds = array('username' => $user);
+ $msg = msgEncode('pshift', 'pshift', $flds, $user);
+ $rep = sendsockreply('getPShifts', $msg);
+ if (!$rep)
+	dbdown();
+ return repData($rep);
+}
+#
 function getBlocks($user)
 {
  if ($user == false)
