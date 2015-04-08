@@ -289,6 +289,45 @@ struct session {
 	time_t added;
 };
 
+#define ID_AUTH 0
+#define ID_WORKINFO 1
+#define ID_AGEWORKINFO 2
+#define ID_SHARES 3
+#define ID_SHAREERR 4
+#define ID_POOLSTATS 5
+#define ID_WORKERSTATS 6
+#define ID_BLOCK 7
+#define ID_ADDRAUTH 8
+#define ID_HEARTBEAT 9
+
+static const char *ckdb_ids[] = {
+	"authorise",
+	"workinfo",
+	"ageworkinfo",
+	"shares",
+	"shareerror",
+	"poolstats",
+	"workerstats",
+	"block",
+	"addrauth",
+	"heartbeat"
+};
+
+static const char *ckdb_seq_names[] = {
+	"seqauthorise",
+	"seqworkinfo",
+	"seqageworkinfo",
+	"seqshares",
+	"seqshareerror",
+	"seqpoolstats",
+	"seqworkerstats",
+	"seqblock",
+	"seqaddrauth",
+	"seqheartbeat"
+};
+
+#define ID_COUNT (sizeof(ckdb_ids)/sizeof(char *))
+
 struct stratifier_data {
 	char pubkeytxnbin[25];
 	char donkeytxnbin[25];
@@ -301,8 +340,10 @@ struct stratifier_data {
 	mutex_t ckdb_lock;
 	/* Protects sequence numbers */
 	mutex_t ckdb_msg_lock;
-	/* Incrementing sequence number */
+	/* Incrementing global sequence number */
 	int ckdb_seq;
+	/* Incrementing ckdb_ids[] sequence numbers */
+	int ckdb_seq_ids[ID_COUNT];
 
 	bool ckdb_offline;
 
@@ -392,30 +433,6 @@ struct json_entry {
 #define GEN_LAX 0
 #define GEN_NORMAL 1
 #define GEN_PRIORITY 2
-
-#define ID_AUTH 0
-#define ID_WORKINFO 1
-#define ID_AGEWORKINFO 2
-#define ID_SHARES 3
-#define ID_SHAREERR 4
-#define ID_POOLSTATS 5
-#define ID_WORKERSTATS 6
-#define ID_BLOCK 7
-#define ID_ADDRAUTH 8
-#define ID_HEARTBEAT 9
-
-static const char *ckdb_ids[] = {
-	"authorise",
-	"workinfo",
-	"ageworkinfo",
-	"shares",
-	"shareerror",
-	"poolstats",
-	"workerstats",
-	"block",
-	"addrauth",
-	"heartbeat"
-};
 
 /* For storing a set of messages within another lock, allowing us to dump them
  * to the log outside of lock */
@@ -624,6 +641,7 @@ static char *ckdb_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const int idty
 	/* Set the atomically incrementing sequence number */
 	mutex_lock(&sdata->ckdb_msg_lock);
 	json_set_int(val, "seqall", sdata->ckdb_seq++);
+	json_set_int(val, ckdb_seq_names[idtype], sdata->ckdb_seq_ids[idtype]++);
 	mutex_unlock(&sdata->ckdb_msg_lock);
 
 	json_msg = json_dumps(val, JSON_COMPACT);
