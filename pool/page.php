@@ -177,11 +177,19 @@ function trm_force($html)
  return dotrm($html, false);
 }
 #
+function isCrap()
+{
+ if (isset($_SERVER['HTTP_USER_AGENT']))
+	return strpos($_SERVER['HTTP_USER_AGENT'],'iP');
+ else
+	return false;
+}
+#
 function pghead($css_marker, $script_marker, $name)
 {
  global $page_title;
 
- $iCrap = strpos($_SERVER['HTTP_USER_AGENT'],'iP');
+ $iCrap = isCrap();
 
  $head = "<!DOCTYPE html>\n";
 
@@ -444,6 +452,12 @@ function pgtop($info, $dotop, $user, $douser)
 		$lh = $img1.$lhc.$img2;
 		$lw = $img1.$lwc.$img2;
 	}
+
+	if (!isset($info['users']))
+		$info['users'] = '?';
+	if (!isset($info['workers']))
+		$info['workers'] = '?';
+
 	$top .= '<table cellpadding=0 cellspacing=0 border=0 width=100%><tr><td>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0>';
 	$top .= "<tr><td class=topdes>$lh</td></tr>";
@@ -522,7 +536,7 @@ function pgtop($info, $dotop, $user, $douser)
 #
 function pgmenu($menus)
 {
- $iCrap = strpos($_SERVER['HTTP_USER_AGENT'],'iP');
+ $iCrap = isCrap();
 
  $ret = "\n<table cellpadding=0 cellspacing=0 border=0 width=100% id=n42>";
  $ret .= '<tr><td width=100%>';
