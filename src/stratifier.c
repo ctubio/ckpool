@@ -640,6 +640,8 @@ static char *ckdb_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const int idty
 
 	/* Set the atomically incrementing sequence number */
 	mutex_lock(&sdata->ckdb_msg_lock);
+	json_set_int(val, "seqstart", ckp->starttime);
+	json_set_int(val, "seqpid", ckp->startpid);
 	json_set_int(val, "seqall", sdata->ckdb_seq++);
 	json_set_int(val, ckdb_seq_names[idtype], sdata->ckdb_seq_ids[idtype]++);
 	mutex_unlock(&sdata->ckdb_msg_lock);
