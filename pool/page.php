@@ -263,9 +263,9 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .fthi {color:red; font-size:7px; }
 .ftlo {color:green; font-size:7px; }
 .ft {color:blue; font-size:7px; }
-.ftl {text-align: left; color:blue; font-size:7px; display:inline-block; width:33%; }
-.ftm {text-align: middle; font-size:10pt; display:inline-block; width:33%; }
-.ftr {text-align: rigth; color:blue; font-size:7px; display:inline-block; width:33%; }
+.ftl {text-align: left; color:blue; font-size:7px; display:inline-block; width:20%; white-space: nowrap; }
+.ftm {text-align: middle; font-size:10pt; display:inline-block; width:60%; white-space: nowrap; }
+.ftr {text-align: rigth; color:blue; font-size:7px; display:inline-block; width:20%; }
 $css_marker
 </style>\n";
 
