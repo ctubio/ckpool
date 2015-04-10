@@ -1,7 +1,7 @@
 <?php
 #
 global $stt;
-$stt = microtime();
+$stt = microtime(true);
 #
 global $loginfailed;
 $loginfailed = false;

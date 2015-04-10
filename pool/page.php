@@ -245,7 +245,7 @@ if (!$iCrap)
 }
  $head .= "
 h1 {margin-top: 20px; float:middle; font-size: 20px;}
-.foot, .push {height: 50px; font-size: 10pt;}
+.foot, .push {height: 50px;}
 .title {background-color: #909090;}
 .even {background-color: #cccccc;}
 .odd {background-color: #a8a8a8;}
@@ -263,6 +263,9 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .fthi {color:red; font-size:7px; }
 .ftlo {color:green; font-size:7px; }
 .ft {color:blue; font-size:7px; }
+.ftl {text-align: left; color:blue; font-size:7px; display:inline-block; width:33%; }
+.ftm {text-align: middle; font-size:10pt; display:inline-block; width:33%; }
+.ftr {text-align: rigth; color:blue; font-size:7px; display:inline-block; width:33%; }
 $css_marker
 </style>\n";
 
@@ -613,12 +616,14 @@ function pgbody($info, $page, $menu, $dotop, $user, $douser)
 #
 function pgfoot($info)
 {
+ global $stt;
  $foot =      '</div></td></tr>';
  $foot .=    '</table>';
  $foot .=   '</center></td></tr>';
  $foot .=  '</table>';
  $foot .= '<div class=push></div></div>';
- $foot .= '<div class=foot><br>';
+ $std = gmdate('jS M H:i:s \U\T\C', intval($stt));
+ $foot .= "<div class=foot><br><span class=ftl>$std&nbsp;</span><span class=ftm>";
  if (is_array($info) && isset($info['sync']))
  {
   $sync = $info['sync'];
@@ -627,13 +632,13 @@ function pgfoot($info)
   else
 	$syc = 'lo';
   $syncd = number_format($sync);
-  $foot .= "<span class=ft$syc>sync: $syncd</span> ";
+  $foot .= "<span class=ft$syc>sync: $syncd</span>&nbsp;";
  }
  $foot .= 'Copyright &copy; Kano 2014';
  $now = date('Y');
  if ($now != '2014')
 	$foot .= "-$now";
- $foot .= ' <span class=ft>Z/s</span></div>';
+ $foot .= '&nbsp;<span class=ft>Z/s</span></span><span class=ftr>&nbsp;</span></div>';
  $foot .= "</body></html>\n";
 
  return $foot;
