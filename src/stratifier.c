@@ -347,6 +347,45 @@ struct session {
 	time_t added;
 };
 
+#define ID_AUTH 0
+#define ID_WORKINFO 1
+#define ID_AGEWORKINFO 2
+#define ID_SHARES 3
+#define ID_SHAREERR 4
+#define ID_POOLSTATS 5
+#define ID_WORKERSTATS 6
+#define ID_BLOCK 7
+#define ID_ADDRAUTH 8
+#define ID_HEARTBEAT 9
+
+static const char *ckdb_ids[] = {
+	"authorise",
+	"workinfo",
+	"ageworkinfo",
+	"shares",
+	"shareerror",
+	"poolstats",
+	"workerstats",
+	"block",
+	"addrauth",
+	"heartbeat"
+};
+
+static const char *ckdb_seq_names[] = {
+	"seqauthorise",
+	"seqworkinfo",
+	"seqageworkinfo",
+	"seqshares",
+	"seqshareerror",
+	"seqpoolstats",
+	"seqworkerstats",
+	"seqblock",
+	"seqaddrauth",
+	"seqheartbeat"
+};
+
+#define ID_COUNT (sizeof(ckdb_ids)/sizeof(char *))
+
 struct stratifier_data {
 	ckpool_t *ckp;
 
@@ -361,8 +400,10 @@ struct stratifier_data {
 	mutex_t ckdb_lock;
 	/* Protects sequence numbers */
 	mutex_t ckdb_msg_lock;
-	/* Incrementing sequence number */
+	/* Incrementing global sequence number */
 	int ckdb_seq;
+	/* Incrementing ckdb_ids[] sequence numbers */
+	int ckdb_seq_ids[ID_COUNT];
 
 	bool ckdb_offline;
 	bool verbose;
@@ -437,30 +478,6 @@ struct json_entry {
 #define GEN_LAX 0
 #define GEN_NORMAL 1
 #define GEN_PRIORITY 2
-
-#define ID_AUTH 0
-#define ID_WORKINFO 1
-#define ID_AGEWORKINFO 2
-#define ID_SHARES 3
-#define ID_SHAREERR 4
-#define ID_POOLSTATS 5
-#define ID_WORKERSTATS 6
-#define ID_BLOCK 7
-#define ID_ADDRAUTH 8
-#define ID_HEARTBEAT 9
-
-static const char *ckdb_ids[] = {
-	"authorise",
-	"workinfo",
-	"ageworkinfo",
-	"shares",
-	"shareerror",
-	"poolstats",
-	"workerstats",
-	"block",
-	"addrauth",
-	"heartbeat"
-};
 
 /* For storing a set of messages within another lock, allowing us to dump them
  * to the log outside of lock */
@@ -668,7 +685,8 @@ static char *ckdb_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const int idty
 
 	/* Set the atomically incrementing sequence number */
 	mutex_lock(&sdata->ckdb_msg_lock);
-	json_set_int(val, "seq", sdata->ckdb_seq++);
+	json_set_int(val, "seqall", sdata->ckdb_seq++);
+	json_set_int(val, ckdb_seq_names[idtype], sdata->ckdb_seq_ids[idtype]++);
 	mutex_unlock(&sdata->ckdb_msg_lock);
 
 	json_msg = json_dumps(val, JSON_COMPACT);
@@ -3792,14 +3810,20 @@ static int send_recv_auth(stratum_instance_t *client)
 		worker_instance_t *worker = client->worker_instance;
 		json_error_t err_val;
 		json_t *val = NULL;
+		int offset = 0;
 
 		LOGINFO("Got ckdb response: %s", buf);
 		response = alloca(responselen);
 		memset(response, 0, responselen);
-		if (unlikely(sscanf(buf, "id.%*d.%s", response) < 1 || strlen(response) < 1 || !strchr(response, '='))) {
+		if (unlikely(sscanf(buf, "id.%*d.%c%n", response, &offset) < 1)) {
+			LOGWARNING("Got1 unparseable ckdb auth response: %s", buf);
+			goto out_fail;
+		}
+		strcpy(response+1, buf+offset);
+		if (!strchr(response, '=')) {
 			if (cmdmatch(response, "failed"))
 				goto out;
-			LOGWARNING("Got unparseable ckdb auth response: %s", buf);
+			LOGWARNING("Got2 unparseable ckdb auth response: %s", buf);
 			goto out_fail;
 		}
 		cmd = response;
@@ -5221,21 +5245,25 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 		responselen = strlen(buf);
 	if (likely(responselen > 0)) {
 		char *response = alloca(responselen);
+		int offset = 0;
 
 		memset(response, 0, responselen);
-		sscanf(buf, "id.%*d.%s", response);
-		if (safecmp(response, "ok")) {
-			char *cmd;
+		if (sscanf(buf, "id.%*d.%c%n", response, &offset) > 0) {
+			strcpy(response+1, buf+offset);
+			if (safecmp(response, "ok")) {
+				char *cmd;
 
-			cmd = response;
-			strsep(&cmd, ".");
-			LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
-			if (cmdmatch(cmd, "heartbeat=")) {
-				strsep(&cmd, "=");
-				parse_ckdb_cmd(ckp, cmd);
-			}
+				cmd = response;
+				strsep(&cmd, ".");
+				LOGDEBUG("Got ckdb response: %s cmd %s", response, cmd);
+				if (cmdmatch(cmd, "heartbeat=")) {
+					strsep(&cmd, "=");
+					parse_ckdb_cmd(ckp, cmd);
+				}
+			} else
+				LOGWARNING("Got ckdb failure response: %s", buf);
 		} else
-			LOGWARNING("Got failed ckdb response: %s", buf);
+			LOGWARNING("Got bad ckdb response: %s", buf);
 		free(buf);
 	}
 }
