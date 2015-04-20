@@ -248,6 +248,30 @@ static void *unix_receiver(void *arg)
 	return NULL;
 }
 
+/* Get the next message in the receive queue, or wait up to 5 seconds for
+ * the next message, returning NULL if no message is received in that time. */
+unix_msg_t *get_unix_msg(proc_instance_t *pi)
+{
+	unix_msg_t *umsg;
+
+	mutex_lock(&pi->rmsg_lock);
+	if (!pi->unix_msgs) {
+		tv_t now;
+		ts_t abs;
+
+		tv_time(&now);
+		tv_to_ts(&abs, &now);
+		abs.tv_sec += 5;
+		cond_timedwait(&pi->rmsg_cond, &pi->rmsg_lock, &abs);
+	}
+	umsg = pi->unix_msgs;
+	if (umsg)
+		DL_DELETE(pi->unix_msgs, umsg);
+	mutex_unlock(&pi->rmsg_lock);
+
+	return umsg;
+}
+
 void create_unix_receiver(proc_instance_t *pi)
 {
 	pthread_t pth;

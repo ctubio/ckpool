@@ -233,6 +233,7 @@ ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
 ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, const int count);
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
 bool ckmsgq_empty(ckmsgq_t *ckmsgq);
+unix_msg_t *get_unix_msg(proc_instance_t *pi);
 void create_unix_receiver(proc_instance_t *pi);
 
 ckpool_t *global_ckp;
