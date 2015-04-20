@@ -3883,7 +3883,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			finished = true;
 		ck_wunlock(&fpm_lock);
 		if (finished) {
-			LOGERR("%s() reload completed, ckpool queue match at line %"PRIu64, __func__, count);
+			LOGERR("%s() reload ckpool queue match at line %"PRIu64, __func__, count);
 			return true;
 		}
 
@@ -4101,7 +4101,12 @@ static bool reload_from(tv_t *start)
 		processing++;
 		count = 0;
 
-		while (!everyone_die && !matched &&
+		/* Don't abort when matched since breakdown() will remove
+		 *  the matching message sequence numbers queued from ckpool
+		 * Also since ckpool messages are not in order, we could be
+		 *  aborting early and not get the few slightly later out of
+		 *  order messages in the log file */
+		while (!everyone_die && 
 			logline(reload_buf, MAX_READ, fp, filename))
 				matched = reload_line(conn, filename, ++count, reload_buf);
 
@@ -4121,7 +4126,7 @@ static bool reload_from(tv_t *start)
 		} else
 			fclose(fp);
 		free(filename);
-		if (everyone_die || matched)
+		if (everyone_die)
 			break;
 		reload_timestamp.tv_sec += ROLL_S;
 		if (confirm_sharesummary && tv_newer(&confirm_finish, &reload_timestamp)) {
