@@ -498,43 +498,31 @@ out:
 
 static void childsighandler(const int sig);
 
-struct proc_message {
-	proc_instance_t *pi;
-	char *msg;
-	const char *file;
-	const char *func;
-	int line;
-};
-
-/* Send all one way messages asynchronously so we can wait till the receiving
- * end closes the socket to ensure all messages are received but no deadlocks
- * can occur with 2 processes waiting for each other's socket closure. */
-void *async_send_proc(void *arg)
+/* Send a single message to a process instance when there will be no response,
+ * closing the socket immediately. */
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	struct proc_message *pm = (struct proc_message *)arg;
-	proc_instance_t *pi = pm->pi;
-	char *msg = pm->msg;
-	const char *file = pm->file;
-	const char *func = pm->func;
-	int line = pm->line;
-
 	char *path = pi->us.path;
 	bool ret = false;
 	int sockd;
 
-	pthread_detach(pthread_self());
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
+		return;
+	}
 
 	if (unlikely(!path || !strlen(path))) {
 		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
 		goto out;
 	}
+
 	/* At startup the pid fields are not set up before some processes are
 	 * forked so they never inherit them. */
 	if (unlikely(!pi->pid)) {
 		pi->pid = get_proc_pid(pi);
 		if (!pi->pid) {
 			LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
-			goto out_nofail;
+			return;
 		}
 	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
@@ -549,40 +537,17 @@ void *async_send_proc(void *arg)
 	}
 	if (unlikely(!send_unix_msg(sockd, msg)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
-	else
+	else {
 		ret = true;
-	if (!wait_close(sockd, 5))
-		LOGWARNING("send_proc %s did not detect close from %s %s:%d", msg, file, func, line);
+		if (!wait_close(sockd, 5))
+			LOGWARNING("send_proc %s did not detect close from %s %s:%d", msg, file, func, line);
+	}
 	Close(sockd);
 out:
 	if (unlikely(!ret)) {
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
 		childsighandler(15);
 	}
-out_nofail:
-	free(msg);
-	free(pm);
-	return NULL;
-}
-
-/* Send a single message to a process instance when there will be no response,
- * closing the socket immediately. */
-void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
-{
-	struct proc_message *pm;
-	pthread_t pth;
-
-	if (unlikely(!msg || !strlen(msg))) {
-		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
-		return;
-	}
-	pm = ckalloc(sizeof(struct proc_message));
-	pm->pi = pi;
-	pm->msg = strdup(msg);
-	pm->file = file;
-	pm->func = func;
-	pm->line = line;
-	create_pthread(&pth, async_send_proc, pm);
 }
 
 /* Send a single message to a process instance and retrieve the response, then
