@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.070"
+#define CKDB_VERSION DB_VERSION"-1.071"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -790,7 +790,7 @@ extern tv_t missing_secuser_max;
  *   maxseq is incremented to the current maximum N+x each time a record is
  *   processed
  *  If we get up to N+3 but it is unexpectedly followed by N+5, that means N+4
- *   is currently missing - so it is flagged as missing by time=0 and the
+ *   is currently missing - so it is flagged as missing by MISSFLAG=0 and the
  *   missing counters are incremented - maxseq will now be N+5
  *  Once we reach N+size we need to discard N and use it as N+size
  *   and increment seqbase N
@@ -804,7 +804,7 @@ extern tv_t missing_secuser_max;
  *  If we receive an item N-x i.e. less than seqbase N, then:
  *   If maxseq-N = size then N-x is considered stale and the stale counters
  *    are incremented since there's no unused items below N available
- *    this shouldn't normally happen after we've received size seq numbers
+ *    This shouldn't normally happen after we've received size seq numbers
  *   Else maxseq-N is less than size, that means there are unused items below N
  *    This will usually only be with a new sequence and the first seq was out
  *     of order, before lower sequence numbers, thus maxseq should be close to

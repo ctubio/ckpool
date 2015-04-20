@@ -901,7 +901,7 @@ K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 	if (!u_item) {
 		LOGERR("%s(): unknown user '%s'",
 			__func__,
-			st = safe_text(username));
+			st = safe_text_nonull(username));
 		FREENULL(st);
 		goto unitem;
 	}
@@ -2797,7 +2797,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 	if (!w_item) {
 		LOGDEBUG("%s(): new_default_worker failed %"PRId64"/%s/%ld,%ld",
 			 __func__, shares->userid,
-			 st = safe_text(shares->workername),
+			 st = safe_text_nonull(shares->workername),
 			 shares->createdate.tv_sec, shares->createdate.tv_usec);
 		FREENULL(st);
 		return false;
@@ -2811,7 +2811,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
 				 " %"PRId64"/%s/%ld,%ld",
 				 __func__, shares->workinfoid, shares->userid,
-				 st = safe_text(shares->workername),
+				 st = safe_text_nonull(shares->workername),
 				 shares->createdate.tv_sec,
 				 shares->createdate.tv_usec);
 			FREENULL(st);
@@ -2827,7 +2827,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 					 "%"PRId64" %"PRId64"/%s/%ld,%ld",
 					 __func__, sharesummary->complete,
 					 shares->workinfoid, shares->userid,
-					 st = safe_text(shares->workername),
+					 st = safe_text_nonull(shares->workername),
 					 shares->createdate.tv_sec,
 					 shares->createdate.tv_usec);
 				FREENULL(st);
@@ -2938,7 +2938,7 @@ keep:
 	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
 		" Early share procured",
 		__func__, early_shares->workinfoid,
-		st = safe_text(early_shares->workername),
+		st = safe_text_nonull(early_shares->workername),
 		early_shares->createdate.tv_sec,
 		early_shares->createdate.tv_usec, cd_buf,
 		early_shares->oldcount, early_shares->redo);
@@ -2953,7 +2953,7 @@ discard:
 	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
 		" Early share discarded!%s",
 		__func__, early_shares->workinfoid,
-		st = safe_text(early_shares->workername),
+		st = safe_text_nonull(early_shares->workername),
 		early_shares->createdate.tv_sec,
 		early_shares->createdate.tv_usec, cd_buf,
 		early_shares->oldcount, early_shares->redo, why);
@@ -2982,7 +2982,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
-		 workinfoid, st = safe_text(workername), nonce,
+		 workinfoid, st = safe_text_nonull(workername), nonce,
 		 errn, cd->tv_sec, cd->tv_usec);
 	FREENULL(st);
 
@@ -3002,7 +3002,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		    or the authentication information got to ckdb after
 		    the shares ... which shouldn't ever happen */
 		LOGERR("%s() %s/%ld,%ld %s no user! Share discarded!",
-			__func__, st = safe_text(username),
+			__func__, st = safe_text_nonull(username),
 			cd->tv_sec, cd->tv_usec, cd_buf);
 		FREENULL(st);
 		goto tisbad;
@@ -3029,7 +3029,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 			btv_to_buf(cd, cd_buf, sizeof(cd_buf));
 			LOGERR("%s() %s/%ld,%ld %s missing secondaryuserid! "
 				"Share corrected",
-				__func__, st = safe_text(username),
+				__func__, st = safe_text_nonull(username),
 				cd->tv_sec, cd->tv_usec, cd_buf);
 			FREENULL(st);
 		}
@@ -3044,7 +3044,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
 			"Early share queued!",
 			__func__, shares->workinfoid,
-			st = safe_text(workername),
+			st = safe_text_nonull(workername),
 			cd->tv_sec, cd->tv_usec, cd_buf);
 		FREENULL(st);
 		shares->redo = 0;
@@ -3102,7 +3102,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 	if (!w_item) {
 		LOGDEBUG("%s(): new_default_worker failed %"PRId64"/%s/%ld,%ld",
 			 __func__, shareerrors->userid,
-			 st = safe_text(shareerrors->workername),
+			 st = safe_text_nonull(shareerrors->workername),
 			 shareerrors->createdate.tv_sec,
 			 shareerrors->createdate.tv_usec);
 		FREENULL(st);
@@ -3118,7 +3118,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 				 " %"PRId64"/%s/%ld,%ld",
 				 __func__, shareerrors->workinfoid,
 				 shareerrors->userid,
-				 st = safe_text(shareerrors->workername),
+				 st = safe_text_nonull(shareerrors->workername),
 				 shareerrors->createdate.tv_sec,
 				 shareerrors->createdate.tv_usec);
 			FREENULL(st);
@@ -3136,7 +3136,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 					 __func__, sharesummary->complete,
 					 shareerrors->workinfoid,
 					 shareerrors->userid,
-					 st = safe_text(shareerrors->workername),
+					 st = safe_text_nonull(shareerrors->workername),
 					 shareerrors->createdate.tv_sec,
 					 shareerrors->createdate.tv_usec);
 				FREENULL(st);
@@ -3249,7 +3249,7 @@ keep:
 	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
 		" Early share procured",
 		__func__, early_shareerrors->workinfoid,
-		st = safe_text(early_shareerrors->workername),
+		st = safe_text_nonull(early_shareerrors->workername),
 		early_shareerrors->createdate.tv_sec,
 		early_shareerrors->createdate.tv_usec, cd_buf,
 		early_shareerrors->oldcount, early_shareerrors->redo);
@@ -3264,7 +3264,7 @@ discard:
 	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
 		" Early share discarded!%s",
 		__func__, early_shareerrors->workinfoid,
-		st = safe_text(early_shareerrors->workername),
+		st = safe_text_nonull(early_shareerrors->workername),
 		early_shareerrors->createdate.tv_sec,
 		early_shareerrors->createdate.tv_usec, cd_buf,
 		early_shareerrors->oldcount, early_shareerrors->redo, why);
@@ -3290,7 +3290,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
-		 workinfoid, st = safe_text(workername), errn,
+		 workinfoid, st = safe_text_nonull(workername), errn,
 		 error, cd->tv_sec, cd->tv_usec);
 	FREENULL(st);
 
@@ -3307,7 +3307,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	if (!u_item) {
 		btv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s() %s/%ld,%ld %s no user! Shareerror discarded!",
-			__func__, st = safe_text(username),
+			__func__, st = safe_text_nonull(username),
 			cd->tv_sec, cd->tv_usec, cd_buf);
 		FREENULL(st);
 		goto tisbad;
@@ -3330,7 +3330,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 			btv_to_buf(cd, cd_buf, sizeof(cd_buf));
 			LOGERR("%s() %s/%ld,%ld %s missing secondaryuserid! "
 				"Sharerror corrected",
-				__func__, st = safe_text(username),
+				__func__, st = safe_text_nonull(username),
 				cd->tv_sec, cd->tv_usec, cd_buf);
 			FREENULL(st);
 		}
@@ -3345,7 +3345,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
 			"Early shareerror queued!",
 			__func__, shareerrors->workinfoid,
-			st = safe_text(workername),
+			st = safe_text_nonull(workername),
 			cd->tv_sec, cd->tv_usec, cd_buf);
 		FREENULL(st);
 		shareerrors->redo = 0;
@@ -4004,7 +4004,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 				LOGDEBUG("%s(): updating sharesummary not '%c'"
 					 " %"PRId64"/%s/%"PRId64"/%s",
 					__func__, SUMMARY_NEW, row->userid,
-					st = safe_text(row->workername),
+					st = safe_text_nonull(row->workername),
 					row->workinfoid, row->complete);
 				FREENULL(st);
 			}
@@ -4956,7 +4956,7 @@ flail:
 				snprintf(tmp, sizeof(tmp),
 					 " Reward: %f, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
 					 BTC_TO_D(row->reward),
-					 st = safe_text(row->workername),
+					 st = safe_text_nonull(row->workername),
 					 pool.diffacc, est, pct, cd_buf);
 				FREENULL(st);
 				if (pool.workinfoid < row->workinfoid) {
@@ -5686,7 +5686,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		} else {
 			LOGDEBUG("%s(): unknown user '%s'",
 				 __func__,
-				 st = safe_text(username));
+				 st = safe_text_nonull(username));
 			FREENULL(st);
 		}
 		if (!u_item)
@@ -5727,7 +5727,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		// Shouldn't actually be possible unless twice in the logs
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s(): Duplicate auths ignored %s/%s/%s",
-			__func__, poolinstance, st = safe_text(workername),
+			__func__, poolinstance, st = safe_text_nonull(workername),
 			cd_buf);
 		FREENULL(st);
 
@@ -6056,7 +6056,7 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	if (!u_item) {
 		LOGERR("%s(): unknown user '%s'",
 			__func__,
-			st = safe_text(username));
+			st = safe_text_nonull(username));
 		FREENULL(st);
 		return false;
 	}
@@ -6166,8 +6166,8 @@ bool workerstats_add(char *poolinstance, char *elapsed, char *username,
 		char *usr = NULL, *wrk = NULL;
 		LOGERR("%s(): unknown user '%s' (worker=%s)",
 			__func__,
-			usr = safe_text(username),
-			wrk = safe_text(workername));
+			usr = safe_text_nonull(username),
+			wrk = safe_text_nonull(workername));
 		FREENULL(usr);
 		FREENULL(wrk);
 		return false;
@@ -6261,7 +6261,7 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 
 	LOGDEBUG("%s() adding ms %"PRId64"/%"PRId64"/%s/%.0f",
 		 __func__, row->markerid, row->userid,
-		 st = safe_text(row->workername),
+		 st = safe_text_nonull(row->workername),
 		 row->diffacc);
 	FREENULL(st);
 
