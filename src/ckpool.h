@@ -99,6 +99,10 @@ struct server_instance {
 typedef struct server_instance server_instance_t;
 
 struct ckpool_instance {
+	/* Start time */
+	time_t starttime;
+	/* Start pid */
+	pid_t startpid;
 	/* The initial command line arguments */
 	char **initial_args;
 	/* Number of arguments */

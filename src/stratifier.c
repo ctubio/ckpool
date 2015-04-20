@@ -401,9 +401,9 @@ struct stratifier_data {
 	/* Protects sequence numbers */
 	mutex_t ckdb_msg_lock;
 	/* Incrementing global sequence number */
-	int ckdb_seq;
+	uint64_t ckdb_seq;
 	/* Incrementing ckdb_ids[] sequence numbers */
-	int ckdb_seq_ids[ID_COUNT];
+	uint64_t ckdb_seq_ids[ID_COUNT];
 
 	bool ckdb_offline;
 	bool verbose;
@@ -682,17 +682,21 @@ static char *ckdb_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const int idty
 	char *json_msg;
 	char logname[512];
 	char *ret = NULL;
+	uint64_t seqall;
 
-	/* Set the atomically incrementing sequence number */
+	json_set_int(val, "seqstart", ckp->starttime);
+	json_set_int(val, "seqpid", ckp->startpid);
+	/* Set the atomically incrementing sequence numbers */
 	mutex_lock(&sdata->ckdb_msg_lock);
-	json_set_int(val, "seqall", sdata->ckdb_seq++);
+	seqall = sdata->ckdb_seq++;
+	json_set_int(val, "seqall", seqall);
 	json_set_int(val, ckdb_seq_names[idtype], sdata->ckdb_seq_ids[idtype]++);
 	mutex_unlock(&sdata->ckdb_msg_lock);
 
 	json_msg = json_dumps(val, JSON_COMPACT);
 	if (unlikely(!json_msg))
 		goto out;
-	ASPRINTF(&ret, "%s.id.json=%s", ckdb_ids[idtype], json_msg);
+	ASPRINTF(&ret, "%s.%"PRIu64".json=%s", ckdb_ids[idtype], seqall, json_msg);
 	free(json_msg);
 out:
 	json_decref(val);
@@ -3815,7 +3819,7 @@ static int send_recv_auth(stratum_instance_t *client)
 		LOGINFO("Got ckdb response: %s", buf);
 		response = alloca(responselen);
 		memset(response, 0, responselen);
-		if (unlikely(sscanf(buf, "id.%*d.%c%n", response, &offset) < 1)) {
+		if (unlikely(sscanf(buf, "%*d.%*d.%c%n", response, &offset) < 1)) {
 			LOGWARNING("Got1 unparseable ckdb auth response: %s", buf);
 			goto out_fail;
 		}
@@ -5248,7 +5252,7 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 		int offset = 0;
 
 		memset(response, 0, responselen);
-		if (sscanf(buf, "id.%*d.%c%n", response, &offset) > 0) {
+		if (sscanf(buf, "%*d.%*d.%c%n", response, &offset) > 0) {
 			strcpy(response+1, buf+offset);
 			if (safecmp(response, "ok")) {
 				char *cmd;

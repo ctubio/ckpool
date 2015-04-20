@@ -205,8 +205,8 @@ function ni(e,o){if(e){if(o==0){e.defd=e.style.display;e.style.display='none'}el
 function domin(o){var e=document.getElementById('minicb');if(e){if(o==0){e.checked=true}else{e.checked=false}};for(var i=0;i<10;i++){e=document.getElementById('mini'+i);ni(e,o)}}
 function mini(){var hm=gcn('mini');if(hm==''){domin(1)}else{domin(0)}}
 function md(e){var c='';if(e.checked){c='y'}scnv('mini',c);mini()}
+function tim(){var e=document.getElementById('ftr');if(e){var now=new Date(),t=document.createTextNode(now.toLocaleString());e.appendChild(t)}}
 function jst(){var e=document.getElementById('jst');if(e){e.style.visibility='hidden'}}
-window.onpaint=jst();
 </script>\n";
  $head .= "<style type='text/css'>
 input[type=checkbox] {vertical-align: -2px;}
@@ -245,7 +245,7 @@ if (!$iCrap)
 }
  $head .= "
 h1 {margin-top: 20px; float:middle; font-size: 20px;}
-.foot, .push {height: 50px; font-size: 10pt;}
+.foot, .push {height: 50px;}
 .title {background-color: #909090;}
 .even {background-color: #cccccc;}
 .odd {background-color: #a8a8a8;}
@@ -263,6 +263,9 @@ h1 {margin-top: 20px; float:middle; font-size: 20px;}
 .fthi {color:red; font-size:7px; }
 .ftlo {color:green; font-size:7px; }
 .ft {color:blue; font-size:7px; }
+.ftl {text-align: left; color:blue; font-size:7px; display:inline-block; width:20%; white-space: nowrap; }
+.ftm {text-align: middle; font-size:10pt; display:inline-block; width:60%; white-space: nowrap; }
+.ftr {text-align: rigth; color:blue; font-size:7px; display:inline-block; width:20%; white-space: nowrap; }
 $css_marker
 </style>\n";
 
@@ -589,7 +592,7 @@ function pgmenu($menus)
 #
 function pgbody($info, $page, $menu, $dotop, $user, $douser)
 {
- $body = '<body onload="mini();jst()"';
+ $body = '<body';
  if ($page == 'index')
 	$body .= ' background=/BTC20.png';
  $body .= '><div class=page>';
@@ -613,12 +616,14 @@ function pgbody($info, $page, $menu, $dotop, $user, $douser)
 #
 function pgfoot($info)
 {
+ global $stt;
  $foot =      '</div></td></tr>';
  $foot .=    '</table>';
  $foot .=   '</center></td></tr>';
  $foot .=  '</table>';
  $foot .= '<div class=push></div></div>';
- $foot .= '<div class=foot><br>';
+ $std = gmdate('jS M H:i:s \U\T\C', intval($stt));
+ $foot .= "<div class=foot><br><span class=ftl>$std&nbsp;</span><span class=ftm>";
  if (is_array($info) && isset($info['sync']))
  {
   $sync = $info['sync'];
@@ -627,14 +632,14 @@ function pgfoot($info)
   else
 	$syc = 'lo';
   $syncd = number_format($sync);
-  $foot .= "<span class=ft$syc>sync: $syncd</span> ";
+  $foot .= "<span class=ft$syc>sync: $syncd</span>&nbsp;";
  }
  $foot .= 'Copyright &copy; Kano 2014';
  $now = date('Y');
  if ($now != '2014')
 	$foot .= "-$now";
- $foot .= ' <span class=ft>Z/s</span></div>';
- $foot .= "</body></html>\n";
+ $foot .= '&nbsp;<span class=ft>Z/s</span></span><span class=ftr id=ftr>&nbsp;</span></div>';
+ $foot .= "<script type='text/javascript'>jst();tim();mini();</script></body></html>\n";
 
  return $foot;
 }

@@ -1438,6 +1438,8 @@ int main(int argc, char **argv)
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
+	ckp.starttime = time(NULL);
+	ckp.startpid = getpid();
 	ckp.loglevel = LOG_NOTICE;
 	ckp.initial_args = ckalloc(sizeof(char *) * (argc + 2)); /* Leave room for extra -H */
 	for (ckp.args = 0; ckp.args < argc; ckp.args++)
