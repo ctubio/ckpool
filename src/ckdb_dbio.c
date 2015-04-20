@@ -37,26 +37,26 @@ char *pqerrmsg(PGconn *conn)
 // HISTORY FIELDS
 #define HISTORYDATEFLDS(_res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, "createdate", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV("createdate", _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, "createby", _fld, _ok); \
+		TXT_TO_TV(CDDB, _fld, (_data)->createdate); \
+		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_STR("createby", _fld, (_data)->createby); \
-		PQ_GET_FLD(_res, _row, "createcode", _fld, _ok); \
+		TXT_TO_STR(BYDB, _fld, (_data)->createby); \
+		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_STR("createcode", _fld, (_data)->createcode); \
-		PQ_GET_FLD(_res, _row, "createinet", _fld, _ok); \
+		TXT_TO_STR(CODEDB, _fld, (_data)->createcode); \
+		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_STR("createinet", _fld, (_data)->createinet); \
-		PQ_GET_FLD(_res, _row, "expirydate", _fld, _ok); \
+		TXT_TO_STR(INETDB, _fld, (_data)->createinet); \
+		PQ_GET_FLD(_res, _row, EDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV("expirydate", _fld, (_data)->expirydate); \
+		TXT_TO_TV(EDDB, _fld, (_data)->expirydate); \
 	} while (0)
 
 #define HISTORYDATEPARAMS(_params, _his_pos, _row) do { \
@@ -70,35 +70,35 @@ char *pqerrmsg(PGconn *conn)
 // MODIFY FIELDS
 #define MODIFYDATEFLDPOINTERS(_list, _res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, "createdate", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV("createdate", _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, "createby", _fld, _ok); \
+		TXT_TO_TV(CDDB, _fld, (_data)->createdate); \
+		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		SET_CREATEBY(_list, (_data)->createby, _fld); \
-		PQ_GET_FLD(_res, _row, "createcode", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		SET_CREATECODE(_list, (_data)->createcode, _fld); \
-		PQ_GET_FLD(_res, _row, "createinet", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		SET_CREATEINET(_list, (_data)->createinet, _fld); \
-		PQ_GET_FLD(_res, _row, "modifydate", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, MDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV("modifydate", _fld, (_data)->modifydate); \
-		PQ_GET_FLD(_res, _row, "modifyby", _fld, _ok); \
+		TXT_TO_TV(MDDB, _fld, (_data)->modifydate); \
+		PQ_GET_FLD(_res, _row, MBYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		SET_MODIFYBY(_list, (_data)->modifyby, _fld); \
-		PQ_GET_FLD(_res, _row, "modifycode", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, MCODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		SET_MODIFYCODE(_list, (_data)->modifycode, _fld); \
-		PQ_GET_FLD(_res, _row, "modifyinet", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, MINETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		SET_MODIFYINET(_list, (_data)->modifyinet, _fld); \
@@ -125,22 +125,22 @@ char *pqerrmsg(PGconn *conn)
 // SIMPLE FIELDS
 #define SIMPLEDATEFLDS(_res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, "createdate", _fld, _ok); \
+		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV("createdate", _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, "createby", _fld, _ok); \
+		TXT_TO_TV(CDDB, _fld, (_data)->createdate); \
+		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_STR("createby", _fld, (_data)->createby); \
-		PQ_GET_FLD(_res, _row, "createcode", _fld, _ok); \
+		TXT_TO_STR(BYDB, _fld, (_data)->createby); \
+		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_STR("createcode", _fld, (_data)->createcode); \
-		PQ_GET_FLD(_res, _row, "createinet", _fld, _ok); \
+		TXT_TO_STR(CODEDB, _fld, (_data)->createcode); \
+		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_STR("createinet", _fld, (_data)->createinet); \
+		TXT_TO_STR(INETDB, _fld, (_data)->createinet); \
 	} while (0)
 
 #define SIMPLEDATEPARAMS(_params, _his_pos, _row) do { \
@@ -342,8 +342,8 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 
 	lastid += increment;
 	snprintf(qry, sizeof(qry), "update idcontrol set "
-				   "lastid=$1, modifydate=$2, modifyby=$3, "
-				   "modifycode=$4, modifyinet=$5 "
+				   "lastid=$1,"MDDB"=$2,"MBYDB"=$3,"
+				   MCODEDB"=$4,"MINETDB"=$5 "
 				   "where idname='%s'",
 				   idname);
 
@@ -421,7 +421,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
-	upd = "update users set expirydate=$1 where userid=$2 and expirydate=$3";
+	upd = "update users set "EDDB"=$1 where userid=$2 and "EDDB"=$3";
 	par = 0;
 	params[par++] = tv_to_buf(cd, NULL, 0);
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
@@ -472,7 +472,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		"userid,username,$3,$4,joineddate,"
 		"$5,secondaryuserid,$6,"
 		"$7,$8,$9,$10,$11 from users where "
-		"userid=$1 and expirydate=$2";
+		"userid=$1 and "EDDB"=$2";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
@@ -795,8 +795,8 @@ bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun)
 	}
 
 	if (old_item) {
-		upd = "update useratts set expirydate=$1 where userid=$2 and "
-			"attname=$3 and expirydate=$4";
+		upd = "update useratts set "EDDB"=$1 where userid=$2 and "
+			"attname=$3 and "EDDB"=$4";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(old_useratts->userid, NULL, 0);
@@ -985,8 +985,8 @@ bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd)
 			conned = true;
 		}
 
-		upd = "update useratts set expirydate=$1 where userid=$2 and "
-			"attname=$3 and expirydate=$4";
+		upd = "update useratts set "EDDB"=$1 where userid=$2 and "
+			"attname=$3 and "EDDB"=$4";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(useratts->userid, NULL, 0);
@@ -1327,7 +1327,7 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
-	upd = "update workers set expirydate=$1 where workerid=$2 and expirydate=$3";
+	upd = "update workers set "EDDB"=$1 where workerid=$2 and "EDDB"=$3";
 	par = 0;
 	params[par++] = tv_to_buf(cd, NULL, 0);
 	params[par++] = bigint_to_buf(row->workerid, NULL, 0);
@@ -1551,8 +1551,8 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	count = matches = 0;
 	APPEND_REALLOC_INIT(upd, off, len);
 	APPEND_REALLOC(upd, off, len,
-			"update paymentaddresses set expirydate=$1 where "
-			"userid=$2 and expirydate=$3 and payaddress in (");
+			"update paymentaddresses set "EDDB"=$1 where "
+			"userid=$2 and "EDDB"=$3 and payaddress in (");
 	par = 0;
 	params[par++] = tv_to_buf(cd, NULL, 0);
 	params[par++] = bigint_to_buf(userid, NULL, 0);
@@ -1905,8 +1905,8 @@ bool payments_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 
 		DATA_PAYMENTS(oldp, *old_p_item);
 
-		upd = "update payments set expirydate=$1 where paymentid=$2"
-			" and expirydate=$3";
+		upd = "update payments set "EDDB"=$1 where paymentid=$2"
+			" and "EDDB"=$3";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(oldp->paymentid, NULL, 0);
@@ -2220,9 +2220,9 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 
 	if (old_item) {
 		upd = "update optioncontrol "
-			"set expirydate=$1 where optionname=$2 and "
+			"set "EDDB"=$1 where optionname=$2 and "
 			"activationdate=$3 and activationheight=$4 and "
-			"expirydate=$5";
+			EDDB"=$5";
 
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
@@ -2367,7 +2367,7 @@ bool optioncontrol_fill(PGconn *conn)
 	sel = "select "
 		"optionname,optionvalue,activationdate,activationheight"
 		HISTORYDATECONTROL
-		" from optioncontrol where expirydate=$1";
+		" from optioncontrol where "EDDB"=$1";
 	par = 0;
 	params[par++] = tv_to_buf((tv_t *)(&default_expiry), NULL, 0);
 	PARCHK(par, params);
@@ -2635,7 +2635,7 @@ bool workinfo_fill(PGconn *conn)
 			"workinfoid,poolinstance,merklehash,prevhash,"
 			"coinbase1,coinbase2,version,bits,ntime,reward"
 			HISTORYDATECONTROL
-			" from workinfo where expirydate=$1 and"
+			" from workinfo where "EDDB"=$1 and"
 			" ((workinfoid>=$2 and workinfoid<=$3)");
 
 	// If we aren't loading the full range, ensure the necessary ones are loaded
@@ -3921,7 +3921,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 		if (wm_item) {
 			DATA_WORKMARKERS(wm, wm_item);
 			LOGERR("%s(): attempt to update sharesummary "
-			       "with %s %"PRId64"/%"PRId64"/%s createdate %s"
+			       "with %s %"PRId64"/%"PRId64"/%s "CDDB" %s"
 			       " but processed workmarkers %"PRId64" exists",
 				__func__, s_row ? "shares" : "shareerrors",
 				workinfoid, userid, st = safe_text(workername),
@@ -3969,7 +3969,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 						level = LOG_WARNING;
 				} else
 					ooof0++;
-				LOGMSG(level, "%s(): OoO %s createdate (%s) is < summary"
+				LOGMSG(level, "%s(): OoO %s "CDDB" (%s) is < summary"
 					" firstshare (%s) (%s)",
 					__func__, s_row ? "shares" : "shareerrors",
 					(tmp1 = ctv_to_buf(createdate, NULL, 0)),
@@ -3990,7 +3990,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 						level = LOG_WARNING;
 				} else
 					oool0++;
-				LOGMSG(level, "%s(): OoO %s createdate (%s) is < summary"
+				LOGMSG(level, "%s(): OoO %s "CDDB" (%s) is < summary"
 					" lastshare (%s) (%s)",
 					__func__, s_row ? "shares" : "shareerrors",
 					(tmp1 = ctv_to_buf(createdate, NULL, 0)),
@@ -4126,7 +4126,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 					"shareacc=$9,sharesta=$10,sharedup=$11,sharehi=$12,"
 					"sharerej=$13,firstshare=$14,lastshare=$15,"
 					"sharecount=$16,errorcount=$17,lastdiffacc=$18,complete=$19"
-					",modifydate=$20,modifyby=$21,modifycode=$22,modifyinet=$23 "
+					","MDDB"=$20,"MBYDB"=$21,"MCODEDB"=$22,"MINETDB"=$23 "
 					"where userid=$1 and workername=$2 and workinfoid=$3";
 
 				res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -4154,7 +4154,7 @@ bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITE
 					PARCHKVAL(par, 8, params);
 
 					upd = "update sharesummary "
-						"set complete=$4,modifydate=$5,modifyby=$6,modifycode=$7,modifyinet=$8 "
+						"set complete=$4,"MDDB"=$5,"MBYDB"=$6,"MCODEDB"=$7,"MINETDB"=$8 "
 						"where userid=$1 and workername=$2 and workinfoid=$3";
 
 					res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -4509,7 +4509,7 @@ bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 	row->statsconfirmed[1] = '\0';
 	HISTORYDATEINIT(row, cd, by, code, inet);
 
-	upd = "update blocks set expirydate=$1 where blockhash=$2 and expirydate=$3";
+	upd = "update blocks set "EDDB"=$1 where blockhash=$2 and "EDDB"=$3";
 	par = 0;
 	params[par++] = tv_to_buf(cd, NULL, 0);
 	params[par++] = str_to_buf(row->blockhash, NULL, 0);
@@ -4564,7 +4564,7 @@ bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 		"clientid,enonce1,nonce2,nonce,reward,confirmed,"
 		"$3,$4,$5,$6,$7,$8,"
 		"$9,$10,$11,$12,$13 from blocks where "
-		"blockhash=$1 and expirydate=$2";
+		"blockhash=$1 and "EDDB"=$2";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
@@ -4782,7 +4782,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				goto flail;
 			}
 
-			upd = "update blocks set expirydate=$1 where blockhash=$2 and expirydate=$3";
+			upd = "update blocks set "EDDB"=$1 where blockhash=$2 and "EDDB"=$3";
 			par = 0;
 			params[par++] = tv_to_buf(cd, NULL, 0);
 			params[par++] = str_to_buf(row->blockhash, NULL, 0);
@@ -4849,7 +4849,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					"clientid,enonce1,nonce2,nonce,reward,"
 					"$3,$4,$5,$6,$7,elapsed,statsconfirmed,"
 					"$8,$9,$10,$11,$12 from blocks where "
-					"blockhash=$1 and expirydate=$2";
+					"blockhash=$1 and "EDDB"=$2";
 			} else {
 				HISTORYDATEPARAMS(params, par, row);
 				PARCHKVAL(par, 3 + HISTORYDATECOUNT, params); // 8 as per ins
@@ -4865,7 +4865,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					"$3,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed,"
 					"$4,$5,$6,$7,$8 from blocks where "
-					"blockhash=$1 and expirydate=$2";
+					"blockhash=$1 and "EDDB"=$2";
 			}
 
 			res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
@@ -5208,8 +5208,8 @@ bool miningpayouts_add(PGconn *conn, bool add, K_ITEM *mp_item,
 
 		DATA_MININGPAYOUTS(oldmp, *old_mp_item);
 
-		upd = "update miningpayouts set expirydate=$1 where payoutid=$2"
-			" and userid=$3 and expirydate=$4";
+		upd = "update miningpayouts set "EDDB"=$1 where payoutid=$2"
+			" and userid=$3 and "EDDB"=$4";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(oldmp->payoutid, NULL, 0);
@@ -5428,8 +5428,8 @@ bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 
 		DATA_PAYOUTS(oldpayouts, *old_p_item);
 
-		upd = "update payouts set expirydate=$1 where payoutid=$2"
-			" and expirydate=$3";
+		upd = "update payouts set "EDDB"=$1 where payoutid=$2"
+			" and "EDDB"=$3";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(oldpayouts->payoutid, NULL, 0);
@@ -5922,7 +5922,7 @@ bool poolstats_fill(PGconn *conn)
 			"poolinstance,elapsed,users,workers,hashrate,"
 			"hashrate5m,hashrate1hr,hashrate24hr"
 			SIMPLEDATECONTROL
-			" from poolstats where createdate>");
+			" from poolstats where "CDDB">");
 	APPEND_REALLOC(sel, off, len, stamp);
 
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -6545,8 +6545,8 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			begun = true;
 		}
 
-		upd = "update workmarkers set expirydate=$1 where markerid=$2"
-			" and expirydate=$3";
+		upd = "update workmarkers set "EDDB"=$1 where markerid=$2"
+			" and "EDDB"=$3";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(oldworkmarkers->markerid, NULL, 0);
@@ -6873,8 +6873,8 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 
 		begun = true;
 
-		upd = "update marks set expirydate=$1 where workinfoid=$2"
-			" and expirydate=$3";
+		upd = "update marks set "EDDB"=$1 where workinfoid=$2"
+			" and "EDDB"=$3";
 		par = 0;
 		params[par++] = tv_to_buf(cd, NULL, 0);
 		params[par++] = bigint_to_buf(workinfoid, NULL, 0);
