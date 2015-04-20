@@ -2141,7 +2141,15 @@ static enum cmd_values process_seq(K_ITEM *seqall, int which, tv_t *cd,
 	dupcmd = update_seq(ckdb_cmds[which].seq, n_seqcmd, n_seqstt, n_seqpid,
 			    buf, now, cd, code, warndup, msg);
 
-	// zzz // if dupall != dupcmd report a problem ... inside update_seq() ?
+	if (dupall != dupcmd) {
+		LOGERR("SEQ INIMICAL %s/%"PRIu64"=%s %s/%"PRIu64"=%s "
+			"cmd=%.32s...",
+			seqnam[SEQ_ALL], n_seqall, dupall ? "DUP" : "notdup",
+			seqnam[ckdb_cmds[which].seq], n_seqcmd,
+			dupcmd ? "DUP" : "notdup",
+			st = safe_text_nonull(msg));
+		FREENULL(st);
+	}
 
 	/* The norm is: neither is a dup, so reply with ok to process
 	 * If only one is a dup then that's a corrupt message or a bug
