@@ -615,11 +615,8 @@ void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 	}
 	if (unlikely(!send_unix_msg(sockd, msg)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
-	else {
+	else
 		ret = true;
-		if (!wait_close(sockd, 5))
-			LOGWARNING("send_proc %s did not detect close from %s %s:%d", msg, file, func, line);
-	}
 	Close(sockd);
 out:
 	if (unlikely(!ret)) {
