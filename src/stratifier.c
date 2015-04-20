@@ -1770,7 +1770,7 @@ retry:
 
 		umsg = get_unix_msg(pi);
 		if (unlikely(!umsg &&!ping_main(ckp))) {
-			LOGEMERG("Generator failed to ping main process, exiting");
+			LOGEMERG("Stratifier failed to ping main process, exiting");
 			ret = 1;
 			goto out;
 		}
