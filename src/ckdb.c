@@ -3674,10 +3674,10 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_HEARTBEAT:
 						// First message from the pool
 						if (want_first) {
+							want_first = false;
 							ck_wlock(&fpm_lock);
 							first_pool_message = strdup(buf);
 							ck_wunlock(&fpm_lock);
-							want_first = false;
 						}
 					case CMD_CHKPASS:
 					case CMD_ADDUSER:
@@ -3693,6 +3693,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_NEWID:
 					case CMD_STATS:
 					case CMD_USERSTATUS:
+					case CMD_SHSTA:
 						ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
 										 by_default,
 										 (char *)__func__,
@@ -3816,10 +3817,10 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_BLOCK:
 						// First message from the pool
 						if (want_first) {
+							want_first = false;
 							ck_wlock(&fpm_lock);
 							first_pool_message = strdup(buf);
 							ck_wunlock(&fpm_lock);
-							want_first = false;
 						}
 
 						snprintf(reply, sizeof(reply),
@@ -3982,7 +3983,8 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_USERSTATUS:
 			case CMD_MARKS:
 			case CMD_PSHIFT:
-				LOGERR("%s() Message line %"PRIu64" '%s' - invalid - ignored",
+			case CMD_SHSTA:
+				LOGERR("%s() INVALID message line %"PRIu64" '%s' - ignored",
 					__func__, count, cmd);
 				break;
 			case CMD_AUTH:
@@ -4348,6 +4350,7 @@ static void *listener(void *arg)
 		K_RUNLOCK(workqueue_store);
 
 		LOGWARNING("reload shares OoO %s", ooo_status(ooo_buf, sizeof(ooo_buf)));
+		sequence_report(true);
 
 		LOGWARNING("%s(): ckdb ready, queue %d", __func__, wqcount);
 
