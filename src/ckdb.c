@@ -1130,16 +1130,16 @@ static void alloc_storage()
 	marks_root = new_ktree();
 }
 
-#define SEQSETWARN(_seqset, _msgtxt, _endtxt) do { \
+#define SEQSETWARN(_set, _seqset, _msgtxt, _endtxt) do { \
 	char _t_buf[DATE_BUFSIZ]; \
 	btu64_to_buf(&((_seqset)->seqstt), _t_buf, sizeof(_t_buf)); \
-	LOGWARNING("SEQ %s: "SEQSTT" %"PRIu64"=%s "SEQPID" %"PRIu64" M%"PRIu64 \
+	LOGWARNING("SEQ %s: %d/"SEQSTT" %"PRIu64"=%s "SEQPID" %"PRIu64" M%"PRIu64 \
 		   "/T%"PRIu64"/L%"PRIu64"/S%"PRIu64"/H%"PRIu64"/OK%"PRIu64 \
 		   " %s v%"PRIu64"/^%"PRIu64"/M%"PRIu64"/T%"PRIu64"/L%"PRIu64 \
 		   "/S%"PRIu64"/H%"PRIu64"/OK%"PRIu64" %s v%"PRIu64"/^%"PRIu64 \
 		   "/M%"PRIu64"/T%"PRIu64"/L%"PRIu64"/S%"PRIu64"/H%"PRIu64 \
 		   "/OK%"PRIu64"%s", \
-		   _msgtxt, (_seqset)->seqstt, _t_buf, (_seqset)->seqpid, \
+		   _msgtxt, _set, (_seqset)->seqstt, _t_buf, (_seqset)->seqpid, \
 		   (_seqset)->missing, (_seqset)->trans, (_seqset)->lost, \
 		   (_seqset)->stale, (_seqset)->high, (_seqset)->ok, \
 		   seqnam[SEQ_ALL], \
@@ -1198,13 +1198,61 @@ static void alloc_storage()
 
 #define FREE_ALL(_list) FREE_TREE(_list); FREE_LISTS(_list)
 
+/* Write a share missing/lost report to the console - always report set 0
+ * It's possible for the set numbers to be wrong and the output to report one
+ *  seqset twice if a new seqset arrives between the unlock/lock for writing
+ *  the console message - since a new seqset would shuffle the sets down and
+ *  if the list was full, move the last one back to the top of the setset_store
+ *  list, but this would normally only be when ckpool restarts and also wont
+ *  cause a problem since only the last set can be moved and the code checks
+ *  if it is the end and also duplicates the set before releasing the lock */
+void sequence_report(bool lock)
+{
+	SEQSET *seqset, seqset_copy;
+	K_ITEM *ss_item;
+	bool last, miss;
+	int set;
+
+	last = false;
+	set = 0;
+	if (lock)
+		ck_wlock(&seq_lock);
+	ss_item = seqset_store->head;
+	while (!last && ss_item) {
+		if (!ss_item->next)
+			last = true;
+		DATA_SEQSET(seqset, ss_item);
+		/* Missing/Trans/Lost should all be 0 for shares */
+		if (seqset->seqstt && (set == 0 ||
+		    seqset->seqdata[SEQ_SHARES].missing ||
+		    seqset->seqdata[SEQ_SHARES].trans ||
+		    seqset->seqdata[SEQ_SHARES].lost)) {
+			miss = (seqset->seqdata[SEQ_SHARES].missing ||
+				seqset->seqdata[SEQ_SHARES].trans ||
+				seqset->seqdata[SEQ_SHARES].lost);
+			if (lock) {
+				memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+				ck_wunlock(&seq_lock);
+				seqset = &seqset_copy;
+			}
+			SEQSETWARN(set, seqset,
+				   miss ? "SHARES MISSING" : "status" , EMPTY);
+			if (lock)
+				ck_wlock(&seq_lock);
+		}
+		ss_item = ss_item->next;
+		set++;
+	}
+	if (lock)
+		ck_wunlock(&seq_lock);
+}
+
 static void dealloc_storage()
 {
 	SHAREERRORS *shareerrors;
-	K_ITEM *s_item, *ss_item;
+	K_ITEM *s_item;
 	char *st = NULL;
 	SHARES *shares;
-	SEQSET *seqset;
 
 	LOGWARNING("%s() logqueue ...", __func__);
 
@@ -1331,18 +1379,8 @@ static void dealloc_storage()
 	FREE_LISTS(workqueue);
 
 	LOGWARNING("%s() seqset ...", __func__);
+	sequence_report(false);
 
-	ss_item = seqset_store->head;
-	while (ss_item) {
-		DATA_SEQSET(seqset, ss_item);
-		/* Missing/Trans/Lost should all be 0 for shares */
-		if (seqset->seqstt && (seqset->seqdata[SEQ_SHARES].missing ||
-		    seqset->seqdata[SEQ_SHARES].trans ||
-		    seqset->seqdata[SEQ_SHARES].lost)) {
-			SEQSETWARN(seqset, "SHARES MISSING", EMPTY);
-		}
-		ss_item = ss_item->next;
-	}
 	FREE_LIST(seqtrans);
 
 	FREE_STORE_DATA(seqset);
@@ -1930,10 +1968,14 @@ setitemdata:
 			   SEQSTT" %"PRIu64"=%s "SEQPID" %"PRIu64,
 			   nam, n_seqcmd, n_seqstt, t_buf, n_seqpid);
 	} else {
-		if (newseq)
-			SEQSETWARN(&seqset_pre, "previous", EMPTY);
-		if (expseq)
-			SEQSETWARN(&seqset_exp, "discarded old", " for:");
+		if (newseq) {
+			// previous set is set 1
+			SEQSETWARN(1, &seqset_pre, "previous", EMPTY);
+		}
+		if (expseq) {
+			// set -1 means it was the discarded/removed last set
+			SEQSETWARN(-1, &seqset_exp, "discarded old", " for:");
+		}
 		if (newseq || expseq) {
 			btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
 			LOGWARNING("Seq created new: %s %"PRIu64" "
@@ -2142,12 +2184,13 @@ static enum cmd_values process_seq(K_ITEM *seqall, int which, tv_t *cd,
 			    buf, now, cd, code, warndup, msg);
 
 	if (dupall != dupcmd) {
-		LOGERR("SEQ INIMICAL %s/%"PRIu64"=%s %s/%"PRIu64"=%s "
-			"cmd=%.32s...",
-			seqnam[SEQ_ALL], n_seqall, dupall ? "DUP" : "notdup",
-			seqnam[ckdb_cmds[which].seq], n_seqcmd,
-			dupcmd ? "DUP" : "notdup",
-			st = safe_text_nonull(msg));
+		// Bad/corrupt data or a code bug
+		LOGEMERG("SEQ INIMICAL %s/%"PRIu64"=%s %s/%"PRIu64"=%s "
+			 "cmd=%.32s...",
+			 seqnam[SEQ_ALL], n_seqall, dupall ? "DUP" : "notdup",
+			 seqnam[ckdb_cmds[which].seq], n_seqcmd,
+			 dupcmd ? "DUP" : "notdup",
+			 st = safe_text_nonull(msg));
 		FREENULL(st);
 	}
 
