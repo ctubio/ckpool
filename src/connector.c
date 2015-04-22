@@ -257,7 +257,8 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	if (fd != -1) {
 		client_id = client->id;
 
-		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, client->fd, NULL);
+		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, fd, NULL);
+		nolinger_socket(fd);
 		Close(client->fd);
 		HASH_DEL(cdata->clients, client);
 		DL_APPEND(cdata->dead_clients, client);
