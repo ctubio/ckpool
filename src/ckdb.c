@@ -2023,9 +2023,10 @@ setitemdata:
 			SEQSETWARN(expset, &seqset_exp, "discarded old", " for:");
 		if (newseq || expseq) {
 			btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
-			LOGWARNING("Seq created new: %s %"PRIu64" "
+			LOGWARNING("Seq created new: set %d %s %"PRIu64" "
 				   SEQSTT" %"PRIu64"=%s "SEQPID" %"PRIu64,
-				   nam, n_seqcmd, n_seqstt, t_buf, n_seqpid);
+				   set, nam, n_seqcmd, n_seqstt, t_buf,
+				   n_seqpid);
 		}
 	}
 
