@@ -906,14 +906,19 @@ int wait_close(int sockd, int timeout)
 int wait_read_select(int sockd, int timeout)
 {
 	struct pollfd sfd;
+	int ret = -1;
 
 	if (unlikely(sockd < 0))
-		return -1;
+		goto out;
 	sfd.fd = sockd;
 	sfd.events = POLLIN;
 	sfd.revents = 0;
 	timeout *= 1000;
-	return poll(&sfd, 1, timeout);
+	ret = poll(&sfd, 1, timeout);
+	if (ret && !(sfd.revents & POLLIN))
+		ret = -1;
+out:
+	return ret;
 }
 
 int read_length(int sockd, void *buf, int len)
