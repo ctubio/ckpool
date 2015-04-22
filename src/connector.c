@@ -225,7 +225,7 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 
 	client->fd = fd;
 	event.data.ptr = client;
-	event.events = EPOLLIN;
+	event.events = EPOLLIN | EPOLLRDHUP;
 	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) < 0)) {
 		LOGERR("Failed to epoll_ctl add in accept_client");
 		recycle_client(cdata, client);
@@ -495,7 +495,7 @@ void *receiver(void *arg)
 		client = ref_client_by_id(cdata, client->id);
 		if (unlikely(!client))
 			continue;
-		if ((event.events & EPOLLERR) || (event.events & EPOLLHUP)) {
+		if (event.events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
 			/* Client disconnected */
 			LOGDEBUG("Client fd %d HUP in epoll", client->fd);
 			invalidate_client(cdata->pi->ckp, cdata, client);
