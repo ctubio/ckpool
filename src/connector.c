@@ -492,8 +492,7 @@ void *receiver(void *arg)
 		client = event.data.ptr;
 		/* Recheck this client still exists in the same form when it
 		 * was queued. */
-		client = ref_client_by_id(cdata, client->id);
-		if (unlikely(!client))
+		if (unlikely(client != ref_client_by_id(cdata, client->id)))
 			continue;
 		if (event.events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
 			/* Client disconnected */
