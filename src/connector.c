@@ -219,7 +219,6 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	}
 
 	keep_sockalive(fd);
-	nolinger_socket(fd);
 
 	LOGINFO("Connected new client %d on socket %d to %d active clients from %s:%d",
 		cdata->nfds, fd, no_clients, client->address_name, port);
@@ -258,7 +257,8 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	if (fd != -1) {
 		client_id = client->id;
 
-		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, client->fd, NULL);
+		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, fd, NULL);
+		nolinger_socket(fd);
 		Close(client->fd);
 		HASH_DEL(cdata->clients, client);
 		DL_APPEND(cdata->dead_clients, client);
@@ -318,31 +318,26 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf);
 /* Client is holding a reference count from being on the epoll list */
 static void parse_client_msg(cdata_t *cdata, client_instance_t *client)
 {
-	int buflen, ret, selfail = 0;
 	ckpool_t *ckp = cdata->ckp;
 	char msg[PAGESIZE], *eol;
+	int buflen, ret;
 	json_t *val;
 
 retry:
-	/* Select should always return positive after poll unless we have
-	 * been disconnected. On retries, decdatade whether we should do further
-	 * reads based on select readiness and only fail if we get an error. */
 	ret = wait_read_select(client->fd, 0);
 	if (ret < 1) {
-		if (ret > selfail)
+		if (!ret)
 			return;
 		LOGINFO("Client fd %d disconnected - select fail with bufofs %d ret %d errno %d %s",
 			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
 		return;
 	}
-	selfail = -1;
 	buflen = PAGESIZE - client->bufofs;
 	ret = recv(client->fd, client->buf + client->bufofs, buflen, 0);
 	if (ret < 1) {
-		/* We should have something to read if called since poll set
-		 * this fd's revents status so if there's nothing it means the
-		 * client has disconnected. */
+		if (!ret)
+			return;
 		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
 			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
