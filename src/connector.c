@@ -219,7 +219,6 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	}
 
 	keep_sockalive(fd);
-	nolinger_socket(fd);
 
 	LOGINFO("Connected new client %d on socket %d to %d active clients from %s:%d",
 		cdata->nfds, fd, no_clients, client->address_name, port);
