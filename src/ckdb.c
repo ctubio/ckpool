@@ -951,6 +951,7 @@ static void clean_up(ckpool_t *ckp)
 
 static void alloc_storage()
 {
+	size_t len;
 	int seq;
 
 	seqset_free = k_new_list("SeqSet", sizeof(SEQSET),
@@ -958,7 +959,7 @@ static void alloc_storage()
 	seqset_store = k_new_store(seqset_free);
 
 	// Map the SEQ_NNN values to their cmd names
-	seqnam[0] = SEQALL;
+	seqnam[0] = strdup(SEQALL);
 	for (seq = 0; ckdb_cmds[seq].cmd_val != CMD_END; seq++) {
 		if (ckdb_cmds[seq].seq != SEQ_NONE) {
 			if (seqnam[ckdb_cmds[seq].seq]) {
@@ -968,7 +969,12 @@ static void alloc_storage()
 					    seq, seqnam[ckdb_cmds[seq].seq],
 					    ckdb_cmds[seq].cmd_str);
 			}
-			seqnam[ckdb_cmds[seq].seq] = ckdb_cmds[seq].cmd_str;
+			len = strlen(SEQRPE) + strlen(ckdb_cmds[seq].cmd_str) + 1;
+			seqnam[ckdb_cmds[seq].seq] = malloc(len);
+			if (!(seqnam[ckdb_cmds[seq].seq]))
+				quithere(1, "malloc (%d) OOM", (int)len);
+			snprintf(seqnam[ckdb_cmds[seq].seq], len, "%s%s",
+				 SEQPRE, ckdb_cmds[seq].cmd_str);
 		}
 	}
 	for (seq = 0; seq < SEQ_MAX; seq++) {
@@ -1253,6 +1259,7 @@ static void dealloc_storage()
 	K_ITEM *s_item;
 	char *st = NULL;
 	SHARES *shares;
+	int seq;
 
 	LOGWARNING("%s() logqueue ...", __func__);
 
@@ -1386,6 +1393,9 @@ static void dealloc_storage()
 	FREE_STORE_DATA(seqset);
 	FREE_LIST_DATA(seqset);
 	FREE_LISTS(seqset);
+
+	for (seq = 0; seq < SEQ_MAX; seq++)
+		FREENULL(seqnam[seq]);
 
 	LOGWARNING("%s() finished", __func__);
 }
@@ -2136,7 +2146,7 @@ static enum cmd_values process_seq(K_ITEM *seqall, int which, tv_t *cd,
 	size_t len, off;
 	bool dupall, dupcmd;
 	char *code = NULL;
-	char buf[64];
+	char *seqcmdnam;
 
 	n_seqstt = n_seqpid = n_seqcmd = 0;
 	n_seqall = atol(transfer_data(seqall));
@@ -2157,8 +2167,8 @@ static enum cmd_values process_seq(K_ITEM *seqall, int which, tv_t *cd,
 
 	if ((seqpid = find_transfer(trf_root, SEQPID)))
 		n_seqpid = atol(transfer_data(seqpid));
-	snprintf(buf, sizeof(buf), "%s%s", SEQPRE, ckdb_cmds[which].cmd_str);
-	if ((seqcmd = find_transfer(trf_root, buf)))
+	seqcmdnam = seqnam[ckdb_cmds[which].seq];
+	if ((seqcmd = find_transfer(trf_root, seqcmdnam)))
 		n_seqcmd = atol(transfer_data(seqcmd));
 
 	/* Make one message with the initial seq missing/value problems ...
@@ -2176,7 +2186,7 @@ static enum cmd_values process_seq(K_ITEM *seqall, int which, tv_t *cd,
 				APPEND_REALLOC(err, off, len, BLANK SEQPID);
 			if (!seqcmd) {
 				APPEND_REALLOC(err, off, len, BLANK);
-				APPEND_REALLOC(err, off, len, buf);
+				APPEND_REALLOC(err, off, len, seqcmdnam);
 			}
 		}
 		if (seqstt && n_seqstt < DATE_BEGIN) {
@@ -2220,7 +2230,7 @@ static enum cmd_values process_seq(K_ITEM *seqall, int which, tv_t *cd,
 	dupall = update_seq(SEQ_ALL, n_seqall, n_seqstt, n_seqpid, SEQALL,
 			    now, cd, code, seqitemflags, msg);
 	dupcmd = update_seq(ckdb_cmds[which].seq, n_seqcmd, n_seqstt, n_seqpid,
-			    buf, now, cd, code, seqitemflags, msg);
+			    seqcmdnam, now, cd, code, seqitemflags, msg);
 
 	if (dupall != dupcmd) {
 		// Bad/corrupt data or a code bug
