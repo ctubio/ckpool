@@ -335,8 +335,9 @@ retry:
 	buflen = PAGESIZE - client->bufofs;
 	ret = recv(client->fd, client->buf + client->bufofs, buflen, 0);
 	if (ret < 1) {
-		if (!ret)
-			return;
+		/* We should have something to read if called since poll set
+		 * this fd's revents status so if there's nothing it means the
+		 * client has disconnected. */
 		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
 			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
