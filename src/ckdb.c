@@ -4287,7 +4287,7 @@ static bool reload_from(tv_t *start)
 
 	ck_wlock(&fpm_lock);
 	if (first_pool_message) {
-		LOGERR("%s() reload didn't finding first ckpool queue '%.32s...",
+		LOGERR("%s() reload didn't find the first ckpool queue '%.32s...",
 			__func__, st = safe_text(first_pool_message));
 		FREENULL(st);
 		FREENULL(first_pool_message);
