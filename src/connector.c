@@ -383,10 +383,11 @@ reparse:
 			json_object_del(val, "client_id");
 			passthrough_id = (client->id << 32) | passthrough_id;
 			json_object_set_new_nocheck(val, "client_id", json_integer(passthrough_id));
-		} else
+		} else {
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
-		json_object_set_new_nocheck(val, "address", json_string(client->address_name));
-		json_object_set_new_nocheck(val, "server", json_integer(client->server));
+			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
+			json_object_set_new_nocheck(val, "server", json_integer(client->server));
+		}
 		s = json_dumps(val, 0);
 
 		/* Do not send messages of clients we've already dropped. We
