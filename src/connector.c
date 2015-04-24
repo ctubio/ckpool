@@ -520,7 +520,7 @@ void *receiver(void *arg)
 			/* See what type of error this is and raise the log
 			 * level of the message if it's unexpected. */
 			getsockopt(client->fd, SOL_SOCKET, SO_ERROR, (void *)&error, &errlen);
-			if (error != 104) {
+			if (error && error != 104) {
 				LOGNOTICE("Client id %"PRId64" fd %d epollerr HUP in epoll with error %d: %s",
 					  client->id, client->fd, error, strerror(error));
 			} else {
