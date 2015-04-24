@@ -274,11 +274,14 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	return fd;
 }
 
-static void stratifier_drop_client(ckpool_t *ckp, int64_t id)
+static void stratifier_drop_client(ckpool_t *ckp, const client_instance_t *client)
 {
 	char buf[256];
 
-	sprintf(buf, "dropclient=%"PRId64, id);
+	/* The stratifier is not in use in passthrough mode */
+	if (ckp->passthrough || client->passthrough)
+		return;
+	sprintf(buf, "dropclient=%"PRId64, client->id);
 	send_proc(ckp->stratifier, buf);
 }
 
@@ -292,9 +295,7 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	int ret;
 
 	ret = drop_client(cdata, client);
-	if (ckp->passthrough)
-		goto out;
-	stratifier_drop_client(ckp, client->id);
+	stratifier_drop_client(ckp, client);
 
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
@@ -308,7 +309,6 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	}
 	ck_wunlock(&cdata->lock);
 
-out:
 	return ret;
 }
 

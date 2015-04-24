@@ -3409,14 +3409,14 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
-		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		/* We need to inform the connector process that this client
-		 * is a passthrough and to manage its messages accordingly.
-		 * The client_id stays on the list but we won't send anything
-		 * to it since it's unauthorised. Set the flag just in case. */
-		client->authorised = false;
+		 * is a passthrough and to manage its messages accordingly. No
+		 * data from this client id should ever come back to this
+		 * stratifier after this so drop the client in the stratifier. */
+		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 		send_proc(client->ckp->connector, buf);
+		drop_client(sdata, client_id);
 		return;
 	}
 
