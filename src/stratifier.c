@@ -1348,7 +1348,7 @@ static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
 
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id,
-						  const char *address, const int server)
+						  const char *address, int server)
 {
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
@@ -1357,6 +1357,9 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	client->id = id;
 	client->session_id = ++sdata->session_id;
 	strcpy(client->address, address);
+	/* Sanity check to not overflow lookup in ckp->serverurl[] */
+	if (server >= ckp->serverurls)
+		server = 0;
 	client->server = server;
 	client->diff = client->old_diff = ckp->startdiff;
 	client->ckp = ckp;
