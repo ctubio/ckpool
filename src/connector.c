@@ -289,12 +289,17 @@ static void generator_drop_client(ckpool_t *ckp, const client_instance_t *client
 	free(s);
 }
 
-static void stratifier_drop_client(ckpool_t *ckp, const client_instance_t *client)
+static void stratifier_drop_id(ckpool_t *ckp, const int64_t id)
 {
 	char buf[256];
 
-	sprintf(buf, "dropclient=%"PRId64, client->id);
+	sprintf(buf, "dropclient=%"PRId64, id);
 	send_proc(ckp->stratifier, buf);
+}
+
+static void stratifier_drop_client(ckpool_t *ckp, const client_instance_t *client)
+{
+	stratifier_drop_id(ckp, client->id);
 }
 
 /* Invalidate this instance. Remove them from the hashtables we look up
@@ -681,6 +686,7 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf)
 			invalidate_client(ckp, cdata, client);
 		} else {
 			LOGINFO("Connector failed to find client id %"PRId64" to send to", id);
+			stratifier_drop_id(ckp, id);
 		}
 		free(buf);
 		return;
