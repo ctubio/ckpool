@@ -274,13 +274,25 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	return fd;
 }
 
+/* For sending the drop command to the upstream pool in passthrough mode */
+static void generator_drop_client(ckpool_t *ckp, const client_instance_t *client)
+{
+	json_t *val;
+	char *s;
+
+	JSON_CPACK(val, "{si,sI:ss:si:ss:s[]}", "id", 42, "client_id", client->id, "address",
+		   client->address_name, "server", client->server, "method", "mining.term",
+		   "params");
+	s = json_dumps(val, 0);
+	json_decref(val);
+	send_proc(ckp->generator, s);
+	free(s);
+}
+
 static void stratifier_drop_client(ckpool_t *ckp, const client_instance_t *client)
 {
 	char buf[256];
 
-	/* The stratifier is not in use in passthrough mode */
-	if (ckp->passthrough || client->passthrough)
-		return;
 	sprintf(buf, "dropclient=%"PRId64, client->id);
 	send_proc(ckp->stratifier, buf);
 }
@@ -295,7 +307,10 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	int ret;
 
 	ret = drop_client(cdata, client);
-	stratifier_drop_client(ckp, client);
+	if (!ckp->passthrough && !client->passthrough)
+		stratifier_drop_client(ckp, client);
+	else if (ckp->passthrough)
+		generator_drop_client(ckp, client);
 
 	/* Cull old unused clients lazily when there are no more reference
 	 * counts for them. */
@@ -784,10 +799,10 @@ static char *connector_stats(cdata_t *cdata)
 
 static int connector_loop(proc_instance_t *pi, cdata_t *cdata)
 {
-	int64_t client_id64, client_id;
 	unix_msg_t *umsg = NULL;
 	ckpool_t *ckp = pi->ckp;
 	uint8_t test_cycle = 0;
+	int64_t client_id;
 	char *buf;
 	int ret = 0;
 
@@ -827,12 +842,14 @@ retry:
 	} else if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
 
-		ret = sscanf(buf, "dropclient=%"PRId64, &client_id64);
+		ret = sscanf(buf, "dropclient=%"PRId64, &client_id);
 		if (ret < 0) {
 			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
 			goto retry;
 		}
-		client_id = client_id64 & 0xffffffffll;
+		/* A passthrough client, we can't drop this yet */
+		if (client_id > 0xffffffffll)
+			goto retry;
 		client = ref_client_by_id(cdata, client_id);
 		if (unlikely(!client)) {
 			LOGINFO("Connector failed to find client id %"PRId64" to drop", client_id);

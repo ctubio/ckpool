@@ -3460,6 +3460,13 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		ckmsgq_add(sdata->stxnq, jp);
 		return;
 	}
+
+	if (cmdmatch(method, "mining.term")) {
+		LOGDEBUG("Mining terminate requested from %"PRId64" %s", client_id, client->address);
+		drop_client(sdata, client_id);
+		return;
+	}
+
 	/* Unhandled message here */
 	LOGINFO("Unhandled client %"PRId64" %s method %s", client_id, client->address, method);
 	return;
