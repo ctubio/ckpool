@@ -343,21 +343,13 @@ static void parse_client_msg(cdata_t *cdata, client_instance_t *client)
 	json_t *val;
 
 retry:
-	ret = wait_read_select(client->fd, 0);
-	if (ret < 1) {
-		if (!ret)
-			return;
-		LOGINFO("Client fd %d disconnected - select fail with bufofs %d ret %d errno %d %s",
-			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
-		invalidate_client(ckp, cdata, client);
-		return;
-	}
 	buflen = PAGESIZE - client->bufofs;
 	ret = recv(client->fd, client->buf + client->bufofs, buflen, MSG_DONTWAIT);
 	if (ret < 1) {
-		/* We should have something to read if called since poll set
-		 * this fd's revents status so if there's nothing it means the
-		 * client has disconnected. */
+		if (!ret)
+			return;
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
+			return;
 		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
 			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
