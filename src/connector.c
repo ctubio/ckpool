@@ -494,12 +494,34 @@ void *receiver(void *arg)
 			LOGWARNING("Failed to find client by id in receiver!");
 			continue;
 		}
-		if (event.events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
-			/* Client disconnected */
-			LOGDEBUG("Client fd %d HUP in epoll", client->fd);
-			invalidate_client(cdata->pi->ckp, cdata, client);
-		} else
+		/* We can have both messages and read hang ups so process the
+		 * message first. */
+		if (likely(event.events & EPOLLIN))
 			parse_client_msg(cdata, client);
+		if (unlikely(event.events & EPOLLERR)) {
+			socklen_t errlen = sizeof(int);
+			int error = 0;
+
+			/* See what type of error this is and raise the log
+			 * level of the message if it's unexpected. */
+			getsockopt(client->fd, SOL_SOCKET, SO_ERROR, (void *)&error, &errlen);
+			if (error != 104) {
+				LOGNOTICE("Client id %"PRId64" fd %d epollerr HUP in epoll with error %d: %s",
+					  client->id, client->fd, error, strerror(error));
+			} else {
+				LOGINFO("Client id %"PRId64" fd %d epollerr HUP in epoll with error %d: %s",
+					client->id, client->fd, error, strerror(error));
+			}
+			invalidate_client(cdata->pi->ckp, cdata, client);
+		} else if (unlikely(event.events & EPOLLHUP)) {
+			/* Client connection reset by peer */
+			LOGINFO("Client id %"PRId64" fd %d HUP in epoll", client->id, client->fd);
+			invalidate_client(cdata->pi->ckp, cdata, client);
+		} else if (unlikely(event.events & EPOLLRDHUP)) {
+			/* Client disconnected by peer */
+			LOGINFO("Client id %"PRId64" fd %d RDHUP in epoll", client->id, client->fd);
+			invalidate_client(cdata->pi->ckp, cdata, client);
+		}
 		dec_instance_ref(cdata, client);
 	}
 	return NULL;
