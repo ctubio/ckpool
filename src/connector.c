@@ -333,7 +333,7 @@ retry:
 		return;
 	}
 	buflen = PAGESIZE - client->bufofs;
-	ret = recv(client->fd, client->buf + client->bufofs, buflen, 0);
+	ret = recv(client->fd, client->buf + client->bufofs, buflen, MSG_DONTWAIT);
 	if (ret < 1) {
 		/* We should have something to read if called since poll set
 		 * this fd's revents status so if there's nothing it means the
