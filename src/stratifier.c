@@ -3443,12 +3443,8 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 
 	/* We should only accept authorised requests from here on */
 	if (!client->authorised) {
-		/* Dropping unauthorised clients here also allows the
-		 * stratifier process to restart since it will have lost all
-		 * the stratum instance data. Clients will just reconnect. */
-		LOGINFO("Dropping unauthorised client %"PRId64" %s", client_id, client->address);
-		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		LOGINFO("Dropping %s from unauthorised client %"PRId64" %s", method,
+			client_id, client->address);
 		return;
 	}
 
