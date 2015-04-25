@@ -1512,11 +1512,8 @@ static void reconnect_clients(sdata_t *sdata, const char *cmd)
 	if (port)
 		url = strsep(&port, ",");
 	if (url && port) {
-		int port_no;
-
-		port_no = strtol(port, NULL, 10);
-		JSON_CPACK(json_msg, "{sosss[sii]}", "id", json_null(), "method", "client.reconnect",
-			"params", url, port_no, 0);
+		JSON_CPACK(json_msg, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
+			"params", url, port, 0);
 	} else
 		JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
