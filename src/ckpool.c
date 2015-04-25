@@ -808,7 +808,7 @@ static void terminate_oldpid(const ckpool_t *ckp, proc_instance_t *pi, const pid
 		return;
 	LOGWARNING("Old process %s pid %d failed to respond to terminate request, killing",
 			pi->processname, oldpid);
-	if (kill_pid(oldpid, 9) || !pid_wait(oldpid, 500))
+	if (kill_pid(oldpid, 9) || !pid_wait(oldpid, 3000))
 		quit(1, "Unable to kill old process %s pid %d", pi->processname, oldpid);
 }
 
