@@ -503,7 +503,7 @@ void *receiver(void *arg)
 		}
 		client = ref_client_by_id(cdata, event.data.u64);
 		if (unlikely(!client)) {
-			LOGWARNING("Failed to find client by id in receiver!");
+			LOGNOTICE("Failed to find client by id %"PRId64" in receiver!", event.data.u64);
 			continue;
 		}
 		/* We can have both messages and read hang ups so process the
