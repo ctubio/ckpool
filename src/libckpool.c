@@ -932,7 +932,7 @@ int read_length(int sockd, void *buf, int len)
 	if (unlikely(sockd < 0))
 		return -1;
 	while (len) {
-		ret = recv(sockd, buf + ofs, len, 0);
+		ret = recv(sockd, buf + ofs, len, MSG_WAITALL);
 		if (unlikely(ret < 1))
 			return -1;
 		ofs += ret;
