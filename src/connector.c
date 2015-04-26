@@ -506,10 +506,14 @@ void *receiver(void *arg)
 			LOGNOTICE("Failed to find client by id %"PRId64" in receiver!", event.data.u64);
 			continue;
 		}
+		if (unlikely(client->fd == -1))
+			goto noparse;
 		/* We can have both messages and read hang ups so process the
 		 * message first. */
 		if (likely(event.events & EPOLLIN))
 			parse_client_msg(cdata, client);
+		if (unlikely(client->fd == -1))
+			goto noparse;
 		if (unlikely(event.events & EPOLLERR)) {
 			socklen_t errlen = sizeof(int);
 			int error = 0;
@@ -534,6 +538,7 @@ void *receiver(void *arg)
 			LOGINFO("Client id %"PRId64" fd %d RDHUP in epoll", client->id, client->fd);
 			invalidate_client(cdata->pi->ckp, cdata, client);
 		}
+noparse:
 		dec_instance_ref(cdata, client);
 	}
 	return NULL;
