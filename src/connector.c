@@ -30,7 +30,6 @@ struct client_instance {
 	UT_hash_handle hh;
 	int64_t id;
 	int fd;
-	struct epoll_event event;
 
 	/* Reference count for when this instance is used outside of the
 	 * connector_data lock */
@@ -168,6 +167,7 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	int fd, port, no_clients, sockd;
 	ckpool_t *ckp = cdata->ckp;
 	client_instance_t *client;
+	struct epoll_event event;
 	socklen_t address_len;
 
 	ck_rlock(&cdata->lock);
@@ -230,9 +230,9 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	ck_wunlock(&cdata->lock);
 
 	client->fd = fd;
-	client->event.data.u64 = client->id;
-	client->event.events = EPOLLIN | EPOLLRDHUP;
-	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &client->event) < 0)) {
+	event.data.u64 = client->id;
+	event.events = EPOLLIN | EPOLLRDHUP;
+	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) < 0)) {
 		LOGERR("Failed to epoll_ctl add in accept_client");
 		return 0;
 	}
@@ -256,7 +256,7 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 	if (fd != -1) {
 		client_id = client->id;
 
-		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, fd, &client->event);
+		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, fd, NULL);
 		nolinger_socket(fd);
 		Close(client->fd);
 		HASH_DEL(cdata->clients, client);
