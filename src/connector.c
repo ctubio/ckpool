@@ -450,7 +450,7 @@ void *receiver(void *arg)
 	epfd = cdata->epfd = epoll_create1(EPOLL_CLOEXEC);
 	if (epfd < 0) {
 		LOGEMERG("FATAL: Failed to create epoll in receiver");
-		return NULL;
+		goto out;
 	}
 	serverfds = cdata->ckp->serverurls;
 	/* Add all the serverfds to the epoll */
@@ -461,7 +461,7 @@ void *receiver(void *arg)
 		ret = epoll_ctl(epfd, EPOLL_CTL_ADD, cdata->serverfd[i], &event);
 		if (ret < 0) {
 			LOGEMERG("FATAL: Failed to add epfd %d to epoll_ctl", epfd);
-			return NULL;
+			goto out;
 		}
 	}
 
@@ -541,6 +541,9 @@ void *receiver(void *arg)
 noparse:
 		dec_instance_ref(cdata, client);
 	}
+out:
+	/* We shouldn't get here unless there's an error */
+	childsighandler(15);
 	return NULL;
 }
 
@@ -641,7 +644,8 @@ contfree:
 		free(sender_send);
 		dec_instance_ref(cdata, client);
 	}
-
+	/* We shouldn't get here unless there's an error */
+	childsighandler(15);
 	return NULL;
 }
 
@@ -804,7 +808,6 @@ static int connector_loop(proc_instance_t *pi, cdata_t *cdata)
 {
 	unix_msg_t *umsg = NULL;
 	ckpool_t *ckp = pi->ckp;
-	uint8_t test_cycle = 0;
 	int64_t client_id;
 	char *buf;
 	int ret = 0;
@@ -816,20 +819,6 @@ retry:
 		Close(umsg->sockd);
 		free(umsg->buf);
 		dealloc(umsg);
-	}
-
-	if (!++test_cycle) {
-		/* Test for pthread join every 256 messages */
-		if (unlikely(!pthread_tryjoin_np(cdata->pth_sender, NULL))) {
-			LOGEMERG("Connector sender thread shutdown, exiting");
-			ret = 1;
-			goto out;
-		}
-		if (unlikely(!pthread_tryjoin_np(cdata->pth_receiver, NULL))) {
-			LOGEMERG("Connector receiver thread shutdown, exiting");
-			ret = 1;
-			goto out;
-		}
 	}
 
 	do {
