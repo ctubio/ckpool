@@ -681,14 +681,9 @@ static void send_client(cdata_t *cdata, int64_t id, char *buf)
 		return;
 	}
 
-	ck_wlock(&cdata->lock);
-	HASH_FIND_I64(cdata->clients, &id, client);
 	/* Grab a reference to this client until the sender_send has
 	 * completed processing. */
-	if (likely(client))
-		__inc_instance_ref(client);
-	ck_wunlock(&cdata->lock);
-
+	client = ref_client_by_id(cdata, id);
 	if (unlikely(!client)) {
 		ckpool_t *ckp = cdata->ckp;
 
