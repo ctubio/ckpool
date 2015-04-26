@@ -2428,8 +2428,7 @@ static int send_recv_auth(stratum_instance_t *client)
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
 			parse_worker_diffs(ckp, worker_array);
 			client->suggest_diff = worker->mindiff;
-			if (!user->auth_time)
-				user->auth_time = time(NULL);
+			user->auth_time = time(NULL);
 		}
 		if (secondaryuserid && (!safecmp(response, "ok.authorise") ||
 					!safecmp(response, "ok.addrauth"))) {
