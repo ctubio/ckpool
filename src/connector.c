@@ -435,8 +435,12 @@ static client_instance_t *ref_client_by_id(cdata_t *cdata, int64_t id)
 
 	ck_wlock(&cdata->lock);
 	HASH_FIND_I64(cdata->clients, &id, client);
-	if (client && !client->invalid)
-		__inc_instance_ref(client);
+	if (client) {
+		if (!client->invalid)
+			__inc_instance_ref(client);
+		else
+			client = NULL;
+	}
 	ck_wunlock(&cdata->lock);
 
 	return client;
