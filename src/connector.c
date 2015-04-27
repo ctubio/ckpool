@@ -354,6 +354,12 @@ static void parse_client_msg(cdata_t *cdata, client_instance_t *client)
 	json_t *val;
 
 retry:
+	if (unlikely(client->bufofs > MAX_MSGSIZE)) {
+		LOGNOTICE("Client id %"PRId64" fd %d overloaded buffer without EOL, disconnecting",
+			  client->id, client->fd);
+		invalidate_client(ckp, cdata, client);
+		return;
+	}
 	buflen = PAGESIZE - client->bufofs;
 	/* This read call is non-blocking since the socket is set to O_NOBLOCK */
 	ret = read(client->fd, client->buf + client->bufofs, buflen);
@@ -368,14 +374,8 @@ retry:
 	client->bufofs += ret;
 reparse:
 	eol = memchr(client->buf, '\n', client->bufofs);
-	if (!eol) {
-		if (unlikely(client->bufofs > MAX_MSGSIZE)) {
-			LOGWARNING("Client fd %d overloaded buffer without EOL, disconnecting", client->fd);
-			invalidate_client(ckp, cdata, client);
-			return;
-		}
+	if (!eol)
 		goto retry;
-	}
 
 	/* Do something useful with this message now */
 	buflen = eol - client->buf + 1;
