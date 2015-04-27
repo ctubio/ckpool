@@ -565,7 +565,8 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 		if (unlikely(ret < 1)) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK || !ret)
 				return false;
-			LOGINFO("Client id %"PRId64" fd %d disconnected", client->id, client->fd);
+			LOGINFO("Client id %"PRId64" fd %d disconnected with write errno %d:%s",
+				client->id, client->fd, errno, strerror(errno));
 			invalidate_client(ckp, cdata, client);
 			return true;
 		}
