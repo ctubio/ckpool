@@ -368,8 +368,8 @@ retry:
 	if (ret < 1) {
 		if (likely(errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 			return;
-		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
-			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
+		LOGINFO("Client id %"PRId64" fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
+			client->id, client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
 		return;
 	}
@@ -382,7 +382,7 @@ reparse:
 	/* Do something useful with this message now */
 	buflen = eol - client->buf + 1;
 	if (unlikely(buflen > MAX_MSGSIZE)) {
-		LOGWARNING("Client fd %d message oversize, disconnecting", client->fd);
+		LOGNOTICE("Client id %"PRId64" fd %d message oversize, disconnecting", client->id, client->fd);
 		invalidate_client(ckp, cdata, client);
 		return;
 	}
