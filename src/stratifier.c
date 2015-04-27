@@ -1289,17 +1289,17 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazil
 
 	if (client->workername) {
 		if (user) {
-			ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s dropped %s",
-				client->id, client->address, user->throttled ? "throttled " : "",
-				user->username, client->workername, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Dropped client %"PRId64" %s %suser %s worker %s %s",
+				 client->id, client->address, user->throttled ? "throttled " : "",
+				 user->username, client->workername, lazily ? "lazily" : "");
 		} else {
-			ASPRINTF(msg, "Client %"PRId64" %s no user worker %s dropped %s",
-				client->id, client->address, client->workername,
-				lazily ? "lazily" : "");
+			ASPRINTF(msg, "Dropped client %"PRId64" %s no user worker %s %s",
+				 client->id, client->address, client->workername,
+				 lazily ? "lazily" : "");
 		}
 	} else {
-		ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
-				client->id, client->address, lazily ? "lazily" : "");
+		ASPRINTF(msg, "Dropped workerless client %"PRId64" %s %s",
+			 client->id, client->address, lazily ? "lazily" : "");
 	}
 	__del_client(sdata, client);
 	__kill_instance(sdata, client);
