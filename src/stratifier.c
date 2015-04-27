@@ -4531,7 +4531,8 @@ int stratifier(proc_instance_t *pi)
 		create_pthread(&pth_blockupdate, blockupdate, ckp);
 
 	mutex_init(&sdata->stats_lock);
-	create_pthread(&pth_statsupdate, statsupdate, ckp);
+	if (!ckp->passthrough)
+		create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	mutex_init(&sdata->share_lock);
 	mutex_init(&sdata->block_lock);
