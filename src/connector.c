@@ -356,9 +356,7 @@ retry:
 	/* This read call is non-blocking since the socket is set to O_NOBLOCK */
 	ret = read(client->fd, client->buf + client->bufofs, buflen);
 	if (ret < 1) {
-		if (!ret)
-			return;
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
+		if (errno == EAGAIN || errno == EWOULDBLOCK || !ret)
 			return;
 		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
 			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
@@ -561,9 +559,7 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 		int ret = write(client->fd, sender_send->buf + sender_send->ofs, sender_send->len);
 
 		if (unlikely(ret < 1)) {
-			if (!ret)
-				return false;
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			if (errno == EAGAIN || errno == EWOULDBLOCK || !ret)
 				return false;
 			LOGINFO("Client id %"PRId64" fd %d disconnected", client->id, client->fd);
 			invalidate_client(ckp, cdata, client);
