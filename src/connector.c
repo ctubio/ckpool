@@ -224,6 +224,7 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	}
 
 	keep_sockalive(fd);
+	noblock_socket(fd);
 
 	LOGINFO("Connected new client %d on socket %d to %d active clients from %s:%d",
 		cdata->nfds, fd, no_clients, client->address_name, port);
@@ -352,7 +353,8 @@ static void parse_client_msg(cdata_t *cdata, client_instance_t *client)
 
 retry:
 	buflen = PAGESIZE - client->bufofs;
-	ret = recv(client->fd, client->buf + client->bufofs, buflen, MSG_DONTWAIT);
+	/* This read call is non-blocking since the socket is set to O_NOBLOCK */
+	ret = read(client->fd, client->buf + client->bufofs, buflen);
 	if (ret < 1) {
 		if (!ret)
 			return;
@@ -569,7 +571,7 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 		return true;
 
 	while (sender_send->len) {
-		int ret = send(client->fd, sender_send->buf + sender_send->ofs, sender_send->len , MSG_DONTWAIT);
+		int ret = write(client->fd, sender_send->buf + sender_send->ofs, sender_send->len);
 
 		if (unlikely(ret < 1)) {
 			if (!ret)
@@ -593,8 +595,9 @@ static void clear_sender_send(sender_send_t *sender_send, cdata_t *cdata)
 	free(sender_send);
 }
 
-/* Use a thread to send queued messages, using select() to only send to sockets
- * ready for writing immediately to not delay other messages. */
+/* Use a thread to send queued messages, appending them to the sends list and
+ * iterating over all of them, attempting to send them all non-blocking to
+ * only send to those clients ready to receive data. */
 static void *sender(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
