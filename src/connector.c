@@ -590,7 +590,7 @@ static void *sender(void *arg)
 	rename_proc("csender");
 
 	while (42) {
-		sender_send_t *sender_send, *sending, *tmp;
+		sender_send_t *sending, *tmp;
 
 		/* Check all sends to see if they can be written out */
 		DL_FOREACH_SAFE(sends, sending, tmp) {
@@ -611,13 +611,11 @@ static void *sender(void *arg)
 			timeraddspec(&timeout_ts, &polltime);
 			cond_timedwait(&cdata->sender_cond, &cdata->sender_lock, &timeout_ts);
 		}
-		sender_send = cdata->sender_sends;
-		if (sender_send)
-			DL_DELETE(cdata->sender_sends, sender_send);
+		if (cdata->sender_sends) {
+			DL_CONCAT(sends, cdata->sender_sends);
+			cdata->sender_sends = NULL;
+		}
 		mutex_unlock(&cdata->sender_lock);
-
-		if (sender_send)
-			DL_APPEND(sends, sender_send);
 	}
 	/* We shouldn't get here unless there's an error */
 	childsighandler(15);
