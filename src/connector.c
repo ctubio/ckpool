@@ -358,7 +358,7 @@ retry:
 	/* This read call is non-blocking since the socket is set to O_NOBLOCK */
 	ret = read(client->fd, client->buf + client->bufofs, buflen);
 	if (ret < 1) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK || !ret)
+		if (likely(errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 			return;
 		LOGINFO("Client fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
 			client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
