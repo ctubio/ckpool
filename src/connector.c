@@ -919,7 +919,9 @@ int connector(proc_instance_t *pi)
 			Close(sockd);
 			goto out;
 		}
-		if (listen(sockd, SOMAXCONN) < 0) {
+		/* Set listen backlog to larger than SOMAXCONN in case the
+		 * system configuration supports it */
+		if (listen(sockd, 1024) < 0) {
 			LOGERR("Connector failed to listen on socket");
 			Close(sockd);
 			goto out;
@@ -961,7 +963,7 @@ int connector(proc_instance_t *pi)
 				ret = 1;
 				goto out;
 			}
-			if (listen(sockd, SOMAXCONN) < 0) {
+			if (listen(sockd, 1024) < 0) {
 				LOGERR("Connector failed to listen on socket");
 				Close(sockd);
 				goto out;
