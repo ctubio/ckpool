@@ -1494,8 +1494,8 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged to reconnect from dead proxy %d:%d", reconnects,
-			  id, subid);
+		LOGINFO("%d clients flagged to reconnect from dead proxy %d:%d", reconnects,
+			id, subid);
 	}
 	/* When a proxy dies, recruit more of the global proxies for them to
 	 * fail over to in case user proxies are unavailable. */
