@@ -1740,7 +1740,7 @@ out:
 		}
 	} else {
 		keep_sockalive(cs->fd);
-		event.events = EPOLLIN;
+		event.events = EPOLLIN | EPOLLRDHUP;
 		event.data.ptr = proxi;
 		/* Add this connsock_t to the epoll list */
 		if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, cs->fd, &event) == -1)) {
@@ -1994,7 +1994,7 @@ static void *proxy_recv(void *arg)
 		if (likely(ret > 0)) {
 			subproxy = event.data.ptr;
 			cs = &subproxy->cs;
-			if (event.events & EPOLLHUP)
+			if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))
 				ret = -1;
 			else
 				ret = read_socket_line(cs, 5);
@@ -2063,7 +2063,7 @@ static void *userproxy_recv(void *arg)
 		}
 		proxy = event.data.ptr;
 		cs = &proxy->cs;
-		if (event.events & EPOLLHUP) {
+		if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
 			LOGNOTICE("Proxy %d:%d %s hung up in epoll_wait", proxy->id,
 				  proxy->subid, proxy->url);
 			disable_subproxy(gdata, proxy->parent, proxy);

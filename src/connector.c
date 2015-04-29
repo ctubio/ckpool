@@ -470,7 +470,7 @@ void *receiver(void *arg)
 	for (i = 0; i < serverfds; i++) {
 		/* The small values will be less than the first client ids */
 		event.data.u64 = i;
-		event.events = EPOLLIN;
+		event.events = EPOLLIN | EPOLLRDHUP;
 		ret = epoll_ctl(epfd, EPOLL_CTL_ADD, cdata->serverfd[i], &event);
 		if (ret < 0) {
 			LOGEMERG("FATAL: Failed to add epfd %d to epoll_ctl", epfd);
