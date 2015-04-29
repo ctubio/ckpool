@@ -259,6 +259,7 @@ struct stratum_instance {
 			 * or other problem and should be dropped lazily if
 			 * this is set to 2 */
 
+	bool reconnect; /* This client really needs to reconnect */
 	time_t reconnect_request; /* The time we sent a reconnect message */
 
 	user_instance_t *user_instance;
@@ -1381,11 +1382,14 @@ static void reconnect_clients(sdata_t *sdata)
 			continue;
 		if (!client->authorised)
 			continue;
-		/* This client is bound to a user proxy */
-		if (client->proxy->userid)
-			continue;
-		if (client->proxyid == proxy->id)
-			continue;
+		/* Is this client boudn to a dead proxy? */
+		if (!client->reconnect) {
+			/* This client is bound to a user proxy */
+			if (client->proxy->userid)
+				continue;
+			if (client->proxyid == proxy->id)
+				continue;
+		}
 		if (headroom-- < 1)
 			continue;
 		reconnects++;
@@ -1468,8 +1472,10 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 		/* Clients could remain connected to a dead connection here
 		 * but should be picked up when we recruit enough slots after
 		 * another notify. */
-		if (headroom-- < 1)
+		if (headroom-- < 1) {
+			client->reconnect = true;
 			continue;
+		}
 		reconnects++;
 		reconnect_client(sdata, client);
 	}
@@ -1620,7 +1626,8 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 			continue;
 		if (client->user_id != userid)
 			continue;
-		if (client->proxy->userid == userid)
+		/* Is this client bound to a dead proxy? */
+		if (!client->reconnect && client->proxy->userid == userid)
 			continue;
 		if (headroom-- < 1)
 			continue;
@@ -2442,6 +2449,7 @@ static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
 		LOGINFO("reconnect_client_id failed to find client %"PRId64, client_id);
 		return;
 	}
+	client->reconnect = true;
 	reconnect_client(sdata, client);
 	dec_instance_ref(sdata, client);
 }
