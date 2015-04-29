@@ -1539,7 +1539,7 @@ static void send_json_msgq(gdata_t *gdata, cs_msg_t **csmsgq)
 
 		/* Only try to send one message at a time to each proxy
 		 * to avoid sending parts of different messages */
-		if (proxy->sending != csmsg)
+		if (proxy->sending  && proxy->sending != csmsg)
 			continue;
 		while (csmsg->len) {
 			int fd;
