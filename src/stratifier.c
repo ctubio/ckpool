@@ -1459,7 +1459,7 @@ static void check_bestproxy(sdata_t *sdata)
 		LOGNOTICE("Stratifier setting active proxy to %d", changed_id);
 }
 
-static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
+static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bool replaced)
 {
 	stratum_instance_t *client, *tmp;
 	int reconnects = 0, proxyid = 0;
@@ -1469,7 +1469,7 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid)
 	proxy = existing_subproxy(sdata, id, subid);
 	if (proxy) {
 		proxy->dead = true;
-		if (proxy->global)
+		if (!replaced && proxy->global)
 			check_bestproxy(sdata);
 	}
 	LOGINFO("Stratifier dropping clients from proxy %d:%d", id, subid);
@@ -1550,8 +1550,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	/* Is this a replacement for an existing proxy id? */
 	old = existing_subproxy(sdata, id, subid);
 	if (old) {
-		if (old->dead)
-			dead_proxyid(sdata, id, subid);
+		dead_proxyid(sdata, id, subid, true);
 		proxy = old;
 		proxy->dead = false;
 	} else
@@ -2449,7 +2448,7 @@ static void dead_proxy(sdata_t *sdata, const char *buf)
 	int id = 0, subid = 0;
 
 	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
-	dead_proxyid(sdata, id, subid);
+	dead_proxyid(sdata, id, subid, false);
 }
 
 static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
