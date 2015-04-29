@@ -502,6 +502,18 @@ static void notice_msg_entries(char_entry_t **entries)
 	}
 }
 
+static void info_msg_entries(char_entry_t **entries)
+{
+	char_entry_t *entry, *tmpentry;
+
+	DL_FOREACH_SAFE(*entries, entry, tmpentry) {
+		DL_DELETE(*entries, entry);
+		LOGINFO("%s", entry->buf);
+		free(entry->buf);
+		free(entry);
+	}
+}
+
 static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 {
 	uint64_t *u64, g64, d64 = 0;
@@ -5715,7 +5727,7 @@ static void *statsupdate(void *arg)
 				}
 			}
 			mutex_unlock(&sdata->proxy_lock);
-			notice_msg_entries(&char_list);
+			info_msg_entries(&char_list);
 		}
 
 		ts_realtime(&ts_now);
