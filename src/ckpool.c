@@ -530,11 +530,13 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		eom = strchr(cs->buf, '\n');
 	}
 
-	ret = wait_read_select(fd, timeout);
+	ret = wait_read_select(fd, eom ? 0 : timeout);
 	if (ret < 1) {
-		if (!ret)
+		if (!ret) {
+			if (eom)
+				goto parse;
 			LOGDEBUG("Select timed out in read_socket_line");
-		else {
+		} else {
 			if (cs->ckp->proxy)
 				LOGINFO("Select failed in read_socket_line");
 			else
@@ -549,11 +551,9 @@ int read_socket_line(connsock_t *cs, const int timeout)
 
 		ret = recv(fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
-			/* Closed socket after valid message */
-			if (eom || !ret || errno == EAGAIN || errno == EWOULDBLOCK) {
-				ret = 0;
+			/* No more to read or closed socket after valid message */
+			if (eom)
 				break;
-			}
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
 			else
@@ -578,6 +578,7 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		cs->buf[cs->bufofs] = '\0';
 		eom = strchr(cs->buf, '\n');
 	}
+parse:
 	ret = eom - cs->buf;
 
 	cs->buflen = cs->buf + cs->bufofs - eom - 1;
