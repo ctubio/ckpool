@@ -510,11 +510,13 @@ void empty_buffer(connsock_t *cs)
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. */
-int read_socket_line(connsock_t *cs, const int timeout)
+int read_socket_line(connsock_t *cs, float timeout)
 {
 	int fd = cs->fd, ret = -1;
 	char *eom = NULL;
+	tv_t start, now;
 	size_t buflen;
+	float diff;
 
 	if (unlikely(fd < 0))
 		goto out;
@@ -530,6 +532,8 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		eom = strchr(cs->buf, '\n');
 	}
 
+	tv_time(&start);
+rewait:
 	ret = wait_read_select(fd, eom ? 0 : timeout);
 	if (ret < 1) {
 		if (!ret) {
@@ -544,6 +548,9 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		}
 		goto out;
 	}
+	tv_time(&now);
+	diff = tvdiff(&now, &start);
+	timeout -= diff;
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 		int backoff = 1;
@@ -554,6 +561,9 @@ int read_socket_line(connsock_t *cs, const int timeout)
 			/* No more to read or closed socket after valid message */
 			if (eom)
 				break;
+			/* Have we used up all the timeout yet? */
+			if (timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+				goto rewait;
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
 			else
