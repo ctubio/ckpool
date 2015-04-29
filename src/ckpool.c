@@ -530,35 +530,34 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		eom = strchr(cs->buf, '\n');
 	}
 
+	ret = wait_read_select(fd, timeout);
+	if (ret < 1) {
+		if (!ret)
+			LOGDEBUG("Select timed out in read_socket_line");
+		else {
+			if (cs->ckp->proxy)
+				LOGINFO("Select failed in read_socket_line");
+			else
+				LOGERR("Select failed in read_socket_line");
+		}
+		goto out;
+	}
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 		int backoff = 1;
 		char *newbuf;
 
-		ret = wait_read_select(fd, eom ? 0 : timeout);
-		if (ret < 1) {
-			if (eom)
-				break;
-			if (!ret)
-				LOGDEBUG("Select timed out in read_socket_line");
-			else {
-				if (cs->ckp->proxy)
-					LOGNOTICE("Select failed in read_socket_line");
-				else
-					LOGERR("Select failed in read_socket_line");
-			}
-			goto out;
-		}
-		ret = recv(fd, readbuf, PAGESIZE - 4, 0);
+		ret = recv(fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
 			/* Closed socket after valid message */
-			if (eom)
+			if (eom || !ret || errno == EAGAIN || errno == EWOULDBLOCK) {
+				ret = 0;
 				break;
+			}
 			if (cs->ckp->proxy)
-				LOGNOTICE("Failed to recv in read_socket_line");
+				LOGINFO("Failed to recv in read_socket_line");
 			else
 				LOGERR("Failed to recv in read_socket_line");
-			ret = -1;
 			goto out;
 		}
 		buflen = cs->bufofs + ret + 1;
