@@ -1289,17 +1289,17 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazil
 
 	if (client->workername) {
 		if (user) {
-			ASPRINTF(msg, "Client %"PRId64" %s %suser %s worker %s dropped %s",
-				client->id, client->address, user->throttled ? "throttled " : "",
-				user->username, client->workername, lazily ? "lazily" : "");
+			ASPRINTF(msg, "Dropped client %"PRId64" %s %suser %s worker %s %s",
+				 client->id, client->address, user->throttled ? "throttled " : "",
+				 user->username, client->workername, lazily ? "lazily" : "");
 		} else {
-			ASPRINTF(msg, "Client %"PRId64" %s no user worker %s dropped %s",
-				client->id, client->address, client->workername,
-				lazily ? "lazily" : "");
+			ASPRINTF(msg, "Dropped client %"PRId64" %s no user worker %s %s",
+				 client->id, client->address, client->workername,
+				 lazily ? "lazily" : "");
 		}
 	} else {
-		ASPRINTF(msg, "Workerless client %"PRId64" %s dropped %s",
-				client->id, client->address, lazily ? "lazily" : "");
+		ASPRINTF(msg, "Dropped workerless client %"PRId64" %s %s",
+			 client->id, client->address, lazily ? "lazily" : "");
 	}
 	__del_client(sdata, client);
 	__kill_instance(sdata, client);
@@ -1348,7 +1348,7 @@ static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
 
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id,
-						  const char *address, const int server)
+						  const char *address, int server)
 {
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
@@ -1357,6 +1357,9 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	client->id = id;
 	client->session_id = ++sdata->session_id;
 	strcpy(client->address, address);
+	/* Sanity check to not overflow lookup in ckp->serverurl[] */
+	if (server >= ckp->serverurls)
+		server = 0;
 	client->server = server;
 	client->diff = client->old_diff = ckp->startdiff;
 	client->ckp = ckp;
@@ -1509,11 +1512,8 @@ static void reconnect_clients(sdata_t *sdata, const char *cmd)
 	if (port)
 		url = strsep(&port, ",");
 	if (url && port) {
-		int port_no;
-
-		port_no = strtol(port, NULL, 10);
-		JSON_CPACK(json_msg, "{sosss[sii]}", "id", json_null(), "method", "client.reconnect",
-			"params", url, port_no, 0);
+		JSON_CPACK(json_msg, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
+			"params", url, port, 0);
 	} else
 		JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
@@ -2428,8 +2428,7 @@ static int send_recv_auth(stratum_instance_t *client)
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
 			parse_worker_diffs(ckp, worker_array);
 			client->suggest_diff = worker->mindiff;
-			if (!user->auth_time)
-				user->auth_time = time(NULL);
+			user->auth_time = time(NULL);
 		}
 		if (secondaryuserid && (!safecmp(response, "ok.authorise") ||
 					!safecmp(response, "ok.addrauth"))) {
@@ -3265,7 +3264,7 @@ static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_va
 {
 	json_t *val;
 
-	JSON_CPACK(val, "{soss}", "id", json_copy(id_val), "error", err_msg);
+	JSON_CPACK(val, "{soss}", "id", json_deep_copy(id_val), "error", err_msg);
 	stratum_add_send(sdata, val, client_id);
 }
 
@@ -3409,14 +3408,14 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
-		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		/* We need to inform the connector process that this client
-		 * is a passthrough and to manage its messages accordingly.
-		 * The client_id stays on the list but we won't send anything
-		 * to it since it's unauthorised. Set the flag just in case. */
-		client->authorised = false;
+		 * is a passthrough and to manage its messages accordingly. No
+		 * data from this client id should ever come back to this
+		 * stratifier after this so drop the client in the stratifier. */
+		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 		send_proc(client->ckp->connector, buf);
+		drop_client(sdata, client_id);
 		return;
 	}
 
@@ -3443,12 +3442,8 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 
 	/* We should only accept authorised requests from here on */
 	if (!client->authorised) {
-		/* Dropping unauthorised clients here also allows the
-		 * stratifier process to restart since it will have lost all
-		 * the stratum instance data. Clients will just reconnect. */
-		LOGINFO("Dropping unauthorised client %"PRId64" %s", client_id, client->address);
-		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		LOGINFO("Dropping %s from unauthorised client %"PRId64" %s", method,
+			client_id, client->address);
 		return;
 	}
 
@@ -3464,6 +3459,13 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		ckmsgq_add(sdata->stxnq, jp);
 		return;
 	}
+
+	if (cmdmatch(method, "mining.term")) {
+		LOGDEBUG("Mining terminate requested from %"PRId64" %s", client_id, client->address);
+		drop_client(sdata, client_id);
+		return;
+	}
+
 	/* Unhandled message here */
 	LOGINFO("Unhandled client %"PRId64" %s method %s", client_id, client->address, method);
 	return;
@@ -3625,8 +3627,16 @@ static void discard_json_params(json_params_t *jp)
 {
 	json_decref(jp->method);
 	json_decref(jp->params);
-	json_decref(jp->id_val);
+	if (jp->id_val)
+		json_decref(jp->id_val);
 	free(jp);
+}
+
+static void steal_json_id(json_t *val, json_params_t *jp)
+{
+	/* Steal the id_val as is to avoid a copy */
+	json_object_set_new_nocheck(val, "id", jp->id_val);
+	jp->id_val = NULL;
 }
 
 static void sshare_process(ckpool_t *ckp, json_params_t *jp)
@@ -3651,7 +3661,7 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 	result_val = parse_submit(client, json_msg, jp->params, &err_val);
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
-	json_object_set_nocheck(json_msg, "id", jp->id_val);
+	steal_json_id(json_msg, jp);
 	stratum_add_send(sdata, json_msg, client_id);
 out_decref:
 	dec_instance_ref(sdata, client);
@@ -3713,7 +3723,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	json_msg = json_object();
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
-	json_object_set_nocheck(json_msg, "id", jp->id_val);
+	steal_json_id(json_msg, jp);
 	stratum_add_send(sdata, json_msg, client_id);
 
 	if (!json_is_true(result_val) || !client->suggest_diff)
@@ -3877,7 +3887,7 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 		goto out;
 	}
 	val = json_object();
-	json_object_set_nocheck(val, "id", jp->id_val);
+	steal_json_id(val, jp);
 	if (cmdmatch(msg, "mining.get_transactions")) {
 		int txns;
 
@@ -4521,7 +4531,8 @@ int stratifier(proc_instance_t *pi)
 		create_pthread(&pth_blockupdate, blockupdate, ckp);
 
 	mutex_init(&sdata->stats_lock);
-	create_pthread(&pth_statsupdate, statsupdate, ckp);
+	if (!ckp->passthrough)
+		create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	mutex_init(&sdata->share_lock);
 	mutex_init(&sdata->block_lock);
