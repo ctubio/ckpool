@@ -270,6 +270,7 @@ static void kill_server(server_instance_t *si)
 static void clear_unix_msg(unix_msg_t **umsg)
 {
 	if (*umsg) {
+		Close((*umsg)->sockd);
 		free((*umsg)->buf);
 		free(*umsg);
 		*umsg = NULL;
