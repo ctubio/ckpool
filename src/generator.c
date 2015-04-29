@@ -1392,21 +1392,21 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	}
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
-		LOGNOTICE("Client %"PRId64" sending shares to non existent proxy %d, dropping",
-			  client_id, id);
+		LOGINFO("Client %"PRId64" sending shares to non existent proxy %d, dropping",
+			client_id, id);
 		stratifier_reconnect_client(ckp, client_id);
 		goto out;
 	}
 	proxi = subproxy_by_id(proxy, subid);
 	if (unlikely(!proxi)) {
-		LOGNOTICE("Client %"PRId64" sending shares to non existent subproxy %d:%d, dropping",
-			  client_id, id, subid);
+		LOGINFO("Client %"PRId64" sending shares to non existent subproxy %d:%d, dropping",
+			client_id, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
 		goto out;
 	}
 	if (!proxi->alive) {
-		LOGNOTICE("Client %"PRId64" sending shares to dead subproxy %d:%d, dropping",
-			  client_id, id, subid);
+		LOGINFO("Client %"PRId64" sending shares to dead subproxy %d:%d, dropping",
+			client_id, id, subid);
 		stratifier_reconnect_client(ckp, client_id);
 		goto out;
 	}
