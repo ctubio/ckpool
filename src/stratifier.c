@@ -1410,8 +1410,8 @@ static void reconnect_clients(sdata_t *sdata)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged for reconnect to global proxy %d",
-			  reconnects, proxy->id);
+		LOGINFO("%d clients flagged for reconnect to global proxy %d",
+			reconnects, proxy->id);
 	}
 	if (headroom < 0)
 		generator_recruit(sdata->ckp, proxy->id, -headroom);
@@ -1649,8 +1649,8 @@ static void check_userproxies(sdata_t *sdata, const int userid)
 	ck_runlock(&sdata->instance_lock);
 
 	if (reconnects) {
-		LOGNOTICE("%d clients flagged for reconnect to user %d proxies",
-			  reconnects, userid);
+		LOGINFO("%d clients flagged for reconnect to user %d proxies",
+			reconnects, userid);
 	}
 	if (headroom < 0)
 		recruit_best_userproxy(sdata, userid, -headroom);
