@@ -562,7 +562,7 @@ rewait:
 			if (eom)
 				break;
 			/* Have we used up all the timeout yet? */
-			if (timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			if (timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 				goto rewait;
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
