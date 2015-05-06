@@ -223,9 +223,9 @@ struct stratum_instance {
 	 * instance_lock */
 	int ref;
 
-	char enonce1[32];
+	char enonce1[36]; /* Fit up to 16 byte binary enonce1 */
 	uchar enonce1bin[16];
-	char enonce1var[12];
+	char enonce1var[20]; /* Fit up to 8 byte binary enonce1var */
 	uint64_t enonce1_64;
 	int session_id;
 
