@@ -3121,7 +3121,7 @@ static char *shift_words[] =
 	"quinn",
 	"rika",
 	"sena",
-	"tsubasa",
+	"tenshi",
 	"ur",
 	"valentina",
 	"winry",
