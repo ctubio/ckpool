@@ -990,7 +990,7 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 					row->sharerej++;
 					break;
 			}
-			K_WLOCK(workerstatus_free);
+			K_WUNLOCK(workerstatus_free);
 		}
 	}
 
