@@ -2,22 +2,33 @@
 #
 function blocksorder($a, $b)
 {
- if ($b['blocks'] == $a['blocks'])
-	return $b['diffacc'] - $a['diffacc'];
+ if ($b['blocks'] != $a['blocks'])
+	return $b['blocks'] - $a['blocks'];
  else
-	return $a['blocks'] - $b['blocks'];
+ {
+	if ($b['diffacc'] != $a['diffacc'])
+		return $a['diffacc'] - $b['diffacc'];
+	else
+		return strcmp($a['username'], $b['username']);
+ }
 }
 #
 function douserinfo($data, $user)
 {
+ $sall = ($user == 'Kano');
+
  $ans = getUserInfo($user);
 
- $pg = '<h1>Block Hall of Fame</h1>'.$pg;
+ $pg = '<h1>Block Acclaim</h1>'.$pg;
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= "<tr class=title>";
  $pg .= "<td class=dl>User</td>";
  $pg .= "<td class=dr>Blocks</td>";
- $pg .= "<td class=dr>Diff</td>";
+ if ($sall)
+ {
+	$pg .= "<td class=dr>Diff</td>";
+	$pg .= "<td class=dr>Avg</td>";
+ }
  $pg .= "</tr>\n";
 
  if ($ans['STATUS'] == 'ok')
@@ -26,14 +37,23 @@ function douserinfo($data, $user)
 	$count = $ans['rows'];
 	for ($i = 0; $i < $count; $i++)
 	{
+		if ($sall)
+			$diffacc = $ans['diffacc:'.$i];
+		else
+			$diffacc = 0;
+
 		$all[] = array('blocks' => $ans['blocks:'.$i],
 				'username' => $ans['username:'.$i],
-				'diffacc' => $ans['diffacc:'.$i]);
+				'diffacc' => $diffacc);
 	}
 	usort($all, 'blocksorder');
 
 	for ($i = 0; $i < $count; $i++)
 	{
+		$bl = $all[$i]['blocks'];
+		if ($sall == false && $bl < 1)
+			break;
+
 		if (($i % 2) == 0)
 			$row = 'even';
 		else
@@ -42,10 +62,15 @@ function douserinfo($data, $user)
 		$pg .= "<tr class=$row>";
 		$un = htmlspecialchars($all[$i]['username']);
 		$pg .= "<td class=dl>$un</td>";
-		$bl = $all[$i]['blocks'];
 		$pg .= "<td class=dr>$bl</td>";
-		$diffacc = difffmt($all[$i]['diffacc']);
-		$pg .= "<td class=dr>$diffacc</td>";
+		if ($sall)
+		{
+			$diffacc = $all[$i]['diffacc'];
+			$pg .= '<td class=dr>'.difffmt($diffacc).'</td>';
+			if ($bl == 0)
+				$bl = 1;
+			$pg .= '<td class=dr>'.difffmt($diffacc/$bl).'</td>';
+		}
 		$pg .= "</tr>\n";
 	}
  }
