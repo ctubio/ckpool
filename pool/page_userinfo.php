@@ -9,7 +9,7 @@ function blocksorder($a, $b)
 	if ($b['diffacc'] != $a['diffacc'])
 		return $a['diffacc'] - $b['diffacc'];
 	else
-		return strcmp($a['username'], $b['username']);
+		return strcasecmp($a['username'], $b['username']);
  }
 }
 #
