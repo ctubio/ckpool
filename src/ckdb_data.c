@@ -936,8 +936,10 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 					 file, func, line);
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
+			K_WLOCK(workerstatus_free);
 			if (tv_newer(&(row->last_auth), &(auths->createdate)))
 				copy_tv(&(row->last_auth), &(auths->createdate));
+			K_WUNLOCK(workerstatus_free);
 		}
 	}
 
@@ -953,6 +955,7 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 					 file, func, line);
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
+			K_WLOCK(workerstatus_free);
 			if (tv_newer(&(row->last_share), &(shares->createdate))) {
 				copy_tv(&(row->last_share), &(shares->createdate));
 				row->last_diff = shares->diff;
@@ -987,6 +990,7 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 					row->sharerej++;
 					break;
 			}
+			K_WLOCK(workerstatus_free);
 		}
 	}
 
@@ -995,6 +999,7 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 					 file, func, line);
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
+			K_WLOCK(workerstatus_free);
 			if (userstats->idle) {
 				if (tv_newer(&(row->last_idle), &(userstats->statsdate)))
 					copy_tv(&(row->last_idle), &(userstats->statsdate));
@@ -1002,6 +1007,7 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 				if (tv_newer(&(row->last_stats), &(userstats->statsdate)))
 					copy_tv(&(row->last_stats), &(userstats->statsdate));
 			}
+			K_WUNLOCK(workerstatus_free);
 		}
 	}
 }
@@ -1768,6 +1774,7 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	K_TREE_CTX ss_ctx[1], s_ctx[1];
 	char cd_buf[DATE_BUFSIZ];
 	int64_t ss_tot, ss_already, ss_failed, shares_tot, shares_dumped;
+	int64_t diff_tot;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKINFO *workinfo;
 	SHARES lookshares, *shares;
@@ -1822,7 +1829,8 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	looksharesummary.workername = EMPTY;
 
 	ok = true;
-	ss_tot = ss_already = ss_failed = shares_tot = shares_dumped = 0;
+	ss_tot = ss_already = ss_failed = shares_tot = shares_dumped =
+	diff_tot = 0;
 	ss_look.data = (void *)(&looksharesummary);
 	K_RLOCK(sharesummary_free);
 	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &ss_look, cmp_sharesummary_workinfoid, ss_ctx);
@@ -1891,6 +1899,8 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 				break;
 
 			shares_tot++;
+			if (shares->errn == SE_NONE)
+				diff_tot += shares->diff;
 			tmp_item = next_in_ktree(s_ctx);
 			shares_root = remove_from_ktree(shares_root, s_item, cmp_shares);
 			k_unlink_item(shares_store, s_item);
@@ -1898,10 +1908,13 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 				shares_dumped++;
 			if (reloading && skipupdate && !error[0]) {
 				snprintf(error, sizeof(error),
-					 "reload found aged shares: %"PRId64"/%"PRId64"/%s",
+					 "reload found aged share: %"PRId64
+					 "/%"PRId64"/%s/%s%.0f",
 					 shares->workinfoid,
 					 shares->userid,
-					 shares->workername);
+					 shares->workername,
+					 (shares->errn == SE_NONE) ? "" : "*",
+					 shares->diff);
 			}
 			k_add_head(shares_free, s_item);
 			s_item = tmp_item;
@@ -1923,12 +1936,13 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		/* If all were already aged, and no shares
 		 * then we don't want a message */
 		if (!(ss_already == ss_tot && shares_tot == 0)) {
-			LOGERR("%s(): Summary aging of %"PRId64"/%s sstotal=%"PRId64
-				" already=%"PRId64" failed=%"PRId64
-				", sharestotal=%"PRId64" dumped=%"PRId64,
+			LOGERR("%s(): Summary aging of %"PRId64
+				"/%s sstotal=%"PRId64" already=%"PRId64
+				" failed=%"PRId64", sharestotal=%"PRId64
+				" dumped=%"PRId64", diff=%"PRId64,
 				__func__, workinfoid, poolinstance, ss_tot,
 				ss_already, ss_failed, shares_tot,
-				shares_dumped);
+				shares_dumped, diff_tot);
 		}
 	}
 bye:
@@ -4434,4 +4448,168 @@ char *shiftcode(tv_t *createdate)
 
 	LOGDEBUG("%s() code_buf='%s'", __func__, code_buf);
 	return(code_buf);
+}
+
+// order by userid asc
+cmp_t cmp_userinfo(K_ITEM *a, K_ITEM *b)
+{
+	USERINFO *ua, *ub;
+	DATA_USERINFO(ua, a);
+	DATA_USERINFO(ub, b);
+	return CMP_BIGINT(ua->userid, ub->userid);
+}
+
+K_ITEM *_get_userinfo(int64_t userid, bool lock)
+{
+	USERINFO userinfo;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *find;
+
+	userinfo.userid = userid;
+
+	INIT_USERINFO(&look);
+	look.data = (void *)(&userinfo);
+	if (lock)
+		K_RLOCK(userinfo_free);
+	find = find_in_ktree(userinfo_root, &look, cmp_userinfo, ctx);
+	if (lock)
+		K_RUNLOCK(userinfo_free);
+	return find;
+}
+
+K_ITEM *_find_create_userinfo(int64_t userid, bool lock, WHERE_FFL_ARGS)
+{
+	K_ITEM *ui_item, *u_item;
+	USERS *users = NULL;
+	USERINFO *row;
+
+	ui_item = _get_userinfo(userid, lock);
+	if (!ui_item) {
+		if (lock)
+			K_RLOCK(users_free);
+		u_item = find_userid(userid);
+		if (lock)
+			K_RUNLOCK(users_free);
+		DATA_USERS_NULL(users, u_item);
+
+		if (lock)
+			K_WLOCK(userinfo_free);
+		ui_item = k_unlink_head(userinfo_free);
+		DATA_USERINFO(row, ui_item);
+
+		bzero(row, sizeof(*row));
+		row->userid = userid;
+		if (u_item)
+			STRNCPY(row->username, users->username);
+		else
+			bigint_to_buf(userid, row->username, sizeof(row->username));
+
+		userinfo_root = add_to_ktree(userinfo_root, ui_item, cmp_userinfo);
+		k_add_head(userinfo_store, ui_item);
+		if (lock)
+			K_WUNLOCK(userinfo_free);
+	}
+	return ui_item;
+}
+
+void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
+		      MARKERSUMMARY *markersummary, bool ss_sub, bool lock)
+{
+	USERINFO *row;
+	K_ITEM *item;
+
+	if (shares) {
+		item = _find_userinfo(shares->userid, lock);
+		DATA_USERINFO(row, item);
+		if (lock)
+			K_WLOCK(userinfo_free);
+		switch (shares->errn) {
+			case SE_NONE:
+				row->diffacc += shares->diff;
+				row->shareacc++;
+				break;
+			case SE_STALE:
+				row->diffsta += shares->diff;
+				row->sharesta++;
+				break;
+			case SE_DUPE:
+				row->diffdup += shares->diff;
+				row->sharedup++;
+				break;
+			case SE_HIGH_DIFF:
+				row->diffhi += shares->diff;
+				row->sharehi++;
+				break;
+			default:
+				row->diffrej += shares->diff;
+				row->sharerej++;
+				break;
+		}
+		if (lock)
+			K_WUNLOCK(userinfo_free);
+	}
+
+	// Only during db load so no locking required
+	if (sharesummary) {
+		item = _find_userinfo(sharesummary->userid, false);
+		DATA_USERINFO(row, item);
+		if (ss_sub) {
+			row->diffacc -= sharesummary->diffacc;
+			row->diffsta -= sharesummary->diffsta;
+			row->diffdup -= sharesummary->diffdup;
+			row->diffhi -= sharesummary->diffhi;
+			row->diffrej -= sharesummary->diffrej;
+			row->shareacc -= sharesummary->shareacc;
+			row->sharesta -= sharesummary->sharesta;
+			row->sharedup -= sharesummary->sharedup;
+			row->sharehi -= sharesummary->sharehi;
+			row->sharerej -= sharesummary->sharerej;
+		} else {
+			row->diffacc += sharesummary->diffacc;
+			row->diffsta += sharesummary->diffsta;
+			row->diffdup += sharesummary->diffdup;
+			row->diffhi += sharesummary->diffhi;
+			row->diffrej += sharesummary->diffrej;
+			row->shareacc += sharesummary->shareacc;
+			row->sharesta += sharesummary->sharesta;
+			row->sharedup += sharesummary->sharedup;
+			row->sharehi += sharesummary->sharehi;
+			row->sharerej += sharesummary->sharerej;
+		}
+	}
+
+	// Only during db load so no locking required
+	if (markersummary) {
+		item = _find_userinfo(markersummary->userid, false);
+		DATA_USERINFO(row, item);
+		row->diffacc += markersummary->diffacc;
+		row->diffsta += markersummary->diffsta;
+		row->diffdup += markersummary->diffdup;
+		row->diffhi += markersummary->diffhi;
+		row->diffrej += markersummary->diffrej;
+		row->shareacc += markersummary->shareacc;
+		row->sharesta += markersummary->sharesta;
+		row->sharedup += markersummary->sharedup;
+		row->sharehi += markersummary->sharehi;
+		row->sharerej += markersummary->sharerej;
+	}
+}
+
+// N.B. good blocks = blocks - orphans
+void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock)
+{
+	USERINFO *row;
+	K_ITEM *item;
+
+	item = find_userinfo(blocks->userid);
+	DATA_USERINFO(row, item);
+	if (lock)
+		K_WLOCK(userinfo_free);
+	if (isnew) {
+		row->blocks++;
+		copy_tv(&(row->last_block), &(blocks->createdate));
+	} else
+		row->orphans++;
+	if (lock)
+		K_WLOCK(userinfo_free);
 }

@@ -5194,6 +5194,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(poolstats, 1, 1);
 	USEINFO(userstats, 2, 1);
 	USEINFO(workerstatus, 1, 1);
+	USEINFO(userinfo, 1, 1);
 	USEINFO(msgline, 1, 0);
 	USEINFO(workqueue, 1, 0);
 	USEINFO(transfer, 0, 0);
@@ -5863,6 +5864,88 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(buf);
 }
 
+static char *cmd_userinfo(__maybe_unused PGconn *conn, char *cmd, char *id,
+			  __maybe_unused tv_t *now, __maybe_unused char *by,
+			  __maybe_unused char *code, __maybe_unused char *inet,
+			  __maybe_unused tv_t *notcd,
+			  __maybe_unused K_TREE *trf_root)
+{
+	K_ITEM *ui_item;
+	USERINFO *userinfo;
+	char reply[1024] = "";
+	char tmp[1024];
+	size_t len, off;
+	double d;
+	char *buf;
+	int rows;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+
+	rows = 0;
+	K_RLOCK(userinfo_free);
+	ui_item = userinfo_store->head;
+	while (ui_item) {
+		DATA_USERINFO(userinfo, ui_item);
+
+		str_to_buf(userinfo->username, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "username:%d=%s%c",
+			 rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "blocks:%d=%d%c", rows,
+			 userinfo->blocks - userinfo->orphans, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "orphans:%d=%d%c", rows,
+			 userinfo->orphans, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		double_to_buf(userinfo->diffacc, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "diffacc:%d=%s%c", rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		d = userinfo->diffsta + userinfo->diffdup + userinfo->diffhi +
+		    userinfo->diffrej;
+		double_to_buf(d, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "diffinv:%d=%s%c", rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		double_to_buf(userinfo->shareacc, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "shareacc:%d=%s%c", rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		d = userinfo->sharesta + userinfo->sharedup + userinfo->sharehi +
+		    userinfo->sharerej;
+		double_to_buf(d, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "shareinv:%d=%s%c", rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "lastblock=%ld%c",
+					   userinfo->last_block.tv_sec, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		rows++;
+		ui_item = ui_item->next;
+	}
+	K_RUNLOCK(userinfo_free);
+
+	snprintf(tmp, sizeof(tmp),
+		 "rows=%d%cflds=%s%c",
+		 rows, FLDSEP,
+		 "username,blocks,orphans,diffacc,diffinv,shareacc,shareinv,"
+		 "lastblock", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	snprintf(tmp, sizeof(tmp), "arn=%s%carp=", "UserInfo", FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+
+	LOGDEBUG("%s.ok.%d_rows", id, rows);
+	return buf;
+}
+
 // TODO: limit access by having seperate sockets for each
 #define ACCESS_POOL	"p"
 #define ACCESS_SYSTEM	"s"
@@ -5975,5 +6058,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_MARKS,	"marks",	false,	false,	cmd_marks,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_PSHIFT,	"pshift",	false,	false,	cmd_pshift,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_SHSTA,	"shsta",	true,	false,	cmd_shsta,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_USERINFO,	"userinfo",	false,	false,	cmd_userinfo,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	NULL }
 };

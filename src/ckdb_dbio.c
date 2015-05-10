@@ -2836,6 +2836,9 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 			}
 
 			if (!sharesummary->reset) {
+				_userinfo_update(NULL, sharesummary, NULL,
+						 true, true);
+
 				zero_sharesummary(sharesummary,
 						  &(shares->createdate),
 						  shares->diff);
@@ -2844,8 +2847,10 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 		}
 	}
 
-	if (!confirm_sharesummary)
+	if (!confirm_sharesummary) {
 		workerstatus_update(NULL, shares, NULL);
+		userinfo_update(shares, NULL, NULL);
+	}
 
 	sharesummary_update(conn, shares, NULL, NULL, shares->createby,
 			    shares->createcode, shares->createinet,
@@ -3144,6 +3149,9 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 			}
 
 			if (!sharesummary->reset) {
+				_userinfo_update(NULL, sharesummary, NULL,
+						 true, true);
+
 				zero_sharesummary(sharesummary,
 						  &(shareerrors->createdate),
 						  0.0);
@@ -4442,6 +4450,8 @@ bool sharesummary_fill(PGconn *conn)
 
 		sharesummary_to_pool(p_row, row);
 
+		_userinfo_update(NULL, row, NULL, false, false);
+
 		tick();
 	}
 	if (!ok) {
@@ -4743,6 +4753,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 			// We didn't use a Begin
 			ok = true;
+			userinfo_block(row, true);
 			goto unparam;
 			break;
 		case BLOCKS_ORPHAN:
@@ -4877,6 +4888,8 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			update_old = true;
+			if (confirmed[0] == BLOCKS_ORPHAN)
+				userinfo_block(row, false);
 			break;
 		default:
 			LOGERR("%s(): %s.failed.invalid confirm='%s'",
@@ -5130,6 +5143,12 @@ bool blocks_fill(PGconn *conn)
 		if (pool.workinfoid < row->workinfoid) {
 			pool.workinfoid = row->workinfoid;
 			pool.height = row->height;
+		}
+
+		if (CURRENT(&(row->expirydate))) {
+			_userinfo_block(row, true, false);
+			if (row->confirmed[0] == BLOCKS_ORPHAN)
+				_userinfo_block(row, false, false);
 		}
 	}
 	if (!ok)
@@ -6461,6 +6480,8 @@ bool markersummary_fill(PGconn *conn)
 
 		markersummary_to_pool(p_row, row);
 
+		_userinfo_update(NULL, NULL, row, false, false);
+
 		tick();
 	}
 	if (!ok) {
@@ -6469,6 +6490,7 @@ bool markersummary_fill(PGconn *conn)
 	}
 
 	p_n = markersummary_pool_store->count;
+
 	//K_WUNLOCK(markersummary_free);
 	PQclear(res);
 

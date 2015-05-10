@@ -510,6 +510,11 @@ const char *marktype_other_finish_fmt = "fin: %s";
 const char *marktype_shift_begin_skip = "Shift stt: ";
 const char *marktype_shift_end_skip = "Shift fin: ";
 
+// USERINFO from various incoming data
+K_TREE *userinfo_root;
+K_LIST *userinfo_free;
+K_STORE *userinfo_store;
+
 static char logname[512];
 static char *dbcode;
 
@@ -1145,6 +1150,11 @@ static void alloc_storage()
 				ALLOC_MARKS, LIMIT_MARKS, true);
 	marks_store = k_new_store(marks_free);
 	marks_root = new_ktree();
+
+	userinfo_free = k_new_list("UserInfo", sizeof(USERINFO),
+					ALLOC_USERINFO, LIMIT_USERINFO, true);
+	userinfo_store = k_new_store(userinfo_free);
+	userinfo_root = new_ktree();
 }
 
 #define SEQSETMSG(_set, _seqset, _msgtxt, _endtxt) do { \
@@ -1281,6 +1291,8 @@ static void dealloc_storage()
 	LOGWARNING("%s() logqueue ...", __func__);
 
 	FREE_LISTS(logqueue);
+
+	FREE_ALL(userinfo);
 
 	FREE_TREE(marks);
 	FREE_STORE_DATA(marks);
@@ -3953,6 +3965,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_STATS:
 					case CMD_USERSTATUS:
 					case CMD_SHSTA:
+					case CMD_USERINFO:
 						ans = ckdb_cmds[msgline->which_cmds].func(NULL,
 								msgline->cmd,
 								msgline->id,
@@ -4275,6 +4288,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_MARKS:
 			case CMD_PSHIFT:
 			case CMD_SHSTA:
+			case CMD_USERINFO:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,

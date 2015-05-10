@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.092"
+#define CKDB_VERSION DB_VERSION"-1.093"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -403,6 +403,7 @@ enum cmd_values {
 	CMD_MARKS,
 	CMD_PSHIFT,
 	CMD_SHSTA,
+	CMD_USERINFO,
 	CMD_END
 };
 
@@ -1929,6 +1930,35 @@ extern const char *marktype_shift_end_skip;
 #define MARK_USED_STR "u"
 #define MUSED(_status) (tolower((_status)[0]) == MARK_USED)
 
+// USERINFO from various incoming data
+typedef struct userinfo {
+	int64_t userid;
+	char username[TXT_BIG+1];
+	int blocks;
+	int orphans; // How many blocks are orphans
+	tv_t last_block;
+	// For all time
+	double diffacc;
+	double diffsta;
+	double diffdup;
+	double diffhi;
+	double diffrej;
+	double shareacc;
+	double sharesta;
+	double sharedup;
+	double sharehi;
+	double sharerej;
+} USERINFO;
+
+#define ALLOC_USERINFO 1000
+#define LIMIT_USERINFO 0
+#define INIT_USERINFO(_item) INIT_GENERIC(_item, userinfo)
+#define DATA_USERINFO(_var, _item) DATA_GENERIC(_var, _item, userinfo, true)
+
+extern K_TREE *userinfo_root;
+extern K_LIST *userinfo_free;
+extern K_STORE *userinfo_store;
+
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnow(tv_t *now);
 extern void tick();
@@ -2192,6 +2222,17 @@ extern bool _marks_description(char *description, size_t siz, char *marktype,
 				int32_t height, char *shift, char *other,
 				WHERE_FFL_ARGS);
 extern char *shiftcode(tv_t *createdate);
+extern cmp_t cmp_userinfo(K_ITEM *a, K_ITEM *b);
+#define get_userinfo(_userid) _get_userinfo(_userid, true)
+extern K_ITEM *_get_userinfo(int64_t userid, bool lock);
+#define find_userinfo(_userid) _find_create_userinfo(_userid, true, WHERE_FFL_HERE)
+#define _find_userinfo(_userid, _lock) _find_create_userinfo(_userid, _lock, WHERE_FFL_HERE)
+extern K_ITEM *_find_create_userinfo(int64_t userid, bool lock, WHERE_FFL_ARGS);
+#define userinfo_update(_s, _ss, _ms) _userinfo_update(_s, _ss, _ms, true, true)
+extern void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
+			     MARKERSUMMARY *markersummary, bool ss_sub, bool lock);
+#define userinfo_block(_blocks, _isnew) _userinfo_block(_blocks, _isnew, true)
+extern void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
