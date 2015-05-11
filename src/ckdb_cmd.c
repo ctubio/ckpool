@@ -683,7 +683,8 @@ static char *cmd_poolstats_do(PGconn *conn, char *cmd, char *id, char *by,
 					by, code, inet, cd, igndup, trf_root);
 
 	if (!ok) {
-		LOGERR("%s() %s.failed.DBE", __func__, id);
+		if (!igndup)
+			LOGERR("%s() %s.failed.DBE", __func__, id);
 		return strdup("failed.DBE");
 	}
 	LOGDEBUG("%s.ok.", id);
@@ -698,13 +699,11 @@ static char *cmd_poolstats(PGconn *conn, char *cmd, char *id,
 {
 	bool igndup = false;
 
-	// confirm_summaries() doesn't call this
-	if (reloading) {
-		if (tv_equal(cd, &(dbstatus.newest_createdate_blocks)))
-			igndup = true;
-		else if (tv_newer(cd, &(dbstatus.newest_createdate_blocks)))
-			return NULL;
-	}
+	/* confirm_summaries() doesn't call this
+	 * We don't care about dups during reload since poolstats_fill()
+	 * doesn't load all the data */
+	if (reloading)
+		igndup = true;
 
 	return cmd_poolstats_do(conn, cmd, id, by, code, inet, cd, igndup, trf_root);
 }
@@ -1965,20 +1964,18 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		K_ITEM *i_ntime, *i_reward;
 		bool igndup = false;
 
-		if (reloading && !confirm_sharesummary) {
-			if (tv_equal(cd, &(dbstatus.newest_createdate_workinfo)))
-				igndup = true;
-			else if (tv_newer(cd, &(dbstatus.newest_createdate_workinfo)))
-				return NULL;
-		}
-
 		i_workinfoid = require_name(trf_root, "workinfoid", 1, NULL, reply, siz);
 		if (!i_workinfoid)
 			return strdup(reply);
 
-		if (confirm_sharesummary) {
-			TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
+		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
 
+		if (reloading && !confirm_sharesummary) {
+			if (workinfoid <= dbstatus.newest_workinfoid)
+				igndup = true;
+		}
+
+		if (confirm_sharesummary) {
 			if (workinfoid < confirm_first_workinfoid ||
 			    workinfoid > confirm_last_workinfoid)
 				goto wiconf;
@@ -2056,12 +2053,6 @@ wiconf:
 		K_ITEM *i_secondaryuserid;
 		bool ok;
 
-		// This just excludes the shares we certainly don't need
-		if (reloading && !confirm_sharesummary) {
-			if (tv_newer(cd, &(dbstatus.sharesummary_firstshare)))
-				return NULL;
-		}
-
 		i_nonce = require_name(trf_root, "nonce", 1, NULL, reply, siz);
 		if (!i_nonce)
 			return strdup(reply);
@@ -2070,9 +2061,28 @@ wiconf:
 		if (!i_workinfoid)
 			return strdup(reply);
 
-		if (confirm_sharesummary) {
-			TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
+		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
 
+		if (reloading && !confirm_sharesummary) {
+			/* ISDR (Ignored shares during reload)
+			 * This will discard any shares older than the newest
+			 *  workinfoidend of any workmarker - including ready
+			 *  but not processed workmarkers
+			 * This means that if a workmarker needs re-processing
+			 *  and all of it's shares need to be redone, that will
+			 *  require a seperate procedure to the reload
+			 *  This would be the (as yet non-existant)
+			 *   confirm_markersummary which will replace the
+			 *   now unusable confirm_sharesummary code
+			 * However, if the workmarker simply just needs to be
+			 *  flagged as processed, this avoids the problem of
+			 *  duplicating shares before flagging it
+			 */
+			if (workinfoid <= dbstatus.newest_workmarker_workinfoid)
+				return NULL;
+		}
+
+		if (confirm_sharesummary) {
 			if (workinfoid < confirm_first_workinfoid ||
 			    workinfoid > confirm_last_workinfoid)
 				goto sconf;
@@ -2151,12 +2161,6 @@ sconf:
 		K_ITEM *i_error, *i_secondaryuserid;
 		bool ok;
 
-		// This just excludes the shareerrors we certainly don't need
-		if (reloading && !confirm_sharesummary) {
-			if (tv_newer(cd, &(dbstatus.sharesummary_firstshare)))
-				return NULL;
-		}
-
 		i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
 		if (!i_username)
 			return strdup(reply);
@@ -2165,6 +2169,13 @@ sconf:
 		if (!i_workinfoid)
 			return strdup(reply);
 
+		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
+
+		if (reloading && !confirm_sharesummary) {
+			// See comment 'ISDR' above for shares
+			if (workinfoid <= dbstatus.newest_workmarker_workinfoid)
+				return NULL;
+		}
 		if (confirm_sharesummary) {
 			TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
 
@@ -2216,14 +2227,17 @@ seconf:
 		tv_t ss_first, ss_last;
 		bool ok;
 
-		if (reloading && !confirm_sharesummary) {
-			if (tv_newer(cd, &(dbstatus.sharesummary_firstshare)))
-				return NULL;
-		}
-
 		i_workinfoid = require_name(trf_root, "workinfoid", 1, NULL, reply, siz);
 		if (!i_workinfoid)
 			return strdup(reply);
+
+		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
+
+		if (reloading && !confirm_sharesummary) {
+			// This excludes any already summarised
+			if (workinfoid <= dbstatus.newest_workmarker_workinfoid)
+				return NULL;
+		}
 
 		if (confirm_sharesummary) {
 			TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
@@ -2237,27 +2251,19 @@ seconf:
 		if (!i_poolinstance)
 			return strdup(reply);
 
-		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
-
-		ok = workinfo_age(conn, workinfoid,
-					transfer_data(i_poolinstance),
-					by, code, inet, cd,
-					&ss_first, &ss_last,
-					&ss_count, &s_count, &s_diff);
-
+		ok = workinfo_age(workinfoid, transfer_data(i_poolinstance),
+				  by, code, inet, cd, &ss_first, &ss_last,
+				  &ss_count, &s_count, &s_diff);
 		if (!ok) {
 			LOGERR("%s(%s) %s.failed.DATA", __func__, cmd, id);
 			return strdup("failed.DATA");
 		} else {
-			/* Don't slow down the reload - do them later
-			 * N.B. this means if you abort/terminate the reload,
-			 * next restart will again go back to the oldest
-			 * unaged sharesummary due to a pool terminate */
+			/* Don't slow down the reload - do them later */
 			if (!reloading) {
 				// Aging is a queued item thus the reply is ignored
-				auto_age_older(conn, workinfoid,
-						     transfer_data(i_poolinstance),
-						     by, code, inet, cd);
+				auto_age_older(workinfoid,
+						transfer_data(i_poolinstance),
+						by, code, inet, cd);
 			}
 		}
 		LOGDEBUG("%s.ok.aged %"PRId64, id, workinfoid);

@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.094"
+#define CKDB_VERSION DB_VERSION"-1.100"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -125,20 +125,12 @@ extern const char *addrpatt;
 #define MAX_PAYADDR '~'
 
 typedef struct loadstatus {
-	tv_t oldest_sharesummary_firstshare_n;
-	tv_t newest_sharesummary_firstshare_a;
-	tv_t newest_sharesummary_firstshare_ay;
-	tv_t sharesummary_firstshare; // whichever of above 2 used
-	tv_t oldest_sharesummary_firstshare_a;
-	tv_t newest_sharesummary_firstshare_y;
+	int64_t newest_workmarker_workinfoid;
+	int64_t newest_workinfoid;
+	tv_t newest_createdate_workmarker_workinfo;
 	tv_t newest_createdate_workinfo;
 	tv_t newest_createdate_poolstats;
-	tv_t newest_starttimeband_userstats;
 	tv_t newest_createdate_blocks;
-	int64_t oldest_workinfoid_n; // of oldest firstshare sharesummary n
-	int64_t oldest_workinfoid_a; // of oldest firstshare sharesummary a
-	int64_t newest_workinfoid_a; // of newest firstshare sharesummary a
-	int64_t newest_workinfoid_y; // of newest firstshare sharesummary y
 } LOADSTATUS;
 extern LOADSTATUS dbstatus;
 
@@ -1366,10 +1358,6 @@ typedef struct sharesummary {
 	double sharerej;
 	int64_t sharecount;
 	int64_t errorcount;
-	int64_t countlastupdate; // non-DB field
-	bool inserted; // non-DB field
-	bool saveaged; // non-DB field
-	bool reset; // non-DB field
 	tv_t firstshare;
 	tv_t lastshare;
 	double lastdiffacc;
@@ -2131,10 +2119,10 @@ extern cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS);
 extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
 extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
-extern bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
-			 char *by, char *code, char *inet, tv_t *cd,
-			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
-			 int64_t *s_count, int64_t *s_diff);
+extern bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by,
+			 char *code, char *inet, tv_t *cd, tv_t *ss_first,
+			 tv_t *ss_last, int64_t *ss_count, int64_t *s_count,
+			 int64_t *s_diff);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
@@ -2152,8 +2140,8 @@ extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
 extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
 				  int64_t workinfoid, bool pool);
 extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
-extern void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
-			   char *by, char *code, char *inet, tv_t *cd);
+extern void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
+			   char *code, char *inet, tv_t *cd);
 #define dbhash2btchash(_hash, _buf, _siz) \
 	_dbhash2btchash(_hash, _buf, _siz, WHERE_FFL_HERE)
 void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
@@ -2244,6 +2232,8 @@ extern void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock);
 #define PGOK(_res) ((_res) == PGRES_COMMAND_OK || \
 			(_res) == PGRES_TUPLES_OK || \
 			(_res) == PGRES_EMPTY_QUERY)
+
+#define SQL_UNIQUE_VIOLATION "23505"
 
 #define CKPQ_READ true
 #define CKPQ_WRITE false
@@ -2348,11 +2338,12 @@ extern bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmar
 						char *by, char *code, char *inet,
 						tv_t *cd, K_TREE *trf_root);
 extern char *ooo_status(char *buf, size_t siz);
-#define sharesummary_update(_conn, _s_row, _e_row, _ss_item, _by, _code, _inet, _cd) \
-		_sharesummary_update(_conn, _s_row, _e_row, _ss_item, _by, _code, _inet, _cd, \
+#define sharesummary_update(_s_row, _e_row, _ss_item, _by, _code, _inet, _cd) \
+		_sharesummary_update(_s_row, _e_row, _ss_item, _by, _code, _inet, _cd, \
 					WHERE_FFL_HERE)
-extern bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
-				char *by, char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS);
+extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
+				 char *by, char *code, char *inet, tv_t *cd,
+				 WHERE_FFL_ARGS);
 extern bool sharesummary_fill(PGconn *conn);
 extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 			 double diffacc, double diffinv, double shareacc,

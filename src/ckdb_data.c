@@ -1764,10 +1764,10 @@ K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 	return item;
 }
 
-bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
-		  char *by, char *code, char *inet, tv_t *cd,
-		  tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
-		  int64_t *s_count, int64_t *s_diff)
+// Duplicates during a reload are set to not show messages
+bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
+		  char *inet, tv_t *cd, tv_t *ss_first, tv_t *ss_last,
+		  int64_t *ss_count, int64_t *s_count, int64_t *s_diff)
 {
 	K_ITEM *wi_item, ss_look, *ss_item, s_look, *s_item;
 	K_ITEM *wm_item, *tmp_item;
@@ -1778,7 +1778,7 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKINFO *workinfo;
 	SHARES lookshares, *shares;
-	bool ok = false, conned = false, skipupdate;
+	bool ok = false, skipupdate;
 	char error[1024];
 
 	LOGDEBUG("%s(): age", __func__);
@@ -1857,14 +1857,9 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		}
 
 		if (!skipupdate) {
-			if (conn == NULL && !confirm_sharesummary) {
-				conn = dbconnect();
-				conned = true;
-			}
-
-			if (!sharesummary_update(conn, NULL, NULL, ss_item, by, code, inet, cd)) {
+			if (!sharesummary_update(NULL, NULL, ss_item, by, code, inet, cd)) {
 				ss_failed++;
-				LOGERR("%s(): Failed to age share summary %"PRId64"/%s/%"PRId64,
+				LOGERR("%s(): Failed to age sharesummary %"PRId64"/%s/%"PRId64,
 					__func__, sharesummary->userid,
 					sharesummary->workername,
 					sharesummary->workinfoid);
@@ -1928,9 +1923,6 @@ bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		if (error[0])
 			LOGERR("%s(): %s", __func__, error);
 	}
-
-	if (conned)
-		PQfinish(conn);
 
 	if (ss_already || ss_failed || shares_dumped) {
 		/* If all were already aged, and no shares
@@ -2046,8 +2038,7 @@ void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff)
 	row->diffacc = row->diffsta = row->diffdup = row->diffhi =
 	row->diffrej = row->shareacc = row->sharesta = row->sharedup =
 	row->sharehi = row->sharerej = 0.0;
-	row->sharecount = row->errorcount = row->countlastupdate = 0;
-	row->reset = false;
+	row->sharecount = row->errorcount = 0;
 	row->firstshare.tv_sec = cd->tv_sec;
 	row->firstshare.tv_usec = cd->tv_usec;
 	row->lastshare.tv_sec = row->firstshare.tv_sec;
@@ -2102,8 +2093,8 @@ K_ITEM *find_last_sharesummary(int64_t userid, char *workername)
 
 /* TODO: markersummary checking?
  * However, there should be no issues since the sharesummaries are removed */
-void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
-		    char *by, char *code, char *inet, tv_t *cd)
+void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
+		    char *code, char *inet, tv_t *cd)
 {
 	static int64_t last_attempted_id = -1;
 	static int64_t prev_found = 0;
@@ -2170,10 +2161,9 @@ void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
 		do_id = age_id;
 		to_id = 0;
 		do {
-			ok = workinfo_age(conn, do_id, poolinstance,
-						by, code, inet, cd,
-						&ss_first, &ss_last,
-						&ss_count, &s_count, &s_diff);
+			ok = workinfo_age(do_id, poolinstance, by, code, inet,
+					  cd, &ss_first, &ss_last, &ss_count,
+					  &s_count, &s_diff);
 
 			ss_count_tot += ss_count;
 			s_count_tot += s_count;
@@ -4611,5 +4601,5 @@ void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock)
 	} else
 		row->orphans++;
 	if (lock)
-		K_WLOCK(userinfo_free);
+		K_WUNLOCK(userinfo_free);
 }
