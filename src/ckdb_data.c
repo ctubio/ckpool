@@ -3875,6 +3875,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	WORKMARKERS *workmarkers;
 	K_ITEM *wm_item, *wm_last = NULL;
 	tv_t now;
+	bool ok;
 
 	K_RLOCK(workmarkers_free);
 	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
@@ -3916,8 +3917,15 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	else
 		setnow(&now);
 
-	return sharesummaries_to_markersummaries(NULL, workmarkers, by, code,
-						 inet, &now, trf_root);
+	/* So we can't change any sharesummaries/markersummaries while a
+	 *  payout is being generated
+	 * N.B. this is a long lock since it stores the markersummaries */
+	ck_wlock(&process_pplns_lock);
+	ok = sharesummaries_to_markersummaries(NULL, workmarkers, by, code,
+						inet, &now, trf_root);
+	ck_wunlock(&process_pplns_lock);
+
+	return ok;
 }
 
 void dsp_workmarkers(K_ITEM *item, FILE *stream)
