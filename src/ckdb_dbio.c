@@ -9,6 +9,17 @@
 
 #include "ckdb.h"
 
+// Doesn't work with negative numbers ...
+void pcom(int n)
+{
+	if (n < 1000)
+		printf("%d", n);
+	else {
+		pcom(n/1000);
+		printf(",%03d", n % 1000);
+	}
+}
+
 char *pqerrmsg(PGconn *conn)
 {
 	char *ptr, *buf = strdup(PQerrorMessage(conn));
@@ -2624,6 +2635,9 @@ bool workinfo_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	printf(TICK_PREFIX"wi 0\r");
+	fflush(stdout);
+
 	// TODO: select the data based on sharesummary since old data isn't needed
 	//  however, the ageing rules for workinfo will decide that also
 	//  keep the last block + current? Rules will depend on payout scheme also
@@ -2763,6 +2777,13 @@ bool workinfo_fill(PGconn *conn)
 		if (tv_newer(&(dbstatus.newest_createdate_workinfo), &(row->createdate))) {
 			copy_tv(&(dbstatus.newest_createdate_workinfo), &(row->createdate));
 			dbstatus.newest_workinfoid = row->workinfoid;
+		}
+
+		if (i == 0 || ((i+1) % 100000) == 0) {
+			printf(TICK_PREFIX"wi ");
+			pcom(i+1);
+			putchar('\r');
+			fflush(stdout);
 		}
 
 		tick();
@@ -5896,6 +5917,9 @@ bool markersummary_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	printf(TICK_PREFIX"ms 0\r");
+	fflush(stdout);
+
 	// TODO: limit how far back
 	sel = "select "
 		"markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
@@ -6054,6 +6078,13 @@ bool markersummary_fill(PGconn *conn)
 		markersummary_to_pool(p_row, row);
 
 		_userinfo_update(NULL, NULL, row, false, false);
+
+		if (i == 0 || ((i+1) % 100000) == 0) {
+			printf(TICK_PREFIX"ms ");
+			pcom(i+1);
+			putchar('\r');
+			fflush(stdout);
+		}
 
 		tick();
 	}
