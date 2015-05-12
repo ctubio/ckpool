@@ -4145,6 +4145,21 @@ static void *socketer(__maybe_unused void *arg)
 						workqueue->code =  (char *)__func__;
 						workqueue->inet = inet_default;
 						k_add_tail(workqueue_store, wq_item);
+						/* Stop the reload queue from growing too big
+						 * Use a size that should be big enough */
+						if (reloading && workqueue_store->count > 250000) {
+							K_ITEM *wq2_item = k_unlink_head(workqueue_store);
+							K_WUNLOCK(workqueue_free);
+							WORKQUEUE *wq;
+							DATA_WORKQUEUE(wq, wq2_item);
+							K_ITEM *ml_item = wq->msgline_item;
+							free_msgline_data(ml_item, true, false);
+							K_WLOCK(msgline_free);
+							k_add_head(msgline_free, ml_item);
+							K_WUNLOCK(msgline_free);
+							K_WLOCK(workqueue_free);
+							k_add_head(workqueue_free, wq2_item);
+						}
 						K_WUNLOCK(workqueue_free);
 						ml_item = NULL;
 						mutex_lock(&wq_waitlock);
@@ -4744,6 +4759,7 @@ static void *listener(void *arg)
 							seqdata++;
 						}
 					}
+					ss_item = ss_item->next;
 				}
 			}
 			seqdata_reload_lost = false;
