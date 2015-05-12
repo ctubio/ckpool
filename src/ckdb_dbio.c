@@ -3452,12 +3452,11 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	K_ITEM *p_ss_item, *p_ms_item;
 	bool ok = false, conned = false;
 	int64_t diffacc, shareacc;
-	char *reason = NULL, *tuples = NULL;
+	char *reason = NULL;
 	char *params[2];
-	int n, par = 0, deleted = -7;
+	int n, par = 0;
 	int ss_count, ms_count;
 	char *st = NULL;
-	char *del;
 
 	LOGWARNING("%s() Processing: workmarkers %"PRId64"/%s/"
 		   "End %"PRId64"/Stt %"PRId64"/%s/%s",
@@ -3606,6 +3605,12 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		ms_item = ms_item->next;
 	}
 
+#if 0
+	int deleted = -7;
+	char *tuples = NULL;
+	char *del;
+
+	// No longer in the DB
 	if (old_sharesummary_store->count > 0) {
 		par = 0;
 		params[par++] = bigint_to_buf(workmarkers->workinfoidstart, NULL, 0);
@@ -3636,6 +3641,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 			goto rollback;
 		}
 	}
+#endif
 
 	ok = workmarkers_process(conn, true, true,
 				 workmarkers->markerid,
