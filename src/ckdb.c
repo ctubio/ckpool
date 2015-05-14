@@ -805,7 +805,7 @@ static bool getdata3()
 		goto sukamudai;
 	if (!(ok = markersummary_fill(conn)) || everyone_die)
 		goto sukamudai;
-	if (!confirm_sharesummary)
+	if (!confirm_sharesummary && !everyone_die)
 		ok = poolstats_fill(conn);
 
 sukamudai:

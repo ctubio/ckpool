@@ -4520,34 +4520,27 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			 "%"PRId32"/%s",
 			 payoutid, old_payouts2->status, payouts2->status,
 			 payouts2->height, payouts2->blockhash);
-/*
 	} else if (strcasecmp(action, "expire") == 0) {
-		/ TODO: Expire the payout - effectively deletes it
+		/* Expire the payout - effectively deletes it
 		 * Require payoutid
-		 * If any payments are paid then don't allow it /
+		 * TODO: If any payments are paid then don't allow it */
 		i_payoutid = require_name(trf_root, "payoutid", 1,
 					  (char *)intpatt, reply, siz);
 		if (!i_payoutid)
 			return strdup(reply);
 		TXT_TO_BIGINT("payoutid", transfer_data(i_payoutid), payoutid);
 
-		K_WLOCK(payouts_free);
-		p_item = find_payoutid(payoutid);
+		p_item = payouts_full_expire(conn, payoutid, now, true);
 		if (!p_item) {
-			K_WUNLOCK(payouts_free);
-			snprintf(reply, siz,
-				 "no payout with id %"PRId64, payoutid);
+			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
 			return strdup(reply);
 		}
-		p2_item = k_unlink_head(payouts_free);
-		K_WUNLOCK(payouts_free);
-
-		DATA_PAYOUTS(payouts2, p2_item);
-		bzero(payouts2, sizeof(*payouts2));
-		payouts2->payoutid = payouts->payoutid;
-
-		...
-*/
+		DATA_PAYOUTS(payouts, p_item);
+		snprintf(msg, sizeof(msg),
+			 "payout %"PRId64" block %"PRId32" reward %"PRId64
+			 " status '%s'",
+			 payouts->payoutid, payouts->height,
+			 payouts->minerreward, payouts->status);
 	} else if (strcasecmp(action, "process") == 0) {
 		/* Generate a payout
 		 * Require height, blockhash and addrdate

@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.105"
+#define CKDB_VERSION DB_VERSION"-1.110"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1974,6 +1974,8 @@ extern void sequence_report(bool lock);
 #define PPLNSDIFFTIMES "pplns_diff_times"
 #define PPLNSDIFFADD "pplns_diff_add"
 
+#define REWARDOVERRIDE "MinerReward"
+
 // Data free functions (first)
 extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
 extern void free_workinfo_data(K_ITEM *item);
@@ -2371,6 +2373,8 @@ extern void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item,
 extern bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item,
 			K_ITEM **old_p_item, char *by, char *code, char *inet,
 			tv_t *cd, K_TREE *trf_root, bool already);
+extern K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now,
+				bool lock);
 extern bool payouts_fill(PGconn *conn);
 extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,

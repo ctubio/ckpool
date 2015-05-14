@@ -2302,6 +2302,7 @@ nostart:
 			DATA_OPTIONCONTROL(optioncontrol, old_item);
 			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
 							       cmp_optioncontrol);
+			k_unlink_item(optioncontrol_store, old_item);
 			FREENULL(optioncontrol->optionvalue);
 			k_add_head(optioncontrol_free, old_item);
 		}
@@ -3604,44 +3605,6 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		}
 		ms_item = ms_item->next;
 	}
-
-#if 0
-	int deleted = -7;
-	char *tuples = NULL;
-	char *del;
-
-	// No longer in the DB
-	if (old_sharesummary_store->count > 0) {
-		par = 0;
-		params[par++] = bigint_to_buf(workmarkers->workinfoidstart, NULL, 0);
-		params[par++] = bigint_to_buf(workmarkers->workinfoidend, NULL, 0);
-		PARCHK(par, params);
-
-		del = "delete from sharesummary "
-			"where workinfoid >= $1 and workinfoid <= $2";
-
-		res = PQexecParams(conn, del, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
-		rescode = PQresultStatus(res);
-		if (PGOK(rescode)) {
-			tuples = PQcmdTuples(res);
-			if (tuples && *tuples)
-				deleted = atoi(tuples);
-		}
-		PQclear(res);
-		if (!PGOK(rescode)) {
-			PGLOGERR("Delete", rescode, conn);
-			reason = "delete failure";
-			goto rollback;
-		}
-
-		if (deleted != old_sharesummary_store->count) {
-			LOGERR("%s() processed sharesummaries=%d but deleted=%d",
-				shortname, old_sharesummary_store->count, deleted);
-			reason = "delete mismatch";
-			goto rollback;
-		}
-	}
-#endif
 
 	ok = workmarkers_process(conn, true, true,
 				 workmarkers->markerid,
@@ -5121,6 +5084,245 @@ unparam:
 		payouts_add_ram(ok, p_item, *old_p_item, cd);
 
 	return ok;
+}
+
+/* Expire the entire payout, miningpayouts and payments
+ * If it returns false, nothing was changed
+ *  and a console message will say why */
+K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock)
+{
+	bool locked = false, conned = false, begun = false, ok = false;
+	K_TREE_CTX mp_ctx[1], pm_ctx[1];
+	K_ITEM *po_item = NULL, *mp_item, *pm_item, *next_item;
+	PAYMENTS *payments = NULL;
+	MININGPAYOUTS *mp = NULL;
+	PAYOUTS *payouts = NULL;
+	ExecStatusType rescode;
+	PGresult *res;
+	char *params[8];
+	int n, par = 0;
+	char *upd, *tuples = NULL;
+	int po_upd, mp_upd, pm_upd;
+
+	// If not already done before calling
+	if (lock)
+		ck_wlock(&process_pplns_lock);
+
+	// This will be rare so a full lock is best
+	K_WLOCK(payouts_free);
+	K_WLOCK(miningpayouts_free);
+	K_WLOCK(payments_free);
+	locked = true;
+
+	po_item = find_payoutid(payoutid);
+	if (!po_item) {
+		LOGERR("%s(): unknown payoutid %"PRId64, __func__, payoutid);
+		goto matane;
+	}
+
+	conned = CKPQConn(&conn);
+
+	begun = CKPQBegin(conn);
+	if (!begun)
+		goto matane;
+
+	upd = "update payouts set "EDDB"=$1 where payoutid=$2 and "EDDB"=$3";
+	par = 0;
+	params[par++] = tv_to_buf(now, NULL, 0);
+	params[par++] = bigint_to_buf(payoutid, NULL, 0);
+	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+	PARCHKVAL(par, 3, params);
+
+	res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	if (PGOK(rescode)) {
+		tuples = PQcmdTuples(res);
+		if (tuples && *tuples) {
+			po_upd = atoi(tuples);
+			if (po_upd != 1) {
+				LOGERR("%s() updated payouts should be 1"
+					" but updated=%d",
+					__func__, po_upd);
+				goto matane;
+			}
+		}
+	}
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Update payouts", rescode, conn);
+		goto matane;
+	}
+
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	upd = "update miningpayouts set "EDDB"=$1 where payoutid=$2 and "EDDB"=$3";
+	par = 0;
+	params[par++] = tv_to_buf(now, NULL, 0);
+	params[par++] = bigint_to_buf(payoutid, NULL, 0);
+	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+	PARCHKVAL(par, 3, params);
+
+	res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	if (PGOK(rescode)) {
+		tuples = PQcmdTuples(res);
+		if (tuples && *tuples)
+			mp_upd = atoi(tuples);
+	}
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Update miningpayouts", rescode, conn);
+		goto matane;
+	}
+
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	upd = "update payments set "EDDB"=$1 where payoutid=$2 and "EDDB"=$3";
+	par = 0;
+	params[par++] = tv_to_buf(now, NULL, 0);
+	params[par++] = bigint_to_buf(payoutid, NULL, 0);
+	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+	PARCHKVAL(par, 3, params);
+
+	res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	if (PGOK(rescode)) {
+		tuples = PQcmdTuples(res);
+		if (tuples && *tuples)
+			pm_upd = atoi(tuples);
+	}
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Update payments", rescode, conn);
+		goto matane;
+	}
+
+	for (n = 0; n < par; n++)
+		free(params[n]);
+	par = 0;
+
+	// Check miningpayouts failure condition
+	mp_item = first_miningpayouts(payoutid, mp_ctx);
+	if (!mp_item) {
+		if (mp_upd != 0) {
+			LOGERR("%s() updated miningpayouts should be 0 but"
+				" updated=%d",
+				__func__, mp_upd);
+			goto matane;
+		}
+	} else {
+		int count = 0;
+		DATA_MININGPAYOUTS(mp, mp_item);
+		while (mp_item && mp->payoutid == payoutid) {
+			if (CURRENT(&(mp->expirydate)))
+				count++;
+			mp_item = next_in_ktree(mp_ctx);
+			DATA_MININGPAYOUTS_NULL(mp, mp_item);
+		}
+		if (count != mp_upd) {
+			LOGERR("%s() updated miningpayouts should be %d but"
+				" updated=%d",
+				__func__, count, mp_upd);
+			goto matane;
+		}
+	}
+
+	/* Check payments failure condition
+	 *
+	 * This does a full table search since there is no index
+	 * This should be so rare that adding an index/tree for it
+	 *  would be a waste */
+	pm_item = first_in_ktree(payments_root, pm_ctx);
+	if (!pm_item) {
+		if (pm_upd != 0) {
+			LOGERR("%s() updated payments should be 0 but"
+				" updated=%d",
+				__func__, pm_upd);
+			goto matane;
+		}
+	} else {
+		int count = 0;
+		DATA_PAYMENTS(payments, pm_item);
+		while (pm_item) {
+			if (payments->payoutid == payoutid &&
+			    CURRENT(&(payments->expirydate))) {
+				count++;
+			}
+			pm_item = next_in_ktree(pm_ctx);
+			DATA_PAYMENTS_NULL(payments, pm_item);
+		}
+		if (count != pm_upd) {
+			LOGERR("%s() updated payments should be %d but"
+				" updated=%d",
+				__func__, count, pm_upd);
+			goto matane;
+		}
+	}
+
+	// No more possible errors, so update the ram tables
+	DATA_PAYOUTS(payouts, po_item);
+	payouts_root = remove_from_ktree(payouts_root, po_item, cmp_payouts);
+	payouts_id_root = remove_from_ktree(payouts_id_root, po_item, cmp_payouts_id);
+	copy_tv(&(payouts->expirydate), now);
+	payouts_root = add_to_ktree(payouts_root, po_item, cmp_payouts);
+	payouts_id_root = add_to_ktree(payouts_id_root, po_item, cmp_payouts_id);
+
+	mp_item = first_miningpayouts(payoutid, mp_ctx);
+	DATA_MININGPAYOUTS_NULL(mp, mp_item);
+	while (mp_item && mp->payoutid == payoutid) {
+		if (CURRENT(&(mp->expirydate))) {
+			next_item = next_in_ktree(mp_ctx);
+			miningpayouts_root = remove_from_ktree(miningpayouts_root, mp_item, cmp_miningpayouts);
+			copy_tv(&(mp->expirydate), now);
+			miningpayouts_root = add_to_ktree(miningpayouts_root, mp_item, cmp_miningpayouts);
+			mp_item = next_item;
+		} else
+			mp_item = next_in_ktree(mp_ctx);
+
+		DATA_MININGPAYOUTS_NULL(mp, mp_item);
+	}
+
+	pm_item = first_in_ktree(payments_root, pm_ctx);
+	DATA_PAYMENTS_NULL(payments, pm_item);
+	while (pm_item) {
+		if (payments->payoutid == payoutid &&
+		    CURRENT(&(payments->expirydate))) {
+			next_item = next_in_ktree(pm_ctx);
+			payments_root = remove_from_ktree(payments_root, pm_item, cmp_payments);
+			copy_tv(&(payments->expirydate), now);
+			payments_root = add_to_ktree(payments_root, pm_item, cmp_payments);
+			pm_item = next_item;
+		} else
+			pm_item = next_in_ktree(pm_ctx);
+
+		DATA_PAYMENTS_NULL(payments, pm_item);
+	}
+
+	ok = true;
+matane:
+	if (begun)
+		CKPQEnd(conn, ok);
+
+	if (locked) {
+		K_WUNLOCK(payments_free);
+		K_WUNLOCK(miningpayouts_free);
+		K_WUNLOCK(payouts_free);
+	}
+
+	CKPQDisco(&conn, conned);
+
+	if (lock)
+		ck_wunlock(&process_pplns_lock);
+
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	if (ok)
+		return po_item;
+	else
+		return NULL;
 }
 
 bool payouts_fill(PGconn *conn)

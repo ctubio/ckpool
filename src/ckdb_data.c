@@ -1563,6 +1563,28 @@ cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
+#define reward_override_name(_height, _buf, _siz) \
+	_reward_override_name(_height, _buf, _siz, WHERE_FFL_HERE)
+static bool _reward_override_name(int32_t height, char *buf, size_t siz,
+				  WHERE_FFL_ARGS)
+{
+	char tmp[128];
+	size_t len;
+
+	snprintf(tmp, sizeof(tmp), REWARDOVERRIDE"_%"PRId32, height);
+
+	// Code bug - detect and notify truncation coz that would be bad :P
+	len = strlen(tmp) + 1;
+	if (len > siz) {
+		LOGEMERG("%s(): Invalid size %d passed - required %d" WHERE_FFL,
+			 __func__, (int)siz, (int)len, WHERE_FFL_PASS);
+		return false;
+	}
+
+	strcpy(buf, tmp);
+	return true;
+}
+
 // Must be R or W locked before call
 K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height)
 {
@@ -2996,7 +3018,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	K_TREE *mu_root = NULL;
 	int usercount;
 	double ndiff, total_diff, diff_want, elapsed;
-	char ndiffbin[TXT_SML+1];
+	char ndiffbin[TXT_SML+1], rewardbuf[32];
 	double diff_times, diff_add;
 	char cd_buf[CDATE_BUFSIZ];
 	tv_t end_tv = { 0L, 0L };
@@ -3365,6 +3387,39 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	d64 = blocks->reward * 9 / 1000;
 	g64 = blocks->reward - d64;
 	payouts->minerreward = g64;
+
+	/* We can hard code a miner reward for a block in optioncontrol
+	 *  if it ever needs adjusting - so just expire the payout and
+	 *  re-process the reward ... before it's paid */
+	bool oname;
+	oname = reward_override_name(blocks->height, rewardbuf,
+				     sizeof(rewardbuf));
+	if (oname) {
+		OPTIONCONTROL *oc;
+		K_ITEM *oc_item;
+		// optioncontrol must be default limits or below these limits
+		oc_item = find_optioncontrol(rewardbuf, &now, blocks->height+1);
+		if (oc_item) {
+			int64_t override, delta;
+			char *moar = "more";
+			double per;
+			DATA_OPTIONCONTROL(oc, oc_item);
+			override = (int64_t)atol(oc->optionvalue);
+			delta = override - g64;
+			if (delta < 0) {
+				moar = "less";
+				delta = -delta;
+			}
+			per = 100.0 * (double)delta / (double)g64;
+			LOGWARNING("%s(): *** block %"PRId32" payout reward"
+				   " overridden, was %"PRId64" now %"PRId64
+				   " = %"PRId64" (%.4f%%) %s",
+				   __func__, blocks->height,
+				   g64, override, delta, per, moar);
+			payouts->minerreward = override;
+		}
+	}
+
 	payouts->workinfoidstart = begin_workinfoid;
 	payouts->workinfoidend = end_workinfoid;
 	payouts->elapsed = elapsed;
