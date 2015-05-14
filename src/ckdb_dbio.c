@@ -5102,7 +5102,7 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 	char *params[8];
 	int n, par = 0;
 	char *upd, *tuples = NULL;
-	int po_upd, mp_upd, pm_upd;
+	int po_upd = -7, mp_upd = -7, pm_upd = -7;
 
 	// If not already done before calling
 	if (lock)
