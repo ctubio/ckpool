@@ -4808,7 +4808,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	tv_t marker_end = { 0L, 0L };
 	int rows, want, i, where_all;
 	int64_t maxrows;
-	double wm_count;
+	double wm_count, d;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -4892,8 +4892,14 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			while (ms_item && ms->markerid == wm->markerid &&
 			       ms->userid == users->userid) {
 				ms_add.diffacc += ms->diffacc;
+				ms_add.diffsta += ms->diffsta;
+				ms_add.diffdup += ms->diffdup;
+				ms_add.diffhi += ms->diffhi;
 				ms_add.diffrej += ms->diffrej;
 				ms_add.shareacc += ms->shareacc;
+				ms_add.sharesta += ms->sharesta;
+				ms_add.sharedup += ms->sharedup;
+				ms_add.sharehi += ms->sharehi;
 				ms_add.sharerej += ms->sharerej;
 
 				want = worker_offset(selects, ms->workername);
@@ -4904,8 +4910,10 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 								   want, rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
-					double_to_buf(ms->diffrej, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "%d_diffrej:%d=%s%c",
+					d = ms->diffsta + ms->diffdup +
+					    ms->diffhi + ms->diffrej;
+					double_to_buf(d, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_diffinv:%d=%s%c",
 								   want, rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
@@ -4914,8 +4922,10 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 								   want, rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
-					double_to_buf(ms->sharerej, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "%d_sharerej:%d=%s%c",
+					d = ms->sharesta + ms->sharedup +
+					    ms->sharehi + ms->sharerej;
+					double_to_buf(d, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_shareinv:%d=%s%c",
 								   want, rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 				}
@@ -4999,8 +5009,10 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf(ms_add.diffrej, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_diffrej:%d=%s%c",
+				d = ms_add.diffsta + ms_add.diffdup +
+				    ms_add.diffhi + ms_add.diffrej;
+				double_to_buf(d, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_diffinv:%d=%s%c",
 							   where_all, rows,
 							   reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
@@ -5011,8 +5023,10 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf(ms_add.sharerej, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_sharerej:%d=%s%c",
+				d = ms_add.sharesta + ms_add.sharedup +
+				    ms_add.sharehi + ms_add.sharerej;
+				double_to_buf(d, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_shareinv:%d=%s%c",
 							   where_all, rows,
 							   reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
@@ -5037,7 +5051,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			APPEND_REALLOC(buf, off, len, tmp);
 			snprintf(tmp, sizeof(tmp),
 				 "%d_flds=%s%c", i,
-				 "diffacc,diffrej,shareacc,sharerej", FLDSEP);
+				 "diffacc,diffinv,shareacc,shareinv", FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 		}
 	}
@@ -5666,7 +5680,7 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 	tv_t marker_end = { 0L, 0L };
 	int rows;
 	int64_t maxrows;
-	double wm_count;
+	double wm_count, d;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -5728,8 +5742,10 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   0, rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf(ms->diffrej, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_diffrej:%d=%s%c",
+				d = ms->diffsta + ms->diffdup + ms->diffhi +
+				    ms->diffrej;
+				double_to_buf(d, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_diffinv:%d=%s%c",
 							   0, rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
@@ -5738,8 +5754,10 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   0, rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf(ms->sharerej, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_sharerej:%d=%s%c",
+				d = ms->sharesta + ms->sharedup + ms->sharehi +
+				    ms->sharerej;
+				double_to_buf(d, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp), "%d_shareinv:%d=%s%c",
 							   0, rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 			}
@@ -5824,7 +5842,7 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "%d_pool=%s%c", 0, "all", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "%d_flds=%s%c",
-		 0, "diffacc,diffrej,shareacc,sharerej", FLDSEP);
+		 0, "diffacc,diffinv,shareacc,shareinv", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "prefix_all=%d_%c", 0, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
