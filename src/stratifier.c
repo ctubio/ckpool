@@ -2473,7 +2473,7 @@ static json_t *userinfo(const user_instance_t *user)
 {
 	json_t *val;
 
-	JSON_CPACK(val, "{ss,sI,si,sf,sf,sf,sf,sf,sf,si}",
+	JSON_CPACK(val, "{ss,si,si,sf,sf,sf,sf,sf,sf,si}",
 		   "user", user->username, "id", user->id, "workers", user->workers,
 	    "bestdiff", user->best_diff, "dsps1", user->dsps1, "dsps5", user->dsps5,
 	    "dsps60", user->dsps60, "dsps1440", user->dsps1440, "dsps10080", user->dsps10080,
