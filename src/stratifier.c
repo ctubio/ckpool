@@ -2593,7 +2593,7 @@ static json_t *workerinfo(const user_instance_t *user, const worker_instance_t *
 {
 	json_t *val;
 
-	JSON_CPACK(val, "{ss,ss,sI,sf,sf,sf,sf,si,sf,si,sb}",
+	JSON_CPACK(val, "{ss,ss,si,sf,sf,sf,sf,si,sf,si,sb}",
 		   "user", user->username, "worker", worker->workername, "id", user->id,
 	    "dsps1", worker->dsps1, "dsps5", worker->dsps5, "dsps60", worker->dsps60,
 	    "dsps1440", worker->dsps1440, "lastshare", worker->last_share.tv_sec,
