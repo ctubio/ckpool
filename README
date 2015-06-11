@@ -131,6 +131,7 @@ ckpool supports the following options:
 -n NAME | --name NAME
 -P | --passthrough
 -p | --proxy
+-R | --redirector
 -S CKDB-SOCKDIR | --ckdb-sockdir CKDB-SOCKDIR
 -s SOCKDIR | --sockdir SOCKDIR
 
@@ -178,6 +179,13 @@ presence on the master pool. Standalone mode is implied.
 clients as separate entities while presenting shares as a single user to the
 upstream pool specified. Note that the upstream pool needs to be a ckpool for
 it to scale to large hashrates. Standalone mode is Optional.
+
+-R will start ckpool in a variant of passthrough mode. It is designed to be a
+front end to filter out users that never contribute any shares. Once an
+accepted share from the upstream pool is detected, it will issue a redirect to
+one of the redirecturl entries in the configuration file. It will cycle over
+entries if multiple exist, but try to keep all clients from the same IP
+redirecting to the same pool.
 
 -S <CKDB-SOCKDIR> tells ckpool which directory to look for the ckdb socket to
 talk to.
@@ -255,6 +263,9 @@ will attempt to bind to all interfaces in port 3333 by default in pool mode
 and 3334 in proxy mode. Multiple entries can be specified as an array by
 either IP or resolvable domain name but the executable must be able to bind to
 all of them and ports up to 1024 usually require privileged access.
+
+"redirecturl" : This is an array of URLs that ckpool will redirect active
+miners to in redirector mode. They must be valid resolvable URLs+ports.
 
 "mindiff" : Minimum diff that vardiff will allow miners to drop to. Default 1
 
