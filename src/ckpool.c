@@ -1103,7 +1103,7 @@ bool json_get_int64(int64_t *store, const json_t *val, const char *res)
 		goto out;
 	}
 	if (!json_is_integer(entry)) {
-		LOGWARNING("Json entry %s is not an integer", res);
+		LOGINFO("Json entry %s is not an integer", res);
 		goto out;
 	}
 	*store = json_integer_value(entry);
