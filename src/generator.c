@@ -1477,11 +1477,14 @@ static void account_shares(proxy_instance_t *proxy, const double diff, const boo
 	mutex_unlock(&parent->proxy_lock);
 }
 
-static bool parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf)
+/* Returns zero if it is not recognised as a share, 1 if it is a valid share
+ * and -1 if it is recognised as a share but invalid. */
+static int parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf)
 {
-	bool ret = false, result = false;
 	json_t *val = NULL, *idval;
+	bool result = false;
 	share_msg_t *share;
+	int ret = 0;
 	int64_t id;
 
 	val = json_loads(buf, 0, NULL);
@@ -1505,17 +1508,16 @@ static bool parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf
 		HASH_DEL(gdata->shares, share);
 	mutex_unlock(&gdata->share_lock);
 
-	/* We set response to true even if we don't find the matching share,
-	 * so long as we recognised it as a share response */
-	ret = true;
 	if (!share) {
 		LOGINFO("Proxy %d:%d failed to find matching share to result: %s",
 			proxi->id, proxi->subid, buf);
 		/* We don't know what diff these shares are so assume the
 		 * current proxy diff. */
 		account_shares(proxi, proxi->diff, result);
+		ret = -1;
 		goto out;
 	}
+	ret = 1;
 	account_shares(proxi, share->diff, result);
 	LOGINFO("Proxy %d:%d share result %s from client %d", proxi->id, proxi->subid,
 		buf, share->client_id);
@@ -2044,9 +2046,10 @@ static void *proxy_recv(void *arg)
 			if (parse_method(ckp, subproxy, cs->buf))
 				continue;
 			/* If it's not a method it should be a share result */
-			if (!parse_share(gdata, subproxy, cs->buf))
+			if (!parse_share(gdata, subproxy, cs->buf)) {
 				LOGNOTICE("Proxy %d:%d unhandled stratum message: %s",
 					  subproxy->id, subproxy->subid, cs->buf);
+			}
 		} while ((ret = read_socket_line(cs, 0)) > 0);
 	}
 
@@ -2130,9 +2133,10 @@ static void *userproxy_recv(void *arg)
 			if (parse_method(ckp, proxy, cs->buf))
 				continue;
 			/* If it's not a method it should be a share result */
-			if (!parse_share(gdata, proxy, cs->buf))
+			if (!parse_share(gdata, proxy, cs->buf)) {
 				LOGNOTICE("Proxy %d:%d unhandled stratum message: %s",
 					  proxy->id, proxy->subid, cs->buf);
+			}
 		} while ((ret = read_socket_line(cs, 0)) > 0);
 	}
 	return NULL;
