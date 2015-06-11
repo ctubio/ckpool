@@ -177,6 +177,9 @@ struct ckpool_instance {
 	/* Are we running in passthrough mode */
 	bool passthrough;
 
+	/* Are we a redirecting passthrough */
+	bool redirector;
+
 	/* Are we running as a proxy */
 	bool proxy;
 
@@ -218,6 +221,10 @@ struct ckpool_instance {
 	char **proxyurl;
 	char **proxyauth;
 	char **proxypass;
+
+	/* Passthrough redirect options */
+	int redirecturls;
+	char **redirecturl;
 
 	/* Private data for each process */
 	void *data;

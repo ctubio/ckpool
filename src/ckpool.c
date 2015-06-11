@@ -1258,6 +1258,36 @@ out:
 	return ret;
 }
 
+static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
+{
+	bool ret = false;
+	int arr_size, i;
+
+	if (!arr_val)
+		goto out;
+	if (!json_is_array(arr_val)) {
+		LOGNOTICE("Unable to parse redirecturl entries as an array");
+		goto out;
+	}
+	arr_size = json_array_size(arr_val);
+	if (!arr_size) {
+		LOGWARNING("redirecturl array empty");
+		goto out;
+	}
+	ckp->redirecturls = arr_size;
+	ckp->redirecturl = ckalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		json_t *val = json_array_get(arr_val, i);
+
+		if (!_json_get_string(&ckp->redirecturl[i], val, "redirecturl"))
+			LOGWARNING("Invalid redirecturl entry number %d", i);
+	}
+	ret = true;
+out:
+	return ret;
+}
+
+
 static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
@@ -1307,6 +1337,10 @@ static void parse_config(ckpool_t *ckp)
 		if (arr_size)
 			parse_proxies(ckp, arr_val, arr_size);
 	}
+	arr_val = json_object_get(json_conf, "redirecturl");
+	if (arr_val)
+		parse_redirecturls(ckp, arr_val);
+
 	json_decref(json_conf);
 }
 
@@ -1434,6 +1468,7 @@ static struct option long_options[] = {
 	{"name",	required_argument,	0,	'n'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"redirector",	no_argument,		0,	'R'},
 	{"ckdb-sockdir",required_argument,	0,	'S'},
 	{"sockdir",	required_argument,	0,	's'},
 	{0, 0, 0, 0}
@@ -1451,6 +1486,7 @@ static struct option long_options[] = {
 	{"name",	required_argument,	0,	'n'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"redirector",	no_argument,		0,	'R'},
 	{"sockdir",	required_argument,	0,	's'},
 	{0, 0, 0, 0}
 };
@@ -1494,7 +1530,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpRS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1549,14 +1585,19 @@ int main(int argc, char **argv)
 				ckp.name = optarg;
 				break;
 			case 'P':
-				if (ckp.proxy)
-					quit(1, "Cannot set both proxy and passthrough mode");
+				if (ckp.proxy || ckp.redirector)
+					quit(1, "Cannot set both proxy or redirector and passthrough mode");
 				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
-				if (ckp.passthrough)
-					quit(1, "Cannot set both passthrough and proxy mode");
+				if (ckp.passthrough || ckp.redirector)
+					quit(1, "Cannot set both passthrough or redirector and proxy mode");
 				ckp.proxy = true;
+				break;
+			case 'R':
+				if (ckp.proxy || ckp.passthrough)
+					quit(1, "Cannot set both proxy or passthrough and redirector modes");
+				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.redirector = true;
 				break;
 			case 'S':
 				ckp.ckdb_sockdir = strdup(optarg);
@@ -1570,6 +1611,10 @@ int main(int argc, char **argv)
 	if (!ckp.name) {
 		if (ckp.proxy)
 			ckp.name = "ckproxy";
+		else if (ckp.redirector)
+			ckp.name = "ckredirector";
+		else if (ckp.passthrough)
+			ckp.name = "ckpassthrough";
 		else
 			ckp.name = "ckpool";
 	}
