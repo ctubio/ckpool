@@ -697,6 +697,32 @@ static void *sender(void *arg)
 	return NULL;
 }
 
+static void redirect_client(ckpool_t *ckp, client_instance_t *client)
+{
+	sender_send_t *sender_send;
+	cdata_t *cdata = ckp->data;
+	json_t *val;
+	char *buf;
+
+	JSON_CPACK(val, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
+		   "params", ckp->redirecturl[0], ckp->redirectport[0], 0);
+	buf = json_dumps(val, JSON_EOL);
+	json_decref(val);
+
+	sender_send = ckzalloc(sizeof(sender_send_t));
+	sender_send->client = client;
+	sender_send->buf = buf;
+	sender_send->len = strlen(buf);
+
+	mutex_lock(&cdata->sender_lock);
+	cdata->sends_generated++;
+	DL_APPEND(cdata->sender_sends, sender_send);
+	pthread_cond_signal(&cdata->sender_cond);
+	mutex_unlock(&cdata->sender_lock);
+}
+
+/* Look for accepted shares in redirector mode to know we can redirect this
+ * client to a protected server. */
 static void test_redirector_shares(ckpool_t *ckp, client_instance_t *client, const char *buf)
 {
 	json_t *val = json_loads(buf, 0, NULL);
@@ -736,7 +762,9 @@ static void test_redirector_shares(ckpool_t *ckp, client_instance_t *client, con
 			LOGDEBUG("Rejected trs share");
 			goto out;
 		}
-		LOGWARNING("Found accepted share for client %"PRId64, client->id);
+		LOGNOTICE("Found accepted share for client %"PRId64" - redirecting",
+			   client->id);
+		redirect_client(ckp, client);
 	}
 out:
 	json_decref(val);
