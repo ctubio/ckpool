@@ -1616,10 +1616,10 @@ int main(int argc, char **argv)
 	if (!ckp.name) {
 		if (ckp.redirector)
 			ckp.name = "ckredirector";
-		else if (ckp.proxy)
-			ckp.name = "ckproxy";
 		else if (ckp.passthrough)
 			ckp.name = "ckpassthrough";
+		else if (ckp.proxy)
+			ckp.name = "ckproxy";
 		else
 			ckp.name = "ckpool";
 	}
