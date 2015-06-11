@@ -1163,7 +1163,7 @@ bool json_get_bool(bool *store, const json_t *val, const char *res)
 		goto out;
 	}
 	if (!json_is_boolean(entry)) {
-		LOGWARNING("Json entry %s is not a boolean", res);
+		LOGINFO("Json entry %s is not a boolean", res);
 		goto out;
 	}
 	*store = json_is_true(entry);
@@ -1262,6 +1262,7 @@ static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
 {
 	bool ret = false;
 	int arr_size, i;
+	char redirecturl[INET6_ADDRSTRLEN], url[INET6_ADDRSTRLEN], port[8];
 
 	if (!arr_val)
 		goto out;
@@ -1276,11 +1277,15 @@ static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
 	}
 	ckp->redirecturls = arr_size;
 	ckp->redirecturl = ckalloc(sizeof(char *) * arr_size);
+	ckp->redirectport = ckalloc(sizeof(char *) * arr_size);
 	for (i = 0; i < arr_size; i++) {
 		json_t *val = json_array_get(arr_val, i);
 
-		if (!_json_get_string(&ckp->redirecturl[i], val, "redirecturl"))
-			LOGWARNING("Invalid redirecturl entry number %d", i);
+		strncpy(redirecturl, json_string_value(val), INET6_ADDRSTRLEN - 1);
+		if (!url_from_serverurl(redirecturl, url, port))
+			quit(1, "Invalid redirecturl entry %d %s", i, redirecturl);
+		ckp->redirecturl[i] = strdup(url);
+		ckp->redirectport[i] = strdup(port);
 	}
 	ret = true;
 out:
@@ -1609,10 +1614,10 @@ int main(int argc, char **argv)
 	}
 
 	if (!ckp.name) {
-		if (ckp.proxy)
-			ckp.name = "ckproxy";
-		else if (ckp.redirector)
+		if (ckp.redirector)
 			ckp.name = "ckredirector";
+		else if (ckp.proxy)
+			ckp.name = "ckproxy";
 		else if (ckp.passthrough)
 			ckp.name = "ckpassthrough";
 		else

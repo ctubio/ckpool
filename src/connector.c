@@ -733,7 +733,7 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 
 	json_msg = json_loads(buf, 0, NULL);
 	if (unlikely(!json_msg)) {
-		LOGWARNING("Invalid json message: %s", buf);
+		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
 		return;
 	}
 

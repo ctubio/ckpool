@@ -225,6 +225,7 @@ struct ckpool_instance {
 	/* Passthrough redirect options */
 	int redirecturls;
 	char **redirecturl;
+	char **redirectport;
 
 	/* Private data for each process */
 	void *data;
