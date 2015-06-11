@@ -51,7 +51,7 @@ struct share_msg {
 	UT_hash_handle hh;
 	int id; // Our own id for submitting upstream
 
-	int client_id;
+	int64_t client_id;
 	time_t submit_time;
 	double diff;
 };
@@ -63,7 +63,7 @@ struct stratum_msg {
 	struct stratum_msg *prev;
 
 	json_t *json_msg;
-	int client_id;
+	int64_t client_id;
 };
 
 typedef struct stratum_msg stratum_msg_t;
@@ -1539,7 +1539,7 @@ static int parse_share(gdata_t *gdata, proxy_instance_t *proxi, const char *buf)
 	}
 	ret = 1;
 	account_shares(proxi, share->diff, result);
-	LOGINFO("Proxy %d:%d share result %s from client %d", proxi->id, proxi->subid,
+	LOGINFO("Proxy %d:%d share result %s from client %"PRId64, proxi->id, proxi->subid,
 		buf, share->client_id);
 	free(share);
 out:
