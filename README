@@ -142,8 +142,9 @@ are automatically accepted without any attempt to authorise users in any way.
 This option is explicitly enabled when built without ckdb support.
 
 -c <CONFIG> tells ckpool to override its default configuration filename and
-load the specified one. If -c is not specified, ckpool looks for ckpool.conf
-whereas in proxy or passthrough modes it will look for ckproxy.conf
+load the specified one. If -c is not specified, ckpool looks for ckpool.conf,
+in proxy mode it looks for ckproxy.conf, in passthrough mode for
+ckpassthrough.conf and in redirector mode for ckredirector.conf
 
 -d <CKDB-NAME> tells ckpool what the name of the ckdb process is that it should
 speak to, otherwise it will look for ckdb.
@@ -168,7 +169,8 @@ and then workbase.
 maximum debug is level 7.
 
 -n <NAME> will change the ckpool process name to that specified, allowing
-multiple different named instances to be running.
+multiple different named instances to be running. By default the variant
+names are used: ckpool, ckproxy, ckpassthrough, ckredirector.
 
 -P will start ckpool in passthrough proxy mode where it collates all incoming
 connections and streams all information on a single connection to an upstream
