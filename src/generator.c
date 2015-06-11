@@ -1372,15 +1372,33 @@ static void stratifier_reconnect_client(ckpool_t *ckp, const int64_t id)
 	send_proc(ckp->stratifier, buf);
 }
 
+/* Add a share to the gdata share hashlist. Returns the share id */
+static int add_share(gdata_t *gdata, const int64_t client_id, const double diff)
+{
+	share_msg_t *share = ckzalloc(sizeof(share_msg_t));
+	int ret;
+
+	share->submit_time = time(NULL);
+	share->client_id = client_id;
+	share->diff = diff;
+
+	/* Add new share entry to the share hashtable */
+	mutex_lock(&gdata->share_lock);
+	ret = share->id = gdata->share_id++;
+	HASH_ADD_I64(gdata->shares, id, share);
+	mutex_unlock(&gdata->share_lock);
+
+	return ret;
+}
+
 static void submit_share(gdata_t *gdata, json_t *val)
 {
 	proxy_instance_t *proxy, *proxi;
 	ckpool_t *ckp = gdata->ckp;
+	int id, subid, share_id;
 	bool success = false;
 	stratum_msg_t *msg;
-	share_msg_t *share;
 	int64_t client_id;
-	int id, subid;
 
 	/* Get the client id so we can tell the stratifier to drop it if the
 	 * proxy it's bound to is not functional */
@@ -1419,19 +1437,9 @@ static void submit_share(gdata_t *gdata, json_t *val)
 
 	success = true;
 	msg = ckzalloc(sizeof(stratum_msg_t));
-	share = ckzalloc(sizeof(share_msg_t));
-	share->submit_time = time(NULL);
-	share->client_id = client_id;
-	share->diff = proxi->diff;
 	msg->json_msg = val;
-
-	/* Add new share entry to the share hashtable */
-	mutex_lock(&gdata->share_lock);
-	share->id = gdata->share_id++;
-	HASH_ADD_I64(gdata->shares, id, share);
-	mutex_unlock(&gdata->share_lock);
-
-	json_object_set_nocheck(val, "id", json_integer(share->id));
+	share_id = add_share(gdata, client_id, proxi->diff);
+	json_object_set_nocheck(val, "id", json_integer(share_id));
 
 	/* Add the new message to the psend list */
 	mutex_lock(&gdata->psend_lock);
