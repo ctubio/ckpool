@@ -134,6 +134,13 @@ static void __inc_instance_ref(client_instance_t *client)
 	client->ref++;
 }
 
+static void inc_instance_ref(cdata_t *cdata, client_instance_t *client)
+{
+	ck_wlock(&cdata->lock);
+	__inc_instance_ref(client);
+	ck_wunlock(&cdata->lock);
+}
+
 /* Increase the reference count of instance */
 static void __dec_instance_ref(client_instance_t *client)
 {
@@ -713,6 +720,7 @@ static void redirect_client(ckpool_t *ckp, client_instance_t *client)
 	sender_send->client = client;
 	sender_send->buf = buf;
 	sender_send->len = strlen(buf);
+	inc_instance_ref(cdata, client);
 
 	mutex_lock(&cdata->sender_lock);
 	cdata->sends_generated++;
