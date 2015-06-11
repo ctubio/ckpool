@@ -1262,7 +1262,8 @@ static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
 {
 	bool ret = false;
 	int arr_size, i;
-	char redirecturl[INET6_ADDRSTRLEN], url[INET6_ADDRSTRLEN], port[8];
+	char *redirecturl, url[INET6_ADDRSTRLEN], port[8];
+	redirecturl = alloca(INET6_ADDRSTRLEN);
 
 	if (!arr_val)
 		goto out;
@@ -1282,9 +1283,10 @@ static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
 		json_t *val = json_array_get(arr_val, i);
 
 		strncpy(redirecturl, json_string_value(val), INET6_ADDRSTRLEN - 1);
+		/* See that the url properly resolves */
 		if (!url_from_serverurl(redirecturl, url, port))
 			quit(1, "Invalid redirecturl entry %d %s", i, redirecturl);
-		ckp->redirecturl[i] = strdup(url);
+		ckp->redirecturl[i] = strdup(strsep(&redirecturl, ":"));
 		ckp->redirectport[i] = strdup(port);
 	}
 	ret = true;
