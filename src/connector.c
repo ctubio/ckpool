@@ -26,6 +26,7 @@
 typedef struct client_instance client_instance_t;
 typedef struct sender_send sender_send_t;
 typedef struct share share_t;
+typedef struct redirect redirect_t;
 
 struct client_instance {
 	/* For clients hashtable */
@@ -83,6 +84,13 @@ struct share {
 	int64_t id;
 };
 
+struct redirect {
+	UT_hash_handle hh;
+	char address_name[INET6_ADDRSTRLEN];
+	int id;
+	int redirect_no;
+};
+
 /* Private data for the connector */
 struct connector_data {
 	ckpool_t *ckp;
@@ -125,6 +133,11 @@ struct connector_data {
 	/* For protecting the pending sends list */
 	mutex_t sender_lock;
 	pthread_cond_t sender_cond;
+
+	/* Hash list of all redirected IP address in redirector mode */
+	redirect_t *redirects;
+	/* What redirect we're currently up to */
+	int redirect;
 };
 
 typedef struct connector_data cdata_t;
@@ -707,15 +720,41 @@ static void *sender(void *arg)
 	return NULL;
 }
 
+static int add_redirect(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
+{
+	redirect_t *redirect;
+	bool found;
+
+	ck_wlock(&cdata->lock);
+	HASH_FIND_STR(cdata->redirects, client->address_name, redirect);
+	if (!redirect) {
+		redirect = ckzalloc(sizeof(redirect_t));
+		strcpy(redirect->address_name, client->address_name);
+		redirect->redirect_no = cdata->redirect++;
+		if (cdata->redirect >= ckp->redirecturls)
+			cdata->redirect = 0;
+		HASH_ADD_STR(cdata->redirects, address_name, redirect);
+		found = false;
+	} else
+		found = true;
+	ck_wunlock(&cdata->lock);
+
+	LOGNOTICE("Redirecting client %"PRId64" from %s IP %s to redirecturl %d",
+		  client->id, found ? "matching" : "new", client->address_name, redirect->redirect_no);
+	return redirect->redirect_no;
+}
+
 static void redirect_client(ckpool_t *ckp, client_instance_t *client)
 {
 	sender_send_t *sender_send;
 	cdata_t *cdata = ckp->data;
 	json_t *val;
 	char *buf;
+	int num;
 
+	num = add_redirect(ckp, cdata, client);
 	JSON_CPACK(val, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
-		   "params", ckp->redirecturl[0], ckp->redirectport[0], 0);
+		   "params", ckp->redirecturl[num], ckp->redirectport[num], 0);
 	buf = json_dumps(val, JSON_EOL);
 	json_decref(val);
 
