@@ -61,6 +61,7 @@ struct client_instance {
 	/* Is this the parent passthrough client */
 	bool passthrough;
 
+	/* Linked list of shares in redirector mode.*/
 	share_t *shares;
 };
 
@@ -369,7 +370,9 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 static void send_client(cdata_t *cdata, int64_t id, char *buf);
 
 /* Look for shares being submitted via a redirector and add them to a linked
- * list for looking up the responses */
+ * list for looking up the responses. Theoretically this could leak shares but
+ * we should only ever store one share before redirecting active clients unless
+ * they don't support redirection. */
 static void parse_redirector_share(client_instance_t *client, const char *msg, const json_t *val)
 {
 	share_t *share, *tmp;
