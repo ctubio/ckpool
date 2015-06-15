@@ -330,7 +330,9 @@ static const char *ckdb_seq_names[] = {
 
 struct stratifier_data {
 	char pubkeytxnbin[25];
+	int pubkeytxnlen;
 	char donkeytxnbin[25];
+	int donkeytxnlen;
 
 	pool_stats_t stats;
 	/* Protects changes to pool stats */
@@ -542,18 +544,18 @@ static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 	*u64 = htole64(g64);
 	wb->coinb2len += 8;
 
-	wb->coinb2bin[wb->coinb2len++] = 25;
-	memcpy(wb->coinb2bin + wb->coinb2len, sdata->pubkeytxnbin, 25);
-	wb->coinb2len += 25;
+	wb->coinb2bin[wb->coinb2len++] = sdata->pubkeytxnlen;
+	memcpy(wb->coinb2bin + wb->coinb2len, sdata->pubkeytxnbin, sdata->pubkeytxnlen);
+	wb->coinb2len += sdata->pubkeytxnlen;
 
 	if (ckp->donvalid) {
 		u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
 		*u64 = htole64(d64);
 		wb->coinb2len += 8;
 
-		wb->coinb2bin[wb->coinb2len++] = 25;
-		memcpy(wb->coinb2bin + wb->coinb2len, sdata->donkeytxnbin, 25);
-		wb->coinb2len += 25;
+		wb->coinb2bin[wb->coinb2len++] = sdata->donkeytxnlen;
+		memcpy(wb->coinb2bin + wb->coinb2len, sdata->donkeytxnbin, sdata->donkeytxnlen);
+		wb->coinb2len += sdata->donkeytxnlen;
 	}
 
 	wb->coinb2len += 4; // Blank lock
@@ -4490,18 +4492,26 @@ int stratifier(proc_instance_t *pi)
 			LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
 			goto out;
 		}
-		if (script_address(ckp->btcaddress)) {
-			LOGEMERG("Fatal: btcaddress valid but unsupported M of N 3x address");
-			goto out;
-		}
 
 		/* Store this for use elsewhere */
 		hex2bin(scriptsig_header_bin, scriptsig_header, 41);
-		address_to_pubkeytxn(sdata->pubkeytxnbin, ckp->btcaddress);
+		if (script_address(ckp->btcaddress)) {
+			address_to_scripttxn(sdata->pubkeytxnbin, ckp->btcaddress);
+			sdata->pubkeytxnlen = 23;
+		} else {
+			address_to_pubkeytxn(sdata->pubkeytxnbin, ckp->btcaddress);
+			sdata->pubkeytxnlen = 25;
+		}
 
 		if (test_address(ckp, ckp->donaddress)) {
 			ckp->donvalid = true;
-			address_to_pubkeytxn(sdata->donkeytxnbin, ckp->donaddress);
+			if (script_address(ckp->donaddress)) {
+				sdata->donkeytxnlen = 23;
+				address_to_scripttxn(sdata->donkeytxnbin, ckp->donaddress);
+			} else {
+				sdata->donkeytxnlen = 25;
+				address_to_pubkeytxn(sdata->donkeytxnbin, ckp->donaddress);
+			}
 		}
 	}
 
