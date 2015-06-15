@@ -4456,6 +4456,13 @@ static void read_poolstats(ckpool_t *ckp)
 	}
 }
 
+/* Braindead check to see if this btcaddress is an M of N script address which
+ * is currently unsupported as a generation address. */
+static bool script_address(const char *btcaddress)
+{
+	return btcaddress[0] == '3';
+}
+
 int stratifier(proc_instance_t *pi)
 {
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
@@ -4481,6 +4488,10 @@ int stratifier(proc_instance_t *pi)
 	if (!ckp->proxy) {
 		if (!test_address(ckp, ckp->btcaddress)) {
 			LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
+			goto out;
+		}
+		if (script_address(ckp->btcaddress)) {
+			LOGEMERG("Fatal: btcaddress valid but unsupported M of N 3x address");
 			goto out;
 		}
 
