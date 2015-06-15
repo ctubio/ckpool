@@ -1503,7 +1503,7 @@ static const int b58tobin_tbl[] = {
 	47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57
 };
 
-/* b58bin should always be at least 24 bytes long and already checked to be
+/* b58bin should always be at least 25 bytes long and already checked to be
  * valid. */
 void b58tobin(char *b58bin, const char *b58)
 {
@@ -1636,7 +1636,8 @@ void address_to_scripttxn(char *pkh, const char *addr)
 
 	b58tobin(b58bin, addr);
 	pkh[0] = 0xa9;
-	memcpy(&pkh[1], &b58bin[1], 20);
+	pkh[1] = 0x14;
+	memcpy(&pkh[2], &b58bin[1], 20);
 	pkh[22] = 0x87;
 }
 
