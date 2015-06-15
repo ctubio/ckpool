@@ -1503,7 +1503,7 @@ static const int b58tobin_tbl[] = {
 	47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57
 };
 
-/* b58bin should always be at least 25 bytes long and already checked to be
+/* b58bin should always be at least 21 bytes long and already checked to be
  * valid. */
 void b58tobin(char *b58bin, const char *b58)
 {
@@ -1619,9 +1619,8 @@ char *http_base64(const char *src)
 
 void address_to_pubkeytxn(char *pkh, const char *addr)
 {
-	char b58bin[25];
+	char b58bin[25] = {};
 
-	memset(b58bin, 0, 25);
 	b58tobin(b58bin, addr);
 	pkh[0] = 0x76;
 	pkh[1] = 0xa9;
@@ -1629,6 +1628,16 @@ void address_to_pubkeytxn(char *pkh, const char *addr)
 	memcpy(&pkh[3], &b58bin[1], 20);
 	pkh[23] = 0x88;
 	pkh[24] = 0xac;
+}
+
+void address_to_scripttxn(char *pkh, const char *addr)
+{
+	char b58bin[23] = {};
+
+	b58tobin(b58bin, addr);
+	pkh[0] = 0xa9;
+	memcpy(&pkh[1], &b58bin[1], 20);
+	pkh[22] = 0x87;
 }
 
 /*  For encoding nHeight into coinbase, return how many bytes were used */
