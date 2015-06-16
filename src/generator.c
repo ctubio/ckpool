@@ -2676,41 +2676,6 @@ static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int id
 	return proxy;
 }
 
-static bool alive_btcd(server_instance_t *si)
-{
-	connsock_t *cs = &si->cs;
-	char *userpass = NULL;
-	gbtbase_t gbt;
-
-	if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
-		LOGWARNING("Failed to extract address from btcd %s", si->url);
-		return false;
-	}
-	userpass = strdup(si->auth);
-	realloc_strcat(&userpass, ":");
-	realloc_strcat(&userpass, si->pass);
-	cs->auth = http_base64(userpass);
-	dealloc(userpass);
-	if (!cs->auth) {
-		LOGWARNING("Failed to create base64 auth from btcd %s", userpass);
-		return false;
-	}
-	if (cs->fd < 0) {
-		LOGWARNING("Failed to connect socket to btcd %s:%s !", cs->url, cs->port);
-		return false;
-	}
-	keep_sockalive(cs->fd);
-	/* Test we can authorise by getting a gbt, but we won't be using it. */
-	memset(&gbt, 0, sizeof(gbtbase_t));
-	if (!gen_gbtbase(cs, &gbt)) {
-		LOGINFO("Failed to get test block template from btcd %s:%s!",
-			cs->url, cs->port);
-		return false;
-	}
-	clear_gbtbase(&gbt);
-	return true;
-}
-
 static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
 	gdata_t *gdata = ckp->data;
@@ -2739,14 +2704,14 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	if (ckp->node) {
 		if (ckp->btcds) {
 			/* If we also have btcds set up in node mode, try to talk to
-			* one of them as a way to submit blocks if we find them when
-			* submitting them upstream. */
+			 * one of them as a way to submit blocks if we find them when
+			 * submitting them upstream. */
 			server_instance_t *si = ckp->btcdbackup = ckzalloc(sizeof(server_instance_t));
 
 			si->url = ckp->btcdurl[0];
 			si->auth = ckp->btcdauth[0];
 			si->pass = ckp->btcdpass[0];
-			if (alive_btcd(si)) {
+			if (server_alive(ckp, si, false)) {
 				LOGNOTICE("Node backup btcd %s:%s alive", si->cs.url, si->cs.port);
 			} else {
 				LOGWARNING("Node backup btcd %s:%s failed! Will run as ordinary passthrough",
