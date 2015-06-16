@@ -1967,7 +1967,10 @@ double diff_from_nbits(char *nbits)
 	pow = nbits[0];
 	powdiff = (8 * (0x1d - 3)) - (8 * (pow - 3));
 	diff32 = be32toh(*((uint32_t *)nbits)) & 0x00FFFFFF;
-	numerator = 0xFFFFULL << powdiff;
+	if (likely(powdiff > 0))
+		numerator = 0xFFFFULL << powdiff;
+	else
+		numerator = 0xFFFFULL >> -powdiff;
 	return numerator / (double)diff32;
 }
 
