@@ -268,7 +268,7 @@ bool dbload_only_sharesummary = false;
  *  markersummaries and pplns payouts may not be correct */
 bool sharesummary_marks_limit = false;
 
-// DB users,workers load is complete
+// DB optioncontrol,users,workers,useratts load is complete
 bool db_users_complete = false;
 // DB load is complete
 bool db_load_complete = false;
@@ -509,6 +509,11 @@ const char *marktype_other_finish_fmt = "fin: %s";
 // For getting back the shift code/name
 const char *marktype_shift_begin_skip = "Shift stt: ";
 const char *marktype_shift_end_skip = "Shift fin: ";
+
+// USERINFO from various incoming data
+K_TREE *userinfo_root;
+K_LIST *userinfo_free;
+K_STORE *userinfo_store;
 
 static char logname[512];
 static char *dbcode;
@@ -753,7 +758,9 @@ static bool getdata1()
 		goto matane;
 	if (!(ok = users_fill(conn)))
 		goto matane;
-	ok = workers_fill(conn);
+	if (!(ok = workers_fill(conn)))
+		goto matane;
+	ok = useratts_fill(conn);
 
 matane:
 
@@ -791,21 +798,15 @@ static bool getdata3()
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
 		goto sukamudai;
-	/* marks must be loaded before sharesummary
-	 * since sharesummary looks at the marks data */
 	if (!(ok = marks_fill(conn)) || everyone_die)
 		goto sukamudai;
+	/* must be after workinfo */
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!(ok = markersummary_fill(conn)) || everyone_die)
 		goto sukamudai;
-	if (!(ok = sharesummary_fill(conn)) || everyone_die)
-		goto sukamudai;
-	if (!confirm_sharesummary) {
-		if (!(ok = useratts_fill(conn)) || everyone_die)
-			goto sukamudai;
+	if (!confirm_sharesummary && !everyone_die)
 		ok = poolstats_fill(conn);
-	}
 
 sukamudai:
 
@@ -823,31 +824,24 @@ static bool reload()
 	char *reason;
 	FILE *fp;
 
-	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
-	LOGWARNING("%s(): %s oldest DB incomplete sharesummary", __func__, buf);
-	tv_to_buf(&(dbstatus.newest_sharesummary_firstshare_ay), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB complete sharesummary", __func__, buf);
+	tv_to_buf(&(dbstatus.newest_createdate_workmarker_workinfo),
+		  buf, sizeof(buf));
+	LOGWARNING("%s(): %s newest DB workmarker wid %"PRId64,
+		   __func__, buf,
+		   dbstatus.newest_workmarker_workinfoid);
 	tv_to_buf(&(dbstatus.newest_createdate_workinfo), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB workinfo", __func__, buf);
+	LOGWARNING("%s(): %s newest DB workinfo wid %"PRId64,
+		   __func__, buf, dbstatus.newest_workinfoid);
 	tv_to_buf(&(dbstatus.newest_createdate_poolstats), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB poolstats", __func__, buf);
+	LOGWARNING("%s(): %s newest DB poolstats (ignored)", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_blocks), buf, sizeof(buf));
 	LOGWARNING("%s(): %s newest DB blocks (ignored)", __func__, buf);
 
-	if (dbstatus.oldest_sharesummary_firstshare_n.tv_sec)
-		copy_tv(&(dbstatus.sharesummary_firstshare), &(dbstatus.oldest_sharesummary_firstshare_n));
-	else
-		copy_tv(&(dbstatus.sharesummary_firstshare), &(dbstatus.newest_sharesummary_firstshare_ay));
-
-	copy_tv(&start, &(dbstatus.sharesummary_firstshare));
-	reason = "sharesummary";
+	copy_tv(&start, &(dbstatus.newest_createdate_workmarker_workinfo));
+	reason = "workmarkers";
 	if (!tv_newer(&start, &(dbstatus.newest_createdate_workinfo))) {
 		copy_tv(&start, &(dbstatus.newest_createdate_workinfo));
 		reason = "workinfo";
-	}
-	if (!tv_newer(&start, &(dbstatus.newest_createdate_poolstats))) {
-		copy_tv(&start, &(dbstatus.newest_createdate_poolstats));
-		reason = "poolstats";
 	}
 
 	tv_to_buf(&start, buf, sizeof(buf));
@@ -896,15 +890,18 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		fclose(fp);
 		if (ret == 1 && !(kill(oldpid, 0))) {
 			if (!ckp->killold) {
-				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
+				LOGEMERG("Process %s pid %d still exists, start"
+					 " ckpool with -k if you wish to kill it",
 					 path, oldpid);
 				return false;
 			}
 			if (kill(oldpid, 9)) {
-				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				LOGEMERG("Unable to kill old process %s pid %d",
+					 path, oldpid);
 				return false;
 			}
-			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
+			LOGWARNING("Killing off old process %s pid %d",
+				   path, oldpid);
 		}
 	}
 	fp = fopen(path, "we");
@@ -1145,18 +1142,26 @@ static void alloc_storage()
 				ALLOC_MARKS, LIMIT_MARKS, true);
 	marks_store = k_new_store(marks_free);
 	marks_root = new_ktree();
+
+	userinfo_free = k_new_list("UserInfo", sizeof(USERINFO),
+					ALLOC_USERINFO, LIMIT_USERINFO, true);
+	userinfo_store = k_new_store(userinfo_free);
+	userinfo_root = new_ktree();
 }
 
-#define SEQSETWARN(_set, _seqset, _msgtxt, _endtxt) do { \
+#define SEQSETMSG(_set, _seqset, _msgtxt, _endtxt) do { \
 	char _t_buf[DATE_BUFSIZ]; \
+	bool _warn = ((_seqset)->seqdata[SEQ_SHARES].missing > 0) || \
+		     ((_seqset)->seqdata[SEQ_SHARES].lost > 0); \
 	btu64_to_buf(&((_seqset)->seqstt), _t_buf, sizeof(_t_buf)); \
-	LOGWARNING("SEQ %s: %d/"SEQSTT":%"PRIu64"=%s "SEQPID":%"PRIu64 \
+	LOGWARNING("%s %s: %d/"SEQSTT":%"PRIu64"=%s "SEQPID":%"PRIu64 \
 		   " M%"PRIu64"/T%"PRIu64"/L%"PRIu64"/S%"PRIu64"/H%"PRIu64 \
 		   "/R%"PRIu64"/OK%"PRIu64" %s v%"PRIu64"/^%"PRIu64"/M%"PRIu64 \
 		   "/T%"PRIu64"/L%"PRIu64"/S%"PRIu64"/H%"PRIu64"/R%"PRIu64 \
 		   "/OK%"PRIu64" %s v%"PRIu64"/^%"PRIu64"/M%"PRIu64"/T%"PRIu64 \
 		   "/L%"PRIu64"/S%"PRIu64"/H%"PRIu64"/R%"PRIu64 \
 		   "/OK%"PRIu64"%s", \
+		   _warn ? "SEQ" : "Seq", \
 		   _msgtxt, _set, (_seqset)->seqstt, _t_buf, \
 		   (_seqset)->seqpid, (_seqset)->missing, (_seqset)->trans, \
 		   (_seqset)->lost, (_seqset)->stale, (_seqset)->high, \
@@ -1248,16 +1253,15 @@ void sequence_report(bool lock)
 		    seqset->seqdata[SEQ_SHARES].missing ||
 		    seqset->seqdata[SEQ_SHARES].trans ||
 		    seqset->seqdata[SEQ_SHARES].lost)) {
-			miss = (seqset->seqdata[SEQ_SHARES].missing ||
-				seqset->seqdata[SEQ_SHARES].trans ||
-				seqset->seqdata[SEQ_SHARES].lost);
+			miss = (seqset->seqdata[SEQ_SHARES].missing > 0) ||
+				(seqset->seqdata[SEQ_SHARES].lost > 0);
 			if (lock) {
 				memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
 				ck_wunlock(&seq_lock);
 				seqset = &seqset_copy;
 			}
-			SEQSETWARN(set, seqset,
-				   miss ? "SHARES MISSING" : "status" , EMPTY);
+			SEQSETMSG(set, seqset,
+				  miss ? "SHARES MISSING" : "status" , EMPTY);
 			if (lock)
 				ck_wlock(&seq_lock);
 		}
@@ -1279,6 +1283,8 @@ static void dealloc_storage()
 	LOGWARNING("%s() logqueue ...", __func__);
 
 	FREE_LISTS(logqueue);
+
+	FREE_ALL(userinfo);
 
 	FREE_TREE(marks);
 	FREE_STORE_DATA(marks);
@@ -1746,8 +1752,9 @@ static void seq_reloadmax()
  *  messages or incorrect messages on the console when errors occur
  * It wont lose msglines from the reload or the queue, since if there is any
  *  problem with any msgline, it will be processed rather than skipped
- * Only valid duplicates, with all 3 sequence numbers (cmd, stt, pid) matching
- *  a previous msgline, are flagged DUP to be skipped by the sequence code */
+ * Only valid duplicates, with all 4 sequence numbers (all, cmd, stt, pid)
+ *  matching a previous msgline, are flagged DUP to be skipped by the
+ *  sequence code */
 static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 			uint64_t n_seqstt, uint64_t n_seqpid,
 			char *nam, tv_t *now, tv_t *cd, char *code,
@@ -1767,6 +1774,11 @@ static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 	uint64_t u;
 	int set = -1, expset = -1, highlimit, i;
 	K_STORE *lost = NULL;
+
+	LOGDEBUG("%s() SQ %c:%d/%s/%"PRIu64"/%"PRIu64"/%"PRIu64"/%s '%.80s...",
+		 __func__, SECHR(seqentryflags), seq, nam, n_seqcmd, n_seqstt,
+		 n_seqpid, code, st = safe_text(msg));
+	FREENULL(st);
 
 	firstseq = newseq = expseq = gothigh = okhi = gotstale =
 	gotstalestart = dup = wastrans = gotrecover = false;
@@ -1954,7 +1966,7 @@ gotseqset:
 			 *  there was some problem with the reload data
 			 * When we switch from the reload data to the queue
 			 *  data, it is also flagged ok since it may also be
-			 *  due to lost data at the end or missing reload files
+			 *  due to lost data at the end, or missing reload files
 			 * In both these cases the message will be 'OKHI'
 			 *  instead of 'HIGH'
 			 * If however this is caused by a corrupt seq number
@@ -2186,12 +2198,13 @@ setitemdata:
 	} else {
 		if (newseq) {
 			if (set == 0)
-				SEQSETWARN(0, &seqset_pre, "previous", EMPTY);
+				SEQSETMSG(0, &seqset_pre, "previous", EMPTY);
 			else
-				SEQSETWARN(0, &seqset_pre, "current", EMPTY);
+				SEQSETMSG(0, &seqset_pre, "current", EMPTY);
 		}
-		if (expseq)
-			SEQSETWARN(expset, &seqset_exp, "discarded old", " for:");
+		if (expseq) {
+			SEQSETMSG(expset, &seqset_exp, "discarded old", " for:");
+		}
 		if (newseq || expseq) {
 			btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
 			LOGWARNING("Seq created new: set:%d %s:%"PRIu64" "
@@ -2203,15 +2216,21 @@ setitemdata:
 
 	if (dup) {
 		int level = LOG_WARNING;
-		/* If one is SE_RELOAD and the other is SE_EARLYSOCK then it's
-		 *  not unexpected so only LOG_DEBUG */
+		/* If one is SE_RELOAD and the other is SE_EARLYSOCK or
+		 *  SE_SOCKET then it's not unexpected, so only use LOG_DEBUG
+		 * Technically SE_SOCKET is unexpected, except that at the end
+		 *  of the reload sync there may still be pool messages that
+		 *  haven't got into the queue yet - it wouldn't be expected
+		 *  for there to be many since it would be ckdb emptying the
+		 *  queue faster than it is filling due to the reload delay -
+		 *  but either way they don't need to be reported */
 		if (((seqentry_copy.flags | seqentryflags) & SE_RELOAD) &&
-		    ((seqentry_copy.flags | seqentryflags) & SE_EARLYSOCK))
+		    ((seqentry_copy.flags | seqentryflags) & (SE_EARLYSOCK | SE_SOCKET)))
 			level = LOG_DEBUG;
 		btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
 		bt_to_buf(&(cd->tv_sec), t_buf2, sizeof(t_buf2));
 		LOGMSG(level, "SEQ dup%s %c:%c %s %"PRIu64" set:%d/%"PRIu64
-				"=%s/%"PRIu64" %s/%s v%"PRIu64"/^%"PRIu64
+				"=%s/%"PRIu64" %s/%s -vs- v%"PRIu64"/^%"PRIu64
 				"/M%"PRIu64"/T%"PRIu64"/L%"PRIu64"/S%"PRIu64
 				"/H%"PRIu64"/OK%"PRIu64" cmd=%.42s...",
 				(level == LOG_DEBUG) ? "*" : EMPTY,
@@ -3049,7 +3068,7 @@ static void *summariser(__maybe_unused void *arg)
 
 	rename_proc("db_summariser");
 
-	while (!everyone_die && !startup_complete)
+	while (!everyone_die && !reload_queue_complete)
 		cksleep_ms(42);
 
 	summariser_using_data = true;
@@ -3106,7 +3125,7 @@ static char *shift_words[] =
 	"quinn",
 	"rika",
 	"sena",
-	"tsubasa",
+	"tenshi",
 	"ur",
 	"valentina",
 	"winry",
@@ -3541,7 +3560,7 @@ static void *marker(__maybe_unused void *arg)
 
 	rename_proc("db_marker");
 
-	while (!everyone_die && !startup_complete)
+	while (!everyone_die && !reload_queue_complete)
 		cksleep_ms(42);
 
 	if (sharesummary_marks_limit) {
@@ -3551,16 +3570,6 @@ static void *marker(__maybe_unused void *arg)
 	}
 
 	marker_using_data = true;
-
-/* TODO: trigger this every workinfo change?
- *  note that history catch up would also mean the tigger would
- *  catch up at most 100 missing marks per shift
- *  however, also, a workinfo change means a sharesummary DB update,
- *  so would be best to (usually) wait until that is done
- * OR: avoid writing the sharesummaries to the DB at all
- *  and only write the markersummaries? - since 100 workinfoid shifts
- *  will usually mean that markersummaries are less than every hour
- *  (and a reload processes more than an hour) */
 
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
@@ -3938,6 +3947,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_STATS:
 					case CMD_USERSTATUS:
 					case CMD_SHSTA:
+					case CMD_USERINFO:
 						ans = ckdb_cmds[msgline->which_cmds].func(NULL,
 								msgline->cmd,
 								msgline->id,
@@ -4135,6 +4145,21 @@ static void *socketer(__maybe_unused void *arg)
 						workqueue->code =  (char *)__func__;
 						workqueue->inet = inet_default;
 						k_add_tail(workqueue_store, wq_item);
+						/* Stop the reload queue from growing too big
+						 * Use a size that should be big enough */
+						if (reloading && workqueue_store->count > 250000) {
+							K_ITEM *wq2_item = k_unlink_head(workqueue_store);
+							K_WUNLOCK(workqueue_free);
+							WORKQUEUE *wq;
+							DATA_WORKQUEUE(wq, wq2_item);
+							K_ITEM *ml_item = wq->msgline_item;
+							free_msgline_data(ml_item, true, false);
+							K_WLOCK(msgline_free);
+							k_add_head(msgline_free, ml_item);
+							K_WUNLOCK(msgline_free);
+							K_WLOCK(workqueue_free);
+							k_add_head(workqueue_free, wq2_item);
+						}
 						K_WUNLOCK(workqueue_free);
 						ml_item = NULL;
 						mutex_lock(&wq_waitlock);
@@ -4260,6 +4285,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_MARKS:
 			case CMD_PSHIFT:
 			case CMD_SHSTA:
+			case CMD_USERINFO:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,
@@ -4410,6 +4436,7 @@ static bool reload_from(tv_t *start)
 	reloading = true;
 
 	copy_tv(&reload_timestamp, start);
+	// Go back further - one reload file
 	reload_timestamp.tv_sec -= reload_timestamp.tv_sec % ROLL_S;
 
 	tv_to_buf(start, buf, sizeof(buf));
@@ -4732,6 +4759,7 @@ static void *listener(void *arg)
 							seqdata++;
 						}
 					}
+					ss_item = ss_item->next;
 				}
 			}
 			seqdata_reload_lost = false;
@@ -4761,6 +4789,7 @@ static void *listener(void *arg)
 	return NULL;
 }
 
+#if 0
 /* TODO: This will be way faster traversing both trees simultaneously
  *  rather than traversing one and searching the other, then repeating
  *  in reverse. Will change it later */
@@ -4864,6 +4893,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 			diff_first, diff_last, cd_buf1, cd_buf2);
 	}
 }
+#endif
 
 /* TODO: have a seperate option to find/store missing workinfo/shares/etc
  *  from the reload files, in a supplied UTC time range
@@ -4876,6 +4906,9 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
  *  and the payment is now wrong */
 static void confirm_reload()
 {
+#if 0
+	TODO: redo this using workmarkers
+
 	K_TREE *sharesummary_workinfoid_save;
 	__maybe_unused K_TREE *sharesummary_save;
 	__maybe_unused K_TREE *workinfo_save;
@@ -5190,6 +5223,7 @@ static void confirm_reload()
 	compare_summaries(sharesummary_workinfoid_root, "ReLoad",
 			  sharesummary_workinfoid_save, "DB",
 			  true, false);
+#endif
 }
 
 // TODO: handle workmarkers/markersummaries
