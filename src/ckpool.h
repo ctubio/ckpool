@@ -180,6 +180,9 @@ struct ckpool_instance {
 	/* Are we a redirecting passthrough */
 	bool redirector;
 
+	/* Are we a relay node passthrough */
+	bool node;
+
 	/* Are we running as a proxy */
 	bool proxy;
 
