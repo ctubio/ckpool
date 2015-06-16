@@ -753,14 +753,14 @@ out:
 	return ret;
 }
 
-static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
+static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi, const bool node)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
 	bool ret = false;
 
-	JSON_CPACK(req, "{s:s,s:[s]}",
+	JSON_CPACK(req, "{s:s,s:[sb]}",
 			"method", "mining.passthrough",
-			"params", PACKAGE"/"VERSION);
+			"params", PACKAGE"/"VERSION, node);
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
@@ -1758,7 +1758,7 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 		goto out;
 	}
 	if (ckp->passthrough) {
-		if (!passthrough_stratum(cs, proxi)) {
+		if (!passthrough_stratum(cs, proxi, ckp->node)) {
 			LOGWARNING("Failed initial passthrough to %s:%s !",
 				   cs->url, cs->port);
 			goto out;
@@ -2718,9 +2718,12 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 					   si->cs.url, si->cs.port);
 				ckp->btcdbackup = NULL;
 				free(si);
+				ckp->node = false;
 			}
-		} else
+		} else {
 			LOGWARNING("No backup btcd specified in node mode! Will run as ordinary passthrough");
+			ckp->node = false;
+		}
 	}
 
 	LOGWARNING("%s generator ready", ckp->name);

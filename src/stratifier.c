@@ -4817,14 +4817,21 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
+		json_t *nodeval = json_array_get(params_val, 1);
 		char buf[256];
+		bool node;
 
+		if (nodeval)
+			node = json_is_true(nodeval);
+		else
+			node = false;
 		/* We need to inform the connector process that this client
 		 * is a passthrough and to manage its messages accordingly. No
 		 * data from this client id should ever come back to this
 		 * stratifier after this so drop the client in the stratifier. */
-		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
-		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+		LOGNOTICE("Adding %spassthrough client %"PRId64" %s", node ? "node " : "",
+			  client_id, client->address);
+		snprintf(buf, 255, "%s=%"PRId64, node ? "node" : "passthrough", client_id);
 		send_proc(ckp->connector, buf);
 		drop_client(ckp, sdata, client_id);
 		return;
