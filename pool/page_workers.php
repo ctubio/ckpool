@@ -2,18 +2,18 @@
 #
 function worktitle($data, $user)
 {
- $r = '<input type=radio name=srt onclick="sott(this';
+ addSort();
+ $r = "input type=radio name=srt onclick=\"sott('worksrt',this);\"";
  $pg  = '<tr class=title>';
- $pg .= "<td class=dl>Worker <span class=nb>Name:$r,0,'s');\"></span></td>";
+ $pg .= "<td class=dl>Worker <span class=nb>Name:<$r id=srtwrk data-sf=s0></span></td>";
  $pg .= '<td class=dr>Work Diff</td>';
- $pg .= "<td class=dr><span class=nb>$r,2,'n');\">:Last</span> Share</td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtlst data-sf=n2>:Last</span> Share</td>";
  $pg .= '<td class=dr>Shares</td>';
- $pg .= "<td class=dr><span class=nb>$r,4,'r');\">:Diff</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtdiff data-sf=r4>:Diff</span></td>";
  $pg .= '<td class=dr>Invalid</td>';
  $pg .= '<td class=dr>Block %</td>';
- $pg .= "<td class=dr><span class=nb>$r,7,'r');\" checked>:Hash</span> Rate</td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r7>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
- addSort();
  return $pg;
 }
 #
@@ -194,6 +194,8 @@ function doworker($data, $user)
  }
 
  $pg .= "</table>\n";
+ $pg .= "<script type='text/javascript'>\n";
+ $pg .= "sotc('worksrt','srtrate');</script>\n";
 
  return "<h1>Workers$title</h1>".$pg;
 }
