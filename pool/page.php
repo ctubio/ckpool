@@ -66,6 +66,11 @@ function addTips()
  addCSS($tcss);
 }
 #
+function addSort()
+{
+ $s = SortJS();
+ addScript($s);
+}
 #
 function makeURL($page)
 {
@@ -75,6 +80,7 @@ function makeURL($page)
 	$page = '?k='.$page;
  return "/index.php$page";
 }
+#
 function makeLink($page, $rest = '')
 {
  $href = "<a href='".makeURL($page)."'";
