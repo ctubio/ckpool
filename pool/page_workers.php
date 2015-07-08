@@ -122,9 +122,9 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 		}
 		else
 		{
+			$su = round($uhr);
 			$totrate += $uhr;
 			$uhr = dsprate($uhr);
-			$su = round($uhr);
 		}
 		$pg .= "<td class=dr data-srt=$su>$uhr</td>";
 
