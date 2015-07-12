@@ -727,6 +727,14 @@ char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, co
 	return buf;
 }
 
+static const char *rpc_method(const char *rpc_req)
+{
+	const char *ptr = strchr(rpc_req, ':');
+	if (ptr)
+		return ptr+1;
+	return rpc_req;
+}
+
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
 	float timeout = RPC_TIMEOUT;
@@ -778,7 +786,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		tv_time(&fin_tv);
 		elapsed = tvdiff(&fin_tv, &stt_tv);
 		LOGWARNING("Failed to write to socket in %s (%.10s...) %.3fs",
-			   __func__, rpc_req, elapsed);
+			   __func__, rpc_method(rpc_req), elapsed);
 		goto out_empty;
 	}
 	ret = read_socket_line(cs, &timeout);
@@ -786,14 +794,14 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		tv_time(&fin_tv);
 		elapsed = tvdiff(&fin_tv, &stt_tv);
 		LOGWARNING("Failed to read socket line in %s (%.10s...) %.3fs",
-			   __func__, rpc_req, elapsed);
+			   __func__, rpc_method(rpc_req), elapsed);
 		goto out_empty;
 	}
 	if (strncasecmp(cs->buf, "HTTP/1.1 200 OK", 15)) {
 		tv_time(&fin_tv);
 		elapsed = tvdiff(&fin_tv, &stt_tv);
 		LOGWARNING("HTTP response to (%.10s...) %.3fs not ok: %s",
-			   rpc_req, elapsed, cs->buf);
+			   rpc_method(rpc_req), elapsed, cs->buf);
 		goto out_empty;
 	}
 	do {
@@ -802,7 +810,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 			tv_time(&fin_tv);
 			elapsed = tvdiff(&fin_tv, &stt_tv);
 			LOGWARNING("Failed to read http socket lines in %s (%.10s...) %.3fs",
-				   __func__, rpc_req, elapsed);
+				   __func__, rpc_method(rpc_req), elapsed);
 			goto out_empty;
 		}
 	} while (strncmp(cs->buf, "{", 1));
@@ -810,13 +818,13 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 	elapsed = tvdiff(&fin_tv, &stt_tv);
 	if (elapsed > 5.0) {
 		LOGWARNING("HTTP socket read+write took %.3fs in %s (%.10s...)",
-			   elapsed, __func__, rpc_req);
+			   elapsed, __func__, rpc_method(rpc_req));
 	}
 
 	val = json_loads(cs->buf, 0, &err_val);
 	if (!val) {
 		LOGWARNING("JSON decode (%.10s...) failed(%d): %s",
-			   rpc_req, err_val.line, err_val.text);
+			   rpc_method(rpc_req), err_val.line, err_val.text);
 	}
 out_empty:
 	empty_socket(cs->fd);
