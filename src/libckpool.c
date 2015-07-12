@@ -948,17 +948,19 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 {
 	char *buf = NULL;
 	uint32_t msglen;
-	int ret;
+	int ret, ern;
 
 	ret = wait_read_select(sockd, timeout1);
 	if (unlikely(ret < 1)) {
-		LOGERR("Select1 failed in recv_unix_msg");
+		ern = errno;
+		LOGERR("Select1 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
 	/* Get message length */
 	ret = read_length(sockd, &msglen, 4);
 	if (unlikely(ret < 4)) {
-		LOGERR("Failed to read 4 byte length in recv_unix_msg");
+		ern = errno;
+		LOGERR("Failed to read 4 byte length in recv_unix_msg (%d?)", ern);
 		goto out;
 	}
 	msglen = le32toh(msglen);
@@ -968,13 +970,15 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 	}
 	ret = wait_read_select(sockd, timeout2);
 	if (unlikely(ret < 1)) {
-		LOGERR("Select2 failed in recv_unix_msg");
+		ern = errno;
+		LOGERR("Select2 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
 	buf = ckzalloc(msglen + 1);
 	ret = read_length(sockd, buf, msglen);
 	if (unlikely(ret < (int)msglen)) {
-		LOGERR("Failed to read %u bytes in recv_unix_msg", msglen);
+		ern = errno;
+		LOGERR("Failed to read %u bytes in recv_unix_msg (%d?)", msglen, ern);
 		dealloc(buf);
 	}
 out:
