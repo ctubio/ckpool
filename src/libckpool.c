@@ -1003,20 +1003,27 @@ out:
 	return ret;
 }
 
-int write_length(int sockd, const void *buf, int len)
+int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line)
 {
 	int ret, ofs = 0;
 
 	if (unlikely(len < 1)) {
-		LOGWARNING("Invalid write length of %d requested in write_length", len);
+		LOGWARNING("Invalid write length of %d requested in write_length from %s %s:%d",
+			   len, file, func, line);
 		return -1;
 	}
-	if (unlikely(sockd < 0))
+	if (unlikely(sockd < 0)) {
+		LOGWARNING("Attempt to write to invalidated sock in write_length from %s %s:%d",
+			   file, func, line);
 		return -1;
+	}
 	while (len) {
 		ret = write(sockd, buf + ofs, len);
-		if (unlikely(ret < 0))
+		if (unlikely(ret < 0)) {
+			LOGERR("Failed to write %d bytes in write_length from %s %s:%d",
+			       len, file, func, line);
 			return -1;
+		}
 		ofs += ret;
 		len -= ret;
 	}
@@ -1049,10 +1056,9 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		LOGERR("Select1 failed in send_unix_msg (%d)", ern);
 		goto out;
 	}
-	ret = write_length(sockd, &msglen, 4);
+	ret = _write_length(sockd, &msglen, 4, file, func, line);
 	if (unlikely(ret < 4)) {
-		ern = errno;
-		LOGERR("Failed to write 4 byte length in send_unix_msg (%d)", ern);
+		LOGERR("Failed to write 4 byte length in send_unix_msg");
 		goto out;
 	}
 	ret = wait_write_select(sockd, 5);
@@ -1061,10 +1067,9 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		LOGERR("Select2 failed in send_unix_msg (%d)", ern);
 		goto out;
 	}
-	ret = write_length(sockd, buf, len);
+	ret = _write_length(sockd, buf, len, file, func, line);
 	if (unlikely(ret < 0)) {
-		ern = errno;
-		LOGERR("Failed to write %d bytes in send_unix_msg (%d)", len, ern);
+		LOGERR("Failed to write %d bytes in send_unix_msg", len);
 		goto out;
 	}
 	retval = true;
