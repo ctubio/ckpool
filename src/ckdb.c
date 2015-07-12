@@ -3743,7 +3743,7 @@ static void *socketer(__maybe_unused void *arg)
 
 		cmdnum = CMD_UNSET;
 
-		buf = recv_unix_msg(sockd);
+		buf = recv_unix_msg_tmo2(sockd, RECV_UNIX_TIMEOUT1, RECV_UNIX_TIMEOUT2);
 		// Once we've read the message
 		setnow(&now);
 		if (buf) {

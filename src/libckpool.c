@@ -1050,7 +1050,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		goto out;
 	}
 	msglen = htole32(len);
-	ret = wait_write_select(sockd, 5);
+	ret = wait_write_select(sockd, UNIX_WRITE_TIMEOUT);
 	if (unlikely(ret < 1)) {
 		ern = errno;
 		LOGERR("Select1 failed in send_unix_msg (%d)", ern);
@@ -1061,7 +1061,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		LOGERR("Failed to write 4 byte length in send_unix_msg");
 		goto out;
 	}
-	ret = wait_write_select(sockd, 5);
+	ret = wait_write_select(sockd, UNIX_WRITE_TIMEOUT);
 	if (unlikely(ret < 1)) {
 		ern = errno;
 		LOGERR("Select2 failed in send_unix_msg (%d)", ern);
@@ -1089,7 +1089,7 @@ bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, cons
 		LOGWARNING("Null message sent to send_unix_data");
 		goto out;
 	}
-	ret = wait_write_select(sockd, 5);
+	ret = wait_write_select(sockd, UNIX_WRITE_TIMEOUT);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in send_unix_data");
 		goto out;
@@ -1112,7 +1112,7 @@ bool _recv_unix_data(int sockd, struct msghdr *msg, const char *file, const char
 	bool retval = false;
 	int ret;
 
-	ret = wait_read_select(sockd, 5);
+	ret = wait_read_select(sockd, UNIX_READ_TIMEOUT);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in recv_unix_data");
 		goto out;

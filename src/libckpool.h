@@ -236,6 +236,12 @@ void logmsg(int loglevel, const char *fmt, ...);
 
 #define PAGESIZE (4096)
 
+/* Default timeouts for unix socket reads and writes in seconds. Set write
+ * timeout to double the read timeout in case of one read blocking the next
+ * writer. */
+#define UNIX_READ_TIMEOUT 5
+#define UNIX_WRITE_TIMEOUT 10
+
 /* Share error values */
 
 enum share_err {
@@ -495,8 +501,8 @@ int read_length(int sockd, void *buf, int len);
 char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, const char *func, const int line);
 #define RECV_UNIX_TIMEOUT1 30
 #define RECV_UNIX_TIMEOUT2 5
-#define recv_unix_msg(sockd) _recv_unix_msg(sockd, RECV_UNIX_TIMEOUT1, RECV_UNIX_TIMEOUT2, __FILE__, __func__, __LINE__)
-#define recv_unix_msg_tmo(sockd, tmo) _recv_unix_msg(sockd, tmo, RECV_UNIX_TIMEOUT2, __FILE__, __func__, __LINE__)
+#define recv_unix_msg(sockd) _recv_unix_msg(sockd, UNIX_READ_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
+#define recv_unix_msg_tmo(sockd, tmo) _recv_unix_msg(sockd, tmo, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
 #define recv_unix_msg_tmo2(sockd, tmo1, tmo2) _recv_unix_msg(sockd, tmo1, tmo2, __FILE__, __func__, __LINE__)
 int wait_write_select(int sockd, float timeout);
 #define write_length(sockd, buf, len) _write_length(sockd, buf, len, __FILE__, __func__, __LINE__)
