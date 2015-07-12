@@ -1005,7 +1005,7 @@ out:
 
 int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line)
 {
-	int ret, ofs = 0;
+	int ret, ofs = 0, ern;
 
 	if (unlikely(len < 1)) {
 		LOGWARNING("Invalid write length of %d requested in write_length from %s %s:%d",
@@ -1013,6 +1013,7 @@ int _write_length(int sockd, const void *buf, int len, const char *file, const c
 		return -1;
 	}
 	if (unlikely(sockd < 0)) {
+		ern = errno;
 		LOGWARNING("Attempt to write to invalidated sock in write_length from %s %s:%d",
 			   file, func, line);
 		return -1;
@@ -1020,8 +1021,9 @@ int _write_length(int sockd, const void *buf, int len, const char *file, const c
 	while (len) {
 		ret = write(sockd, buf + ofs, len);
 		if (unlikely(ret < 0)) {
-			LOGERR("Failed to write %d bytes in write_length from %s %s:%d",
-			       len, file, func, line);
+			ern = errno;
+			LOGERR("Failed to write %d bytes in write_length (%d) from %s %s:%d",
+			       len, ern, file, func, line);
 			return -1;
 		}
 		ofs += ret;
