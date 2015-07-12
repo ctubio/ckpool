@@ -64,7 +64,8 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		int logfd = global_ckp->logfd;
 		char *buf = NULL;
 		struct tm tm;
-		time_t now_t;
+		tv_t now_tv;
+		int ms;
 		va_list ap;
 		char stamp[128];
 
@@ -72,16 +73,17 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		VASPRINTF(&buf, fmt, ap);
 		va_end(ap);
 
-		now_t = time(NULL);
-		localtime_r(&now_t, &tm);
-		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d]",
+		tv_time(&now_tv);
+		ms = (int)(now_tv.tv_usec / 1000);
+		localtime_r(&(now_tv.tv_sec), &tm);
+		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d.%03d]",
 				tm.tm_year + 1900,
 				tm.tm_mon + 1,
 				tm.tm_mday,
 				tm.tm_hour,
 				tm.tm_min,
-				tm.tm_sec);
-		if (loglevel <= LOG_WARNING) {\
+				tm.tm_sec, ms);
+		if (loglevel <= LOG_WARNING) {
 			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(stderr, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
 			else
