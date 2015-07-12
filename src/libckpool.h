@@ -507,8 +507,8 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 int wait_write_select(int sockd, float timeout);
 #define write_length(sockd, buf, len) _write_length(sockd, buf, len, __FILE__, __func__, __LINE__)
 int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line);
-bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line);
-#define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, __FILE__, __func__, __LINE__)
+bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line);
+#define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, UNIX_WRITE_TIMEOUT, __FILE__, __func__, __LINE__)
 bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, const char *func, const int line);
 #define send_unix_data(sockd, msg) _send_unix_data(sockd, msg, __FILE__, __func__, __LINE__)
 bool _recv_unix_data(int sockd, struct msghdr *msg, const char *file, const char *func, const int line);

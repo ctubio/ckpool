@@ -640,7 +640,8 @@ out:
 
 /* Send a single message to a process instance and retrieve the response, then
  * close the socket. */
-char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+char *_send_recv_proc(proc_instance_t *pi, int writetimeout, int readtimedout,
+		      const char *msg, const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path, *buf = NULL;
 	int sockd;
@@ -670,10 +671,10 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
 		goto out;
 	}
-	if (unlikely(!send_unix_msg(sockd, msg)))
+	if (unlikely(!_send_unix_msg(sockd, msg, writetimeout, file, func, line)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
-		buf = recv_unix_msg(sockd);
+		buf = _recv_unix_msg(sockd, readtimedout, readtimedout, file, func, line);
 	Close(sockd);
 out:
 	if (unlikely(!buf))

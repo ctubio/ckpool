@@ -1030,7 +1030,7 @@ int _write_length(int sockd, const void *buf, int len, const char *file, const c
 	return ofs;
 }
 
-bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line)
+bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line)
 {
 	uint32_t msglen, len;
 	bool retval = false;
@@ -1050,7 +1050,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		goto out;
 	}
 	msglen = htole32(len);
-	ret = wait_write_select(sockd, UNIX_WRITE_TIMEOUT);
+	ret = wait_write_select(sockd, timeout);
 	if (unlikely(ret < 1)) {
 		ern = errno;
 		LOGERR("Select1 failed in send_unix_msg (%d)", ern);
@@ -1061,7 +1061,7 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		LOGERR("Failed to write 4 byte length in send_unix_msg");
 		goto out;
 	}
-	ret = wait_write_select(sockd, UNIX_WRITE_TIMEOUT);
+	ret = wait_write_select(sockd, timeout);
 	if (unlikely(ret < 1)) {
 		ern = errno;
 		LOGERR("Select2 failed in send_unix_msg (%d)", ern);
