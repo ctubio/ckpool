@@ -359,7 +359,7 @@ static int send_procmsg(proc_instance_t *pi, const char *buf)
 	}
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
+		LOGWARNING("Failed to open socket %s in send_procmsg", path);
 		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, buf)))
@@ -640,8 +640,8 @@ out:
 
 /* Send a single message to a process instance and retrieve the response, then
  * close the socket. */
-char *_send_recv_proc(proc_instance_t *pi, int writetimeout, int readtimedout,
-		      const char *msg, const char *file, const char *func, const int line)
+char *_send_recv_proc(proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,
+		      const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path, *buf = NULL;
 	int sockd;
@@ -727,10 +727,10 @@ char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, co
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
+	float timeout = RPC_TIMEOUT;
 	char *http_req = NULL;
 	json_error_t err_val;
 	json_t *val = NULL;
-	float timeout = 60;
 	int len, ret;
 
 	if (unlikely(cs->fd < 0)) {
