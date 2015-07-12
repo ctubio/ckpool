@@ -517,8 +517,9 @@ static char *cached_proxy_line(proxy_instance_t *proxi)
 static char *next_proxy_line(connsock_t *cs, proxy_instance_t *proxi)
 {
 	char *buf = cached_proxy_line(proxi);
+	float timeout = 10;
 
-	if (!buf && read_socket_line(cs, 5) > 0)
+	if (!buf && read_socket_line(cs, &timeout) > 0)
 		buf = strdup(cs->buf);
 	return buf;
 }
@@ -534,9 +535,10 @@ static void append_proxy_line(proxy_instance_t *proxi, const char *buf)
 /* Get a new line from the connsock and return a copy of it */
 static char *new_proxy_line(connsock_t *cs)
 {
+	float timeout = 10;
 	char *buf = NULL;
 
-	if (read_socket_line(cs, 5) < 1)
+	if (read_socket_line(cs, &timeout) < 1)
 		goto out;
 	buf = strdup(cs->buf);
 out:
@@ -719,6 +721,7 @@ out:
 static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
+	float timeout = 10;
 	bool ret = false;
 
 	JSON_CPACK(req, "{s:s,s:[s]}",
@@ -730,7 +733,7 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Failed to send message in passthrough_stratum");
 		goto out;
 	}
-	if (read_socket_line(cs, 5) < 1) {
+	if (read_socket_line(cs, &timeout) < 1) {
 		LOGWARNING("Failed to receive line in passthrough_stratum");
 		goto out;
 	}
@@ -1259,6 +1262,7 @@ static void *proxy_recv(void *arg)
 		notify_instance_t *ni, *tmp;
 		share_msg_t *share, *tmpshare;
 		int retries = 0, ret;
+		float timeout;
 		time_t now;
 
 		now = time(NULL);
@@ -1286,12 +1290,13 @@ static void *proxy_recv(void *arg)
 
 		/* If we don't get an update within 10 minutes the upstream pool
 		 * has likely stopped responding. */
+		timeout = 10;
 		do {
 			if (cs->fd == -1) {
 				ret = -1;
 				break;
 			}
-			ret = read_socket_line(cs, 5);
+			ret = read_socket_line(cs, &timeout);
 		} while (ret == 0 && ++retries < 120);
 
 		if (ret < 1) {
@@ -1393,10 +1398,11 @@ static void *passthrough_recv(void *arg)
 	rename_proc("passrecv");
 
 	while (42) {
+		float timeout = 60;
 		int ret;
 
 		do {
-			ret = read_socket_line(cs, 60);
+			ret = read_socket_line(cs, &timeout);
 		} while (ret == 0);
 
 		if (ret < 1) {

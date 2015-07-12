@@ -495,7 +495,7 @@ void empty_buffer(connsock_t *cs)
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. */
-int read_socket_line(connsock_t *cs, float timeout)
+int read_socket_line(connsock_t *cs, float *timeout)
 {
 	int fd = cs->fd, ret = -1;
 	char *eom = NULL;
@@ -519,7 +519,12 @@ int read_socket_line(connsock_t *cs, float timeout)
 
 	tv_time(&start);
 rewait:
-	ret = wait_read_select(fd, eom ? 0 : timeout);
+	if (*timeout <= 0) {
+		LOGDEBUG("Timed out in read_socket_line");
+		ret = 0;
+		goto out;
+	}
+	ret = wait_read_select(fd, eom ? 0 : *timeout);
 	if (ret < 1) {
 		if (!ret) {
 			if (eom)
@@ -531,7 +536,7 @@ rewait:
 	}
 	tv_time(&now);
 	diff = tvdiff(&now, &start);
-	timeout -= diff;
+	*timeout -= diff;
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 		int backoff = 1;
@@ -543,7 +548,7 @@ rewait:
 			if (eom)
 				break;
 			/* Have we used up all the timeout yet? */
-			if (timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
+			if (*timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 				goto rewait;
 			LOGERR("Failed to recv in read_socket_line");
 			goto out;
@@ -724,6 +729,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 	char *http_req = NULL;
 	json_error_t err_val;
 	json_t *val = NULL;
+	float timeout = 60;
 	int len, ret;
 
 	if (unlikely(cs->fd < 0)) {
@@ -766,7 +772,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("Failed to write to socket in json_rpc_call");
 		goto out_empty;
 	}
-	ret = read_socket_line(cs, 5);
+	ret = read_socket_line(cs, &timeout);
 	if (ret < 1) {
 		LOGWARNING("Failed to read socket line in json_rpc_call");
 		goto out_empty;
@@ -776,7 +782,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		goto out_empty;
 	}
 	do {
-		ret = read_socket_line(cs, 5);
+		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
 			LOGWARNING("Failed to read http socket lines in json_rpc_call");
 			goto out_empty;
