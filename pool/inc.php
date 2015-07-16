@@ -91,6 +91,8 @@ span.login {float:right;margin-left:8px;margin-right:24px;}
 span.hil {color:blue;}
 span.user {color:green;}
 span.addr {color:brown;}
+span.hdr {font-weight:bold;text-decoration:underline;}
+span.nn {font-weight:bold;color:red;}
 span.warn {color:orange;font-weight:bold;}
 span.urg {color:red;font-weight:bold;}
 span.err {color:red;font-weight:bold;font-size:120%;}
