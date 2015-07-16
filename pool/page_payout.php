@@ -43,7 +43,7 @@ A ckpool restart will also end the current shift and start a new one.<br><br>
 The current Bitcoin network value for $n1 is <b>$nv</b> and thus $n is <b>$nv5</b><br>
 Bitcoin adjusts the $n1 value every 2016 blocks, which is about every 2 weeks.<br><br>
 When a block is found, the reward process counts back shifts until the total share difficulty included is $n.<br>
-Since shares are summaried into shifts, it will includes the full shift at the end of the range counting backwards,<br>
+Since shares are summaried into shifts, it will include the full shift at the end of the range counting backwards,<br>
 so it usually will be a bit more than $n.<br><br>
 
 <span class=hdr>When are payments sent out?</span><br><br>
