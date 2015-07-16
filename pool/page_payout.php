@@ -6,6 +6,7 @@ function dopayout($data, $user)
  $ot = '<span class=nn>1/5</span>';
  $n = '<span class=nn>5Nd</span>';
  $n1 = '<span class=nn>N</span>';
+ $n1d = '<span class=nn>Nd</span>';
  $bc = '+101 Confirms';
  $bm = 'Matured';
  $nd = 0;
@@ -13,6 +14,7 @@ function dopayout($data, $user)
   $nd = $data['info']['currndiff'];
  $nv = number_format($nd, 1);
  $nv5 = number_format(5.0*$nd, 1);
+
  $pg = "<h1>Payouts</h1>
 <table width=75% cellpadding=0 cellspacing=0 border=0><tr><td>
 
@@ -40,10 +42,10 @@ at the point the block was found.<br>
 A ckpool restart will also end the current shift and start a new one.<br><br>
 
 <span class=hdr>So, what's the $n value?</span><br><br>
-The current Bitcoin network value for $n1 is <b>$nv</b> and thus $n is <b>$nv5</b><br>
-Bitcoin adjusts the $n1 value every 2016 blocks, which is about every 2 weeks.<br><br>
+The current Bitcoin network value for $n1d is $nv and thus $n is <b>$nv5</b><br>
+Bitcoin adjusts the $n1d value every 2016 blocks, which is about every 2 weeks.<br><br>
 When a block is found, the reward process counts back shifts until the total share difficulty included is $n.<br>
-Since shares are summaried into shifts, it will include the full shift at the end of the range counting backwards,<br>
+Since shares are summarised into shifts, it will include the full shift at the end of the range counting backwards,<br>
 so it usually will be a bit more than $n.<br><br>
 
 <span class=hdr>When are payments sent out?</span><br><br>
