@@ -10,7 +10,7 @@ function worktitle($data, $user)
  $pg .= "<td class=dr><span class=nb><$r id=srtlst data-sf=n2>:Last</span> Share</td>";
  $pg .= '<td class=dr>Shares</td>';
  $pg .= "<td class=dr><span class=nb><$r id=srtdiff data-sf=r4>:Diff</span></td>";
- $pg .= '<td class=dr>Invalid</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtinv data-sf=r5>:Invalid</span></td>";
  $pg .= '<td class=dr>Block %</td>';
  $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r7>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
@@ -92,25 +92,33 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 		$shareacc = number_format($all[$i]['w_shareacc'], 0);
 		$totshare += $all[$i]['w_shareacc'];
-		$diffacc = number_format($all[$i]['w_diffacc'], 0);
-		$ds = round($all[$i]['w_diffacc']);
-		$totdiff += $all[$i]['w_diffacc'];
+		$dacc = $all[$i]['w_diffacc'];
+		$diffacc = number_format($dacc, 0);
+		$ds = round($dacc);
+		$totdiff += $dacc;
 		$pg .= "<td class=dr>$shareacc</td>";
 		$pg .= "<td class=dr data-srt=$ds>$diffacc</td>";
 
-		$dtot = $all[$i]['w_diffacc'] + $all[$i]['w_diffinv'];
+		$dinv = $all[$i]['w_diffinv'];
+		$dtot = $dacc + $dinv;
 		if ($dtot > 0)
-			$rej = number_format(100.0 * $all[$i]['w_diffinv'] / $dtot, 3);
+		{
+			$rejf = $dinv / $dtot;
+			$rej = number_format(100.0 * $rejf, 3);
+		}
 		else
+		{
+			$rejf = 0;
 			$rej = '0';
-		$totinvalid +=  $all[$i]['w_diffinv'];
+		}
+		$totinvalid += $dinv;
 
-		$pg .= "<td class=dr>$rej%</td>";
+		$pg .= "<td class=dr data-srt=$rejf>$rej%</td>";
 
 		if ($blockacc <= 0)
 			$blkpct = '&nbsp;';
 		else
-			$blkpct = number_format(100.0 * $all[$i]['w_diffacc'] / $blockacc, 3) . '%';
+			$blkpct = number_format(100.0 * $dacc / $blockacc, 3) . '%';
 
 		$pg .= "<td class=dr>$blkpct</td>";
 
