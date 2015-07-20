@@ -165,6 +165,7 @@ function pgtop($info, $dotop, $user, $douser)
  $nlb = '?';
  $pac = '0';
  $per = '0';
+ $perset = false;
  $uhr = '?GHs';
  $u1hr = '';
  if ($info !== false)
@@ -244,12 +245,46 @@ function pgtop($info, $dotop, $user, $douser)
 		}
 	}
 
+	if (isset($info['blockshareinv']))
+	{
+		$shinv = $info['blockshareinv'];
+		$per = siprefmt($shinv, 1);
+		$perset = true;
+		if (isset($info['blockshareacc']))
+		{
+			$shacc = $info['blockshareacc'];
+			if (($shacc+$shinv) > 0)
+			{
+				$amt = 100.0 * $shinv / ($shacc + $shinv);
+				if (round($amt, 2) > 9.99)
+					$per .= ' ('.number_format($amt, 1).'%)';
+				else
+					$per .= ' ('.number_format($amt, 2).'%)';
+			}
+		}
+	}
+
 	if (isset($info['blockerr']))
 	{
-		$rej = $info['blockerr'];
-		$per = number_format($info['blockerr'], 0);
-		if (isset($info['blockacc']) && ($acc+$rej) > 0)
-			$per .= ' ('.number_format(100.0*$rej/($acc+$rej), 3).'%)';
+		if ($perset == false)
+			$per = '';
+		else
+			$per .= ' &#183; ';
+
+		$inv = $info['blockerr'];
+		$per .= siprefmt($inv, 1);
+		if (isset($info['blockacc']))
+		{
+			$acc = $info['blockacc'];
+			if (($acc+$inv) > 0)
+			{
+				$amt = 100.0 * $inv / ($acc + $inv);
+				if (round($amt, 2) > 9.99)
+					$per .= ' ('.number_format($amt, 1).'%)';
+				else
+					$per .= ' ('.number_format($amt, 2).'%)';
+			}
+		}
 	}
 
 	if (isset($info['u_hashrate5m']))
@@ -350,7 +385,7 @@ function pgtop($info, $dotop, $user, $douser)
 	$top .= "<td class=topdat>&nbsp;$phr</td></tr>";
 	$top .= '<tr><td class=topdes>Shares:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$pac</td></tr>";
-	$top .= '<tr id=mini1><td class=topdes>Invalid:&nbsp;</td>';
+	$top .= '<tr id=mini1><td class=topdes>Invalids:&nbsp;</td>';
 	$top .= "<td class=topdat>&nbsp;$per</td></tr></table>";
 	$top .= '</td><td>';
 	$top .= '<table cellpadding=1 cellspacing=0 border=0 width=100%>';
