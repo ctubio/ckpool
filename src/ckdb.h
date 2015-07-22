@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.113"
+#define CKDB_VERSION DB_VERSION"-1.120"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1735,18 +1735,32 @@ typedef struct workerstatus {
 	tv_t last_stats;
 	tv_t last_idle;
 	// Below gets reset on each block
-	double diffacc;
-	double diffinv; // Non-acc
-	double diffsta;
-	double diffdup;
-	double diffhi;
-	double diffrej;
-	double shareacc;
-	double shareinv; // Non-acc
-	double sharesta;
-	double sharedup;
-	double sharehi;
-	double sharerej;
+	double block_diffacc;
+	double block_diffinv; // Non-acc
+	double block_diffsta;
+	double block_diffdup;
+	double block_diffhi;
+	double block_diffrej;
+	double block_shareacc;
+	double block_shareinv; // Non-acc
+	double block_sharesta;
+	double block_sharedup;
+	double block_sharehi;
+	double block_sharerej;
+	// Below gets reset on each idle
+	double active_diffacc;
+	double active_diffinv; // Non-acc
+	double active_diffsta;
+	double active_diffdup;
+	double active_diffhi;
+	double active_diffrej;
+	double active_shareacc;
+	double active_shareinv; // Non-acc
+	double active_sharesta;
+	double active_sharedup;
+	double active_sharehi;
+	double active_sharerej;
+	tv_t active_start;
 } WORKERSTATUS;
 
 #define ALLOC_WORKERSTATUS 1000

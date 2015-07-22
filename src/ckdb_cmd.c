@@ -1395,18 +1395,18 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 			ws_item = get_workerstatus(users->userid, workers->workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
-				t_diffacc += workerstatus->diffacc;
-				t_diffinv += workerstatus->diffinv;
-				t_diffsta += workerstatus->diffsta;
-				t_diffdup += workerstatus->diffdup;
-				t_diffhi  += workerstatus->diffhi;
-				t_diffrej += workerstatus->diffrej;
-				t_shareacc += workerstatus->shareacc;
-				t_shareinv += workerstatus->shareinv;
-				t_sharesta += workerstatus->sharesta;
-				t_sharedup += workerstatus->sharedup;
-				t_sharehi += workerstatus->sharehi;
-				t_sharerej += workerstatus->sharerej;
+				t_diffacc += workerstatus->block_diffacc;
+				t_diffinv += workerstatus->block_diffinv;
+				t_diffsta += workerstatus->block_diffsta;
+				t_diffdup += workerstatus->block_diffdup;
+				t_diffhi  += workerstatus->block_diffhi;
+				t_diffrej += workerstatus->block_diffrej;
+				t_shareacc += workerstatus->block_shareacc;
+				t_shareinv += workerstatus->block_shareinv;
+				t_sharesta += workerstatus->block_sharesta;
+				t_sharedup += workerstatus->block_sharedup;
+				t_sharehi += workerstatus->block_sharehi;
+				t_sharerej += workerstatus->block_sharerej;
 			}
 
 			/* TODO: workers_root userid+worker is ordered
@@ -1692,6 +1692,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					double w_shareacc, w_shareinv;
 					double w_sharesta, w_sharedup;
 					double w_sharehi, w_sharerej;
+					double w_active_diffacc;
+					tv_t w_active_start;
 
 					w_hashrate5m = w_hashrate1hr =
 					w_hashrate24hr = 0.0;
@@ -1699,30 +1701,34 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 					if (!ws_item) {
 						w_lastshare.tv_sec = 0;
-						w_lastdiff = w_diffacc = w_diffinv =
-						w_diffsta = w_diffdup =
-						w_diffhi = w_diffrej =
-						w_shareacc = w_shareinv =
-						w_sharesta = w_sharedup =
-						w_sharehi = w_sharerej = 0;
+						w_lastdiff = w_diffacc =
+						w_diffinv = w_diffsta =
+						w_diffdup = w_diffhi =
+						w_diffrej = w_shareacc =
+						w_shareinv = w_sharesta =
+						w_sharedup = w_sharehi =
+						w_sharerej = w_active_diffacc = 0;
+						w_active_start.tv_sec = 0;
 					} else {
 						DATA_WORKERSTATUS(workerstatus, ws_item);
 						// It's bad to read possibly changing data
 						K_RLOCK(workerstatus_free);
 						w_lastshare.tv_sec = workerstatus->last_share.tv_sec;
 						w_lastdiff = workerstatus->last_diff;
-						w_diffacc = workerstatus->diffacc;
-						w_diffinv = workerstatus->diffinv;
-						w_diffsta = workerstatus->diffsta;
-						w_diffdup = workerstatus->diffdup;
-						w_diffhi  = workerstatus->diffhi;
-						w_diffrej = workerstatus->diffrej;
-						w_shareacc = workerstatus->shareacc;
-						w_shareinv = workerstatus->shareinv;
-						w_sharesta = workerstatus->sharesta;
-						w_sharedup = workerstatus->sharedup;
-						w_sharehi = workerstatus->sharehi;
-						w_sharerej = workerstatus->sharerej;
+						w_diffacc = workerstatus->block_diffacc;
+						w_diffinv = workerstatus->block_diffinv;
+						w_diffsta = workerstatus->block_diffsta;
+						w_diffdup = workerstatus->block_diffdup;
+						w_diffhi  = workerstatus->block_diffhi;
+						w_diffrej = workerstatus->block_diffrej;
+						w_shareacc = workerstatus->block_shareacc;
+						w_shareinv = workerstatus->block_shareinv;
+						w_sharesta = workerstatus->block_sharesta;
+						w_sharedup = workerstatus->block_sharedup;
+						w_sharehi = workerstatus->block_sharehi;
+						w_sharerej = workerstatus->block_sharerej;
+						w_active_diffacc = workerstatus->active_diffacc;
+						w_active_start.tv_sec = workerstatus->active_start.tv_sec;
 						K_RUNLOCK(workerstatus_free);
 					}
 
@@ -1815,6 +1821,15 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					double_to_buf(w_sharerej, reply, sizeof(reply));
 					snprintf(tmp, sizeof(tmp), "w_sharerej:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_active_diffacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_active_diffacc:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					int_to_buf((int)(w_active_start.tv_sec), reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_active_start:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
 				}
 				rows++;
 			}
@@ -1832,7 +1847,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 "w_lastdiff,w_diffacc,w_diffinv,"
 		 "w_diffsta,w_diffdup,w_diffhi,w_diffrej,"
 		 "w_shareacc,w_shareinv,"
-		 "w_sharesta,w_sharedup,w_sharehi,w_sharerej" : "",
+		 "w_sharesta,w_sharedup,w_sharehi,w_sharerej,"
+		 "w_active_diffacc,w_active_start" : "",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
