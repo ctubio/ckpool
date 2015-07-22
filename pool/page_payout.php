@@ -32,13 +32,16 @@ The $n means the pool rewards $t times the expected number of shares, each time 
 So each share will be paid appoximately $ot of it's expected value, in each block it gets a reward,<br>
 but each share is also expected, on average, to be rewarded $t times in blocks found after the share is submitted to the pool.<br>
 i.e. if pool luck was always 100% then each share is expected to be rewarded $t times.<br><br>
-If pool luck is better than 100%, then the average share reward wil be better than $t times.<br>
+If pool luck is better than 100%, then the average share reward will be better than $t times.<br>
 If pool luck is lower than 100%, then the average share reward will be less than $t times.<br><br>
 
 <span class=hdr>What's a shift?</span></br><br>
 When your miner sends shares to the pool, the shares are not stored individually, but rather summarised into shifts.<br>
-Shifts are ~50min or less in length, however, when we find any pool blocks the current shift ends early,<br>
-at the point the block was found.<br>
+Shifts are ~50min or less in length.<br>
+Aproximately every 30s, the pool generates new work and sends that to all the miners.<br>
+The pool also sends new work every time a block is found on the Bitcoin network.<br>
+A shift summarises all the shares submitted to the pool for 100 work changes.<br>
+However, when we find pool blocks, the current shift ends at the work in which the block was found.<br>
 A ckpool restart will also end the current shift and start a new one.<br><br>
 
 <span class=hdr>So, what's the $n value?</span><br><br>
