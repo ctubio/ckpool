@@ -54,7 +54,7 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.0"
+#define DB_VERSION "1.0.1"
 #define CKDB_VERSION DB_VERSION"-1.120"
 
 #define WHERE_FFL " - from %s %s() line %d"
@@ -1017,6 +1017,9 @@ typedef struct users {
 	char passwordhash[TXT_BIG+1];
 	char secondaryuserid[TXT_SML+1];
 	char salt[TXT_BIG+1];
+	char *userdata;
+	int64_t databits; // non-DB field, Bitmask of userdata content
+	int64_t userbits; // Bitmask of user attributes
 	HISTORYDATECONTROLFIELDS;
 } USERS;
 
@@ -1030,6 +1033,19 @@ typedef struct users {
 #define SHA256SIZBIN	32
 #define SALTSIZHEX	32
 #define SALTSIZBIN	16
+
+#define DATABITS_SEP ','
+#define DATABITS_SEP_STR ","
+
+// databits attributes
+// These are generated at dbload time from userdata
+// Google Auth 2FA
+#define USER_GOOGLEAUTH_NAME "gauth"
+#define USER_GOOGLEAUTH 0x1
+
+// userbits attributes
+// Address account, not a username account
+#define USER_ADDRESS 0x1
 
 extern K_TREE *users_root;
 extern K_TREE *userid_root;
@@ -1073,6 +1089,7 @@ typedef struct workers {
 	int32_t difficultydefault;
 	char idlenotificationenabled[TXT_FLAG+1];
 	int32_t idlenotificationtime;
+	int64_t workerbits; // Bitmask of worker attributes
 	HISTORYDATECONTROLFIELDS;
 } WORKERS;
 
@@ -1085,6 +1102,8 @@ typedef struct workers {
 extern K_TREE *workers_root;
 extern K_LIST *workers_free;
 extern K_STORE *workers_store;
+
+// Currently no workerbits attributes
 
 #define DIFFICULTYDEFAULT_MIN 10
 #define DIFFICULTYDEFAULT_MAX 0x7fffffff
@@ -2299,8 +2318,8 @@ extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			 char *newhash, char *email, char *by, char *code,
 			 char *inet, tv_t *cd, K_TREE *trf_root, char *status);
 extern K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
-			char *passwordhash, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root);
+			char *passwordhash, int64_t userbits, char *by,
+			char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool users_fill(PGconn *conn);
 extern bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun);
 extern K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,

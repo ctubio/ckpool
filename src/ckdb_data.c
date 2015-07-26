@@ -2971,7 +2971,7 @@ double payout_stats(PAYOUTS *payouts, char *statname)
 			pos += len+1;
 			// They should only contain +ve numbers
 			if (*pos && isdigit(*pos)) {
-				tab = strchr(pos, '\t');
+				tab = strchr(pos, FLDSEP);
 				if (!tab)
 					numlen = strlen(pos);
 				else
@@ -2984,7 +2984,7 @@ double payout_stats(PAYOUTS *payouts, char *statname)
 			}
 			break;
 		}
-		pos = strchr(pos, '\t');
+		pos = strchr(pos, FLDSEP);
 		if (pos)
 			pos++;
 	}

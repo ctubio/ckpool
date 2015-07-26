@@ -527,8 +527,8 @@ unparam:
 }
 
 K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
-			char *passwordhash, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root)
+			char *passwordhash, int64_t userbits, char *by,
+			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -540,7 +540,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	uint64_t hash;
 	__maybe_unused uint64_t tmp;
 	bool dup, ok = false;
-	char *params[8 + HISTORYDATECOUNT];
+	char *params[10 + HISTORYDATECOUNT];
 	int n, par = 0;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -592,6 +592,9 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 			      row->passwordhash, sizeof(row->passwordhash));
 	}
 
+	row->userdata = EMPTY;
+	row->userbits = userbits;
+
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
@@ -608,13 +611,15 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
 	params[par++] = str_to_buf(row->secondaryuserid, NULL, 0);
 	params[par++] = str_to_buf(row->salt, NULL, 0);
+	params[par++] = str_to_buf(row->userdata, NULL, 0);
+	params[par++] = bigint_to_buf(row->userbits, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into users "
 		"(userid,username,status,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid,salt"
-		HISTORYDATECONTROL ") values (" PQPARAM13 ")";
+		"secondaryuserid,salt,userdata,userbits"
+		HISTORYDATECONTROL ") values (" PQPARAM15 ")";
 
 	if (!conn) {
 		conn = dbconnect();
@@ -652,6 +657,26 @@ unitem:
 		return NULL;
 }
 
+static void users_checkfor(USERS *row, char *name, int64_t bits)
+{
+	char *ptr;
+
+	ptr = strstr(row->userdata, name);
+	if (ptr) {
+		size_t len = strlen(name);
+		if ((ptr == row->userdata || *(ptr-1) == DATABITS_SEP) &&
+		    *(ptr+len) == '=') {
+			row->databits |= bits;
+		}
+	}
+}
+
+static void users_databits(USERS *row)
+{
+	if (row->userdata && *(row->userdata))
+		users_checkfor(row, USER_GOOGLEAUTH_NAME, USER_GOOGLEAUTH);
+}
+
 bool users_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
@@ -661,14 +686,14 @@ bool users_fill(PGconn *conn)
 	USERS *row;
 	char *field;
 	char *sel;
-	int fields = 8;
+	int fields = 10;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"userid,username,status,emailaddress,joineddate,"
-		"passwordhash,secondaryuserid,salt"
+		"passwordhash,secondaryuserid,salt,userdata,userbits"
 		HISTORYDATECONTROL
 		" from users";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -740,6 +765,18 @@ bool users_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_STR("salt", field, row->salt);
+
+		PQ_GET_FLD(res, i, "userdata", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("userdata", field, row->userdata);
+		LIST_MEM_ADD(users_free, row->userdata);
+		users_databits(row);
+
+		PQ_GET_FLD(res, i, "userbits", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userbits", field, row->userbits);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -1159,7 +1196,7 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	K_ITEM *item, *ret = NULL;
 	WORKERS *row;
 	char *ins;
-	char *params[6 + HISTORYDATECOUNT];
+	char *params[7 + HISTORYDATECOUNT];
 	int n, par = 0;
 	int32_t diffdef;
 	int32_t nottime;
@@ -1222,6 +1259,8 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	if (row->idlenotificationtime == IDLENOTIFICATIONTIME_DEF)
 		row->idlenotificationenabled[0] = IDLENOTIFICATIONDISABLED[0];
 
+	row->workerbits = 0;
+
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
@@ -1232,13 +1271,14 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	params[par++] = int_to_buf(row->difficultydefault, NULL, 0);
 	params[par++] = str_to_buf(row->idlenotificationenabled, NULL, 0);
 	params[par++] = int_to_buf(row->idlenotificationtime, NULL, 0);
+	params[par++] = bigint_to_buf(row->workerbits, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into workers "
 		"(workerid,userid,workername,difficultydefault,"
-		"idlenotificationenabled,idlenotificationtime"
-		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+		"idlenotificationenabled,idlenotificationtime,workerbits"
+		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
@@ -1371,8 +1411,8 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 
 	ins = "insert into workers "
 		"(workerid,userid,workername,difficultydefault,"
-		"idlenotificationenabled,idlenotificationtime"
-		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+		"idlenotificationenabled,idlenotificationtime,workerbits"
+		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->workerid, NULL, 0);
@@ -1381,6 +1421,7 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	params[par++] = int_to_buf(row->difficultydefault, NULL, 0);
 	params[par++] = str_to_buf(row->idlenotificationenabled, NULL, 0);
 	params[par++] = int_to_buf(row->idlenotificationtime, NULL, 0);
+	params[par++] = bigint_to_buf(row->workerbits, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
@@ -1418,14 +1459,14 @@ bool workers_fill(PGconn *conn)
 	WORKERS *row;
 	char *field;
 	char *sel;
-	int fields = 6;
+	int fields = 7;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"userid,workername,difficultydefault,"
-		"idlenotificationenabled,idlenotificationtime"
+		"idlenotificationenabled,idlenotificationtime,workerbits"
 		HISTORYDATECONTROL
 		",workerid from workers";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -1482,6 +1523,11 @@ bool workers_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_INT("idlenotificationtime", field, row->idlenotificationtime);
+
+		PQ_GET_FLD(res, i, "workerbits", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workerbits", field, row->workerbits);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -5495,7 +5541,8 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 	if (!u_item) {
 		if (addressuser) {
 			u_item = users_add(conn, username, EMPTY, EMPTY,
-					   by, code, inet, cd, trf_root);
+					   USER_ADDRESS, by, code, inet, cd,
+					   trf_root);
 		} else {
 			LOGDEBUG("%s(): unknown user '%s'",
 				 __func__,
