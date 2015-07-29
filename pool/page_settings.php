@@ -83,6 +83,14 @@ function settings($data, $user, $email, $addr, $err)
  $pg .= '</td><td class=dl>';
  $pg .= '<input type=password name=pass2 size=20>';
  $pg .= '</td></tr>';
+ $pg .= '<tr class=dc><td class=dr nowrap>';
+ $pg .= '<span class=st1>*</span>2nd Authentication:';
+ $pg .= '</td><td class=dl>';
+ $pg .= '<input type=password name=2fa size=20>';
+ $pg .= '</td></tr>';
+ $pg .= '<tr class=dc><td colspan=2 class=dc><font size=-1>';
+ $pg .= "<span class=st1>*</span>Leave blank if you haven't enabled it</font>";
+ $pg .= '</td></tr>'
  $pg .= '<tr class=dc><td class=dr colspan=2>';
  $pg .= 'Change: <input type=submit name=Change value=Password>';
  $pg .= '</td></tr>';
@@ -123,16 +131,14 @@ function dosettings($data, $user)
 	$oldpass = getparam('oldpass', false);
 	$pass1 = getparam('pass1', false);
 	$pass2 = getparam('pass2', false);
+	$twofa = getparam('2fa', false);
 	if (!safepass($pass1))
-	{
-		$err = "Password is unsafe - requires 6 or more characters, including<br>" .
-			"at least one of each uppercase, lowercase and digits, but not Tab";
-	}
+		$err = 'Unsafe password. ' . passrequires();
 	elseif ($pass1 != $pass2)
 		$err = "Passwords don't match";
 	else
 	{
-		$ans = setPass($user, $oldpass, $pass1);
+		$ans = setPass($user, $oldpass, $pass1, $twofa);
 		$err = 'Password changed';
 		$check = true;
 	}

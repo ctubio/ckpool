@@ -409,17 +409,10 @@ function pgtop($info, $dotop, $user, $douser)
 		list($who, $whoid) = validate();
 		if ($who == false)
 		{
-			$top .= makeForm('')."
-<table cellpadding=0 cellspacing=0 border=0><tr><td>
-<table cellpadding=0 cellspacing=0 border=0><tr>
-<td>User:</td><td><input type=text name=User size=10 value=''></td>
-</tr><tr>
-<td>Pass:</td><td><input type=password name=Pass size=10 value=''></td>
-</tr></table></td><td>
-<table cellpadding=0 cellspacing=0 border=0><tr>
-<td>&nbsp;<input type=submit name=Login value=Login></td></tr><tr>
-<td>&nbsp;&nbsp;<input type=submit name=Register value='Register/Reset'></td></tr></table>
-</td></tr></table></form>";
+			$top .= '<table cellpadding=0 cellspacing=0 border=0><tr><td>';
+			$top .= '<a href=https://' . $_SERVER['SERVER_NAME'];
+			$top .= '/index.php?Register=1>Login<br>Register</a>';
+			$top .= '</td></tr></table>';
 		}
 		else
 		{

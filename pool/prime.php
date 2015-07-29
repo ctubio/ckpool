@@ -105,7 +105,7 @@ function check()
 		showPage(NULL, 'reset', $dmenu, '', $who);
 	else
 	{
-		if (requestRegister() == true)
+		if (requestLoginRegReset() == true)
 			showPage(NULL, 'reg', $dmenu, '', $who);
 		else
 		{
