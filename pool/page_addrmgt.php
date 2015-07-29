@@ -86,8 +86,8 @@ function addrmgtuser($data, $user, $err)
 	$pg .= '</td><td colspan=2 class=dl><input type=submit name=OK value=Save></td></tr>';
 
 	$pg .= "<tr><td colspan=3 class=dc><font size=-1>";
-	$pg .= 'You must enter your password to save changes<br>';
 	$pg .= "<span class=st1>*</span>Leave blank if you haven't enabled it<br>";
+	$pg .= 'You must enter your password to save changes<br>';
 	$pg .= 'A ratio of 0, will remove the address from the payouts</font></td></tr>';
  }
  $pg .= "</table><input type=hidden name=rows value=$count id=rows></form>\n";
