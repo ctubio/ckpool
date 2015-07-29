@@ -225,7 +225,7 @@ function userReg($user, $email, $pass)
  return repDecode($rep);
 }
 #
-function userSettings($user, $email = null, $addr = null, $pass = null)
+function userSettings($user, $email = null, $addr = null, $pass = null, $twofa = null)
 {
  $tmo = false;
  $flds = array('username' => $user);
@@ -247,7 +247,12 @@ function userSettings($user, $email = null, $addr = null, $pass = null)
 	$tmo = 3; # 3x the timeout
  }
  if ($pass != null)
+ {
 	$flds['passwordhash'] = myhash($pass);
+	if ($twofa === null)
+		$twofa = '';
+	$flds['2fa'] = $twofa;
+ }
  $msg = msgEncode('usersettings', 'userset', $flds, $user);
  $rep = sendsockreply('userSettings', $msg, $tmo);
  if (!$rep)
