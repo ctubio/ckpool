@@ -2,15 +2,17 @@
 #
 function worktitle($data, $user)
 {
+ addSort();
+ $r = "input type=radio name=srt onclick=\"sott('worksrt',this);\"";
  $pg  = '<tr class=title>';
- $pg .= '<td class=dl>Worker Name</td>';
+ $pg .= "<td class=dl>Worker <span class=nb>Name:<$r id=srtwrk data-sf=s0></span></td>";
  $pg .= '<td class=dr>Work Diff</td>';
- $pg .= '<td class=dr>Last Share</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtlst data-sf=n2>:Last</span> Share</td>";
  $pg .= '<td class=dr>Shares</td>';
- $pg .= '<td class=dr>Diff</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtdiff data-sf=r4>:Diff</span></td>";
  $pg .= '<td class=dr>Invalid</td>';
  $pg .= '<td class=dr>Block %</td>';
- $pg .= '<td class=dr>Hash Rate</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r7>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
  return $pg;
 }
@@ -86,14 +88,15 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 			$ld = '&nbsp;';
 		$pg .= "<td class=dr>$ld</td>";
 
-		$pg .= '<td class=dr>'.howlongago($lst).'</td>';
+		$pg .= "<td class=dr data-srt=$lst>".howlongago($lst).'</td>';
 
 		$shareacc = number_format($all[$i]['w_shareacc'], 0);
 		$totshare += $all[$i]['w_shareacc'];
 		$diffacc = number_format($all[$i]['w_diffacc'], 0);
+		$ds = round($all[$i]['w_diffacc']);
 		$totdiff += $all[$i]['w_diffacc'];
 		$pg .= "<td class=dr>$shareacc</td>";
-		$pg .= "<td class=dr>$diffacc</td>";
+		$pg .= "<td class=dr data-srt=$ds>$diffacc</td>";
 
 		$dtot = $all[$i]['w_diffacc'] + $all[$i]['w_diffinv'];
 		if ($dtot > 0)
@@ -113,13 +116,17 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 		$uhr = $all[$i]['w_uhr'];
 		if ($uhr == '?')
+		{
 			$uhr = '?GHs';
+			$su = 0;
+		}
 		else
 		{
+			$su = round($uhr);
 			$totrate += $uhr;
 			$uhr = dsprate($uhr);
 		}
-		$pg .= "<td class=dr>$uhr</td>";
+		$pg .= "<td class=dr data-srt=$su>$uhr</td>";
 
 		$pg .= "</tr>\n";
 
@@ -137,7 +144,7 @@ function worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate, $blockac
 	$row = 'even';
  else
 	$row = 'odd';
- $pg .= "<tr class=$row><td class=dl>Total:</td><td colspan=2 class=dl></td>";
+ $pg .= "<tr class=$row><td class=dl>Total: $offset</td><td colspan=2 class=dl></td>";
  $shareacc = number_format($totshare, 0);
  $pg .= "<td class=dr>$shareacc</td>";
  $diffacc = number_format($totdiff, 0);
@@ -187,6 +194,8 @@ function doworker($data, $user)
  }
 
  $pg .= "</table>\n";
+ $pg .= "<script type='text/javascript'>\n";
+ $pg .= "sotc('worksrt','srtrate');</script>\n";
 
  return "<h1>Workers$title</h1>".$pg;
 }

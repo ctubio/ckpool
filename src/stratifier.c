@@ -892,7 +892,7 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int pri
 		set = true;
 	} else
 		set = false;
-	buf = send_recv_proc(ckp->generator, msg);
+	buf = _send_recv_proc(ckp->generator, msg, UNIX_WRITE_TIMEOUT, RPC_TIMEOUT, __FILE__, __func__, __LINE__);
 	if (unlikely(!buf))
 		buf = strdup("failed");
 	if (set)

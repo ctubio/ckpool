@@ -558,8 +558,9 @@ static char *cached_proxy_line(proxy_instance_t *proxi)
 static char *next_proxy_line(connsock_t *cs, proxy_instance_t *proxi)
 {
 	char *buf = cached_proxy_line(proxi);
+	float timeout = 10;
 
-	if (!buf && read_socket_line(cs, 5) > 0)
+	if (!buf && read_socket_line(cs, &timeout) > 0)
 		buf = strdup(cs->buf);
 	return buf;
 }
@@ -575,9 +576,10 @@ static void append_proxy_line(proxy_instance_t *proxi, const char *buf)
 /* Get a new line from the connsock and return a copy of it */
 static char *new_proxy_line(connsock_t *cs)
 {
+	float timeout = 10;
 	char *buf = NULL;
 
-	if (read_socket_line(cs, 5) < 1)
+	if (read_socket_line(cs, &timeout) < 1)
 		goto out;
 	buf = strdup(cs->buf);
 out:
@@ -756,6 +758,7 @@ out:
 static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi, const bool node)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
+	float timeout = 10;
 	bool ret = false;
 
 	JSON_CPACK(req, "{s:s,s:[sb]}",
@@ -767,7 +770,7 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi, const b
 		LOGWARNING("Failed to send message in passthrough_stratum");
 		goto out;
 	}
-	if (read_socket_line(cs, 5) < 1) {
+	if (read_socket_line(cs, &timeout) < 1) {
 		LOGWARNING("Failed to receive line in passthrough_stratum");
 		goto out;
 	}
@@ -1900,6 +1903,7 @@ static void *passthrough_recv(void *arg)
 	alive = proxi->alive;
 
 	while (42) {
+		float timeout = 90;
 		int ret;
 
 		while (!proxy_alive(ckp, proxi, cs, true)) {
@@ -1913,7 +1917,7 @@ static void *passthrough_recv(void *arg)
 			reconnect_generator(ckp);
 
 		/* Make sure we receive a line within 90 seconds */
-		ret = read_socket_line(cs, 90);
+		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in passthrough_recv, attempting reconnect",
 				   proxi->id, proxi->url);
@@ -2025,12 +2029,14 @@ static void *proxy_recv(void *arg)
 		 * has likely stopped responding. */
 		ret = epoll_wait(epfd, &event, 1, 600000);
 		if (likely(ret > 0)) {
+			float timeout = 10;
+
 			subproxy = event.data.ptr;
 			cs = &subproxy->cs;
 			if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))
 				ret = -1;
 			else
-				ret = read_socket_line(cs, 5);
+				ret = read_socket_line(cs, &timeout);
 		}
 		if (ret < 1) {
 			LOGNOTICE("Proxy %d:%d %s failed to epoll/read_socket_line in proxy_recv",

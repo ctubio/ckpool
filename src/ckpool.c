@@ -65,7 +65,8 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		int logfd = global_ckp->logfd;
 		char *buf = NULL;
 		struct tm tm;
-		time_t now_t;
+		tv_t now_tv;
+		int ms;
 		va_list ap;
 		char stamp[128];
 
@@ -73,16 +74,17 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		VASPRINTF(&buf, fmt, ap);
 		va_end(ap);
 
-		now_t = time(NULL);
-		localtime_r(&now_t, &tm);
-		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d]",
+		tv_time(&now_tv);
+		ms = (int)(now_tv.tv_usec / 1000);
+		localtime_r(&(now_tv.tv_sec), &tm);
+		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d.%03d]",
 				tm.tm_year + 1900,
 				tm.tm_mon + 1,
 				tm.tm_mday,
 				tm.tm_hour,
 				tm.tm_min,
-				tm.tm_sec);
-		if (loglevel <= LOG_WARNING) {\
+				tm.tm_sec, ms);
+		if (loglevel <= LOG_WARNING) {
 			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(stderr, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
 			else
@@ -360,7 +362,7 @@ static int send_procmsg(proc_instance_t *pi, const char *buf)
 	}
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
+		LOGWARNING("Failed to open socket %s in send_procmsg", path);
 		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, buf)))
@@ -510,7 +512,7 @@ void empty_buffer(connsock_t *cs)
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. */
-int read_socket_line(connsock_t *cs, float timeout)
+int read_socket_line(connsock_t *cs, float *timeout)
 {
 	int fd = cs->fd, ret = -1;
 	char *eom = NULL;
@@ -534,7 +536,12 @@ int read_socket_line(connsock_t *cs, float timeout)
 
 	tv_time(&start);
 rewait:
-	ret = wait_read_select(fd, eom ? 0 : timeout);
+	if (*timeout <= 0) {
+		LOGDEBUG("Timed out in read_socket_line");
+		ret = 0;
+		goto out;
+	}
+	ret = wait_read_select(fd, eom ? 0 : *timeout);
 	if (ret < 1) {
 		if (!ret) {
 			if (eom)
@@ -550,7 +557,7 @@ rewait:
 	}
 	tv_time(&now);
 	diff = tvdiff(&now, &start);
-	timeout -= diff;
+	*timeout -= diff;
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 		int backoff = 1;
@@ -562,7 +569,7 @@ rewait:
 			if (eom)
 				break;
 			/* Have we used up all the timeout yet? */
-			if (timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
+			if (*timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 				goto rewait;
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
@@ -657,7 +664,8 @@ out:
 
 /* Send a single message to a process instance and retrieve the response, then
  * close the socket. */
-char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+char *_send_recv_proc(proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,
+		      const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path, *buf = NULL;
 	int sockd;
@@ -687,10 +695,10 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
 		goto out;
 	}
-	if (unlikely(!send_unix_msg(sockd, msg)))
+	if (unlikely(!_send_unix_msg(sockd, msg, writetimeout, file, func, line)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
-		buf = recv_unix_msg(sockd);
+		buf = _recv_unix_msg(sockd, readtimedout, readtimedout, file, func, line);
 	Close(sockd);
 out:
 	if (unlikely(!buf))
@@ -743,6 +751,7 @@ char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, co
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
+	float timeout = RPC_TIMEOUT;
 	char *http_req = NULL;
 	json_error_t err_val;
 	json_t *val = NULL;
@@ -788,7 +797,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		LOGWARNING("Failed to write to socket in json_rpc_call");
 		goto out_empty;
 	}
-	ret = read_socket_line(cs, 5);
+	ret = read_socket_line(cs, &timeout);
 	if (ret < 1) {
 		LOGWARNING("Failed to read socket line in json_rpc_call");
 		goto out_empty;
@@ -798,7 +807,7 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		goto out_empty;
 	}
 	do {
-		ret = read_socket_line(cs, 5);
+		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
 			LOGWARNING("Failed to read http socket lines in json_rpc_call");
 			goto out_empty;

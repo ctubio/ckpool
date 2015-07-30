@@ -561,7 +561,8 @@ void logmsg(int loglevel, const char *fmt, ...)
 	int logfd = 0;
 	char *buf = NULL;
 	struct tm tm;
-	time_t now_t;
+	tv_t now_tv;
+	int ms;
 	va_list ap;
 	char stamp[128];
 	char *extra = EMPTY;
@@ -572,8 +573,9 @@ void logmsg(int loglevel, const char *fmt, ...)
 	if (loglevel > global_ckp->loglevel)
 		return;
 
-	now_t = time(NULL);
-	localtime_r(&now_t, &tm);
+	tv_time(&now_tv);
+	ms = (int)(now_tv.tv_usec / 1000);
+	localtime_r(&(now_tv.tv_sec), &tm);
 	minoff = tm.tm_gmtoff / 60;
 	if (minoff < 0) {
 		tzch = '-';
@@ -591,13 +593,13 @@ void logmsg(int loglevel, const char *fmt, ...)
 			 tzch, hroff);
 	}
 	snprintf(stamp, sizeof(stamp),
-			"[%d-%02d-%02d %02d:%02d:%02d%s]",
+			"[%d-%02d-%02d %02d:%02d:%02d.%03d%s]",
 			tm.tm_year + 1900,
 			tm.tm_mon + 1,
 			tm.tm_mday,
 			tm.tm_hour,
 			tm.tm_min,
-			tm.tm_sec,
+			tm.tm_sec, ms,
 			tzinfo);
 
 	if (!fmt) {
@@ -3743,7 +3745,7 @@ static void *socketer(__maybe_unused void *arg)
 
 		cmdnum = CMD_UNSET;
 
-		buf = recv_unix_msg(sockd);
+		buf = recv_unix_msg_tmo2(sockd, RECV_UNIX_TIMEOUT1, RECV_UNIX_TIMEOUT2);
 		// Once we've read the message
 		setnow(&now);
 		if (buf) {
