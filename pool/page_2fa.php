@@ -20,8 +20,8 @@ function set_2fa($data, $user, $tfa, $ans, $err)
 	$pg .= "You don't have 2FA setup yet<br><br>";
 	$pg .= 'To use 2FA you need an App on your phone/tablet<br>';
 	$pg .= 'The free and recommended ones that have been tested here are:<br><br>';
-	$pg .= "Android: 'FreeOTP Authenticator' by Red Hat<br>";
-	$pg .= "Apple: 'OTP Auth' by Roland Moers<br><br>";
+	$pg .= "Android: Google Play 'FreeOTP Authenticator' by Red Hat<br>";
+	$pg .= "Apple: App Store 'OTP Auth' by Roland Moers<br><br>";
 	$pg .= 'Click here to start setting up 2FA: ';
 	$pg .= '<input type=submit name=Setup value=Setup>';
 	$pg .= '</td></tr>';
