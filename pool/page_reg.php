@@ -30,7 +30,7 @@ function doregres($data, $u)
 <tr><td class=dr>Password:</td>
  <td class=dl><input type=password name=Pass value=''></td></tr>
 <tr><td class=dr><span class=st1>*</span>2nd Authentication:</td>
- <td class=dl><input type=password name=2fa></td></tr>
+ <td class=dl><input type=password name=2fa size=10></td></tr>
 <tr><td colspan=2 class=dc><font size=-1><span class=st1>*</span>
  Leave blank if you haven't enabled it</font></td></tr>
 <tr><td>&nbsp;</td>

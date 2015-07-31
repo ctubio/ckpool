@@ -82,7 +82,7 @@ function addrmgtuser($data, $user, $err)
 		$row = 'odd';
 	$pg .= "<tr class=$row>";
 	$pg .= '<td class=dr>';
-	$pg .= '<span class=st1>*</span>2nd Authentication: <input type=password name=2fa size=20>';
+	$pg .= '<span class=st1>*</span>2nd Authentication: <input type=password name=2fa size=10>';
 	$pg .= '</td><td colspan=2 class=dl><input type=submit name=OK value=Save></td></tr>';
 
 	$pg .= "<tr><td colspan=3 class=dc><font size=-1>";

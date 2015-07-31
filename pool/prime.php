@@ -73,7 +73,8 @@ function check()
 		'Rewards' => 'mpayouts',
 		'Payments' => 'payments',
 		'Settings' => 'settings',
-		'User Settings' => 'userset'
+		'User Settings' => 'userset',
+		'2FA Settings' => '2fa'
 	),
 	'Workers' => array(
 		'Shifts' => 'shifts',

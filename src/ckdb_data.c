@@ -155,7 +155,7 @@ char *_safe_text(char *txt, bool shownull)
 	if (!txt) {
 		buf = strdup("(Null)");
 		if (!buf)
-			quithere(1, "malloc OOM");
+			quithere(1, "strdup OOM");
 		return buf;
 	}
 
@@ -1194,6 +1194,179 @@ bool check_hash(USERS *users, char *passwordhash)
 		return (strcasecmp(hex, users->passwordhash) == 0);
 	} else
 		return (strcasecmp(passwordhash, users->passwordhash) == 0);
+}
+
+static void users_checkfor(USERS *users, char *name, int64_t bits)
+{
+	char *ptr;
+
+	ptr = strstr(users->userdata, name);
+	if (ptr) {
+		size_t len = strlen(name);
+		if ((ptr == users->userdata || *(ptr-1) == DATABITS_SEP) &&
+		    *(ptr+len) == '=') {
+			users->databits |= bits;
+		}
+	}
+}
+
+void users_databits(USERS *users)
+{
+	users->databits = 0;
+	if (users->userdata && *(users->userdata))
+	{
+		users_checkfor(users, USER_TOTPAUTH_NAME, USER_TOTPAUTH);
+		users_checkfor(users, USER_TEST2FA_NAME, USER_TEST2FA);
+	}
+}
+
+// Returns the hex text string (and length) in a malloced buffer
+char *_users_userdata_get_hex(USERS *users, char *name, int64_t bit,
+			      size_t *hexlen, WHERE_FFL_ARGS)
+{
+	char *ptr, *tmp, *end, *st = NULL, *val = NULL;
+
+	*hexlen = 0;
+	if (users->userdata && (users->databits & bit)) {
+		ptr = strstr(users->userdata, name);
+		// Should always be true
+		if (!ptr) {
+			LOGEMERG("%s() users userdata/databits mismatch for "
+				 "%s/%"PRId64 WHERE_FFL,
+				 __func__,
+				 st = safe_text_nonull(users->username),
+				 users->databits, WHERE_FFL_PASS);
+			FREENULL(st);
+		} else {
+			tmp = ptr + strlen(name) + 1;
+			if ((ptr == users->userdata || *(ptr-1) == DATABITS_SEP) &&
+			    *(tmp-1) == '=') {
+				end = strchr(tmp, DATABITS_SEP);
+				if (end)
+					*hexlen = end - tmp;
+				else
+					*hexlen = strlen(tmp);
+				val = malloc(*hexlen + 1);
+				if (!val)
+					quithere(1, "malloc OOM");
+				memcpy(val, tmp, *hexlen);
+				val[*hexlen] = '\0';
+			}
+		}
+	}
+	return val;
+}
+
+// Returns binary malloced string (and length) or NULL if not found
+unsigned char *_users_userdata_get_bin(USERS *users, char *name, int64_t bit,
+				       size_t *binlen, WHERE_FFL_ARGS)
+{
+	unsigned char *val = NULL;
+	size_t hexlen;
+	char *hex;
+
+	*binlen = 0;
+	hex = _users_userdata_get_hex(users, name, bit, &hexlen,
+				      WHERE_FFL_PASS);
+	if (hex) {
+		/* avoid calling malloc twice, hex is 2x required
+		 *  and overlap is OK with _hex2bin code */
+		hexlen >>= 1;
+		if (hex2bin(hex, hex, hexlen)) {
+			val = (unsigned char *)hex;
+			*binlen = hexlen;
+		} else
+			FREENULL(hex);
+	}
+	return val;
+}
+
+/* WARNING - users->userdata and users->databits are updated */
+void _users_userdata_del(USERS *users, char *name, int64_t bit, WHERE_FFL_ARGS)
+{
+	char *ptr, *tmp, *st = NULL, *end;
+
+	if (users->userdata && (users->databits & bit)) {
+		ptr = strstr(users->userdata, name);
+		// Should always be true
+		if (!ptr) {
+			LOGEMERG("%s() users userdata/databits mismatch for "
+				 "%s/%"PRId64 WHERE_FFL,
+				 __func__,
+				 st = safe_text_nonull(users->username),
+				 users->databits, WHERE_FFL_PASS);
+			FREENULL(st);
+		} else {
+			tmp = ptr + strlen(name) + 1;
+			if ((ptr == users->userdata || *(ptr-1) == DATABITS_SEP) &&
+			    *(tmp-1) == '=') {
+				// overwrite the memory since it will be smaller
+				end = strchr(tmp, DATABITS_SEP);
+				if (!end) {
+					// chop off the end
+					if (ptr == users->userdata) {
+						// now empty
+						*ptr = '\0';
+					} else {
+						// remove from DATABITS_SEP
+						*(ptr-1) = '\0';
+					}
+				} else {
+					// overlap
+					memmove(ptr, end+1, strlen(end+1)+1);
+				}
+				users->databits &= ~bit;
+			}
+		}
+	}
+}
+
+/* hex should be null terminated hex text
+ * WARNING - users->userdata and users->databits are updated */
+void _users_userdata_add_hex(USERS *users, char *name, int64_t bit, char *hex,
+			     WHERE_FFL_ARGS)
+{
+	char *ptr;
+
+	if (users->userdata && (users->databits & bit)) {
+		// TODO: if it's the same size or smaller, don't reallocate
+		_users_userdata_del(users, name, bit, WHERE_FFL_PASS);
+	}
+
+	if (users->userdata == EMPTY)
+		users->userdata = NULL;
+	else if (users->userdata && !(*(users->userdata)))
+		FREENULL(users->userdata);
+
+	if (users->userdata) {
+		size_t len = strlen(users->userdata) + 1 +
+				strlen(name) + 1 + strlen(hex) + 1;
+		ptr = malloc(len);
+		if (!(ptr))
+			quithere(1, "malloc OOM");
+		snprintf(ptr, len,
+			 "%s%c%s=%s",
+			 users->userdata, DATABITS_SEP, name, hex);
+		FREENULL(users->userdata);
+		users->userdata = ptr;
+	} else {
+		size_t len = strlen(name) + 1 + strlen(hex) + 1;
+		users->userdata = malloc(len);
+		if (!(users->userdata))
+			quithere(1, "malloc OOM");
+		snprintf(users->userdata, len, "%s=%s", name, hex);
+	}
+	users->databits |= bit;
+}
+
+/* value is considered binary data of length len
+ * WARNING - users->userdata and users->databits are updated */
+void _users_userdata_add_bin(USERS *users, char *name, int64_t bit,
+			     unsigned char *bin, size_t len, WHERE_FFL_ARGS)
+{
+	char *hex = bin2hex((const void *)bin, len);
+	_users_userdata_add_hex(users, name, bit, hex, WHERE_FFL_PASS);
+	FREENULL(hex);
 }
 
 // default tree order by userid asc,attname asc,expirydate desc
