@@ -62,6 +62,14 @@ function settings($data, $user, $email, $addr, $err)
   $pg .= '</td><td class=dl>';
   $pg .= '<input type=password name=pass size=20>';
   $pg .= '</td></tr>';
+  $pg .= '<tr class=dc><td class=dr nowrap>';
+  $pg .= '<span class=st1>*</span>2nd Authentication:';
+  $pg .= '</td><td class=dl>';
+  $pg .= '<input type=password name=2fa size=10>';
+  $pg .= '</td></tr>';
+  $pg .= '<tr class=dc><td colspan=2 class=dc><font size=-1>';
+  $pg .= "<span class=st1>*</span>Leave blank if you haven't enabled it</font>";
+  $pg .= '</td></tr>';
   $pg .= '<tr class=dc><td class=dr colspan=2>';
   $pg .= 'Change: <input type=submit name=Change value=Address>';
   $pg .= '</td></tr>';
