@@ -755,15 +755,15 @@ out:
 	return ret;
 }
 
-static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi, const bool node)
+static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
 	float timeout = 10;
 	bool ret = false;
 
-	JSON_CPACK(req, "{s:s,s:[sb]}",
+	JSON_CPACK(req, "{s:s,s:[s]}",
 			"method", "mining.passthrough",
-			"params", PACKAGE"/"VERSION, node);
+			"params", PACKAGE"/"VERSION);
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
@@ -1761,7 +1761,7 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 		goto out;
 	}
 	if (ckp->passthrough) {
-		if (!passthrough_stratum(cs, proxi, ckp->node)) {
+		if (!passthrough_stratum(cs, proxi)) {
 			LOGWARNING("Failed initial passthrough to %s:%s !",
 				   cs->url, cs->port);
 			goto out;
@@ -2029,7 +2029,7 @@ static void *proxy_recv(void *arg)
 		 * has likely stopped responding. */
 		ret = epoll_wait(epfd, &event, 1, 600000);
 		if (likely(ret > 0)) {
-			float timeout = 10;
+			float timeout = 30;
 
 			subproxy = event.data.ptr;
 			cs = &subproxy->cs;
@@ -2704,31 +2704,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 			mutex_init(&gdata->psend_lock);
 			cond_init(&gdata->psend_cond);
 			create_pthread(&gdata->pth_psend, proxy_send, ckp);
-		}
-	}
-
-	if (ckp->node) {
-		if (ckp->btcds) {
-			/* If we also have btcds set up in node mode, try to talk to
-			 * one of them as a way to submit blocks if we find them when
-			 * submitting them upstream. */
-			server_instance_t *si = ckp->btcdbackup = ckzalloc(sizeof(server_instance_t));
-
-			si->url = ckp->btcdurl[0];
-			si->auth = ckp->btcdauth[0];
-			si->pass = ckp->btcdpass[0];
-			if (server_alive(ckp, si, false)) {
-				LOGNOTICE("Node backup btcd %s:%s alive", si->cs.url, si->cs.port);
-			} else {
-				LOGWARNING("Node backup btcd %s:%s failed! Will run as ordinary passthrough",
-					   si->cs.url, si->cs.port);
-				ckp->btcdbackup = NULL;
-				free(si);
-				ckp->node = false;
-			}
-		} else {
-			LOGWARNING("No backup btcd specified in node mode! Will run as ordinary passthrough");
-			ckp->node = false;
 		}
 	}
 

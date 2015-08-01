@@ -22,7 +22,6 @@
 #define RPC_TIMEOUT 60
 
 struct ckpool_instance;
-
 typedef struct ckpool_instance ckpool_t;
 
 struct ckmsg {
@@ -184,9 +183,6 @@ struct ckpool_instance {
 	/* Are we a redirecting passthrough */
 	bool redirector;
 
-	/* Are we a relay node passthrough */
-	bool node;
-
 	/* Are we running as a proxy */
 	bool proxy;
 
@@ -228,7 +224,6 @@ struct ckpool_instance {
 	char **proxyurl;
 	char **proxyauth;
 	char **proxypass;
-	server_instance_t *btcdbackup;
 
 	/* Passthrough redirect options */
 	int redirecturls;

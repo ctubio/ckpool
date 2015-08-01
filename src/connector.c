@@ -61,8 +61,6 @@ struct client_instance {
 
 	/* Is this the parent passthrough client */
 	bool passthrough;
-	/* Is this a parent relay passthrough node client */
-	bool node;
 
 	/* Linked list of shares in redirector mode.*/
 	share_t *shares;
@@ -899,14 +897,13 @@ static bool client_exists(cdata_t *cdata, const int64_t id)
 	return !!client;
 }
 
-static void passthrough_client(cdata_t *cdata, client_instance_t *client, const bool node)
+static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 {
 	char *buf;
 
-	LOGINFO("Connector adding passthrough %sclient %"PRId64, node ? "node " : "", client->id);
+	LOGINFO("Connector adding passthrough client %"PRId64, client->id);
 	client->passthrough = true;
-	client->node = node;
-	ASPRINTF(&buf, "{\"result\": true, \"node\": %s}\n", node ? "true" : "false");
+	ASPRINTF(&buf, "{\"result\": true}\n");
 	send_client(cdata, client->id, buf);
 }
 
@@ -1093,22 +1090,7 @@ retry:
 			LOGINFO("Connector failed to find client id %"PRId64" to pass through", client_id);
 			goto retry;
 		}
-		passthrough_client(cdata, client, false);
-		dec_instance_ref(cdata, client);
-	} else if (cmdmatch(buf, "node")) {
-		client_instance_t *client;
-
-		ret = sscanf(buf, "node=%"PRId64, &client_id);
-		if (ret < 0) {
-			LOGDEBUG("Connector failed to parse node command: %s", buf);
-			goto retry;
-		}
-		client = ref_client_by_id(cdata, client_id);
-		if (unlikely(!client)) {
-			LOGINFO("Connector failed to find client id %"PRId64" to node pass through", client_id);
-			goto retry;
-		}
-		passthrough_client(cdata, client, true);
+		passthrough_client(cdata, client);
 		dec_instance_ref(cdata, client);
 	} else if (cmdmatch(buf, "getxfd")) {
 		int fdno = -1;

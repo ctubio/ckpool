@@ -1481,7 +1481,6 @@ static struct option long_options[] = {
 	{"killold",	no_argument,		0,	'k'},
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
-	{"node",	no_argument,		0,	'N'},
 	{"name",	required_argument,	0,	'n'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
@@ -1500,7 +1499,6 @@ static struct option long_options[] = {
 	{"killold",	no_argument,		0,	'k'},
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
-	{"node",	no_argument,		0,	'N'},
 	{"name",	required_argument,	0,	'n'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
@@ -1548,7 +1546,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:Nn:PpRS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpRS:s:", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1599,27 +1597,22 @@ int main(int argc, char **argv)
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
 				break;
-			case 'N':
-				if (ckp.proxy || ckp.redirector || ckp.passthrough)
-					quit(1, "Cannot set combinations of proxy, node, redirector and passthrough");
-				ckp.standalone = ckp.node = ckp.proxy = ckp.passthrough = true;
-				break;
 			case 'n':
 				ckp.name = optarg;
 				break;
 			case 'P':
-				if (ckp.node || ckp.proxy || ckp.redirector)
-					quit(1, "Cannot set combinations of proxy, node, redirector and passthrough");
+				if (ckp.proxy || ckp.redirector)
+					quit(1, "Cannot set both proxy or redirector and passthrough mode");
 				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
-				if (ckp.node || ckp.passthrough || ckp.redirector)
-					quit(1, "Cannot set combinations of proxy, node, redirector and passthrough");
+				if (ckp.passthrough || ckp.redirector)
+					quit(1, "Cannot set both passthrough or redirector and proxy mode");
 				ckp.proxy = true;
 				break;
 			case 'R':
-				if (ckp.node || ckp.proxy || ckp.passthrough)
-					quit(1, "Cannot set combinations of proxy, node, redirector and passthrough");
+				if (ckp.proxy || ckp.passthrough)
+					quit(1, "Cannot set both proxy or passthrough and redirector modes");
 				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.redirector = true;
 				break;
 			case 'S':
@@ -1632,9 +1625,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!ckp.name) {
-		if (ckp.node)
-			ckp.name = "cknode";
-		else if (ckp.redirector)
+		if (ckp.redirector)
 			ckp.name = "ckredirector";
 		else if (ckp.passthrough)
 			ckp.name = "ckpassthrough";
