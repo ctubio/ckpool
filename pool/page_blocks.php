@@ -204,7 +204,7 @@ function doblocks($data, $user)
 		{
 			$pct = 100.0 * $diffratio;
 			list($fg, $bg) = pctcolour($pct);
-			$bpct = "<font color=$fg>$approx".number_format($pct, 2).'%</font>';
+			$bpct = "<font color=$fg>$approx".number_format($pct, 3).'%</font>';
 			$bg = " bgcolor=$bg";
 			$blktot += $diffacc;
 			if ($stat != 'Orphan')
