@@ -125,6 +125,12 @@ function try_reg($info, $page, $menu, $name, $u)
 	$ok = false;
  else
  {
+	if (stripos($mail, 'hotmail') !== false)
+	{
+		$ok = false;
+		$data['error'] = "hotmail not allowed";
+	}
+
 	if (safepass($pass) !== true)
 	{
 		$ok = false;

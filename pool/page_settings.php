@@ -127,11 +127,16 @@ function dosettings($data, $user)
  {
   case 'EMail':
 	$email = getparam('email', false);
-	$pass = getparam('pass', false);
-	$twofa = getparam('2fa', false);
-	$ans = userSettings($user, $email, null, $pass, $twofa);
-	$err = 'EMail changed';
-	$check = true;
+	if (stripos($email, 'hotmail') !== false)
+		$err = 'hotmail not allowed';
+	else
+	{
+		$pass = getparam('pass', false);
+		$twofa = getparam('2fa', false);
+		$ans = userSettings($user, $email, null, $pass, $twofa);
+		$err = 'EMail changed';
+		$check = true;
+	}
 	break;
   case 'Address':
 	if (!isset($data['info']['u_multiaddr']))
@@ -213,7 +218,7 @@ function dosettings($data, $user)
 			$old = $_SESSION['old_set_email'];
 		else
 			$old = null;
-		emailAddressChanged($email, zeip(), $emailinfo, $old);
+#		emailAddressChanged($email, zeip(), $emailinfo, $old);
 		break;
 	  case 'Address':
 		payoutAddressChanged($email, zeip(), $emailinfo);
