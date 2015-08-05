@@ -1320,7 +1320,9 @@ static void dealloc_storage()
 	FREE_ALL(auths);
 
 	FREE_TREE(payouts_id);
-	FREE_ALL(payouts);
+	FREE_TREE(payouts);
+	FREE_STORE_DATA(payouts);
+	FREE_LIST_DATA(payouts);
 
 	FREE_ALL(miningpayouts);
 	FREE_ALL(blocks);
@@ -1400,7 +1402,9 @@ static void dealloc_storage()
 	FREE_ALL(useratts);
 
 	FREE_TREE(userid);
-	FREE_ALL(users);
+	FREE_TREE(users);
+	FREE_STORE_DATA(users);
+	FREE_LIST_DATA(users);
 
 	LOGWARNING("%s() transfer/heartbeatqueue/workqueue ...", __func__);
 

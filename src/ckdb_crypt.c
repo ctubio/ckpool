@@ -122,6 +122,7 @@ K_ITEM *gen_2fa_key(K_ITEM *old_u_item, int32_t entropy, char *by, char *code,
 			users->userdata = strdup(users->userdata);
 			if (!users->userdata)
 				quithere(1, "strdup OOM");
+			LIST_MEM_ADD(users_free, users->userdata);
 		}
 		users_userdata_add_bin(users, USER_TOTPAUTH_NAME,
 					USER_TOTPAUTH, key, sizeof(key));
@@ -229,6 +230,7 @@ bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 			users->userdata = strdup(users->userdata);
 			if (!users->userdata)
 				quithere(1, "strdup OOM");
+			LIST_MEM_ADD(users_free, users->userdata);
 		}
 		users_userdata_del(users, USER_TEST2FA_NAME, USER_TEST2FA);
 		ok = users_replace(NULL, u_item, old_u_item, by, code, inet, cd,

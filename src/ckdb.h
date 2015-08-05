@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.1"
-#define CKDB_VERSION DB_VERSION"-1.200"
+#define CKDB_VERSION DB_VERSION"-1.210"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -66,13 +66,6 @@
 
 #define STRINT(x) STRINT2(x)
 #define STRINT2(x) #x
-
-#define FREENULL(mem) do { \
-		if (mem) { \
-			free(mem); \
-			mem = NULL; \
-		} \
-	} while (0)
 
 // So they can fit into a 1 byte flag field
 #define TRUE_STR "Y"
@@ -104,6 +97,13 @@ extern int switch_state;
 
 #define BLANK " "
 extern char *EMPTY;
+
+#define FREENULL(mem) do { \
+		if ((mem) && (void *)(mem) != (void *)EMPTY) { \
+			free(mem); \
+			mem = NULL; \
+		} \
+	} while (0)
 
 // To ensure there's space for the ticker
 #define TICK_PREFIX "  "
@@ -450,17 +450,21 @@ enum cmd_values {
 	} while (0)
 
 #define LIST_MEM_ADD(_list, _fld) do { \
-		size_t __siz; \
-		__siz = strlen(_fld) + 1; \
-		LIST_MEM_ADD_SIZ(_list, __siz); \
+		if ((_fld) && (_fld) != EMPTY) { \
+			size_t __siz; \
+			__siz = strlen(_fld) + 1; \
+			LIST_MEM_ADD_SIZ(_list, __siz); \
+		} \
 	} while (0)
 
 #define LIST_MEM_SUB(_list, _fld) do { \
-		size_t __siz; \
-		__siz = strlen(_fld) + 1; \
-		if (__siz % MEMBASE) \
-			__siz += MEMBASE - (__siz % MEMBASE); \
-		_list->ram -= (int)__siz; \
+		if ((_fld) && (_fld) != EMPTY) { \
+			size_t __siz; \
+			__siz = strlen(_fld) + 1; \
+			if (__siz % MEMBASE) \
+				__siz += MEMBASE - (__siz % MEMBASE); \
+			_list->ram -= (int)__siz; \
+		} \
 	} while (0)
 
 #define SET_POINTER(_list, _fld, _val, _def) do { \
@@ -2029,8 +2033,10 @@ extern void sequence_report(bool lock);
 
 // Data free functions (first)
 extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
+extern void free_users_data(K_ITEM *item);
 extern void free_workinfo_data(K_ITEM *item);
 extern void free_sharesummary_data(K_ITEM *item);
+extern void free_payouts_data(K_ITEM *item);
 extern void free_optioncontrol_data(K_ITEM *item);
 extern void free_markersummary_data(K_ITEM *item);
 extern void free_workmarkers_data(K_ITEM *item);

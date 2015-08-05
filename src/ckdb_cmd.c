@@ -3797,6 +3797,7 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 				optioncontrol->optionvalue = strdup(data);
 				if (!(optioncontrol->optionvalue))
 					quithere(1, "malloc (%d) OOM", (int)strlen(data));
+				LIST_MEM_ADD(optioncontrol_free, optioncontrol->optionvalue);
 				gotvalue = true;
 			} else if (strcmp(dot, "date") == 0) {
 				att_to_date(&(optioncontrol->activationdate), data, now);
@@ -4695,6 +4696,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		payouts2->shareacc = payouts->shareacc;
 		copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
 		payouts2->stats = strdup(payouts->stats);
+		LIST_MEM_ADD(payouts_free, payouts2->stats);
 
 		ok = payouts_add(conn, true, p2_item, &old_p2_item,
 				 by, code, inet, now, NULL, false);
@@ -4759,6 +4761,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		payouts2->shareacc = payouts->shareacc;
 		copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
 		payouts2->stats = strdup(payouts->stats);
+		LIST_MEM_ADD(payouts_free, payouts2->stats);
 
 		ok = payouts_add(conn, true, p2_item, &old_p2_item,
 				 by, code, inet, now, NULL, false);
@@ -5410,8 +5413,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 
-// Doesn't include blob memory
-// - average transactiontree length of ~119k I have is ~28k (>3.3GB)
+// FYI average transactiontree length of the ~119k I have is ~28k (>3.3GB)
 #define USEINFO(_obj, _stores, _trees) \
 	klist = _obj ## _free; \
 	ram = sizeof(K_LIST) + _stores * sizeof(K_STORE) + \

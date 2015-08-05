@@ -432,6 +432,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		row->userdata = strdup(users->userdata);
 		if (!row->userdata)
 			quithere(1, "strdup OOM");
+		LIST_MEM_ADD(users_free, row->userdata);
 	}
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
@@ -514,8 +515,7 @@ unparam:
 
 	K_WLOCK(users_free);
 	if (!ok) {
-		if (row->userdata != EMPTY)
-			FREENULL(row->userdata);
+		free_users_data(item);
 		k_add_head(users_free, item);
 	} else {
 		users_root = remove_from_ktree(users_root, u_item, cmp_users);
@@ -649,9 +649,10 @@ unparam:
 		free(params[n]);
 unitem:
 	K_WLOCK(users_free);
-	if (!ok)
+	if (!ok) {
+		free_users_data(item);
 		k_add_head(users_free, item);
-	else {
+	} else {
 		users_root = add_to_ktree(users_root, item, cmp_users);
 		userid_root = add_to_ktree(userid_root, item, cmp_userid);
 		k_add_head(users_store, item);
@@ -761,8 +762,7 @@ unparam:
 	K_WLOCK(users_free);
 	if (!ok) {
 		// cleanup done here
-		if (users->userdata != EMPTY)
-			FREENULL(users->userdata);
+		free_users_data(u_item);
 		k_add_head(users_free, u_item);
 	} else {
 		users_root = remove_from_ktree(users_root, old_u_item, cmp_users);
@@ -892,8 +892,10 @@ bool users_fill(PGconn *conn)
 		userid_root = add_to_ktree(userid_root, item, cmp_userid);
 		k_add_head(users_store, item);
 	}
-	if (!ok)
+	if (!ok) {
+		free_users_data(item);
 		k_add_head(users_free, item);
+	}
 
 	K_WUNLOCK(users_free);
 	PQclear(res);
@@ -2341,7 +2343,7 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *old_item, look;
-	OPTIONCONTROL *row, *optioncontrol;
+	OPTIONCONTROL *row;
 	char *upd, *ins;
 	bool ok = false;
 	char *params[4 + HISTORYDATECOUNT];
@@ -2444,16 +2446,15 @@ nostart:
 	K_WLOCK(optioncontrol_free);
 	if (!ok) {
 		// Cleanup item passed in
-		FREENULL(row->optionvalue);
+		free_optioncontrol_data(oc_item);
 		k_add_head(optioncontrol_free, oc_item);
 	} else {
 		// Discard old
 		if (old_item) {
-			DATA_OPTIONCONTROL(optioncontrol, old_item);
 			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
 							       cmp_optioncontrol);
 			k_unlink_item(optioncontrol_store, old_item);
-			FREENULL(optioncontrol->optionvalue);
+			free_optioncontrol_data(old_item);
 			k_add_head(optioncontrol_free, old_item);
 		}
 		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
@@ -2600,7 +2601,7 @@ bool optioncontrol_fill(PGconn *conn)
 		}
 	}
 	if (!ok) {
-		FREENULL(row->optionvalue);
+		free_optioncontrol_data(item);
 		k_add_head(optioncontrol_free, item);
 	}
 
@@ -2670,11 +2671,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 	K_WLOCK(workinfo_free);
 	if (find_in_ktree(workinfo_root, item, cmp_workinfo, ctx)) {
-		LIST_MEM_SUB(workinfo_free, row->transactiontree);
-		FREENULL(row->transactiontree);
-		LIST_MEM_SUB(workinfo_free, row->merklehash);
-		FREENULL(row->merklehash);
 		workinfoid = row->workinfoid;
+		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
 		K_WUNLOCK(workinfo_free);
 
@@ -2735,19 +2733,12 @@ unparam:
 
 	K_WLOCK(workinfo_free);
 	if (workinfoid == -1) {
-		LIST_MEM_SUB(workinfo_free, row->transactiontree);
-		FREENULL(row->transactiontree);
-		LIST_MEM_SUB(workinfo_free, row->merklehash);
-		FREENULL(row->merklehash);
+		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
 	} else {
-		if (row->transactiontree && *(row->transactiontree)) {
-			// Not currently needed in RAM
-			LIST_MEM_SUB(workinfo_free, row->transactiontree);
-			free(row->transactiontree);
-			row->transactiontree = strdup(EMPTY);
-			LIST_MEM_ADD(workinfo_free, row->transactiontree);
-		}
+		// Not currently needed in RAM
+		LIST_MEM_SUB(workinfo_free, row->transactiontree);
+		FREENULL(row->transactiontree);
 
 		hex2bin(ndiffbin, row->bits, 4);
 		current_ndiff = diff_from_nbits(ndiffbin);
@@ -2870,9 +2861,9 @@ bool workinfo_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_BLOB("transactiontree", field, row->transactiontree);
-*/
-		row->transactiontree = strdup(EMPTY);
 		LIST_MEM_ADD(workinfo_free, row->transactiontree);
+*/
+		row->transactiontree = EMPTY;
 
 		PQ_GET_FLD(res, i, "merklehash", field, ok);
 		if (!ok)
@@ -2940,8 +2931,7 @@ bool workinfo_fill(PGconn *conn)
 		tick();
 	}
 	if (!ok) {
-		//FREENULL(row->transactiontree);
-		FREENULL(row->merklehash);
+		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
 	}
 
@@ -5097,6 +5087,7 @@ void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item, tv_t *cd)
 	K_WLOCK(payouts_free);
 	if (!ok) {
 		// Cleanup for the calling function
+		free_payouts_data(p_item);
 		k_add_head(payouts_free, p_item);
 	} else {
 		if (old_p_item) {
@@ -5601,7 +5592,7 @@ bool payouts_fill(PGconn *conn)
 		tick();
 	}
 	if (!ok) {
-		FREENULL(row->stats);
+		free_payouts_data(item);
 		k_add_head(payouts_free, item);
 	}
 
@@ -6448,7 +6439,7 @@ bool markersummary_fill(PGconn *conn)
 		tick();
 	}
 	if (!ok) {
-		FREENULL(row->workername);
+		free_markersummary_data(item);
 		k_add_head(markersummary_free, item);
 	}
 
@@ -6658,23 +6649,7 @@ unparam:
 	K_WLOCK(workmarkers_free);
 	if (!ok) {
 		if (wm_item) {
-			DATA_WORKMARKERS(row, wm_item);
-			if (row->poolinstance) {
-				if (row->poolinstance != EMPTY) {
-					LIST_MEM_SUB(workmarkers_free,
-						     row->poolinstance);
-					free(row->poolinstance);
-				}
-				row->poolinstance = NULL;
-			}
-			if (row->description) {
-				if (row->description != EMPTY) {
-					LIST_MEM_SUB(workmarkers_free,
-						     row->description);
-					free(row->description);
-				}
-				row->description = NULL;
-			}
+			free_workmarkers_data(wm_item);
 			k_add_head(workmarkers_free, wm_item);
 		}
 	}
@@ -6820,8 +6795,10 @@ bool workmarkers_fill(PGconn *conn)
 
 		tick();
 	}
-	if (!ok)
+	if (!ok) {
+		free_workmarkers_data(item);
 		k_add_head(workmarkers_free, item);
+	}
 
 	K_WUNLOCK(workmarkers_free);
 	PQclear(res);
@@ -6991,32 +6968,10 @@ unparam:
 	K_WLOCK(marks_free);
 	if (!ok) {
 		if (m_item) {
-			DATA_MARKS(row, m_item);
-			if (row->poolinstance) {
-				if (row->poolinstance != EMPTY) {
-					LIST_MEM_SUB(marks_free, row->poolinstance);
-					free(row->poolinstance);
-				}
-				row->poolinstance = NULL;
-			}
-			if (row->description) {
-				if (row->description != EMPTY) {
-					LIST_MEM_SUB(marks_free, row->description);
-					free(row->description);
-				}
-				row->description = NULL;
-			}
-			if (row->extra) {
-				if (row->extra != EMPTY) {
-					LIST_MEM_SUB(marks_free, row->extra);
-					free(row->extra);
-				}
-				row->extra = NULL;
-			}
+			free_marks_data(m_item);
 			k_add_head(marks_free, m_item);
 		}
-	}
-	else {
+	} else {
 		if (old_m_item) {
 			marks_root = remove_from_ktree(marks_root, old_m_item, cmp_marks);
 			copy_tv(&(oldmarks->expirydate), cd);
@@ -7123,8 +7078,10 @@ bool marks_fill(PGconn *conn)
 
 		tick();
 	}
-	if (!ok)
+	if (!ok) {
+		free_marks_data(item);
 		k_add_head(marks_free, item);
+	}
 
 	K_WUNLOCK(marks_free);
 	PQclear(res);
