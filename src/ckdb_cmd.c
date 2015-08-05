@@ -3794,10 +3794,8 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 				gotvalue = false;
 			}
 			if (strcmp(dot, "value") == 0) {
-				optioncontrol->optionvalue = strdup(data);
-				if (!(optioncontrol->optionvalue))
-					quithere(1, "malloc (%d) OOM", (int)strlen(data));
-				LIST_MEM_ADD(optioncontrol_free, optioncontrol->optionvalue);
+				DUP_POINTER(optioncontrol_free,
+					    optioncontrol->optionvalue, data);
 				gotvalue = true;
 			} else if (strcmp(dot, "date") == 0) {
 				att_to_date(&(optioncontrol->activationdate), data, now);
@@ -4695,8 +4693,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		payouts2->diffused = payouts->diffused;
 		payouts2->shareacc = payouts->shareacc;
 		copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
-		payouts2->stats = strdup(payouts->stats);
-		LIST_MEM_ADD(payouts_free, payouts2->stats);
+		DUP_POINTER(payouts_free, payouts2->stats, payouts->stats);
 
 		ok = payouts_add(conn, true, p2_item, &old_p2_item,
 				 by, code, inet, now, NULL, false);
@@ -4760,8 +4757,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		payouts2->diffused = payouts->diffused;
 		payouts2->shareacc = payouts->shareacc;
 		copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
-		payouts2->stats = strdup(payouts->stats);
-		LIST_MEM_ADD(payouts_free, payouts2->stats);
+		DUP_POINTER(payouts_free, payouts2->stats, payouts->stats);
 
 		ok = payouts_add(conn, true, p2_item, &old_p2_item,
 				 by, code, inet, now, NULL, false);

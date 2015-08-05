@@ -118,12 +118,7 @@ K_ITEM *gen_2fa_key(K_ITEM *old_u_item, int32_t entropy, char *by, char *code,
 		K_WUNLOCK(users_free);
 		DATA_USERS(users, u_item);
 		memcpy(users, old_users, sizeof(*users));
-		if (users->userdata != EMPTY) {
-			users->userdata = strdup(users->userdata);
-			if (!users->userdata)
-				quithere(1, "strdup OOM");
-			LIST_MEM_ADD(users_free, users->userdata);
-		}
+		DUP_POINTER(users_free, users->userdata, old_users->userdata);
 		users_userdata_add_bin(users, USER_TOTPAUTH_NAME,
 					USER_TOTPAUTH, key, sizeof(key));
 		users_userdata_add_txt(users, USER_TEST2FA_NAME,
@@ -226,12 +221,7 @@ bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 		K_WUNLOCK(users_free);
 		DATA_USERS(users, u_item);
 		memcpy(users, old_users, sizeof(*users));
-		if (users->userdata != EMPTY) {
-			users->userdata = strdup(users->userdata);
-			if (!users->userdata)
-				quithere(1, "strdup OOM");
-			LIST_MEM_ADD(users_free, users->userdata);
-		}
+		DUP_POINTER(users_free, users->userdata, old_users->userdata);
 		users_userdata_del(users, USER_TEST2FA_NAME, USER_TEST2FA);
 		ok = users_replace(NULL, u_item, old_u_item, by, code, inet, cd,
 				   trf_root);

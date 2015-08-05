@@ -428,12 +428,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		STRNCPY(row->emailaddress, email);
 	if (status)
 		STRNCPY(row->status, status);
-	if (row->userdata != EMPTY) {
-		row->userdata = strdup(users->userdata);
-		if (!row->userdata)
-			quithere(1, "strdup OOM");
-		LIST_MEM_ADD(users_free, row->userdata);
-	}
+	DUP_POINTER(users_free, row->userdata, users->userdata);
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -2649,14 +2644,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 	TXT_TO_BIGINT("workinfoid", workinfoidstr, row->workinfoid);
 	STRNCPY(row->poolinstance, poolinstance);
-	row->transactiontree = strdup(transactiontree);
-	if (!(row->transactiontree))
-		quithere(1, "malloc (%d) OOM", (int)strlen(transactiontree));
-	LIST_MEM_ADD(workinfo_free, row->transactiontree);
-	row->merklehash = strdup(merklehash);
-	if (!(row->merklehash))
-		quithere(1, "malloc (%d) OOM", (int)strlen(merklehash));
-	LIST_MEM_ADD(workinfo_free, row->merklehash);
+	DUP_POINTER(workinfo_free, row->transactiontree, transactiontree);
+	DUP_POINTER(workinfo_free, row->merklehash, merklehash);
 	STRNCPY(row->prevhash, prevhash);
 	STRNCPY(row->coinbase1, coinbase1);
 	STRNCPY(row->coinbase2, coinbase2);
@@ -3680,9 +3669,11 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 				bzero(markersummary, sizeof(*markersummary));
 				markersummary->markerid = workmarkers->markerid;
 				markersummary->userid = sharesummary->userid;
-				markersummary->workername = strdup(sharesummary->workername);
-				LIST_MEM_ADD(markersummary_free, markersummary->workername);
-				ms_root = add_to_ktree(ms_root, ms_item, cmp_markersummary);
+				DUP_POINTER(markersummary_free,
+					    markersummary->workername,
+					    sharesummary->workername);
+				ms_root = add_to_ktree(ms_root, ms_item,
+							cmp_markersummary);
 
 				LOGDEBUG("%s() new ms %"PRId64"/%"PRId64"/%s",
 					 shortname, markersummary->markerid,
@@ -3820,7 +3811,6 @@ flail:
 				bzero(p_markersummary, sizeof(*p_markersummary));
 				p_markersummary->markerid = markersummary->markerid;
 				POOL_MS(p_markersummary);
-				LIST_MEM_ADD(markersummary_free, p_markersummary->workername);
 				markersummary_pool_root = add_to_ktree(markersummary_pool_root,
 								       p_ms_item,
 								       cmp_markersummary);
@@ -4065,8 +4055,8 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 			DATA_SHARESUMMARY(row, item);
 			bzero(row, sizeof(*row));
 			row->userid = userid;
-			row->workername = strdup(workername);
-			LIST_MEM_ADD(sharesummary_free, row->workername);
+			DUP_POINTER(sharesummary_free, row->workername,
+				    workername);
 			row->workinfoid = workinfoid;
 		}
 
@@ -4136,7 +4126,6 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 			DATA_SHARESUMMARY(p_row, p_item);
 			bzero(p_row, sizeof(*p_row));
 			POOL_SS(p_row);
-			LIST_MEM_ADD(sharesummary_free, p_row->workername);
 			p_row->workinfoid = workinfoid;
 		}
 
@@ -6416,7 +6405,6 @@ bool markersummary_fill(PGconn *conn)
 			bzero(p_row, sizeof(*p_row));
 			p_row->markerid = row->markerid;
 			POOL_MS(p_row);
-			LIST_MEM_ADD(markersummary_free, p_row->workername);
 			markersummary_pool_root = add_to_ktree(markersummary_pool_root,
 							       p_item,
 							       cmp_markersummary);
@@ -6596,12 +6584,10 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			}
 		}
 
-		row->poolinstance = strdup(poolinstance);
-		LIST_MEM_ADD(workmarkers_free, poolinstance);
+		DUP_POINTER(workmarkers_free, row->poolinstance, poolinstance);
 		row->workinfoidend = workinfoidend;
 		row->workinfoidstart = workinfoidstart;
-		row->description = strdup(description);
-		LIST_MEM_ADD(workmarkers_free, description);
+		DUP_POINTER(workmarkers_free, row->description, description);
 		STRNCPY(row->status, status);
 		HISTORYDATEINIT(row, cd, by, code, inet);
 		HISTORYDATETRANSFER(trf_root, row);
@@ -6897,13 +6883,10 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 		K_WUNLOCK(marks_free);
 		DATA_MARKS(row, m_item);
 		bzero(row, sizeof(*row));
-		row->poolinstance = strdup(poolinstance);
-		LIST_MEM_ADD(marks_free, poolinstance);
+		DUP_POINTER(marks_free, row->poolinstance, poolinstance);
 		row->workinfoid = workinfoid;
-		row->description = strdup(description);
-		LIST_MEM_ADD(marks_free, description);
-		row->extra = strdup(extra);
-		LIST_MEM_ADD(marks_free, extra);
+		DUP_POINTER(marks_free, row->description, description);
+		DUP_POINTER(marks_free, row->extra, extra);
 		STRNCPY(row->marktype, marktype);
 		STRNCPY(row->status, status);
 		HISTORYDATEINIT(row, cd, by, code, inet);

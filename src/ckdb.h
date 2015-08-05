@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.1"
-#define CKDB_VERSION DB_VERSION"-1.210"
+#define CKDB_VERSION DB_VERSION"-1.211"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -483,8 +483,25 @@ enum cmd_values {
 					LIST_MEM_ADD(_list, _val); \
 				_fld = strdup(_val); \
 				if (!(_fld)) \
-					quithere(1, "malloc OOM"); \
+					quithere(1, "strdup OOM"); \
 			} \
+		} \
+	} while (0)
+
+#define DUP_POINTER(_list, _fld, _val) do { \
+		if ((_fld) && ((_fld) != EMPTY)) { \
+			if (_list) \
+				LIST_MEM_SUB(_list, _fld); \
+			free(_fld); \
+		} \
+		if (!(_val) || !(*(_val))) \
+			(_fld) = EMPTY; \
+		else { \
+			if (_list) \
+				LIST_MEM_ADD(_list, _val); \
+			_fld = strdup(_val); \
+			if (!(_fld)) \
+				quithere(1, "strdup OOM"); \
 		} \
 	} while (0)
 
@@ -2276,7 +2293,7 @@ extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
 	_find_markersummary(_markerid, 0, KANO, EMPTY, true)
 #define POOL_MS(_row) do { \
 		(_row)->userid = KANO; \
-		(_row)->workername = strdup(EMPTY); \
+		(_row)->workername = EMPTY; \
 	} while (0)
 extern K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 				   int64_t userid, char *workername, bool pool);

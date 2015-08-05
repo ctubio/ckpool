@@ -3672,8 +3672,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		 diff_times, FLDSEP, diff_add, FLDSEP, total_share_count,
 		 FLDSEP, ss_count, FLDSEP, wm_count, FLDSEP, ms_count,
 		 FLDSEP, cd_buf);
-	payouts->stats = buf;
-	LIST_MEM_ADD(payouts_free, payouts->stats);
+	DUP_POINTER(payouts_free, payouts->stats, &buf[0]);
 
 	conned = CKPQConn(&conn);
 	begun = CKPQBegin(conn);
@@ -3887,10 +3886,6 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		   ss_count, wm_count, ms_count, usercount, diff_times,
 		   diff_add, cd_buf);
 
-	// convert the stack memory to heap memeory
-	payouts->stats = strdup(payouts->stats);
-	LIST_MEM_ADD(payouts_free, payouts->stats);
-
 	K_WLOCK(payouts_free);
 	p2_item = k_unlink_head(payouts_free);
 	K_WUNLOCK(payouts_free);
@@ -3908,8 +3903,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	payouts2->diffused = payouts->diffused;
 	payouts2->shareacc = payouts->shareacc;
 	copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
-	payouts2->stats = strdup(payouts->stats);
-	LIST_MEM_ADD(payouts_free, payouts2->stats);
+	DUP_POINTER(payouts_free, payouts2->stats, payouts->stats);
 
 	setnow(&now);
 	/* N.B. the PROCESSING payouts could have expirydate = createdate
