@@ -204,7 +204,7 @@ function doblocks($data, $user)
 		{
 			$pct = 100.0 * $diffratio;
 			list($fg, $bg) = pctcolour($pct);
-			$bpct = "<font color=$fg>".number_format($pct, 2).'%</font>';
+			$bpct = "<font color=$fg>$approx".number_format($pct, 3).'%</font>';
 			$bg = " bgcolor=$bg";
 			$blktot += $diffacc;
 			if ($stat != 'Orphan')
@@ -230,7 +230,7 @@ function doblocks($data, $user)
 		 $pg .= "<td class=dl$ex>".utcd($ans['firstcreatedate:'.$i]).'</td>';
 		 $pg .= "<td class=dr$ex>$stat</td>";
 		 $pg .= "<td class=dr>$stara$approx$acc</td>";
-		 $pg .= "<td class=dr$bg>$approx$bpct</td>";
+		 $pg .= "<td class=dr$bg>$bpct</td>";
 		 $pg .= "<td class=dr>$cdfdsp</td>";
 		 $pg .= "</tr>\n";
 		}

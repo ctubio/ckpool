@@ -21,6 +21,8 @@ CREATE TABLE users (
     passwordhash character varying(256) NOT NULL,
     secondaryuserid character varying(64) NOT NULL,
     salt character varying(256) DEFAULT ''::character varying NOT NULL,
+    userdata text DEFAULT ''::text NOT NULL,
+    userbits bigint NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -57,6 +59,7 @@ CREATE TABLE workers (
     difficultydefault integer DEFAULT 0 NOT NULL, -- 0 means default
     idlenotificationenabled char DEFAULT 'n'::character varying NOT NULL,
     idlenotificationtime integer DEFAULT 10 NOT NULL,
+    workerbits bigint NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -460,4 +463,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'1.0.0');
+insert into version (vlock,version) values (1,'1.0.1');

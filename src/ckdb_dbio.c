@@ -428,6 +428,11 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		STRNCPY(row->emailaddress, email);
 	if (status)
 		STRNCPY(row->status, status);
+	if (row->userdata != EMPTY) {
+		row->userdata = strdup(users->userdata);
+		if (!row->userdata)
+			quithere(1, "strdup OOM");
+	}
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -478,10 +483,10 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 
 	ins = "insert into users "
 		"(userid,username,status,emailaddress,joineddate,"
-		"passwordhash,secondaryuserid,salt"
+		"passwordhash,secondaryuserid,salt,userdata,userbits"
 		HISTORYDATECONTROL ") select "
 		"userid,username,$3,$4,joineddate,"
-		"$5,secondaryuserid,$6,"
+		"$5,secondaryuserid,$6,userdata,userbits,"
 		"$7,$8,$9,$10,$11 from users where "
 		"userid=$1 and "EDDB"=$2";
 
@@ -508,9 +513,11 @@ unparam:
 		free(params[n]);
 
 	K_WLOCK(users_free);
-	if (!ok)
+	if (!ok) {
+		if (row->userdata != EMPTY)
+			FREENULL(row->userdata);
 		k_add_head(users_free, item);
-	else {
+	} else {
 		users_root = remove_from_ktree(users_root, u_item, cmp_users);
 		userid_root = remove_from_ktree(userid_root, u_item, cmp_userid);
 		copy_tv(&(users->expirydate), cd);
@@ -527,8 +534,8 @@ unparam:
 }
 
 K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
-			char *passwordhash, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root)
+			char *passwordhash, int64_t userbits, char *by,
+			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -540,7 +547,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	uint64_t hash;
 	__maybe_unused uint64_t tmp;
 	bool dup, ok = false;
-	char *params[8 + HISTORYDATECOUNT];
+	char *params[10 + HISTORYDATECOUNT];
 	int n, par = 0;
 
 	LOGDEBUG("%s(): add", __func__);
@@ -592,6 +599,9 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 			      row->passwordhash, sizeof(row->passwordhash));
 	}
 
+	row->userdata = EMPTY;
+	row->userbits = userbits;
+
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
@@ -608,13 +618,15 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	params[par++] = str_to_buf(row->passwordhash, NULL, 0);
 	params[par++] = str_to_buf(row->secondaryuserid, NULL, 0);
 	params[par++] = str_to_buf(row->salt, NULL, 0);
+	params[par++] = str_to_buf(row->userdata, NULL, 0);
+	params[par++] = bigint_to_buf(row->userbits, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into users "
 		"(userid,username,status,emailaddress,joineddate,passwordhash,"
-		"secondaryuserid,salt"
-		HISTORYDATECONTROL ") values (" PQPARAM13 ")";
+		"secondaryuserid,salt,userdata,userbits"
+		HISTORYDATECONTROL ") values (" PQPARAM15 ")";
 
 	if (!conn) {
 		conn = dbconnect();
@@ -652,6 +664,122 @@ unitem:
 		return NULL;
 }
 
+// Replace the current users record with u_item, and expire the old one
+bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item, char *by,
+		   char *code, char *inet, tv_t *cd, K_TREE *trf_root)
+{
+	ExecStatusType rescode;
+	bool conned = false;
+	PGresult *res;
+	bool ok = false;
+	USERS *users, *old_users;
+	char *upd, *ins;
+	char *params[10 + HISTORYDATECOUNT];
+	int n, par = 0;
+
+	LOGDEBUG("%s(): replace", __func__);
+
+	DATA_USERS(users, u_item);
+	DATA_USERS(old_users, old_u_item);
+
+	HISTORYDATEINIT(users, cd, by, code, inet);
+	HISTORYDATETRANSFER(trf_root, users);
+
+	upd = "update users set "EDDB"=$1 where userid=$2 and "EDDB"=$3";
+	par = 0;
+	params[par++] = tv_to_buf(cd, NULL, 0);
+	params[par++] = bigint_to_buf(old_users->userid, NULL, 0);
+	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
+	PARCHKVAL(par, 3, params);
+
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+
+	// Beginning of a write txn
+	res = PQexec(conn, "Begin", CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Begin", rescode, conn);
+		goto unparam;
+	}
+
+	res = PQexecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Update", rescode, conn);
+		goto rollback;
+	}
+
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	par = 0;
+	params[par++] = bigint_to_buf(users->userid, NULL, 0);
+	params[par++] = str_to_buf(users->username, NULL, 0);
+	params[par++] = str_to_buf(users->status, NULL, 0);
+	params[par++] = str_to_buf(users->emailaddress, NULL, 0);
+	params[par++] = tv_to_buf(&(users->joineddate), NULL, 0);
+	params[par++] = str_to_buf(users->passwordhash, NULL, 0);
+	params[par++] = str_to_buf(users->secondaryuserid, NULL, 0);
+	params[par++] = str_to_buf(users->salt, NULL, 0);
+	params[par++] = str_to_buf(users->userdata, NULL, 0);
+	params[par++] = bigint_to_buf(users->userbits, NULL, 0);
+	HISTORYDATEPARAMS(params, par, users);
+	PARCHKVAL(par, 10 + HISTORYDATECOUNT, params);
+
+	ins = "insert into users "
+		"(userid,username,status,emailaddress,joineddate,"
+		"passwordhash,secondaryuserid,salt,userdata,userbits"
+		HISTORYDATECONTROL ") values (" PQPARAM15 ")";
+
+	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Insert", rescode, conn);
+		goto rollback;
+	}
+
+	ok = true;
+rollback:
+	if (ok)
+		res = PQexec(conn, "Commit", CKPQ_WRITE);
+	else
+		res = PQexec(conn, "Rollback", CKPQ_WRITE);
+
+	PQclear(res);
+unparam:
+	if (conned)
+		PQfinish(conn);
+	for (n = 0; n < par; n++)
+		free(params[n]);
+
+	K_WLOCK(users_free);
+	if (!ok) {
+		// cleanup done here
+		if (users->userdata != EMPTY)
+			FREENULL(users->userdata);
+		k_add_head(users_free, u_item);
+	} else {
+		users_root = remove_from_ktree(users_root, old_u_item, cmp_users);
+		userid_root = remove_from_ktree(userid_root, old_u_item, cmp_userid);
+		copy_tv(&(old_users->expirydate), cd);
+		users_root = add_to_ktree(users_root, old_u_item, cmp_users);
+		userid_root = add_to_ktree(userid_root, old_u_item, cmp_userid);
+
+		users_root = add_to_ktree(users_root, u_item, cmp_users);
+		userid_root = add_to_ktree(userid_root, u_item, cmp_userid);
+		k_add_head(users_store, u_item);
+	}
+	K_WUNLOCK(users_free);
+
+	return ok;
+}
+
 bool users_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
@@ -661,14 +789,14 @@ bool users_fill(PGconn *conn)
 	USERS *row;
 	char *field;
 	char *sel;
-	int fields = 8;
+	int fields = 10;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"userid,username,status,emailaddress,joineddate,"
-		"passwordhash,secondaryuserid,salt"
+		"passwordhash,secondaryuserid,salt,userdata,userbits"
 		HISTORYDATECONTROL
 		" from users";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -740,6 +868,19 @@ bool users_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_STR("salt", field, row->salt);
+
+		// TODO: good case for invariant
+		PQ_GET_FLD(res, i, "userdata", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_PTR("userdata", field, row->userdata);
+		LIST_MEM_ADD(users_free, row->userdata);
+		users_databits(row);
+
+		PQ_GET_FLD(res, i, "userbits", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("userbits", field, row->userbits);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -1159,7 +1300,7 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	K_ITEM *item, *ret = NULL;
 	WORKERS *row;
 	char *ins;
-	char *params[6 + HISTORYDATECOUNT];
+	char *params[7 + HISTORYDATECOUNT];
 	int n, par = 0;
 	int32_t diffdef;
 	int32_t nottime;
@@ -1222,6 +1363,8 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	if (row->idlenotificationtime == IDLENOTIFICATIONTIME_DEF)
 		row->idlenotificationenabled[0] = IDLENOTIFICATIONDISABLED[0];
 
+	row->workerbits = 0;
+
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
 
@@ -1232,13 +1375,14 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 	params[par++] = int_to_buf(row->difficultydefault, NULL, 0);
 	params[par++] = str_to_buf(row->idlenotificationenabled, NULL, 0);
 	params[par++] = int_to_buf(row->idlenotificationtime, NULL, 0);
+	params[par++] = bigint_to_buf(row->workerbits, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into workers "
 		"(workerid,userid,workername,difficultydefault,"
-		"idlenotificationenabled,idlenotificationtime"
-		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+		"idlenotificationenabled,idlenotificationtime,workerbits"
+		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
 
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
@@ -1371,8 +1515,8 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 
 	ins = "insert into workers "
 		"(workerid,userid,workername,difficultydefault,"
-		"idlenotificationenabled,idlenotificationtime"
-		HISTORYDATECONTROL ") values (" PQPARAM11 ")";
+		"idlenotificationenabled,idlenotificationtime,workerbits"
+		HISTORYDATECONTROL ") values (" PQPARAM12 ")";
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->workerid, NULL, 0);
@@ -1381,6 +1525,7 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	params[par++] = int_to_buf(row->difficultydefault, NULL, 0);
 	params[par++] = str_to_buf(row->idlenotificationenabled, NULL, 0);
 	params[par++] = int_to_buf(row->idlenotificationtime, NULL, 0);
+	params[par++] = bigint_to_buf(row->workerbits, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
@@ -1418,14 +1563,14 @@ bool workers_fill(PGconn *conn)
 	WORKERS *row;
 	char *field;
 	char *sel;
-	int fields = 6;
+	int fields = 7;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"userid,workername,difficultydefault,"
-		"idlenotificationenabled,idlenotificationtime"
+		"idlenotificationenabled,idlenotificationtime,workerbits"
 		HISTORYDATECONTROL
 		",workerid from workers";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -1482,6 +1627,11 @@ bool workers_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_INT("idlenotificationtime", field, row->idlenotificationtime);
+
+		PQ_GET_FLD(res, i, "workerbits", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("workerbits", field, row->workerbits);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -5495,7 +5645,8 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 	if (!u_item) {
 		if (addressuser) {
 			u_item = users_add(conn, username, EMPTY, EMPTY,
-					   by, code, inet, cd, trf_root);
+					   USER_ADDRESS, by, code, inet, cd,
+					   trf_root);
 		} else {
 			LOGDEBUG("%s(): unknown user '%s'",
 				 __func__,

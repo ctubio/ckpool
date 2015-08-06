@@ -749,37 +749,47 @@ char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, co
 	return buf;
 }
 
+static const char *rpc_method(const char *rpc_req)
+{
+	const char *ptr = strchr(rpc_req, ':');
+	if (ptr)
+		return ptr+1;
+	return rpc_req;
+}
+
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
 	float timeout = RPC_TIMEOUT;
 	char *http_req = NULL;
 	json_error_t err_val;
 	json_t *val = NULL;
+	tv_t stt_tv, fin_tv;
+	double elapsed;
 	int len, ret;
 
 	if (unlikely(cs->fd < 0)) {
-		LOGWARNING("FD %d invalid in json_rpc_call", cs->fd);
+		LOGWARNING("FD %d invalid in %s", cs->fd, __func__);
 		goto out;
 	}
 	if (unlikely(!cs->url)) {
-		LOGWARNING("No URL in json_rpc_call");
+		LOGWARNING("No URL in %s", __func__);
 		goto out;
 	}
 	if (unlikely(!cs->port)) {
-		LOGWARNING("No port in json_rpc_call");
+		LOGWARNING("No port in %s", __func__);
 		goto out;
 	}
 	if (unlikely(!cs->auth)) {
-		LOGWARNING("No auth in json_rpc_call");
+		LOGWARNING("No auth in %s", __func__);
 		goto out;
 	}
 	if (unlikely(!rpc_req)) {
-		LOGWARNING("Null rpc_req passed to json_rpc_call");
+		LOGWARNING("Null rpc_req passed to %s", __func__);
 		goto out;
 	}
 	len = strlen(rpc_req);
 	if (unlikely(!len)) {
-		LOGWARNING("Zero length rpc_req passed to json_rpc_call");
+		LOGWARNING("Zero length rpc_req passed to %s", __func__);
 		goto out;
 	}
 	http_req = ckalloc(len + 256); // Leave room for headers
@@ -792,31 +802,52 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		 cs->auth, cs->url, cs->port, len, rpc_req);
 
 	len = strlen(http_req);
+	tv_time(&stt_tv);
 	ret = write_socket(cs->fd, http_req, len);
 	if (ret != len) {
-		LOGWARNING("Failed to write to socket in json_rpc_call");
+		tv_time(&fin_tv);
+		elapsed = tvdiff(&fin_tv, &stt_tv);
+		LOGWARNING("Failed to write to socket in %s (%.10s...) %.3fs",
+			   __func__, rpc_method(rpc_req), elapsed);
 		goto out_empty;
 	}
 	ret = read_socket_line(cs, &timeout);
 	if (ret < 1) {
-		LOGWARNING("Failed to read socket line in json_rpc_call");
+		tv_time(&fin_tv);
+		elapsed = tvdiff(&fin_tv, &stt_tv);
+		LOGWARNING("Failed to read socket line in %s (%.10s...) %.3fs",
+			   __func__, rpc_method(rpc_req), elapsed);
 		goto out_empty;
 	}
 	if (strncasecmp(cs->buf, "HTTP/1.1 200 OK", 15)) {
-		LOGWARNING("HTTP response not ok: %s", cs->buf);
+		tv_time(&fin_tv);
+		elapsed = tvdiff(&fin_tv, &stt_tv);
+		LOGWARNING("HTTP response to (%.10s...) %.3fs not ok: %s",
+			   rpc_method(rpc_req), elapsed, cs->buf);
 		goto out_empty;
 	}
 	do {
 		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
-			LOGWARNING("Failed to read http socket lines in json_rpc_call");
+			tv_time(&fin_tv);
+			elapsed = tvdiff(&fin_tv, &stt_tv);
+			LOGWARNING("Failed to read http socket lines in %s (%.10s...) %.3fs",
+				   __func__, rpc_method(rpc_req), elapsed);
 			goto out_empty;
 		}
 	} while (strncmp(cs->buf, "{", 1));
+	tv_time(&fin_tv);
+	elapsed = tvdiff(&fin_tv, &stt_tv);
+	if (elapsed > 5.0) {
+		LOGWARNING("HTTP socket read+write took %.3fs in %s (%.10s...)",
+			   elapsed, __func__, rpc_method(rpc_req));
+	}
 
 	val = json_loads(cs->buf, 0, &err_val);
-	if (!val)
-		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
+	if (!val) {
+		LOGWARNING("JSON decode (%.10s...) failed(%d): %s",
+			   rpc_method(rpc_req), err_val.line, err_val.text);
+	}
 out_empty:
 	empty_socket(cs->fd);
 	empty_buffer(cs);
@@ -1533,7 +1564,7 @@ int main(int argc, char **argv)
 	ckpool_t ckp;
 
 	/* Make significant floating point errors fatal to avoid subtle bugs being missed */
-	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW );
+	feenableexcept(FE_DIVBYZERO | FE_INVALID);
 	json_set_alloc_funcs(json_ckalloc, free);
 
 	global_ckp = &ckp;

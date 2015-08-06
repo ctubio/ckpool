@@ -155,7 +155,7 @@ char *_safe_text(char *txt, bool shownull)
 	if (!txt) {
 		buf = strdup("(Null)");
 		if (!buf)
-			quithere(1, "malloc OOM");
+			quithere(1, "strdup OOM");
 		return buf;
 	}
 
@@ -871,6 +871,18 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 	return ws_item;
 }
 
+// workerstatus must be locked
+static void zero_on_idle(tv_t *when, WORKERSTATUS *workerstatus)
+{
+	copy_tv(&(workerstatus->active_start), when);
+	workerstatus->active_diffacc = workerstatus->active_diffinv =
+	workerstatus->active_diffsta = workerstatus->active_diffdup =
+	workerstatus->active_diffhi = workerstatus->active_diffrej =
+	workerstatus->active_shareacc = workerstatus->active_shareinv =
+	workerstatus->active_sharesta = workerstatus->active_sharedup =
+	workerstatus->active_sharehi = workerstatus->active_sharerej = 0.0;
+}
+
 /* All data is loaded, now update workerstatus fields
    TODO: combine set_block_share_counters() with this? */
 void workerstatus_ready()
@@ -939,6 +951,8 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 			K_WLOCK(workerstatus_free);
 			if (tv_newer(&(row->last_auth), &(auths->createdate)))
 				copy_tv(&(row->last_auth), &(auths->createdate));
+			if (row->active_start.tv_sec == 0)
+				copy_tv(&(row->active_start), &(auths->createdate));
 			K_WUNLOCK(workerstatus_free);
 		}
 	}
@@ -960,34 +974,54 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 				copy_tv(&(row->last_share), &(shares->createdate));
 				row->last_diff = shares->diff;
 			}
+			if (row->active_start.tv_sec == 0)
+				copy_tv(&(row->active_start), &(shares->createdate));
 			switch (shares->errn) {
 				case SE_NONE:
-					row->diffacc += shares->diff;
-					row->shareacc++;
+					row->block_diffacc += shares->diff;
+					row->block_shareacc++;
+					row->active_diffacc += shares->diff;
+					row->active_shareacc++;
 					break;
 				case SE_STALE:
-					row->diffinv += shares->diff;
-					row->shareinv++;
-					row->diffsta += shares->diff;
-					row->sharesta++;
+					row->block_diffinv += shares->diff;
+					row->block_shareinv++;
+					row->block_diffsta += shares->diff;
+					row->block_sharesta++;
+					row->active_diffinv += shares->diff;
+					row->active_shareinv++;
+					row->active_diffsta += shares->diff;
+					row->active_sharesta++;
 					break;
 				case SE_DUPE:
-					row->diffinv += shares->diff;
-					row->shareinv++;
-					row->diffdup += shares->diff;
-					row->sharedup++;
+					row->block_diffinv += shares->diff;
+					row->block_shareinv++;
+					row->block_diffdup += shares->diff;
+					row->block_sharedup++;
+					row->active_diffinv += shares->diff;
+					row->active_shareinv++;
+					row->active_diffdup += shares->diff;
+					row->active_sharedup++;
 					break;
 				case SE_HIGH_DIFF:
-					row->diffinv += shares->diff;
-					row->shareinv++;
-					row->diffhi += shares->diff;
-					row->sharehi++;
+					row->block_diffinv += shares->diff;
+					row->block_shareinv++;
+					row->block_diffhi += shares->diff;
+					row->block_sharehi++;
+					row->active_diffinv += shares->diff;
+					row->active_shareinv++;
+					row->active_diffhi += shares->diff;
+					row->active_sharehi++;
 					break;
 				default:
-					row->diffinv += shares->diff;
-					row->shareinv++;
-					row->diffrej += shares->diff;
-					row->sharerej++;
+					row->block_diffinv += shares->diff;
+					row->block_shareinv++;
+					row->block_diffrej += shares->diff;
+					row->block_sharerej++;
+					row->active_diffinv += shares->diff;
+					row->active_shareinv++;
+					row->active_diffrej += shares->diff;
+					row->active_sharerej++;
 					break;
 			}
 			K_WUNLOCK(workerstatus_free);
@@ -1001,8 +1035,10 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 			DATA_WORKERSTATUS(row, item);
 			K_WLOCK(workerstatus_free);
 			if (userstats->idle) {
-				if (tv_newer(&(row->last_idle), &(userstats->statsdate)))
+				if (tv_newer(&(row->last_idle), &(userstats->statsdate))) {
 					copy_tv(&(row->last_idle), &(userstats->statsdate));
+					zero_on_idle(&(userstats->statsdate), row);
+				}
 			} else {
 				if (tv_newer(&(row->last_stats), &(userstats->statsdate)))
 					copy_tv(&(row->last_stats), &(userstats->statsdate));
@@ -1158,6 +1194,179 @@ bool check_hash(USERS *users, char *passwordhash)
 		return (strcasecmp(hex, users->passwordhash) == 0);
 	} else
 		return (strcasecmp(passwordhash, users->passwordhash) == 0);
+}
+
+static void users_checkfor(USERS *users, char *name, int64_t bits)
+{
+	char *ptr;
+
+	ptr = strstr(users->userdata, name);
+	if (ptr) {
+		size_t len = strlen(name);
+		if ((ptr == users->userdata || *(ptr-1) == DATABITS_SEP) &&
+		    *(ptr+len) == '=') {
+			users->databits |= bits;
+		}
+	}
+}
+
+void users_databits(USERS *users)
+{
+	users->databits = 0;
+	if (users->userdata && *(users->userdata))
+	{
+		users_checkfor(users, USER_TOTPAUTH_NAME, USER_TOTPAUTH);
+		users_checkfor(users, USER_TEST2FA_NAME, USER_TEST2FA);
+	}
+}
+
+// Returns the hex text string (and length) in a malloced buffer
+char *_users_userdata_get_hex(USERS *users, char *name, int64_t bit,
+			      size_t *hexlen, WHERE_FFL_ARGS)
+{
+	char *ptr, *tmp, *end, *st = NULL, *val = NULL;
+
+	*hexlen = 0;
+	if (users->userdata && (users->databits & bit)) {
+		ptr = strstr(users->userdata, name);
+		// Should always be true
+		if (!ptr) {
+			LOGEMERG("%s() users userdata/databits mismatch for "
+				 "%s/%"PRId64 WHERE_FFL,
+				 __func__,
+				 st = safe_text_nonull(users->username),
+				 users->databits, WHERE_FFL_PASS);
+			FREENULL(st);
+		} else {
+			tmp = ptr + strlen(name) + 1;
+			if ((ptr == users->userdata || *(ptr-1) == DATABITS_SEP) &&
+			    *(tmp-1) == '=') {
+				end = strchr(tmp, DATABITS_SEP);
+				if (end)
+					*hexlen = end - tmp;
+				else
+					*hexlen = strlen(tmp);
+				val = malloc(*hexlen + 1);
+				if (!val)
+					quithere(1, "malloc OOM");
+				memcpy(val, tmp, *hexlen);
+				val[*hexlen] = '\0';
+			}
+		}
+	}
+	return val;
+}
+
+// Returns binary malloced string (and length) or NULL if not found
+unsigned char *_users_userdata_get_bin(USERS *users, char *name, int64_t bit,
+				       size_t *binlen, WHERE_FFL_ARGS)
+{
+	unsigned char *val = NULL;
+	size_t hexlen;
+	char *hex;
+
+	*binlen = 0;
+	hex = _users_userdata_get_hex(users, name, bit, &hexlen,
+				      WHERE_FFL_PASS);
+	if (hex) {
+		/* avoid calling malloc twice, hex is 2x required
+		 *  and overlap is OK with _hex2bin code */
+		hexlen >>= 1;
+		if (hex2bin(hex, hex, hexlen)) {
+			val = (unsigned char *)hex;
+			*binlen = hexlen;
+		} else
+			FREENULL(hex);
+	}
+	return val;
+}
+
+/* WARNING - users->userdata and users->databits are updated */
+void _users_userdata_del(USERS *users, char *name, int64_t bit, WHERE_FFL_ARGS)
+{
+	char *ptr, *tmp, *st = NULL, *end;
+
+	if (users->userdata && (users->databits & bit)) {
+		ptr = strstr(users->userdata, name);
+		// Should always be true
+		if (!ptr) {
+			LOGEMERG("%s() users userdata/databits mismatch for "
+				 "%s/%"PRId64 WHERE_FFL,
+				 __func__,
+				 st = safe_text_nonull(users->username),
+				 users->databits, WHERE_FFL_PASS);
+			FREENULL(st);
+		} else {
+			tmp = ptr + strlen(name) + 1;
+			if ((ptr == users->userdata || *(ptr-1) == DATABITS_SEP) &&
+			    *(tmp-1) == '=') {
+				// overwrite the memory since it will be smaller
+				end = strchr(tmp, DATABITS_SEP);
+				if (!end) {
+					// chop off the end
+					if (ptr == users->userdata) {
+						// now empty
+						*ptr = '\0';
+					} else {
+						// remove from DATABITS_SEP
+						*(ptr-1) = '\0';
+					}
+				} else {
+					// overlap
+					memmove(ptr, end+1, strlen(end+1)+1);
+				}
+				users->databits &= ~bit;
+			}
+		}
+	}
+}
+
+/* hex should be null terminated hex text
+ * WARNING - users->userdata and users->databits are updated */
+void _users_userdata_add_hex(USERS *users, char *name, int64_t bit, char *hex,
+			     WHERE_FFL_ARGS)
+{
+	char *ptr;
+
+	if (users->userdata && (users->databits & bit)) {
+		// TODO: if it's the same size or smaller, don't reallocate
+		_users_userdata_del(users, name, bit, WHERE_FFL_PASS);
+	}
+
+	if (users->userdata == EMPTY)
+		users->userdata = NULL;
+	else if (users->userdata && !(*(users->userdata)))
+		FREENULL(users->userdata);
+
+	if (users->userdata) {
+		size_t len = strlen(users->userdata) + 1 +
+				strlen(name) + 1 + strlen(hex) + 1;
+		ptr = malloc(len);
+		if (!(ptr))
+			quithere(1, "malloc OOM");
+		snprintf(ptr, len,
+			 "%s%c%s=%s",
+			 users->userdata, DATABITS_SEP, name, hex);
+		FREENULL(users->userdata);
+		users->userdata = ptr;
+	} else {
+		size_t len = strlen(name) + 1 + strlen(hex) + 1;
+		users->userdata = malloc(len);
+		if (!(users->userdata))
+			quithere(1, "malloc OOM");
+		snprintf(users->userdata, len, "%s=%s", name, hex);
+	}
+	users->databits |= bit;
+}
+
+/* value is considered binary data of length len
+ * WARNING - users->userdata and users->databits are updated */
+void _users_userdata_add_bin(USERS *users, char *name, int64_t bit,
+			     unsigned char *bin, size_t len, WHERE_FFL_ARGS)
+{
+	char *hex = bin2hex((const void *)bin, len);
+	_users_userdata_add_hex(users, name, bit, hex, WHERE_FFL_PASS);
+	FREENULL(hex);
 }
 
 // default tree order by userid asc,attname asc,expirydate desc
@@ -2436,12 +2645,12 @@ void zero_on_new_block()
 	ws_item = first_in_ktree(workerstatus_root, ctx);
 	while (ws_item) {
 		DATA_WORKERSTATUS(workerstatus, ws_item);
-		workerstatus->diffacc = workerstatus->diffinv =
-		workerstatus->diffsta = workerstatus->diffdup =
-		workerstatus->diffhi = workerstatus->diffrej =
-		workerstatus->shareacc = workerstatus->shareinv =
-		workerstatus->sharesta = workerstatus->sharedup =
-		workerstatus->sharehi = workerstatus->sharerej = 0.0;
+		workerstatus->block_diffacc = workerstatus->block_diffinv =
+		workerstatus->block_diffsta = workerstatus->block_diffdup =
+		workerstatus->block_diffhi = workerstatus->block_diffrej =
+		workerstatus->block_shareacc = workerstatus->block_shareinv =
+		workerstatus->block_sharesta = workerstatus->block_sharedup =
+		workerstatus->block_sharehi = workerstatus->block_sharerej = 0.0;
 		ws_item = next_in_ktree(ctx);
 	}
 	K_WUNLOCK(workerstatus_free);
@@ -2511,20 +2720,25 @@ void set_block_share_counters()
 		pool.diffacc += sharesummary->diffacc;
 		pool.diffinv += sharesummary->diffsta + sharesummary->diffdup +
 				sharesummary->diffhi + sharesummary->diffrej;
-		workerstatus->diffacc += sharesummary->diffacc;
-		workerstatus->diffinv += sharesummary->diffsta + sharesummary->diffdup +
-					 sharesummary->diffhi + sharesummary->diffrej;
-		workerstatus->diffsta += sharesummary->diffsta;
-		workerstatus->diffdup += sharesummary->diffdup;
-		workerstatus->diffhi += sharesummary->diffhi;
-		workerstatus->diffrej += sharesummary->diffrej;
-		workerstatus->shareacc += sharesummary->shareacc;
-		workerstatus->shareinv += sharesummary->sharesta + sharesummary->sharedup +
-					  sharesummary->sharehi + sharesummary->sharerej;
-		workerstatus->sharesta += sharesummary->sharesta;
-		workerstatus->sharedup += sharesummary->sharedup;
-		workerstatus->sharehi += sharesummary->sharehi;
-		workerstatus->sharerej += sharesummary->sharerej;
+		// Block stats only
+		workerstatus->block_diffacc += sharesummary->diffacc;
+		workerstatus->block_diffinv += sharesummary->diffsta +
+						sharesummary->diffdup +
+						sharesummary->diffhi +
+						sharesummary->diffrej;
+		workerstatus->block_diffsta += sharesummary->diffsta;
+		workerstatus->block_diffdup += sharesummary->diffdup;
+		workerstatus->block_diffhi += sharesummary->diffhi;
+		workerstatus->block_diffrej += sharesummary->diffrej;
+		workerstatus->block_shareacc += sharesummary->shareacc;
+		workerstatus->block_shareinv += sharesummary->sharesta +
+						sharesummary->sharedup +
+						sharesummary->sharehi +
+						sharesummary->sharerej;
+		workerstatus->block_sharesta += sharesummary->sharesta;
+		workerstatus->block_sharedup += sharesummary->sharedup;
+		workerstatus->block_sharehi += sharesummary->sharehi;
+		workerstatus->block_sharerej += sharesummary->sharerej;
 
 		ss_item = prev_in_ktree(ctx);
 	}
@@ -2589,20 +2803,25 @@ void set_block_share_counters()
 				pool.diffacc += markersummary->diffacc;
 				pool.diffinv += markersummary->diffsta + markersummary->diffdup +
 						markersummary->diffhi + markersummary->diffrej;
-				workerstatus->diffacc += markersummary->diffacc;
-				workerstatus->diffinv += markersummary->diffsta + markersummary->diffdup +
-							 markersummary->diffhi + markersummary->diffrej;
-				workerstatus->diffsta += markersummary->diffsta;
-				workerstatus->diffdup += markersummary->diffdup;
-				workerstatus->diffhi += markersummary->diffhi;
-				workerstatus->diffrej += markersummary->diffrej;
-				workerstatus->shareacc += markersummary->shareacc;
-				workerstatus->shareinv += markersummary->sharesta + markersummary->sharedup +
-							  markersummary->sharehi + markersummary->sharerej;
-				workerstatus->sharesta += markersummary->sharesta;
-				workerstatus->sharedup += markersummary->sharedup;
-				workerstatus->sharehi += markersummary->sharehi;
-				workerstatus->sharerej += markersummary->sharerej;
+				// Block stats only
+				workerstatus->block_diffacc += markersummary->diffacc;
+				workerstatus->block_diffinv += markersummary->diffsta +
+								markersummary->diffdup +
+								markersummary->diffhi +
+								markersummary->diffrej;
+				workerstatus->block_diffsta += markersummary->diffsta;
+				workerstatus->block_diffdup += markersummary->diffdup;
+				workerstatus->block_diffhi += markersummary->diffhi;
+				workerstatus->block_diffrej += markersummary->diffrej;
+				workerstatus->block_shareacc += markersummary->shareacc;
+				workerstatus->block_shareinv += markersummary->sharesta +
+								markersummary->sharedup +
+								markersummary->sharehi +
+								markersummary->sharerej;
+				workerstatus->block_sharesta += markersummary->sharesta;
+				workerstatus->block_sharedup += markersummary->sharedup;
+				workerstatus->block_sharehi += markersummary->sharehi;
+				workerstatus->block_sharerej += markersummary->sharerej;
 
 				ms_item = prev_in_ktree(ctx_ms);
 			}
@@ -2925,7 +3144,7 @@ double payout_stats(PAYOUTS *payouts, char *statname)
 			pos += len+1;
 			// They should only contain +ve numbers
 			if (*pos && isdigit(*pos)) {
-				tab = strchr(pos, '\t');
+				tab = strchr(pos, FLDSEP);
 				if (!tab)
 					numlen = strlen(pos);
 				else
@@ -2938,7 +3157,7 @@ double payout_stats(PAYOUTS *payouts, char *statname)
 			}
 			break;
 		}
-		pos = strchr(pos, '\t');
+		pos = strchr(pos, FLDSEP);
 		if (pos)
 			pos++;
 	}
