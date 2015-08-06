@@ -948,17 +948,19 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 {
 	char *buf = NULL;
 	uint32_t msglen;
-	int ret;
+	int ret, ern;
 
 	ret = wait_read_select(sockd, timeout1);
 	if (unlikely(ret < 1)) {
-		LOGERR("Select1 failed in recv_unix_msg");
+		ern = errno;
+		LOGERR("Select1 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
 	/* Get message length */
 	ret = read_length(sockd, &msglen, 4);
 	if (unlikely(ret < 4)) {
-		LOGERR("Failed to read 4 byte length in recv_unix_msg");
+		ern = errno;
+		LOGERR("Failed to read 4 byte length in recv_unix_msg (%d?)", ern);
 		goto out;
 	}
 	msglen = le32toh(msglen);
@@ -968,13 +970,15 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 	}
 	ret = wait_read_select(sockd, timeout2);
 	if (unlikely(ret < 1)) {
-		LOGERR("Select2 failed in recv_unix_msg");
+		ern = errno;
+		LOGERR("Select2 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
 	buf = ckzalloc(msglen + 1);
 	ret = read_length(sockd, buf, msglen);
 	if (unlikely(ret < (int)msglen)) {
-		LOGERR("Failed to read %u bytes in recv_unix_msg", msglen);
+		ern = errno;
+		LOGERR("Failed to read %u bytes in recv_unix_msg (%d?)", msglen, ern);
 		dealloc(buf);
 	}
 out:
@@ -1005,7 +1009,7 @@ out:
 
 int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line)
 {
-	int ret, ofs = 0;
+	int ret, ofs = 0, ern;
 
 	if (unlikely(len < 1)) {
 		LOGWARNING("Invalid write length of %d requested in write_length from %s %s:%d",
@@ -1013,6 +1017,7 @@ int _write_length(int sockd, const void *buf, int len, const char *file, const c
 		return -1;
 	}
 	if (unlikely(sockd < 0)) {
+		ern = errno;
 		LOGWARNING("Attempt to write to invalidated sock in write_length from %s %s:%d",
 			   file, func, line);
 		return -1;
@@ -1020,8 +1025,9 @@ int _write_length(int sockd, const void *buf, int len, const char *file, const c
 	while (len) {
 		ret = write(sockd, buf + ofs, len);
 		if (unlikely(ret < 0)) {
-			LOGERR("Failed to write %d bytes in write_length from %s %s:%d",
-			       len, file, func, line);
+			ern = errno;
+			LOGERR("Failed to write %d bytes in write_length (%d) from %s %s:%d",
+			       len, ern, file, func, line);
 			return -1;
 		}
 		ofs += ret;

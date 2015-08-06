@@ -72,13 +72,24 @@ function addrmgtuser($data, $user, $err)
 	else
 		$row = 'odd';
 	$pg .= "<tr class=$row>";
-	$pg .= '<td colspan=3 class=dc>';
+	$pg .= '<td class=dr>';
 	$pg .= 'Password: <input type=password name=pass size=20>';
-	$pg .= '&nbsp;<input type=submit name=OK value=Save></td></tr>';
+	$pg .= '</td><td colspan=2>&nbsp;</td></tr>';
+
+	if ((($offset++) % 2) == 0)
+		$row = 'even';
+	else
+		$row = 'odd';
+	$pg .= "<tr class=$row>";
+	$pg .= '<td class=dr>';
+	$pg .= '<span class=st1>*</span>2nd Authentication: <input type=password name=2fa size=10>';
+	$pg .= '</td><td colspan=2 class=dl><input type=submit name=OK value=Save></td></tr>';
+
+	$pg .= "<tr><td colspan=3 class=dc><font size=-1>";
+	$pg .= "<span class=st1>*</span>Leave blank if you haven't enabled it<br>";
+	$pg .= 'You must enter your password to save changes<br>';
+	$pg .= 'A ratio of 0, will remove the address from the payouts</font></td></tr>';
  }
- $pg .= '<tr><td colspan=3 class=dc><font size=-1><span class=st1>*</span>';
- $pg .= ' You must enter your password to save changes<br>';
- $pg .= 'A ratio of 0, will remove the address from the payouts</font></td></tr>';
  $pg .= "</table><input type=hidden name=rows value=$count id=rows></form>\n";
 
  $pg .= "<script type='text/javascript'>\n";
@@ -107,6 +118,7 @@ function doaddrmgt($data, $user)
  $OK = getparam('OK', false);
  $count = getparam('rows', false);
  $pass = getparam('pass', false);
+ $twofa = getparam('2fa', false);
  if ($OK == 'Save' && !nuem($count) && !nuem($pass))
  {
 	if ($count > 0 && $count < 1000)
@@ -119,7 +131,7 @@ function doaddrmgt($data, $user)
 			if (!nuem($addr) && !nuem($ratio))
 				$addrarr[] = array('addr' => $addr, 'ratio' => $ratio);
 		}
-		$ans = userSettings($user, null, $addrarr, $pass);
+		$ans = userSettings($user, null, $addrarr, $pass, $twofa);
 		if ($ans['STATUS'] != 'ok')
 			$err = $ans['ERROR'];
 	}

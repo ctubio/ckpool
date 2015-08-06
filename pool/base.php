@@ -323,12 +323,12 @@ session_start();
 #
 include_once('db.php');
 #
-function validUserPass($user, $pass)
+function validUserPass($user, $pass, $twofa)
 {
- $rep = checkPass($user, $pass);
+ $rep = checkPass($user, $pass, $twofa);
  if ($rep != null)
 	$ans = repDecode($rep);
- usleep(100000); // Max 10x per second
+ usleep(500000); // Max twice per second
  if ($rep != null && $ans['STATUS'] == 'ok')
  {
 	$key = 'ckp'.rand(1000000,9999999);
@@ -352,7 +352,7 @@ function logout()
  }
 }
 #
-function requestRegister()
+function requestLoginRegReset()
 {
  $reg = getparam('Register', true);
  $reg2 = getparam('Reset', false);
@@ -397,7 +397,9 @@ function tryLogInOut()
 		return;
 	}
 
-	$valid = validUserPass($user, $pass);
+	$twofa = getparam('2fa', false);
+
+	$valid = validUserPass($user, $pass, $twofa);
 	if (!$valid)
 		$loginfailed = true;
  }

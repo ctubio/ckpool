@@ -3935,6 +3935,7 @@ static void *socketer(__maybe_unused void *arg)
 							fflush(global_ckp->logfp);
 						break;
 					case CMD_CHKPASS:
+					case CMD_2FA:
 					case CMD_ADDUSER:
 					case CMD_NEWPASS:
 					case CMD_USERSET:
@@ -4262,6 +4263,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_ADDUSER:
 			case CMD_NEWPASS:
 			case CMD_CHKPASS:
+			case CMD_2FA:
 			case CMD_USERSET:
 			case CMD_WORKERSET:
 			case CMD_BLOCKLIST:

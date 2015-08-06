@@ -10,9 +10,10 @@ function worktitle($data, $user)
  $pg .= "<td class=dr><span class=nb><$r id=srtlst data-sf=n2>:Last</span> Share</td>";
  $pg .= '<td class=dr>Shares</td>';
  $pg .= "<td class=dr><span class=nb><$r id=srtdiff data-sf=r4>:Diff</span></td>";
- $pg .= '<td class=dr>Invalid</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtshrate data-sf=r5>:Share Rate</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtinv data-sf=r6>:Invalid</span></td>";
  $pg .= '<td class=dr>Block %</td>';
- $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r7>:Hash</span> Rate</td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r8>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
  return $pg;
 }
@@ -23,7 +24,7 @@ function workhashorder($a, $b)
 }
 #
 function workuser($data, $user, &$offset, &$totshare, &$totdiff,
-			&$totinvalid, &$totrate, &$blockacc,
+			&$totshrate, &$totinvalid, &$totrate, &$blockacc,
 			&$blockreward, $old = false, $srt = false,
 			 $one = false, &$title)
 {
@@ -63,6 +64,8 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 				'w_diffacc' => $ans['w_diffacc:'.$i],
 				'w_diffinv' => $ans['w_diffinv:'.$i],
 				'w_lastdiff' => $ans['w_lastdiff:'.$i],
+				'w_active_diffacc' => $ans['w_active_diffacc:'.$i],
+				'w_active_start' => $ans['w_active_start:'.$i],
 				'w_uhr' => $uhr);
 	}
 
@@ -92,25 +95,49 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 		$shareacc = number_format($all[$i]['w_shareacc'], 0);
 		$totshare += $all[$i]['w_shareacc'];
-		$diffacc = number_format($all[$i]['w_diffacc'], 0);
-		$ds = round($all[$i]['w_diffacc']);
-		$totdiff += $all[$i]['w_diffacc'];
+		$dacc = $all[$i]['w_diffacc'];
+		$diffacc = number_format($dacc, 0);
+		$ds = round($dacc);
+		$totdiff += $dacc;
 		$pg .= "<td class=dr>$shareacc</td>";
 		$pg .= "<td class=dr data-srt=$ds>$diffacc</td>";
 
-		$dtot = $all[$i]['w_diffacc'] + $all[$i]['w_diffinv'];
-		if ($dtot > 0)
-			$rej = number_format(100.0 * $all[$i]['w_diffinv'] / $dtot, 3);
-		else
-			$rej = '0';
-		$totinvalid +=  $all[$i]['w_diffinv'];
+		$acthr = '0';
+		$acthrv = 0;
+		$actstt = $all[$i]['w_active_start'];
+		if ($actstt > 0)
+		{
+			$elapsed = $ans['STAMP'] - $actstt;
+			if ($elapsed > 0)
+			{
+				$acthrv = $all[$i]['w_active_diffacc'] *
+						pow(2,32) / $elapsed;
+				$acthr = dsprate($acthrv);
+				$totshrate += $acthrv;
+			}
+		}
+		$pg .= "<td class=dr data-srt=$acthrv>$acthr</td>";
 
-		$pg .= "<td class=dr>$rej%</td>";
+		$dinv = $all[$i]['w_diffinv'];
+		$dtot = $dacc + $dinv;
+		if ($dtot > 0)
+		{
+			$rejf = $dinv / $dtot;
+			$rej = number_format(100.0 * $rejf, 3);
+		}
+		else
+		{
+			$rejf = 0;
+			$rej = '0';
+		}
+		$totinvalid += $dinv;
+
+		$pg .= "<td class=dr data-srt=$rejf>$rej%</td>";
 
 		if ($blockacc <= 0)
 			$blkpct = '&nbsp;';
 		else
-			$blkpct = number_format(100.0 * $all[$i]['w_diffacc'] / $blockacc, 3) . '%';
+			$blkpct = number_format(100.0 * $dacc / $blockacc, 3) . '%';
 
 		$pg .= "<td class=dr>$blkpct</td>";
 
@@ -136,9 +163,11 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
  return $pg;
 }
 #
-function worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate, $blockacc, $blockreward)
+function worktotal($offset, $totshare, $totdiff, $totshrate, $totinvalid,
+			$totrate, $blockacc, $blockreward)
 {
  $pg = '';
+ $totshrate = dsprate($totshrate);
  $totrate = dsprate($totrate);
  if (($offset % 2) == 0)
 	$row = 'even';
@@ -149,6 +178,7 @@ function worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate, $blockac
  $pg .= "<td class=dr>$shareacc</td>";
  $diffacc = number_format($totdiff, 0);
  $pg .= "<td class=dr>$diffacc</td>";
+ $pg .= "<td class=dr>$totshrate</td>";
  $dtot = $totdiff + $totinvalid;
  if ($dtot > 0)
 	$rej = number_format(100.0 * $totinvalid / $dtot, 3);
@@ -172,6 +202,7 @@ function doworker($data, $user)
 
  $totshare = 0;
  $totdiff = 0;
+ $totshrate = 0;
  $totinvalid = 0;
  $totrate = 0;
  $offset = 0;
@@ -179,11 +210,11 @@ function doworker($data, $user)
  $blockreward = 0;
 
  $pg .= worktitle($data, $user);
- $pg .= workuser($data, $user, $offset, $totshare, $totdiff, $totinvalid,
-			$totrate, $blockacc, $blockreward, false, true, true,
-			$title);
- $pg .= worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate,
-			$blockacc, $blockreward);
+ $pg .= workuser($data, $user, $offset, $totshare, $totdiff, $totshrate,
+			$totinvalid, $totrate, $blockacc, $blockreward,
+			false, true, true, $title);
+ $pg .= worktotal($offset, $totshare, $totdiff, $totshrate, $totinvalid,
+			$totrate, $blockacc, $blockreward);
 
  if (false && $blockacc > 0 && $blockreward > 0)
  {

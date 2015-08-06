@@ -67,7 +67,7 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 
 		u_item = users_add(conn, transfer_data(i_username),
 					 transfer_data(i_emailaddress),
-					 transfer_data(i_passwordhash),
+					 transfer_data(i_passwordhash), 0,
 					 by, code, inet, now, trf_root);
 	}
 
@@ -84,11 +84,13 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 tv_t *now, char *by, char *code, char *inet,
 			 __maybe_unused tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *i_username, *i_oldhash, *i_newhash, *u_item;
+	K_ITEM *i_username, *i_oldhash, *i_newhash, *i_2fa, *u_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	bool ok = true;
 	char *oldhash;
+	int32_t value;
+	USERS *users;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -108,6 +110,10 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 		oldhash = EMPTY;
 	}
 
+	i_2fa = require_name(trf_root, "2fa", 1, (char *)intpatt, reply, siz);
+	if (!i_2fa)
+		return strdup(reply);
+
 	if (ok) {
 		i_newhash = require_name(trf_root, "newhash",
 					 64, (char *)hashpatt,
@@ -120,13 +126,21 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RUNLOCK(users_free);
 
 		if (u_item) {
-			ok = users_update(NULL, u_item,
-						oldhash,
-						transfer_data(i_newhash),
-						NULL,
-						by, code, inet, now,
-						trf_root,
-						NULL);
+			DATA_USERS(users, u_item);
+			if (USER_TOTP_ENA(users)) {
+				value = (int32_t)atoi(transfer_data(i_2fa));
+				ok = check_2fa(users, value);
+			}
+			if (ok) {
+				ok = users_update(NULL,
+						  u_item,
+						  oldhash,
+						  transfer_data(i_newhash),
+						  NULL,
+						  by, code, inet, now,
+						  trf_root,
+						  NULL);
+			}
 		} else
 			ok = false;
 	}
@@ -144,7 +158,7 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 __maybe_unused char *code, __maybe_unused char *inet,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
-	K_ITEM *i_username, *i_passwordhash, *u_item;
+	K_ITEM *i_username, *i_passwordhash, *i_2fa, *u_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	USERS *users;
@@ -160,6 +174,10 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!i_passwordhash)
 		return strdup(reply);
 
+	i_2fa = require_name(trf_root, "2fa", 1, (char *)intpatt, reply, siz);
+	if (!i_2fa)
+		return strdup(reply);
+
 	K_RLOCK(users_free);
 	u_item = find_users(transfer_data(i_username));
 	K_RUNLOCK(users_free);
@@ -169,6 +187,10 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	else {
 		DATA_USERS(users, u_item);
 		ok = check_hash(users, transfer_data(i_passwordhash));
+		if (ok && USER_TOTP_ENA(users)) {
+			uint32_t value = (int32_t)atoi(transfer_data(i_2fa));
+			ok = check_2fa(users, value);
+		}
 	}
 
 	if (!ok) {
@@ -179,13 +201,212 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup("ok.");
 }
 
+static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
+		     tv_t *now, char *by, char *code, char *inet,
+		     __maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_username, *i_action, *i_entropy, *i_value, *u_item, *u_new;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	size_t len, off;
+	char tmp[1024];
+	int32_t entropy, value;
+	USERS *users;
+	char *action, *buf = NULL, *st = NULL;
+	char *sfa_status = EMPTY, *sfa_error = EMPTY;
+	bool ok = false, key = false;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
+				  reply, siz);
+	if (!i_username)
+		return strdup(reply);
+
+	// Field always expected, blank means to report the status
+	i_action = require_name(trf_root, "action", 0, NULL, reply, siz);
+	if (!i_action)
+		return strdup(reply);
+	action = transfer_data(i_action);
+
+	/* Field always expected with a value,
+	 * but the value is only used when generating a Secret Key */
+	i_entropy = require_name(trf_root, "entropy", 1, (char *)intpatt,
+				 reply, siz);
+	if (!i_entropy)
+		return strdup(reply);
+
+	// Field always expected, use 0 if not required
+	i_value = require_name(trf_root, "value", 1, (char *)intpatt,
+				reply, siz);
+	if (!i_value)
+		return strdup(reply);
+
+	K_RLOCK(users_free);
+	u_item = find_users(transfer_data(i_username));
+	K_RUNLOCK(users_free);
+
+	if (u_item) {
+		DATA_USERS(users, u_item);
+
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+
+		switch (users->databits & (USER_TOTPAUTH | USER_TEST2FA)) {
+			case 0:
+				break;
+			case USER_TOTPAUTH:
+				sfa_status = "ok";
+				break;
+			case (USER_TOTPAUTH | USER_TEST2FA):
+				sfa_status = "test";
+				key = true;
+				break;
+			default:
+				// USER_TEST2FA only <- currently invalid
+				LOGERR("%s() users databits invalid for "
+					"'%s/%"PRId64,
+					__func__,
+					st = safe_text_nonull(users->username),
+					users->databits);
+				goto dame;
+		}
+
+		if (!*action) {
+			ok = true;
+		} else if (strcmp(action, "setup") == 0) {
+			// Can't setup if anything is already present -> new
+			if (users->databits & (USER_TOTPAUTH | USER_TEST2FA))
+				goto dame;
+			entropy = (int32_t)atoi(transfer_data(i_entropy));
+			u_new = gen_2fa_key(u_item, entropy, by, code, inet,
+					    now, trf_root);
+			if (u_new) {
+				ok = true;
+				sfa_status = "test";
+				key = true;
+				u_item = u_new;
+				DATA_USERS(users, u_item);
+			}
+		} else if (strcmp(action, "test") == 0) {
+			// Can't test if it's not ready to test
+			if ((users->databits & (USER_TOTPAUTH | USER_TEST2FA))
+			    != (USER_TOTPAUTH | USER_TEST2FA))
+				goto dame;
+			value = (int32_t)atoi(transfer_data(i_value));
+			ok = tst_2fa(u_item, value, by, code, inet, now,
+				     trf_root);
+			if (!ok)
+				sfa_error = "Invalid code";
+			else {
+				key = false;
+				sfa_status = "ok";
+			}
+			// Report sfa_error to web
+			ok = true;
+		} else if (strcmp(action, "new") == 0) {
+			// Can't new if 2FA isn't already present -> setup
+			if ((users->databits & USER_TOTPAUTH) == 0)
+				goto dame;
+			value = (int32_t)atoi(transfer_data(i_value));
+			if (!check_2fa(users, value)) {
+				sfa_error = "Invalid code";
+				// Report sfa_error to web
+				ok = true;
+			} else {
+				entropy = (int32_t)atoi(transfer_data(i_entropy));
+				u_new = gen_2fa_key(u_item, entropy, by, code,
+						    inet, now, trf_root);
+				if (u_new) {
+					ok = true;
+					sfa_status = "test";
+					key = true;
+					u_item = u_new;
+					DATA_USERS(users, u_item);
+				}
+			}
+		}
+		if (key) {
+			char *keystr, *issuer = "Kano";
+			char cd_buf[DATE_BUFSIZ];
+			unsigned char *bin;
+			OPTIONCONTROL *oc;
+			K_ITEM *oc_item;
+			size_t binlen;
+			bin = users_userdata_get_bin(users,
+						     USER_TOTPAUTH_NAME,
+						     USER_TOTPAUTH,
+						     &binlen);
+			if (binlen != TOTPAUTH_KEYSIZE) {
+				LOGERR("%s() invalid key for '%s/%s "
+					"len(%d) != %d",
+					__func__,
+					st = safe_text_nonull(users->username),
+					USER_TOTPAUTH_NAME, (int)binlen,
+					TOTPAUTH_KEYSIZE);
+				FREENULL(st);
+			}
+			if (bin && binlen == TOTPAUTH_KEYSIZE) {
+				keystr = tob32(users, bin, binlen,
+						USER_TOTPAUTH_NAME,
+						TOTPAUTH_DSP_KEYSIZE);
+				snprintf(tmp, sizeof(tmp), "2fa_key=%s%c",
+					 keystr, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				FREENULL(keystr);
+
+				K_RLOCK(optioncontrol_free);
+				oc_item = find_optioncontrol(TOTPAUTH_ISSUER,
+							     now,
+							     OPTIONCONTROL_HEIGHT);
+				K_RUNLOCK(optioncontrol_free);
+				if (oc_item) {
+					DATA_OPTIONCONTROL(oc, oc_item);
+					issuer = oc->optionvalue;
+				} else {
+					tv_to_buf(now, cd_buf, sizeof(cd_buf));
+					LOGEMERG("%s(): missing optioncontrol "
+						 "%s (%s/%d)",
+						 __func__, TOTPAUTH_ISSUER,
+						 cd_buf, OPTIONCONTROL_HEIGHT);
+				}
+
+				// TODO: add issuer to optioncontrol
+				snprintf(tmp, sizeof(tmp),
+					 "2fa_auth=%s%c2fa_hash=%s%c"
+					 "2fa_time=%d%c2fa_issuer=%s%c",
+					 TOTPAUTH_AUTH, FLDSEP,
+					 TOTPAUTH_HASH, FLDSEP,
+					 TOTPAUTH_TIME, FLDSEP,
+					 issuer, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+			}
+			FREENULL(bin);
+		}
+	}
+
+	if (!ok) {
+dame:
+		// Only db/php/code errors should get here
+		LOGERR("%s.failed.%s-%s", id, transfer_data(i_username), action);
+		FREENULL(buf);
+		return strdup("failed.");
+	}
+
+	snprintf(tmp, sizeof(tmp), "2fa_status=%s%c2fa_error=%s",
+				   sfa_status, FLDSEP, sfa_error);
+	APPEND_REALLOC(buf, off, len, tmp);
+	LOGDEBUG("%s.%s-%s.%s", id, transfer_data(i_username), action, buf);
+	return buf;
+}
+
 static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *now, __maybe_unused char *by,
 			 __maybe_unused char *code, __maybe_unused char *inet,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
-	K_ITEM *i_username, *i_passwordhash, *i_rows, *i_address, *i_ratio;
-	K_ITEM *i_email, *u_item, *pa_item, *old_pa_item;
+	K_ITEM *i_username, *i_passwordhash, *i_2fa, *i_rows, *i_address;
+	K_ITEM *i_ratio, *i_email, *u_item, *pa_item, *old_pa_item;
 	char *email, *address;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -263,10 +484,26 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				 "PaymentAddresses", FLDSEP, "");
 			APPEND_REALLOC(answer, off, len, tmp);
 		} else {
+			i_2fa = require_name(trf_root, "2fa", 1, (char *)intpatt,
+					      reply, siz);
+			if (!i_2fa) {
+				reason = "Invalid data";
+				goto struckout;
+			}
+
 			if (!check_hash(users, transfer_data(i_passwordhash))) {
 				reason = "Incorrect password";
 				goto struckout;
 			}
+
+			if (USER_TOTP_ENA(users)) {
+				uint32_t value = (int32_t)atoi(transfer_data(i_2fa));
+				if (!check_2fa(users, value)) {
+					reason = "Invalid data";
+					goto struckout;
+				}
+			}
+
 			i_email = optional_name(trf_root, "email",
 						1, (char *)mailpatt,
 						reply, siz);
@@ -1395,18 +1632,18 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 			ws_item = get_workerstatus(users->userid, workers->workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
-				t_diffacc += workerstatus->diffacc;
-				t_diffinv += workerstatus->diffinv;
-				t_diffsta += workerstatus->diffsta;
-				t_diffdup += workerstatus->diffdup;
-				t_diffhi  += workerstatus->diffhi;
-				t_diffrej += workerstatus->diffrej;
-				t_shareacc += workerstatus->shareacc;
-				t_shareinv += workerstatus->shareinv;
-				t_sharesta += workerstatus->sharesta;
-				t_sharedup += workerstatus->sharedup;
-				t_sharehi += workerstatus->sharehi;
-				t_sharerej += workerstatus->sharerej;
+				t_diffacc += workerstatus->block_diffacc;
+				t_diffinv += workerstatus->block_diffinv;
+				t_diffsta += workerstatus->block_diffsta;
+				t_diffdup += workerstatus->block_diffdup;
+				t_diffhi  += workerstatus->block_diffhi;
+				t_diffrej += workerstatus->block_diffrej;
+				t_shareacc += workerstatus->block_shareacc;
+				t_shareinv += workerstatus->block_shareinv;
+				t_sharesta += workerstatus->block_sharesta;
+				t_sharedup += workerstatus->block_sharedup;
+				t_sharehi += workerstatus->block_sharehi;
+				t_sharerej += workerstatus->block_sharerej;
 			}
 
 			/* TODO: workers_root userid+worker is ordered
@@ -1692,6 +1929,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					double w_shareacc, w_shareinv;
 					double w_sharesta, w_sharedup;
 					double w_sharehi, w_sharerej;
+					double w_active_diffacc;
+					tv_t w_active_start;
 
 					w_hashrate5m = w_hashrate1hr =
 					w_hashrate24hr = 0.0;
@@ -1699,30 +1938,34 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 					if (!ws_item) {
 						w_lastshare.tv_sec = 0;
-						w_lastdiff = w_diffacc = w_diffinv =
-						w_diffsta = w_diffdup =
-						w_diffhi = w_diffrej =
-						w_shareacc = w_shareinv =
-						w_sharesta = w_sharedup =
-						w_sharehi = w_sharerej = 0;
+						w_lastdiff = w_diffacc =
+						w_diffinv = w_diffsta =
+						w_diffdup = w_diffhi =
+						w_diffrej = w_shareacc =
+						w_shareinv = w_sharesta =
+						w_sharedup = w_sharehi =
+						w_sharerej = w_active_diffacc = 0;
+						w_active_start.tv_sec = 0;
 					} else {
 						DATA_WORKERSTATUS(workerstatus, ws_item);
 						// It's bad to read possibly changing data
 						K_RLOCK(workerstatus_free);
 						w_lastshare.tv_sec = workerstatus->last_share.tv_sec;
 						w_lastdiff = workerstatus->last_diff;
-						w_diffacc = workerstatus->diffacc;
-						w_diffinv = workerstatus->diffinv;
-						w_diffsta = workerstatus->diffsta;
-						w_diffdup = workerstatus->diffdup;
-						w_diffhi  = workerstatus->diffhi;
-						w_diffrej = workerstatus->diffrej;
-						w_shareacc = workerstatus->shareacc;
-						w_shareinv = workerstatus->shareinv;
-						w_sharesta = workerstatus->sharesta;
-						w_sharedup = workerstatus->sharedup;
-						w_sharehi = workerstatus->sharehi;
-						w_sharerej = workerstatus->sharerej;
+						w_diffacc = workerstatus->block_diffacc;
+						w_diffinv = workerstatus->block_diffinv;
+						w_diffsta = workerstatus->block_diffsta;
+						w_diffdup = workerstatus->block_diffdup;
+						w_diffhi  = workerstatus->block_diffhi;
+						w_diffrej = workerstatus->block_diffrej;
+						w_shareacc = workerstatus->block_shareacc;
+						w_shareinv = workerstatus->block_shareinv;
+						w_sharesta = workerstatus->block_sharesta;
+						w_sharedup = workerstatus->block_sharedup;
+						w_sharehi = workerstatus->block_sharehi;
+						w_sharerej = workerstatus->block_sharerej;
+						w_active_diffacc = workerstatus->active_diffacc;
+						w_active_start.tv_sec = workerstatus->active_start.tv_sec;
 						K_RUNLOCK(workerstatus_free);
 					}
 
@@ -1815,6 +2058,15 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					double_to_buf(w_sharerej, reply, sizeof(reply));
 					snprintf(tmp, sizeof(tmp), "w_sharerej:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_active_diffacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_active_diffacc:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					int_to_buf((int)(w_active_start.tv_sec), reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_active_start:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
 				}
 				rows++;
 			}
@@ -1832,7 +2084,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 "w_lastdiff,w_diffacc,w_diffinv,"
 		 "w_diffsta,w_diffdup,w_diffhi,w_diffrej,"
 		 "w_shareacc,w_shareinv,"
-		 "w_sharesta,w_sharedup,w_sharehi,w_sharerej" : "",
+		 "w_sharesta,w_sharedup,w_sharehi,w_sharerej,"
+		 "w_active_diffacc,w_active_start" : "",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -2460,7 +2713,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 		if (!u_item) {
 			DATA_OPTIONCONTROL(optioncontrol, oc_item);
 			u_item = users_add(conn, username, EMPTY,
-					   optioncontrol->optionvalue,
+					   optioncontrol->optionvalue, 0,
 					   by, code, inet, cd, trf_root);
 		}
 	}
@@ -6046,6 +6299,7 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_ADDUSER,	"adduser",	false,	false,	cmd_adduser,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_NEWPASS,	"newpass",	false,	false,	cmd_newpass,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_CHKPASS,	"chkpass",	false,	false,	cmd_chkpass,	SEQ_NONE,	ACCESS_WEB },
+	{ CMD_2FA,	"2fa",		false,	false,	cmd_2fa,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_USERSET,	"usersettings",	false,	false,	cmd_userset,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_WORKERSET,"workerset",	false,	false,	cmd_workerset,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_POOLSTAT,	"poolstats",	false,	true,	cmd_poolstats,	SEQ_POOLSTATS,	ACCESS_POOL },

@@ -73,7 +73,8 @@ function check()
 		'Rewards' => 'mpayouts',
 		'Payments' => 'payments',
 		'Settings' => 'settings',
-		'User Settings' => 'userset'
+		'User Settings' => 'userset',
+		'2FA Settings' => '2fa'
 	),
 	'Workers' => array(
 		'Shifts' => 'shifts',
@@ -105,7 +106,7 @@ function check()
 		showPage(NULL, 'reset', $dmenu, '', $who);
 	else
 	{
-		if (requestRegister() == true)
+		if (requestLoginRegReset() == true)
 			showPage(NULL, 'reg', $dmenu, '', $who);
 		else
 		{

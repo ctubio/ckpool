@@ -54,8 +54,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.112"
+#define DB_VERSION "1.0.1"
+#define CKDB_VERSION DB_VERSION"-1.200"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -369,6 +369,7 @@ enum cmd_values {
 	CMD_HEARTBEAT,
 	CMD_NEWPASS,
 	CMD_CHKPASS,
+	CMD_2FA,
 	CMD_USERSET,
 	CMD_WORKERSET,
 	CMD_POOLSTAT,
@@ -1017,6 +1018,9 @@ typedef struct users {
 	char passwordhash[TXT_BIG+1];
 	char secondaryuserid[TXT_SML+1];
 	char salt[TXT_BIG+1];
+	char *userdata;
+	int64_t databits; // non-DB field, Bitmask of userdata content
+	int64_t userbits; // Bitmask of user attributes
 	HISTORYDATECONTROLFIELDS;
 } USERS;
 
@@ -1030,6 +1034,36 @@ typedef struct users {
 #define SHA256SIZBIN	32
 #define SALTSIZHEX	32
 #define SALTSIZBIN	16
+
+#define DATABITS_SEP ','
+#define DATABITS_SEP_STR ","
+
+/* databits attributes
+ * These are generated at dbload time from userdata
+ *  and when the userdata is changed */
+// TOTP Auth 2FA
+#define USER_TOTPAUTH_NAME "totpauth"
+#define USER_TOTPAUTH 0x1
+// 2FA Key untested
+#define USER_TEST2FA_NAME "test2fa"
+#define USER_TEST2FA 0x2
+
+#define USER_TOTP_ENA(_users) \
+	(((_users)->databits & (USER_TOTPAUTH | USER_TEST2FA)) == USER_TOTPAUTH)
+
+// userbits attributes
+// Address account, not a username account
+#define USER_ADDRESS 0x1
+
+// 16 x base 32 (5 bits) = 10 bytes (8 bits)
+#define TOTPAUTH_KEYSIZE 10
+#define TOTPAUTH_DSP_KEYSIZE 16
+// Optioncontrol name
+#define TOTPAUTH_ISSUER "taissuer"
+// Currently only:
+#define TOTPAUTH_AUTH "totp"
+#define TOTPAUTH_HASH "SHA256"
+#define TOTPAUTH_TIME 30
 
 extern K_TREE *users_root;
 extern K_TREE *userid_root;
@@ -1073,6 +1107,7 @@ typedef struct workers {
 	int32_t difficultydefault;
 	char idlenotificationenabled[TXT_FLAG+1];
 	int32_t idlenotificationtime;
+	int64_t workerbits; // Bitmask of worker attributes
 	HISTORYDATECONTROLFIELDS;
 } WORKERS;
 
@@ -1085,6 +1120,8 @@ typedef struct workers {
 extern K_TREE *workers_root;
 extern K_LIST *workers_free;
 extern K_STORE *workers_store;
+
+// Currently no workerbits attributes
 
 #define DIFFICULTYDEFAULT_MIN 10
 #define DIFFICULTYDEFAULT_MAX 0x7fffffff
@@ -1735,18 +1772,32 @@ typedef struct workerstatus {
 	tv_t last_stats;
 	tv_t last_idle;
 	// Below gets reset on each block
-	double diffacc;
-	double diffinv; // Non-acc
-	double diffsta;
-	double diffdup;
-	double diffhi;
-	double diffrej;
-	double shareacc;
-	double shareinv; // Non-acc
-	double sharesta;
-	double sharedup;
-	double sharehi;
-	double sharerej;
+	double block_diffacc;
+	double block_diffinv; // Non-acc
+	double block_diffsta;
+	double block_diffdup;
+	double block_diffhi;
+	double block_diffrej;
+	double block_shareacc;
+	double block_shareinv; // Non-acc
+	double block_sharesta;
+	double block_sharedup;
+	double block_sharehi;
+	double block_sharerej;
+	// Below gets reset on each idle
+	double active_diffacc;
+	double active_diffinv; // Non-acc
+	double active_diffsta;
+	double active_diffdup;
+	double active_diffhi;
+	double active_diffrej;
+	double active_shareacc;
+	double active_shareinv; // Non-acc
+	double active_sharesta;
+	double active_sharedup;
+	double active_sharehi;
+	double active_sharerej;
+	tv_t active_start;
 } WORKERSTATUS;
 
 #define ALLOC_WORKERSTATUS 1000
@@ -2086,8 +2137,35 @@ extern cmp_t cmp_userid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_users(char *username);
 extern K_ITEM *find_userid(int64_t userid);
 extern void make_salt(USERS *users);
-extern void password_hash(char *username, char *passwordhash, char *salt, char *result, size_t siz);
+extern void password_hash(char *username, char *passwordhash, char *salt,
+			  char *result, size_t siz);
 extern bool check_hash(USERS *users, char *passwordhash);
+extern void users_databits(USERS *users);
+#define users_userdata_get_hex(_users, _name, _bit, _hexlen) \
+	_users_userdata_get_hex(_users, _name, _bit, _hexlen, WHERE_FFL_HERE)
+extern char *_users_userdata_get_hex(USERS *users, char *name, int64_t bit,
+				     size_t *hexlen, WHERE_FFL_ARGS);
+#define users_userdata_get_bin(_users, _name, _bit, _binlen) \
+	_users_userdata_get_bin(_users, _name, _bit, _binlen, WHERE_FFL_HERE)
+extern unsigned char *_users_userdata_get_bin(USERS *users, char *name,
+					      int64_t bit, size_t *binlen,
+					      WHERE_FFL_ARGS);
+#define users_userdata_del(_users, _name, _bit) \
+	_users_userdata_del(_users, _name, _bit, WHERE_FFL_HERE)
+extern void _users_userdata_del(USERS *users, char *name, int64_t bit,
+				WHERE_FFL_ARGS);
+// If we want to store a simple string, no point encoding it
+#define users_userdata_add_txt(_users, _name, _bit, _hex) \
+	_users_userdata_add_hex(_users, _name, _bit, _hex, WHERE_FFL_HERE)
+#define users_userdata_add_hex(_users, _name, _bit, _hex) \
+	_users_userdata_add_hex(_users, _name, _bit, _hex, WHERE_FFL_HERE)
+extern void _users_userdata_add_hex(USERS *users, char *name, int64_t bit,
+				    char *hex, WHERE_FFL_ARGS);
+#define users_userdata_add_bin(_users, _name, _bit, _bin, _len) \
+	_users_userdata_add_bin(_users, _name, _bit, _bin, _len, WHERE_FFL_HERE)
+extern void _users_userdata_add_bin(USERS *users, char *name, int64_t bit,
+				    unsigned char *bin, size_t len,
+				    WHERE_FFL_ARGS);
 extern cmp_t cmp_useratts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_useratts(int64_t userid, char *attname);
 extern cmp_t cmp_workers(K_ITEM *a, K_ITEM *b);
@@ -2285,8 +2363,11 @@ extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			 char *newhash, char *email, char *by, char *code,
 			 char *inet, tv_t *cd, K_TREE *trf_root, char *status);
 extern K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
-			char *passwordhash, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root);
+			char *passwordhash, int64_t userbits, char *by,
+			char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+extern bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item,
+			  char *by, char *code, char *inet, tv_t *cd,
+			  K_TREE *trf_root);
 extern bool users_fill(PGconn *conn);
 extern bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun);
 extern K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
@@ -2454,5 +2535,21 @@ extern struct CMDS ckdb_cmds[];
 
 extern bool btc_valid_address(char *addr);
 extern void btc_blockstatus(BLOCKS *blocks);
+
+// ***
+// *** ckdb_crypt.c
+// ***
+
+#define tob32(_users, _bin, _len, _name, _olen) \
+	_tob32(_users, _bin, _len, _name, _olen, WHERE_FFL_HERE)
+extern char *_tob32(USERS *users, unsigned char *bin, size_t len, char *name,
+		    size_t olen, WHERE_FFL_ARGS);
+extern bool gen_data(USERS *users, unsigned char *buf, size_t len,
+		     int32_t entropy);
+extern K_ITEM *gen_2fa_key(K_ITEM *old_u_item, int32_t entropy, char *by,
+			   char *code, char *inet, tv_t *cd,  K_TREE *trf_root);
+extern bool check_2fa(USERS *users, int32_t value);
+extern bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
+		    char *inet, tv_t *cd, K_TREE *trf_root);
 
 #endif

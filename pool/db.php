@@ -166,23 +166,18 @@ function homeInfo($user)
  if ($rep === false)
 	$ans = false;
  else
- {
 	$ans = repDecode($rep);
-//	if ($ans['lastblock'] == '?')
-//	{
-//		$ans['lastblock'] = 1401237522;
-//		$ans['lastblock'] = 1403819191;
-//		$ans['lastblock'] = 1407113822;
-//	}
- }
 
  return $ans;
 }
 #
-function checkPass($user, $pass)
+function checkPass($user, $pass, $twofa)
 {
  $passhash = myhash($pass);
- $flds = array('username' => $user, 'passwordhash' => $passhash);
+ if (nuem($twofa))
+	$twofa = 0;
+ $flds = array('username' => $user, 'passwordhash' => $passhash,
+		'2fa' => $twofa);
  $msg = msgEncode('chkpass', 'chkpass', $flds, $user);
  $rep = sendsockreply('checkPass', $msg);
  if (!$rep)
@@ -190,11 +185,14 @@ function checkPass($user, $pass)
  return $rep;
 }
 #
-function setPass($user, $oldpass, $newpass)
+function setPass($user, $oldpass, $newpass, $twofa)
 {
  $oldhash = myhash($oldpass);
  $newhash = myhash($newpass);
- $flds = array('username' => $user, 'oldhash' => $oldhash, 'newhash' => $newhash);
+ if (nuem($twofa))
+	$twofa = 0;
+ $flds = array('username' => $user, 'oldhash' => $oldhash,
+		'newhash' => $newhash, '2fa' => $twofa);
  $msg = msgEncode('newpass', 'newpass', $flds, $user);
  $rep = sendsockreply('setPass', $msg);
  if (!$rep)
@@ -202,12 +200,27 @@ function setPass($user, $oldpass, $newpass)
  return repDecode($rep);
 }
 #
-function resetPass($user, $newpass)
+function resetPass($user, $newpass, $twofa)
 {
  $newhash = myhash($newpass);
- $flds = array('username' => $user, 'newhash' => $newhash);
+ if (nuem($twofa))
+	$twofa = 0;
+ $flds = array('username' => $user, 'newhash' => $newhash, '2fa' => $twofa);
  $msg = msgEncode('newpass', 'newpass', $flds, $user);
  $rep = sendsockreply('resetPass', $msg);
+ if (!$rep)
+	dbdown();
+ return repDecode($rep);
+}
+#
+function get2fa($user, $action, $entropy, $value)
+{
+ if ($value === null)
+	$value = '';
+ $flds = array('username' => $user, 'action' => $action,
+		'entropy' => $entropy, 'value' => $value);
+ $msg = msgEncode('2fa', '2fa', $flds, $user);
+ $rep = sendsockreply('get2fa', $msg);
  if (!$rep)
 	dbdown();
  return repDecode($rep);
@@ -216,7 +229,8 @@ function resetPass($user, $newpass)
 function userReg($user, $email, $pass)
 {
  $passhash = myhash($pass);
- $flds = array('username' => $user, 'emailaddress' => $email, 'passwordhash' => $passhash);
+ $flds = array('username' => $user, 'emailaddress' => $email,
+		'passwordhash' => $passhash);
  $msg = msgEncode('adduser', 'reg', $flds, $user);
  $rep = sendsockreply('userReg', $msg);
  if (!$rep)
@@ -224,7 +238,7 @@ function userReg($user, $email, $pass)
  return repDecode($rep);
 }
 #
-function userSettings($user, $email = null, $addr = null, $pass = null)
+function userSettings($user, $email = null, $addr = null, $pass = null, $twofa = null)
 {
  $tmo = false;
  $flds = array('username' => $user);
@@ -246,7 +260,12 @@ function userSettings($user, $email = null, $addr = null, $pass = null)
 	$tmo = 3; # 3x the timeout
  }
  if ($pass != null)
+ {
 	$flds['passwordhash'] = myhash($pass);
+	if (nuem($twofa))
+		$twofa = 0;
+	$flds['2fa'] = $twofa;
+ }
  $msg = msgEncode('usersettings', 'userset', $flds, $user);
  $rep = sendsockreply('userSettings', $msg, $tmo);
  if (!$rep)
