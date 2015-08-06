@@ -1449,7 +1449,7 @@ int main(int argc, char **argv)
 	ckpool_t ckp;
 
 	/* Make significant floating point errors fatal to avoid subtle bugs being missed */
-	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW );
+	feenableexcept(FE_DIVBYZERO | FE_INVALID);
 	json_set_alloc_funcs(json_ckalloc, free);
 
 	global_ckp = &ckp;
