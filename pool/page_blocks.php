@@ -1,5 +1,36 @@
 <?php
 #
+function erlcolour($erl)
+{
+ if ($erl <= 0.5)
+ {
+	$grn = (-0.3 - log10($erl)) * 383;
+	if ($grn < 0)
+		$grn = 0;
+	if ($grn > 255)
+		$grn = 255;
+
+	if ($grn > 190)
+		$fg = 'blue';
+	else
+		$fg = 'white';
+	$bg = sprintf("#00%02x00", $grn);
+ }
+ else # ($erl > 0.5)
+ {
+	$ref = (-0.3 - log10(1.0 - $erl)) * 255;
+	if ($red < 0)
+		$red = 0;
+	if ($red > 255)
+		$red = 255;
+
+	$fg = 'white';
+	$bg = sprintf("#%02x0000", $red);
+ }
+
+ return array($fg, $bg);
+}
+#
 function pctcolour($pct)
 {
  if ($pct == 100)
@@ -79,14 +110,19 @@ function doblocks($data, $user)
 			$desc = $ans['s_desc:'.$i];
 			$diff = number_format(100 * $ans['s_diffratio:'.$i], 2);
 			$mean = number_format(100 * $ans['s_diffmean:'.$i], 2);
-			$cdferl = number_format($ans['s_cdferl:'.$i], 4);
+
+			$cdferl = $ans['s_cdferl:'.$i];
+			list($fg, $bg) = erlcolour($cdferl);
+			$cdferldsp = "<font color=$fg>".number_format($cdferl, 4).'</font>';
+			$bg = " bgcolor=$bg";
+
 			$luck = number_format(100 * $ans['s_luck:'.$i], 2);
 
 			$pg .= "<tr class=$row>";
 			$pg .= "<td class=dl>$desc Blocks</td>";
 			$pg .= "<td class=dr>$diff%</td>";
 			$pg .= "<td class=dr>$mean%</td>";
-			$pg .= "<td class=dr>$cdferl</td>";
+			$pg .= "<td class=dr$bg>$cdferldsp</td>";
 			$pg .= "<td class=dr>$luck%</td>";
 			$pg .= "</tr>\n";
 		}
