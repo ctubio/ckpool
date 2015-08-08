@@ -161,6 +161,16 @@ void _free_seqset_data(K_ITEM *item, bool lock)
 	}
 }
 
+/* Data copy functions (added here as needed)
+   All pointers need to initialised since DUP_POINTER will free them */
+
+void copy_users(USERS *newu, USERS *oldu)
+{
+	memcpy(newu, oldu, sizeof(*newu));
+	newu->userdata = NULL;
+	DUP_POINTER(users_free, newu->userdata, oldu->userdata);
+}
+
 // Clear text printable version of txt up to first '\0'
 char *_safe_text(char *txt, bool shownull)
 {
@@ -2645,6 +2655,8 @@ const char *blocks_confirmed(char *confirmed)
 			return blocks_42;
 		case BLOCKS_ORPHAN:
 			return blocks_orphan;
+		case BLOCKS_REJECT:
+			return blocks_reject;
 	}
 	return blocks_unknown;
 }
@@ -2885,7 +2897,8 @@ bool check_update_blocks_stats(tv_t *stats)
 			DATA_BLOCKS(blocks, b_item);
 			if (CURRENT(&(blocks->expirydate))) {
 				pending += blocks->diffacc;
-				if (blocks->confirmed[0] == BLOCKS_ORPHAN)
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
+				    blocks->confirmed[0] == BLOCKS_REJECT)
 					blocks->diffcalc = 0.0;
 				else {
 					blocks->diffcalc = pending;
@@ -2934,10 +2947,11 @@ bool check_update_blocks_stats(tv_t *stats)
 				else
 					blocks->blockluck = 1.0 / blocks->blockdiffratio;
 
-				/* Orphans are treated as +diffacc but no block
+				/* Orphans/Rejects are treated as +diffacc but no block
 				 *  i.e. they simply add shares to the later block
 				 *  and have running stats set to zero */
-				if (blocks->confirmed[0] == BLOCKS_ORPHAN) {
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
+				    blocks->confirmed[0] == BLOCKS_REJECT) {
 					blocks->diffratio = 0.0;
 					blocks->diffmean = 0.0;
 					blocks->cdferl = 0.0;
@@ -3327,6 +3341,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	switch (blocks->confirmed[0]) {
 		case BLOCKS_NEW:
 		case BLOCKS_ORPHAN:
+		case BLOCKS_REJECT:
 			LOGERR("%s(): can't process block %"PRId32"/%"
 				PRId64"/%s/%"PRId64" status: %s/%s",
 				__func__, blocks->height, blocks->workinfoid,
@@ -4881,8 +4896,8 @@ void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
 	}
 }
 
-// N.B. good blocks = blocks - orphans
-void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock)
+// N.B. good blocks = blocks - (orphans + rejects)
+void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock)
 {
 	USERINFO *row;
 	K_ITEM *item;
@@ -4891,11 +4906,14 @@ void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock)
 	DATA_USERINFO(row, item);
 	if (lock)
 		K_WLOCK(userinfo_free);
-	if (isnew) {
+	if (isnew == INFO_NEW) {
 		row->blocks++;
 		copy_tv(&(row->last_block), &(blocks->createdate));
-	} else
+	} else if (isnew == INFO_ORPHAN)
 		row->orphans++;
+	else if (isnew == INFO_REJECT)
+		row->rejects++;
+
 	if (lock)
 		K_WUNLOCK(userinfo_free);
 }

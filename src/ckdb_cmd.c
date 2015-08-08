@@ -325,6 +325,24 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 					DATA_USERS(users, u_item);
 				}
 			}
+		} else if (strcmp(action, "remove") == 0) {
+			// Can't remove if 2FA isn't already present
+			if (!(users->databits & (USER_TOTPAUTH | USER_TEST2FA)))
+				goto dame;
+			value = (int32_t)atoi(transfer_data(i_value));
+			if (!check_2fa(users, value)) {
+				sfa_error = "Invalid code";
+				// Report sfa_error to web
+				ok = true;
+			} else {
+				u_new = remove_2fa(u_item, value, by, code,
+						   inet, now, trf_root);
+				if (u_new) {
+					ok = true;
+					sfa_status = EMPTY;
+					key = false;
+				}
+			}
 		}
 		if (key) {
 			char *keystr, *issuer = "Kano";
@@ -1132,7 +1150,8 @@ redo:
 	while (b_item) {
 		DATA_BLOCKS(blocks, b_item);
 		if (CURRENT(&(blocks->expirydate))) {
-			if (blocks->confirmed[0] != BLOCKS_ORPHAN)
+			if (blocks->confirmed[0] != BLOCKS_ORPHAN &&
+			    blocks->confirmed[0] != BLOCKS_REJECT)
 				tot++;
 		}
 		b_item = next_in_ktree(ctx);
@@ -1149,10 +1168,14 @@ redo:
 			copy_tv(&first_cd, &(blocks->createdate));
 		}
 		if (CURRENT(&(blocks->expirydate))) {
-			if (blocks->confirmed[0] == BLOCKS_ORPHAN) {
+			if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
+			    blocks->confirmed[0] == BLOCKS_REJECT) {
 				snprintf(tmp, sizeof(tmp),
-					 "seq:%d=o%c",
-					 rows, FLDSEP);
+					 "seq:%d=%c%c",
+					 rows,
+					 blocks->confirmed[0] == BLOCKS_ORPHAN ?
+						'o' : 'r',
+					 FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 			} else {
 				snprintf(tmp, sizeof(tmp),
@@ -1191,8 +1214,14 @@ redo:
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
-				 "status:%d=%s%c", rows,
+				 "confirmed:%d=%s%cstatus:%d=%s%c", rows,
+				 blocks->confirmed, FLDSEP, rows,
 				 blocks_confirmed(blocks->confirmed), FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp),
+				 "info:%d=%s%c", rows,
+				 blocks->info, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
@@ -1248,7 +1277,8 @@ redo:
 		while (b_item) {
 			DATA_BLOCKS(blocks, b_item);
 			if (CURRENT(&(blocks->expirydate)) &&
-			    blocks->confirmed[0] != BLOCKS_ORPHAN) {
+			    blocks->confirmed[0] != BLOCKS_ORPHAN &&
+			    blocks->confirmed[0] != BLOCKS_REJECT) {
 				desc = NULL;
 				if (seq == 1) {
 					snprintf(desc_buf, sizeof(desc_buf),
@@ -1314,8 +1344,9 @@ redo:
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
 		 "seq,height,blockhash,nonce,reward,workername,first"CDTRF","
-		 CDTRF",status,statsconf,diffacc,diffinv,shareacc,"
-		 "shareinv,elapsed,netdiff,diffratio,cdf,luck", FLDSEP);
+		 CDTRF",confirmed,status,info,statsconf,diffacc,diffinv,"
+		 "shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck",
+		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Blocks,BlockStats", FLDSEP, ",s");
@@ -1329,13 +1360,13 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 			     tv_t *now, char *by, char *code, char *inet,
 			     __maybe_unused tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *i_height, *i_blockhash, *i_action;
+	K_ITEM *i_height, *i_blockhash, *i_action, *i_info;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *b_item;
 	BLOCKS *blocks;
 	int32_t height;
-	char *action;
+	char *action, *info, *tmp;
 	bool ok = false;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -1368,13 +1399,57 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	DATA_BLOCKS(blocks, b_item);
 
+	// Default to previous value
+	info = blocks->info;
+
 	if (strcasecmp(action, "orphan") == 0) {
 		switch (blocks->confirmed[0]) {
 			case BLOCKS_NEW:
 			case BLOCKS_CONFIRM:
 				ok = blocks_add(conn, transfer_data(i_height),
 						      blocks->blockhash,
-						      BLOCKS_ORPHAN_STR,
+						      BLOCKS_ORPHAN_STR, info,
+						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      by, code, inet, now, false, id,
+						      trf_root);
+				if (!ok) {
+					snprintf(reply, siz,
+						 "DBE.action '%s'",
+						 action);
+					LOGERR("%s.%s", id, reply);
+					return strdup(reply);
+				}
+				// TODO: reset the share counter?
+				break;
+			default:
+				snprintf(reply, siz,
+					 "ERR.invalid action '%.*s%s' for block state '%s'",
+					 CMD_SIZ, action,
+					 (strlen(action) > CMD_SIZ) ? "..." : "",
+					 blocks_confirmed(blocks->confirmed));
+				LOGERR("%s.%s", id, reply);
+				return strdup(reply);
+		}
+	} else if (strcasecmp(action, "reject") == 0) {
+		i_info = require_name(trf_root, "info", 0, (char *)strpatt,
+				      reply, siz);
+		if (!i_info)
+			return strdup(reply);
+		tmp = transfer_data(i_info);
+		/* Override if not empty
+		 * Thus you can't blank it out if current has a value */
+		if (tmp && *tmp)
+			info = tmp;
+
+		switch (blocks->confirmed[0]) {
+			case BLOCKS_NEW:
+			case BLOCKS_CONFIRM:
+			case BLOCKS_ORPHAN:
+			case BLOCKS_REJECT:
+				ok = blocks_add(conn, transfer_data(i_height),
+						      blocks->blockhash,
+						      BLOCKS_REJECT_STR, info,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      by, code, inet, now, false, id,
@@ -1403,7 +1478,7 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 			case BLOCKS_NEW:
 				ok = blocks_add(conn, transfer_data(i_height),
 						      blocks->blockhash,
-						      BLOCKS_CONFIRM_STR,
+						      BLOCKS_CONFIRM_STR, info,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      by, code, inet, now, false, id,
@@ -2596,6 +2671,7 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
 			ok = blocks_add(conn, transfer_data(i_height),
 					      transfer_data(i_blockhash),
 					      transfer_data(i_confirmed),
+					      EMPTY,
 					      transfer_data(i_workinfoid),
 					      transfer_data(i_username),
 					      transfer_data(i_workername),
@@ -2612,6 +2688,7 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
 			ok = blocks_add(conn, transfer_data(i_height),
 					      transfer_data(i_blockhash),
 					      transfer_data(i_confirmed),
+					      EMPTY,
 					      EMPTY, EMPTY, EMPTY, EMPTY,
 					      EMPTY, EMPTY, EMPTY, EMPTY,
 					      by, code, inet, cd, igndup, id,
@@ -3976,6 +4053,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			block_extra = "Can't be paid out yet";
 			break;
 		case BLOCKS_ORPHAN:
+		case BLOCKS_REJECT:
 			block_extra = "Can't be paid out";
 			break;
 		default:
@@ -4427,6 +4505,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 			block_extra = "Can't be paid out yet";
 			break;
 		case BLOCKS_ORPHAN:
+		case BLOCKS_REJECT:
 			block_extra = "Can't be paid out";
 			break;
 		default:
@@ -4708,12 +4787,14 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			 "%"PRId32"/%s",
 			 payoutid, old_payouts2->status, payouts2->status,
 			 payouts2->height, payouts2->blockhash);
-	} else if (strcasecmp(action, "orphan") == 0) {
+	} else if (strcasecmp(action, "orphan") == 0 ||
+	           strcasecmp(action, "reject") == 0) {
 		/* Change the status of a generated payout to orphaned
+		 *  or rejected
 		 * Require payoutid
-		 * Use this if the orphan process didn't automatically
-		 *  update a generated payout to orphaned
-		 * TODO: get orphaned blocks to automatically do this */
+		 * Use this if the orphan or reject process didn't
+		 *  automatically update a generated payout
+		 * TODO: get orphaned and rejected blocks to automatically do this */
 		i_payoutid = require_name(trf_root, "payoutid", 1,
 					  (char *)intpatt, reply, siz);
 		if (!i_payoutid)
@@ -4752,7 +4833,10 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		payouts2->workinfoidstart = payouts->workinfoidstart;
 		payouts2->workinfoidend = payouts->workinfoidend;
 		payouts2->elapsed = payouts->elapsed;
-		STRNCPY(payouts2->status, PAYOUTS_ORPHAN_STR);
+		if (strcasecmp(action, "orphan") == 0)
+			STRNCPY(payouts2->status, PAYOUTS_ORPHAN_STR);
+		else
+			STRNCPY(payouts2->status, PAYOUTS_REJECT_STR);
 		payouts2->diffwanted = payouts->diffwanted;
 		payouts2->diffused = payouts->diffused;
 		payouts2->shareacc = payouts->shareacc;
@@ -6164,7 +6248,9 @@ static char *cmd_userinfo(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		snprintf(tmp, sizeof(tmp), "blocks:%d=%d%c", rows,
-			 userinfo->blocks - userinfo->orphans, FLDSEP);
+			 userinfo->blocks -
+			 (userinfo->orphans + userinfo->rejects),
+			 FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		snprintf(tmp, sizeof(tmp), "orphans:%d=%d%c", rows,

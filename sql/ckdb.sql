@@ -336,6 +336,7 @@ CREATE TABLE blocks (
     nonce character varying(64) NOT NULL,
     reward bigint NOT NULL, -- satoshis
     confirmed char DEFAULT '' NOT NULL,
+    info character varying(64) DEFAULT ''::character varying NOT NULL,
     diffacc float DEFAULT 0 NOT NULL,
     diffinv float DEFAULT 0 NOT NULL,
     shareacc float DEFAULT 0 NOT NULL,
@@ -463,4 +464,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'1.0.1');
+insert into version (vlock,version) values (1,'1.0.2');

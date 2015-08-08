@@ -51,25 +51,59 @@ function addCSS($css)
  $page_css .= $css;
 }
 #
+global $added_gbase;
+$added_gbase = false;
 function addGBase()
 {
- $g = GBaseJS();
- addScript($g);
+ global $added_gbase;
+ if ($added_gbase == false)
+ {
+	$added_gbase = true;
+	$g = GBaseJS();
+	addScript($g);
+ }
 }
 #
+global $added_tips;
+$added_tips = false;
 function addTips()
 {
- $t = TipsJS();
- addScript($t);
-
- $tcss = TipsCSS();
- addCSS($tcss);
+ global $added_tips;
+ if ($added_tips == false)
+ {
+	$added_tips = true;
+	$t = TipsJS();
+	addScript($t);
+	$tcss = TipsCSS();
+	addCSS($tcss);
+ }
 }
 #
+global $added_sort;
+$added_sort = false;
 function addSort()
 {
- $s = SortJS();
- addScript($s);
+ global $added_sort;
+ if ($added_sort == false)
+ {
+	$added_sort = true;
+	$s = SortJS();
+	addScript($s);
+ }
+}
+#
+global $added_qr;
+$added_qr = false;
+function addQR()
+{
+ global $added_qr;
+ if ($added_qr == false)
+ {
+	$added_qr = true;
+	addGBase();
+	$q = QRJS();
+	addScript($q);
+ }
 }
 #
 function makeURL($page)

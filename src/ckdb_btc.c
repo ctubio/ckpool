@@ -355,7 +355,7 @@ void btc_blockstatus(BLOCKS *blocks)
 
 		ok = blocks_add(NULL, height_str,
 				      blocks->blockhash,
-				      BLOCKS_ORPHAN_STR,
+				      BLOCKS_ORPHAN_STR, EMPTY,
 				      EMPTY, EMPTY, EMPTY, EMPTY,
 				      EMPTY, EMPTY, EMPTY, EMPTY,
 				      by_default, (char *)__func__, inet_default,
@@ -378,7 +378,7 @@ void btc_blockstatus(BLOCKS *blocks)
 
 		ok = blocks_add(NULL, height_str,
 				      blocks->blockhash,
-				      BLOCKS_42_STR,
+				      BLOCKS_42_STR, EMPTY,
 				      EMPTY, EMPTY, EMPTY, EMPTY,
 				      EMPTY, EMPTY, EMPTY, EMPTY,
 				      by_default, (char *)__func__, inet_default,

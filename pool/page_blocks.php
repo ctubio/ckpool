@@ -18,7 +18,7 @@ function erlcolour($erl)
  }
  else # ($erl > 0.5)
  {
-	$ref = (-0.3 - log10(1.0 - $erl)) * 255;
+	$red = (-0.3 - log10(1.0 - $erl)) * 255;
 	if ($red < 0)
 		$red = 0;
 	if ($red > 255)
@@ -194,28 +194,51 @@ function doblocks($data, $user)
 		$hifld = "$blink$hi>$hi</a>";
 
 		$ex = '';
+		$conf = $ans['confirmed:'.$i];
 		$stat = $ans['status:'.$i];
-		if ($stat == 'Orphan')
+		$inf = $ans['info:'.$i];
+		$tt = '';
+		if ($conf == 'O' or $conf == 'R')
 		{
 			$ex = 's';
 			$orph = true;
 			$seq = '';
+			if ($conf == 'R')
+			{
+				addTips();
+				$in = explode(':', $inf, 2);
+				if (trim($in[0]) != '')
+					$stat = trim($in[0]);
+				if (count($in) < 2 or trim($in[1]) == '')
+				{
+					$tip = 'Share diff was VERY close<br>';
+					$tip .= 'so we tested it,<br>';
+					$tip .= "but it wasn't worthy<br>";
+				}
+				else
+					$tip = str_replace('+', '<br>', trim($in[1]));
+
+				$tt = "<span class=q onclick='tip(\"btip$i\",6000)'>";
+				$tt .= '?</span><span class=tip0>';
+				$tt .= "<span class=notip id=btip$i>";
+				$tt .= "$tip</span></span>";
+			}
 		}
 		else
 			$seq = $ans['seq:'.$i];
-		if ($stat == '1-Confirm')
+		if ($conf == '1')
 		{
 			if (isset($data['info']['lastheight']))
 			{
-				$conf = 1 + $data['info']['lastheight'] - $hi;
-				$stat = '+'.$conf.' Confirms';
+				$confn = 1 + $data['info']['lastheight'] - $hi;
+				$stat = '+'.$confn.' Confirms';
 			}
 			else
 				$stat = 'Conf';
 		}
 
 		$stara = '';
-		if ($stat == 'Orphan')
+		if ($conf == 'O' or $conf == 'R')
 			$stara = '<span class=st1>*</span>';
 
 		if (isset($ans['statsconf:'.$i]))
@@ -243,7 +266,7 @@ function doblocks($data, $user)
 			$bpct = "<font color=$fg>$approx".number_format($pct, 3).'%</font>';
 			$bg = " bgcolor=$bg";
 			$blktot += $diffacc;
-			if ($stat != 'Orphan')
+			if ($conf != 'O' and $conf != 'R')
 				$nettot += $netdiff;
 
 			$cdfdsp = number_format($cdf, 3);
@@ -264,7 +287,7 @@ function doblocks($data, $user)
 			$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
 		 $pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
 		 $pg .= "<td class=dl$ex>".utcd($ans['firstcreatedate:'.$i]).'</td>';
-		 $pg .= "<td class=dr$ex>$stat</td>";
+		 $pg .= "<td class=dr$ex>$tt$stat</td>";
 		 $pg .= "<td class=dr>$stara$approx$acc</td>";
 		 $pg .= "<td class=dr$bg>$bpct</td>";
 		 $pg .= "<td class=dr>$cdfdsp</td>";
@@ -295,7 +318,7 @@ function doblocks($data, $user)
 	else
 		$pg .= '8';
 	$pg .= ' class=dc><font size=-1><span class=st1>*</span>';
-	$pg .= "Orphans count as shares but not as a block in calculations";
+	$pg .= 'Orphans/Rejects count as shares but not as a block in calculations';
 	$pg .= '</font></td></tr>';
  }
  $pg .= "</table>\n";

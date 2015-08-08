@@ -415,7 +415,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	K_WUNLOCK(users_free);
 
 	DATA_USERS(row, item);
-	memcpy(row, users, sizeof(*row));
+	copy_users(row, users);
 
 	// Update each one supplied
 	if (hash) {
@@ -428,7 +428,6 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		STRNCPY(row->emailaddress, email);
 	if (status)
 		STRNCPY(row->status, status);
-	DUP_POINTER(users_free, row->userdata, users->userdata);
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -4193,7 +4192,7 @@ bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 	K_WUNLOCK(blocks_free);
 
 	DATA_BLOCKS(row, b_item);
-	memcpy(row, oldblocks, sizeof(*row));
+	copy_blocks(row, oldblocks);
 	row->diffacc = diffacc;
 	row->diffinv = diffinv;
 	row->shareacc = shareacc;
@@ -4305,9 +4304,9 @@ unparam:
 }
 
 bool blocks_add(PGconn *conn, char *height, char *blockhash,
-		char *confirmed, char *workinfoid, char *username,
-		char *workername, char *clientid, char *enonce1,
-		char *nonce2, char *nonce, char *reward,
+		char *confirmed, char *info, char *workinfoid,
+		char *username, char *workername, char *clientid,
+		char *enonce1, char *nonce2, char *nonce, char *reward,
 		char *by, char *code, char *inet, tv_t *cd,
 		bool igndup, char *id, K_TREE *trf_root)
 {
@@ -4321,11 +4320,10 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	BLOCKS *row, *oldblocks;
 	USERS *users;
 	char *upd, *ins;
-	char *params[17 + HISTORYDATECOUNT];
+	char *params[18 + HISTORYDATECOUNT];
 	bool ok = false, update_old = false;
 	int n, par = 0;
-	char want = '?';
-	char *st = NULL;
+	char *want = NULL, *st = NULL;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -4377,6 +4375,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			STRNCPY(row->confirmed, confirmed);
+			STRNCPY(row->info, info);
 			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
 			STRNCPY(row->workername, workername);
 			TXT_TO_INT("clientid", clientid, row->clientid);
@@ -4407,6 +4406,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			params[par++] = str_to_buf(row->nonce, NULL, 0);
 			params[par++] = bigint_to_buf(row->reward, NULL, 0);
 			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			params[par++] = str_to_buf(row->info, NULL, 0);
 			params[par++] = double_to_buf(row->diffacc, NULL, 0);
 			params[par++] = double_to_buf(row->diffinv, NULL, 0);
 			params[par++] = double_to_buf(row->shareacc, NULL, 0);
@@ -4419,7 +4419,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			ins = "insert into blocks "
 				"(height,blockhash,workinfoid,userid,workername,"
 				"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-				"diffacc,diffinv,shareacc,shareinv,elapsed,"
+				"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 				"statsconfirmed"
 				HISTORYDATECONTROL ") values (" PQPARAM22 ")";
 
@@ -4437,10 +4437,11 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 			// We didn't use a Begin
 			ok = true;
-			userinfo_block(row, true);
+			userinfo_block(row, INFO_NEW);
 			goto unparam;
 			break;
 		case BLOCKS_ORPHAN:
+		case BLOCKS_REJECT:
 		case BLOCKS_42:
 			// These shouldn't be possible until startup completes
 			if (!startup_complete) {
@@ -4452,7 +4453,6 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					height, hash_dsp, cd_buf);
 				goto flail;
 			}
-			want = BLOCKS_CONFIRM;
 		case BLOCKS_CONFIRM:
 			if (!old_b_item) {
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
@@ -4461,16 +4461,37 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					height, hash_dsp, cd_buf);
 				goto flail;
 			}
-			if (confirmed[0] == BLOCKS_CONFIRM)
-				want = BLOCKS_NEW;
-			if (oldblocks->confirmed[0] != want) {
+			switch (confirmed[0]) {
+				case BLOCKS_CONFIRM:
+					if (oldblocks->confirmed[0] != BLOCKS_NEW)
+						want = BLOCKS_NEW_STR;
+					break;
+				case BLOCKS_42:
+					if (oldblocks->confirmed[0] != BLOCKS_CONFIRM)
+						want = BLOCKS_CONFIRM_STR;
+					break;
+				case BLOCKS_ORPHAN:
+					if (oldblocks->confirmed[0] != BLOCKS_NEW &&
+					    oldblocks->confirmed[0] != BLOCKS_CONFIRM)
+						want = BLOCKS_N_C_STR;
+					break;
+				case BLOCKS_REJECT:
+					if (oldblocks->confirmed[0] != BLOCKS_NEW &&
+					    oldblocks->confirmed[0] != BLOCKS_CONFIRM &&
+					    oldblocks->confirmed[0] != BLOCKS_ORPHAN &&
+					    oldblocks->confirmed[0] != BLOCKS_REJECT)
+						want = BLOCKS_N_C_O_R_STR;
+					break;
+			}
+			if (want) {
 				// No mismatch messages during startup
 				if (startup_complete) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
-					LOGERR("%s(): New Status: %s requires Status: %c. "
-						"Ignored: Status: %s, Block: %s/...%s/%s",
+					LOGERR("%s(): New Status: (%s)%s requires Status: %s. "
+						"Ignored: Status: (%s)%s, Block: %s/...%s/%s",
 						__func__,
-						blocks_confirmed(confirmed), want,
+						confirmed, blocks_confirmed(confirmed),
+						want, oldblocks->confirmed,
 						blocks_confirmed(oldblocks->confirmed),
 						height, hash_dsp, cd_buf);
 				}
@@ -4490,8 +4511,10 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			// New is mostly a copy of the old
-			memcpy(row, oldblocks, sizeof(*row));
+			copy_blocks(row, oldblocks);
 			STRNCPY(row->confirmed, confirmed);
+			if (info && *info)
+				STRNCPY(row->info, info);
 			if (confirmed[0] == BLOCKS_CONFIRM) {
 				row->diffacc = pool.diffacc;
 				row->diffinv = pool.diffinv;
@@ -4525,6 +4548,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			params[par++] = str_to_buf(row->blockhash, NULL, 0);
 			params[par++] = tv_to_buf(cd, NULL, 0);
 			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			params[par++] = str_to_buf(row->info, NULL, 0);
 
 			if (confirmed[0] == BLOCKS_CONFIRM) {
 				params[par++] = double_to_buf(row->diffacc, NULL, 0);
@@ -4532,34 +4556,34 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				params[par++] = double_to_buf(row->shareacc, NULL, 0);
 				params[par++] = double_to_buf(row->shareinv, NULL, 0);
 				HISTORYDATEPARAMS(params, par, row);
-				PARCHKVAL(par, 7 + HISTORYDATECOUNT, params); // 12 as per ins
+				PARCHKVAL(par, 8 + HISTORYDATECOUNT, params); // 13 as per ins
 
 				ins = "insert into blocks "
 					"(height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-					"diffacc,diffinv,shareacc,shareinv,elapsed,"
+					"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed"
 					HISTORYDATECONTROL ") select "
 					"height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,"
-					"$3,$4,$5,$6,$7,elapsed,statsconfirmed,"
-					"$8,$9,$10,$11,$12 from blocks where "
+					"$3,$4,$5,$6,$7,$8,elapsed,statsconfirmed,"
+					"$9,$10,$11,$12,$13 from blocks where "
 					"blockhash=$1 and "EDDB"=$2";
 			} else {
 				HISTORYDATEPARAMS(params, par, row);
-				PARCHKVAL(par, 3 + HISTORYDATECOUNT, params); // 8 as per ins
+				PARCHKVAL(par, 4 + HISTORYDATECOUNT, params); // 9 as per ins
 
 				ins = "insert into blocks "
 					"(height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-					"diffacc,diffinv,shareacc,shareinv,elapsed,"
+					"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed"
 					HISTORYDATECONTROL ") select "
 					"height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,"
-					"$3,diffacc,diffinv,shareacc,shareinv,elapsed,"
+					"$3,$4,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed,"
-					"$4,$5,$6,$7,$8 from blocks where "
+					"$5,$6,$7,$8,$9 from blocks where "
 					"blockhash=$1 and "EDDB"=$2";
 			}
 
@@ -4573,7 +4597,9 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 
 			update_old = true;
 			if (confirmed[0] == BLOCKS_ORPHAN)
-				userinfo_block(row, false);
+				userinfo_block(row, INFO_ORPHAN);
+			else if (confirmed[0] == BLOCKS_REJECT)
+				userinfo_block(row, INFO_REJECT);
 			break;
 		default:
 			LOGERR("%s(): %s.failed.invalid confirm='%s'",
@@ -4663,6 +4689,7 @@ flail:
 				}
 				break;
 			case BLOCKS_ORPHAN:
+			case BLOCKS_REJECT:
 			case BLOCKS_42:
 			default:
 				blk = false;
@@ -4688,14 +4715,14 @@ bool blocks_fill(PGconn *conn)
 	BLOCKS *row;
 	char *field;
 	char *sel;
-	int fields = 17;
+	int fields = 18;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"height,blockhash,workinfoid,userid,workername,"
-		"clientid,enonce1,nonce2,nonce,reward,confirmed,"
+		"clientid,enonce1,nonce2,nonce,reward,confirmed,info,"
 		"diffacc,diffinv,shareacc,shareinv,elapsed,statsconfirmed"
 		HISTORYDATECONTROL
 		" from blocks";
@@ -4784,6 +4811,11 @@ bool blocks_fill(PGconn *conn)
 			break;
 		TXT_TO_STR("confirmed", field, row->confirmed);
 
+		PQ_GET_FLD(res, i, "info", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("info", field, row->info);
+
 		PQ_GET_FLD(res, i, "diffacc", field, ok);
 		if (!ok)
 			break;
@@ -4830,9 +4862,11 @@ bool blocks_fill(PGconn *conn)
 		}
 
 		if (CURRENT(&(row->expirydate))) {
-			_userinfo_block(row, true, false);
+			_userinfo_block(row, INFO_NEW, false);
 			if (row->confirmed[0] == BLOCKS_ORPHAN)
-				_userinfo_block(row, false, false);
+				_userinfo_block(row, INFO_ORPHAN, false);
+			else if (row->confirmed[0] == BLOCKS_REJECT)
+				_userinfo_block(row, INFO_REJECT, false);
 		}
 	}
 	if (!ok)
