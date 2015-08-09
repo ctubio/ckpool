@@ -103,6 +103,8 @@ function set_2fa($data, $user, $tfa, $ans, $err)
  $pg .= 'Your 2FA device would be, for example, your phone or tablet.<br><br>';
  $pg .= 'Each time you need a 2FA code, you use your device to generate a number<br>';
  $pg .= 'that you type into the "<span class=st1>*</span>2nd Authentication:" field on any page that has it.<br><br>';
+ $pg .= '<b>IMPORTANT:</b> the TOTP algorithm uses the time on your device,<br>';
+ $pg .= "so it is important that your device's clock is accurate within a few seconds.<br><br>";
  $pg .= '<span class=urg>WARNING:</span> once you have successfully tested and enabled 2FA,<br>';
  $pg .= 'you will be unable to access or even reset your account without 2FA.<br>';
  $pg .= 'There is no option to recover your 2FA from the web site,<br>';
