@@ -1425,7 +1425,7 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	WORKERS *row;
 	char *upd, *ins;
 	bool ok = false;
-	char *params[6 + HISTORYDATECOUNT];
+	char *params[7 + HISTORYDATECOUNT];
 	int n, par = 0;
 	int32_t diffdef;
 	char idlenot;
