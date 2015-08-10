@@ -181,6 +181,7 @@ char *pqerrmsg(PGconn *conn)
 #define PQPARAM17 PQPARAM16 ",$17"
 #define PQPARAM18 PQPARAM16 ",$17,$18"
 #define PQPARAM22 PQPARAM16 ",$17,$18,$19,$20,$21,$22"
+#define PQPARAM23 PQPARAM16 ",$17,$18,$19,$20,$21,$22,$23"
 #define PQPARAM26 PQPARAM22 ",$23,$24,$25,$26"
 #define PQPARAM27 PQPARAM26 ",$27"
 
@@ -4421,7 +4422,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				"clientid,enonce1,nonce2,nonce,reward,confirmed,"
 				"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 				"statsconfirmed"
-				HISTORYDATECONTROL ") values (" PQPARAM22 ")";
+				HISTORYDATECONTROL ") values (" PQPARAM23 ")";
 
 			if (conn == NULL) {
 				conn = dbconnect();
