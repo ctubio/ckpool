@@ -105,6 +105,14 @@ function set_2fa($data, $user, $tfa, $ans, $err)
  $pg .= 'that you type into the "<span class=st1>*</span>2nd Authentication:" field on any page that has it.<br><br>';
  $pg .= '<b>IMPORTANT:</b> the TOTP algorithm uses the time on your device,<br>';
  $pg .= "so it is important that your device's clock is accurate within a few seconds.<br><br>";
+ $pg .= '<b>IMPORTANT:</b> you enter the value from your App at the time you submit data.<br>';
+ $pg .= "The value is valid only once for a maximum of 30 seconds.<br>";
+ $pg .= "In both the Apps it has a 'dial' that shows the 30 seconds running out.<br>";
+ $pg .= "If you are close to running out, you can wait for the 30 seconds to run out<br>";
+ $pg .= "and then enter the new value it will come up with.<br>";
+ $pg .= "The pool checks your value using the time at the pool when you submit the data,<br>";
+ $pg .= "it doesn't matter when you loaded the web page,<br>";
+ $pg .= "it only matters when you clicked on the web page button to send the data to the pool.<br><br>";
  $pg .= '<span class=urg>WARNING:</span> once you have successfully tested and enabled 2FA,<br>';
  $pg .= 'you will be unable to access or even reset your account without 2FA.<br>';
  $pg .= 'There is no option to recover your 2FA from the web site,<br>';
