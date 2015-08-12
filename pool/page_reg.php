@@ -15,7 +15,14 @@ function doregres($data, $u)
  else
 	$mail = '';
 
- $pg = '<br><br><h1>Choose one:</h1>';
+ $pg = makeForm('')."<br>
+<table cellpadding=0 cellspacing=0 border=0><tr>
+<td>User:</td><td><input type=text name=User size=10 value=''></td>
+<td>&nbsp;Pass:</td><td><input type=password name=Pass size=10 value=''></td>
+<td>&nbsp;<input type=submit name=Login value=Login></td>
+</tr></table></form>";
+
+ $pg .= '<br><h1>or choose one:</h1>';
 
  $pg .= '<table cellpadding=5 cellspacing=0 border=1><tr><td class=dc>';
 
