@@ -173,7 +173,7 @@ function doblocks($data, $user)
 	$pg .= "<td class=dr>Diff</td>";
 	$pg .= "<td class=dr>Diff%</td>";
 	$pg .= "<td class=dr>CDF</td>";
-	$pg .= "<td class=dr>N</td>";
+	$pg .= "<td class=dr>B</td>";
 	$pg .= "</tr>\n";
  }
  $blktot = 0;
