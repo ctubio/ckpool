@@ -441,19 +441,16 @@ function pgtop($info, $dotop, $user, $douser)
 		else
 		{
 			$extra = '';
-			$first = substr($who, 0, 1);
-			if (($first == '1' || $first == '3') && strlen($who) > 12)
+			if (strlen($who) > 12)
 			{
-				$who = substr($who, 0, 11);
+				$who = substr($who, 0, 12);
 				$extra = '&#133;';
 			}
-			$top .= "
-<span class=topwho>".htmlspecialchars($who)."$extra&nbsp;</span><br>
-<span class=topdes>Hash&nbsp;Rate:</span>
-<span class=topdat>$uhr$u1hr</span><br>";
-			$top .= makeForm('')."
-<input type=submit name=Logout value=Logout>
-</form>";
+			$top .= "<span class=topwho>".htmlspecialchars($who)."$extra&nbsp;</span>";
+			$top .= makeForm('');
+			$top .= "<input type=submit name=Logout value=Logout></form>";
+			$top .= "<br><span class=topdes>Hash&nbsp;Rate:</span>";
+			$top .= "<span class=topdat>$uhr$u1hr</span><br>";
 		}
 
 		$top .= '</span>';
