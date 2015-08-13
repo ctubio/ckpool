@@ -173,11 +173,13 @@ function doblocks($data, $user)
 	$pg .= "<td class=dr>Diff</td>";
 	$pg .= "<td class=dr>Diff%</td>";
 	$pg .= "<td class=dr>CDF</td>";
+	$pg .= "<td class=dr>N</td>";
 	$pg .= "</tr>\n";
  }
  $blktot = 0;
  $nettot = 0;
  $i = 0;
+ $cnt = 1;
  $orph = false;
  $csv = "Sequence,Height,Status,Timestamp,DiffAcc,NetDiff,Hash\n";
  if ($ans['STATUS'] == 'ok')
@@ -203,6 +205,7 @@ function doblocks($data, $user)
 			$ex = 's';
 			$orph = true;
 			$seq = '';
+			$nn = $cnt;
 			if ($conf == 'R')
 			{
 				addTips();
@@ -225,7 +228,10 @@ function doblocks($data, $user)
 			}
 		}
 		else
+		{
 			$seq = $ans['seq:'.$i];
+			$nn = $cnt++;
+		}
 		if ($conf == '1')
 		{
 			if (isset($data['info']['lastheight']))
@@ -291,6 +297,7 @@ function doblocks($data, $user)
 		 $pg .= "<td class=dr>$stara$approx$acc</td>";
 		 $pg .= "<td class=dr$bg>$bpct</td>";
 		 $pg .= "<td class=dr>$cdfdsp</td>";
+		 $pg .= "<td class=dr>$nn</td>";
 		 $pg .= "</tr>\n";
 		}
 		else
