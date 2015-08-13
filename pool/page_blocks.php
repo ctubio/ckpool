@@ -179,7 +179,7 @@ function doblocks($data, $user)
  $blktot = 0;
  $nettot = 0;
  $i = 0;
- $cnt = 1;
+ $cnt = 0;
  $orph = false;
  $csv = "Sequence,Height,Status,Timestamp,DiffAcc,NetDiff,Hash\n";
  if ($ans['STATUS'] == 'ok')
@@ -230,7 +230,7 @@ function doblocks($data, $user)
 		else
 		{
 			$seq = $ans['seq:'.$i];
-			$nn = $cnt++;
+			$nn = ++$cnt;
 		}
 		if ($conf == '1')
 		{
