@@ -117,12 +117,7 @@ K_ITEM *gen_2fa_key(K_ITEM *old_u_item, int32_t entropy, char *by, char *code,
 		u_item = k_unlink_head(users_free);
 		K_WUNLOCK(users_free);
 		DATA_USERS(users, u_item);
-		memcpy(users, old_users, sizeof(*users));
-		if (users->userdata != EMPTY) {
-			users->userdata = strdup(users->userdata);
-			if (!users->userdata)
-				quithere(1, "strdup OOM");
-		}
+		copy_users(users, old_users);
 		users_userdata_add_bin(users, USER_TOTPAUTH_NAME,
 					USER_TOTPAUTH, key, sizeof(key));
 		users_userdata_add_txt(users, USER_TEST2FA_NAME,
@@ -198,15 +193,23 @@ bool check_2fa(USERS *users, int32_t value)
 
 	otp %= 1000000;
 
-	LOGDEBUG("%s() '%s/%s offset=%d otp=%"PRId32" value=%"PRId32,
+	LOGDEBUG("%s() '%s/%s offset=%d otp=%"PRId32" value=%"PRId32
+		 " lastvalue=%"PRId32,
 		 __func__, st = safe_text_nonull(users->username),
-		 USER_TOTPAUTH_NAME, offset, otp, value);
+		 USER_TOTPAUTH_NAME, offset, otp, value, users->lastvalue);
 	FREENULL(st);
 	FREENULL(hash);
 
-	if (otp == value)
+	/* Disallow 0 since that's the default value
+	 * If it is 0, that means wait another TOTPAUTH_TIME and try again
+	 *  0 is only one in a million tests for all users
+	 * For security reasons, we can't allow using the same value twice,
+	 *  N.B. a ckdb restart will forget lastvalue, but a restart should
+	 *       take long enough to resolve that issue */
+	if (otp == value && otp != 0 && otp != users->lastvalue) {
+		users->lastvalue = otp;
 		return true;
-	else
+	} else
 		return false;
 }
 
@@ -224,16 +227,52 @@ bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 		u_item = k_unlink_head(users_free);
 		K_WUNLOCK(users_free);
 		DATA_USERS(users, u_item);
-		memcpy(users, old_users, sizeof(*users));
-		if (users->userdata != EMPTY) {
-			users->userdata = strdup(users->userdata);
-			if (!users->userdata)
-				quithere(1, "strdup OOM");
-		}
+		copy_users(users, old_users);
 		users_userdata_del(users, USER_TEST2FA_NAME, USER_TEST2FA);
 		ok = users_replace(NULL, u_item, old_u_item, by, code, inet, cd,
 				   trf_root);
 		// if !ok : u_item was cleaned up in user_replace()
 	}
 	return ok;
+}
+
+K_ITEM *remove_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
+		   char *inet, tv_t *cd,  K_TREE *trf_root)
+{
+	K_ITEM *u_item = NULL;
+	USERS *old_users, *users;
+	bool ok, did = false;
+
+	DATA_USERS(old_users, old_u_item);
+	ok = check_2fa(old_users, value);
+	if (ok) {
+		K_WLOCK(users_free);
+		u_item = k_unlink_head(users_free);
+		K_WUNLOCK(users_free);
+		DATA_USERS(users, u_item);
+		copy_users(users, old_users);
+		if (users->databits & USER_TEST2FA) {
+			users_userdata_del(users, USER_TEST2FA_NAME, USER_TEST2FA);
+			did = true;
+		}
+		if (users->databits & USER_TOTPAUTH) {
+			users_userdata_del(users, USER_TOTPAUTH_NAME, USER_TOTPAUTH);
+			did = true;
+		}
+		if (did) {
+			ok = users_replace(NULL, u_item, old_u_item, by, code, inet, cd,
+					   trf_root);
+			if (!ok) {
+				// u_item was cleaned up in user_replace()
+				u_item = NULL;
+			}
+		} else {
+			K_WLOCK(users_free);
+			free_users_data(u_item);
+			k_add_head(users_free, u_item);
+			K_WUNLOCK(users_free);
+			u_item = NULL;
+		}
+	}
+	return u_item;
 }

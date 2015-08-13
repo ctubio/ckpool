@@ -44,15 +44,33 @@ void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
 	FREENULL(msgline->msg);
 }
 
+void free_users_data(K_ITEM *item)
+{
+	USERS *users;
+
+	DATA_USERS(users, item);
+	LIST_MEM_SUB(users_free, users->userdata);
+	FREENULL(users->userdata);
+}
+
 void free_workinfo_data(K_ITEM *item)
 {
 	WORKINFO *workinfo;
 
 	DATA_WORKINFO(workinfo, item);
-	if (workinfo->transactiontree)
-		FREENULL(workinfo->transactiontree);
-	if (workinfo->merklehash)
-		FREENULL(workinfo->merklehash);
+	LIST_MEM_SUB(workinfo_free, workinfo->transactiontree);
+	FREENULL(workinfo->transactiontree);
+	LIST_MEM_SUB(workinfo_free, workinfo->merklehash);
+	FREENULL(workinfo->merklehash);
+}
+
+void free_payouts_data(K_ITEM *item)
+{
+	PAYOUTS *payouts;
+
+	DATA_PAYOUTS(payouts, item);
+	LIST_MEM_SUB(payouts_free, payouts->stats);
+	FREENULL(payouts->stats);
 }
 
 void free_sharesummary_data(K_ITEM *item)
@@ -60,10 +78,8 @@ void free_sharesummary_data(K_ITEM *item)
 	SHARESUMMARY *sharesummary;
 
 	DATA_SHARESUMMARY(sharesummary, item);
-	if (sharesummary->workername) {
-		LIST_MEM_SUB(sharesummary_free, sharesummary->workername);
-		FREENULL(sharesummary->workername);
-	}
+	LIST_MEM_SUB(sharesummary_free, sharesummary->workername);
+	FREENULL(sharesummary->workername);
 	SET_CREATEBY(sharesummary_free, sharesummary->createby, EMPTY);
 	SET_CREATECODE(sharesummary_free, sharesummary->createcode, EMPTY);
 	SET_CREATEINET(sharesummary_free, sharesummary->createinet, EMPTY);
@@ -77,8 +93,8 @@ void free_optioncontrol_data(K_ITEM *item)
 	OPTIONCONTROL *optioncontrol;
 
 	DATA_OPTIONCONTROL(optioncontrol, item);
-	if (optioncontrol->optionvalue)
-		FREENULL(optioncontrol->optionvalue);
+	LIST_MEM_SUB(optioncontrol_free, optioncontrol->optionvalue);
+	FREENULL(optioncontrol->optionvalue);
 }
 
 void free_markersummary_data(K_ITEM *item)
@@ -86,8 +102,8 @@ void free_markersummary_data(K_ITEM *item)
 	MARKERSUMMARY *markersummary;
 
 	DATA_MARKERSUMMARY(markersummary, item);
-	if (markersummary->workername)
-		FREENULL(markersummary->workername);
+	LIST_MEM_SUB(markersummary_free, markersummary->workername);
+	FREENULL(markersummary->workername);
 	SET_CREATEBY(markersummary_free, markersummary->createby, EMPTY);
 	SET_CREATECODE(markersummary_free, markersummary->createcode, EMPTY);
 	SET_CREATEINET(markersummary_free, markersummary->createinet, EMPTY);
@@ -101,10 +117,10 @@ void free_workmarkers_data(K_ITEM *item)
 	WORKMARKERS *workmarkers;
 
 	DATA_WORKMARKERS(workmarkers, item);
-	if (workmarkers->poolinstance)
-		FREENULL(workmarkers->poolinstance);
-	if (workmarkers->description)
-		FREENULL(workmarkers->description);
+	LIST_MEM_SUB(workmarkers_free, workmarkers->poolinstance);
+	FREENULL(workmarkers->poolinstance);
+	LIST_MEM_SUB(workmarkers_free, workmarkers->description);
+	FREENULL(workmarkers->description);
 }
 
 void free_marks_data(K_ITEM *item)
@@ -112,12 +128,12 @@ void free_marks_data(K_ITEM *item)
 	MARKS *marks;
 
 	DATA_MARKS(marks, item);
-	if (marks->poolinstance && marks->poolinstance != EMPTY)
-		FREENULL(marks->poolinstance);
-	if (marks->description && marks->description != EMPTY)
-		FREENULL(marks->description);
-	if (marks->extra && marks->extra != EMPTY)
-		FREENULL(marks->extra);
+	LIST_MEM_SUB(marks_free, marks->poolinstance);
+	FREENULL(marks->poolinstance);
+	LIST_MEM_SUB(marks_free, marks->description);
+	FREENULL(marks->description);
+	LIST_MEM_SUB(marks_free, marks->extra);
+	FREENULL(marks->extra);
 }
 
 void _free_seqset_data(K_ITEM *item, bool lock)
@@ -143,6 +159,16 @@ void _free_seqset_data(K_ITEM *item, bool lock)
 		}
 		seqset->seqstt = 0;
 	}
+}
+
+/* Data copy functions (added here as needed)
+   All pointers need to initialised since DUP_POINTER will free them */
+
+void copy_users(USERS *newu, USERS *oldu)
+{
+	memcpy(newu, oldu, sizeof(*newu));
+	newu->userdata = NULL;
+	DUP_POINTER(users_free, newu->userdata, oldu->userdata);
 }
 
 // Clear text printable version of txt up to first '\0'
@@ -2629,6 +2655,8 @@ const char *blocks_confirmed(char *confirmed)
 			return blocks_42;
 		case BLOCKS_ORPHAN:
 			return blocks_orphan;
+		case BLOCKS_REJECT:
+			return blocks_reject;
 	}
 	return blocks_unknown;
 }
@@ -2869,7 +2897,8 @@ bool check_update_blocks_stats(tv_t *stats)
 			DATA_BLOCKS(blocks, b_item);
 			if (CURRENT(&(blocks->expirydate))) {
 				pending += blocks->diffacc;
-				if (blocks->confirmed[0] == BLOCKS_ORPHAN)
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
+				    blocks->confirmed[0] == BLOCKS_REJECT)
 					blocks->diffcalc = 0.0;
 				else {
 					blocks->diffcalc = pending;
@@ -2918,10 +2947,11 @@ bool check_update_blocks_stats(tv_t *stats)
 				else
 					blocks->blockluck = 1.0 / blocks->blockdiffratio;
 
-				/* Orphans are treated as +diffacc but no block
+				/* Orphans/Rejects are treated as +diffacc but no block
 				 *  i.e. they simply add shares to the later block
 				 *  and have running stats set to zero */
-				if (blocks->confirmed[0] == BLOCKS_ORPHAN) {
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
+				    blocks->confirmed[0] == BLOCKS_REJECT) {
 					blocks->diffratio = 0.0;
 					blocks->diffmean = 0.0;
 					blocks->cdferl = 0.0;
@@ -3311,6 +3341,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	switch (blocks->confirmed[0]) {
 		case BLOCKS_NEW:
 		case BLOCKS_ORPHAN:
+		case BLOCKS_REJECT:
 			LOGERR("%s(): can't process block %"PRId32"/%"
 				PRId64"/%s/%"PRId64" status: %s/%s",
 				__func__, blocks->height, blocks->workinfoid,
@@ -3656,7 +3687,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		 diff_times, FLDSEP, diff_add, FLDSEP, total_share_count,
 		 FLDSEP, ss_count, FLDSEP, wm_count, FLDSEP, ms_count,
 		 FLDSEP, cd_buf);
-	payouts->stats = buf;
+	DUP_POINTER(payouts_free, payouts->stats, &buf[0]);
 
 	conned = CKPQConn(&conn);
 	begun = CKPQBegin(conn);
@@ -3870,9 +3901,6 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		   ss_count, wm_count, ms_count, usercount, diff_times,
 		   diff_add, cd_buf);
 
-	// convert the stack memory to heap memeory
-	payouts->stats = strdup(payouts->stats);
-
 	K_WLOCK(payouts_free);
 	p2_item = k_unlink_head(payouts_free);
 	K_WUNLOCK(payouts_free);
@@ -3890,7 +3918,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	payouts2->diffused = payouts->diffused;
 	payouts2->shareacc = payouts->shareacc;
 	copy_tv(&(payouts2->lastshareacc), &(payouts->lastshareacc));
-	payouts2->stats = strdup(payouts->stats);
+	DUP_POINTER(payouts_free, payouts2->stats, payouts->stats);
 
 	setnow(&now);
 	/* N.B. the PROCESSING payouts could have expirydate = createdate
@@ -3918,6 +3946,7 @@ shazbot:
 
 	if (p_item) {
 		K_WLOCK(payouts_free);
+		free_payouts_data(p_item);
 		k_add_head(payouts_free, p_item);
 		K_WUNLOCK(payouts_free);
 	}
@@ -4867,8 +4896,8 @@ void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
 	}
 }
 
-// N.B. good blocks = blocks - orphans
-void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock)
+// N.B. good blocks = blocks - (orphans + rejects)
+void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock)
 {
 	USERINFO *row;
 	K_ITEM *item;
@@ -4877,11 +4906,14 @@ void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock)
 	DATA_USERINFO(row, item);
 	if (lock)
 		K_WLOCK(userinfo_free);
-	if (isnew) {
+	if (isnew == INFO_NEW) {
 		row->blocks++;
 		copy_tv(&(row->last_block), &(blocks->createdate));
-	} else
+	} else if (isnew == INFO_ORPHAN)
 		row->orphans++;
+	else if (isnew == INFO_REJECT)
+		row->rejects++;
+
 	if (lock)
 		K_WUNLOCK(userinfo_free);
 }

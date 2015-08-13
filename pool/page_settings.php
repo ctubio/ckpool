@@ -218,7 +218,7 @@ function dosettings($data, $user)
 			$old = $_SESSION['old_set_email'];
 		else
 			$old = null;
-#		emailAddressChanged($email, zeip(), $emailinfo, $old);
+		emailAddressChanged($email, zeip(), $emailinfo, $old);
 		break;
 	  case 'Address':
 		payoutAddressChanged($email, zeip(), $emailinfo);

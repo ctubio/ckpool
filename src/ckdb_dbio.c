@@ -181,6 +181,7 @@ char *pqerrmsg(PGconn *conn)
 #define PQPARAM17 PQPARAM16 ",$17"
 #define PQPARAM18 PQPARAM16 ",$17,$18"
 #define PQPARAM22 PQPARAM16 ",$17,$18,$19,$20,$21,$22"
+#define PQPARAM23 PQPARAM16 ",$17,$18,$19,$20,$21,$22,$23"
 #define PQPARAM26 PQPARAM22 ",$23,$24,$25,$26"
 #define PQPARAM27 PQPARAM26 ",$27"
 
@@ -415,7 +416,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	K_WUNLOCK(users_free);
 
 	DATA_USERS(row, item);
-	memcpy(row, users, sizeof(*row));
+	copy_users(row, users);
 
 	// Update each one supplied
 	if (hash) {
@@ -428,11 +429,6 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		STRNCPY(row->emailaddress, email);
 	if (status)
 		STRNCPY(row->status, status);
-	if (row->userdata != EMPTY) {
-		row->userdata = strdup(users->userdata);
-		if (!row->userdata)
-			quithere(1, "strdup OOM");
-	}
 
 	HISTORYDATEINIT(row, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, row);
@@ -514,8 +510,7 @@ unparam:
 
 	K_WLOCK(users_free);
 	if (!ok) {
-		if (row->userdata != EMPTY)
-			FREENULL(row->userdata);
+		free_users_data(item);
 		k_add_head(users_free, item);
 	} else {
 		users_root = remove_from_ktree(users_root, u_item, cmp_users);
@@ -649,9 +644,10 @@ unparam:
 		free(params[n]);
 unitem:
 	K_WLOCK(users_free);
-	if (!ok)
+	if (!ok) {
+		free_users_data(item);
 		k_add_head(users_free, item);
-	else {
+	} else {
 		users_root = add_to_ktree(users_root, item, cmp_users);
 		userid_root = add_to_ktree(userid_root, item, cmp_userid);
 		k_add_head(users_store, item);
@@ -761,8 +757,7 @@ unparam:
 	K_WLOCK(users_free);
 	if (!ok) {
 		// cleanup done here
-		if (users->userdata != EMPTY)
-			FREENULL(users->userdata);
+		free_users_data(u_item);
 		k_add_head(users_free, u_item);
 	} else {
 		users_root = remove_from_ktree(users_root, old_u_item, cmp_users);
@@ -892,8 +887,10 @@ bool users_fill(PGconn *conn)
 		userid_root = add_to_ktree(userid_root, item, cmp_userid);
 		k_add_head(users_store, item);
 	}
-	if (!ok)
+	if (!ok) {
+		free_users_data(item);
 		k_add_head(users_free, item);
+	}
 
 	K_WUNLOCK(users_free);
 	PQclear(res);
@@ -1429,7 +1426,7 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	WORKERS *row;
 	char *upd, *ins;
 	bool ok = false;
-	char *params[6 + HISTORYDATECOUNT];
+	char *params[7 + HISTORYDATECOUNT];
 	int n, par = 0;
 	int32_t diffdef;
 	char idlenot;
@@ -2341,7 +2338,7 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *old_item, look;
-	OPTIONCONTROL *row, *optioncontrol;
+	OPTIONCONTROL *row;
 	char *upd, *ins;
 	bool ok = false;
 	char *params[4 + HISTORYDATECOUNT];
@@ -2444,16 +2441,15 @@ nostart:
 	K_WLOCK(optioncontrol_free);
 	if (!ok) {
 		// Cleanup item passed in
-		FREENULL(row->optionvalue);
+		free_optioncontrol_data(oc_item);
 		k_add_head(optioncontrol_free, oc_item);
 	} else {
 		// Discard old
 		if (old_item) {
-			DATA_OPTIONCONTROL(optioncontrol, old_item);
 			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
 							       cmp_optioncontrol);
 			k_unlink_item(optioncontrol_store, old_item);
-			FREENULL(optioncontrol->optionvalue);
+			free_optioncontrol_data(old_item);
 			k_add_head(optioncontrol_free, old_item);
 		}
 		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
@@ -2600,7 +2596,7 @@ bool optioncontrol_fill(PGconn *conn)
 		}
 	}
 	if (!ok) {
-		FREENULL(row->optionvalue);
+		free_optioncontrol_data(item);
 		k_add_head(optioncontrol_free, item);
 	}
 
@@ -2648,14 +2644,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 	TXT_TO_BIGINT("workinfoid", workinfoidstr, row->workinfoid);
 	STRNCPY(row->poolinstance, poolinstance);
-	row->transactiontree = strdup(transactiontree);
-	if (!(row->transactiontree))
-		quithere(1, "malloc (%d) OOM", (int)strlen(transactiontree));
-	LIST_MEM_ADD(workinfo_free, row->transactiontree);
-	row->merklehash = strdup(merklehash);
-	if (!(row->merklehash))
-		quithere(1, "malloc (%d) OOM", (int)strlen(merklehash));
-	LIST_MEM_ADD(workinfo_free, row->merklehash);
+	DUP_POINTER(workinfo_free, row->transactiontree, transactiontree);
+	DUP_POINTER(workinfo_free, row->merklehash, merklehash);
 	STRNCPY(row->prevhash, prevhash);
 	STRNCPY(row->coinbase1, coinbase1);
 	STRNCPY(row->coinbase2, coinbase2);
@@ -2670,11 +2660,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 
 	K_WLOCK(workinfo_free);
 	if (find_in_ktree(workinfo_root, item, cmp_workinfo, ctx)) {
-		LIST_MEM_SUB(workinfo_free, row->transactiontree);
-		FREENULL(row->transactiontree);
-		LIST_MEM_SUB(workinfo_free, row->merklehash);
-		FREENULL(row->merklehash);
 		workinfoid = row->workinfoid;
+		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
 		K_WUNLOCK(workinfo_free);
 
@@ -2735,19 +2722,12 @@ unparam:
 
 	K_WLOCK(workinfo_free);
 	if (workinfoid == -1) {
-		LIST_MEM_SUB(workinfo_free, row->transactiontree);
-		FREENULL(row->transactiontree);
-		LIST_MEM_SUB(workinfo_free, row->merklehash);
-		FREENULL(row->merklehash);
+		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
 	} else {
-		if (row->transactiontree && *(row->transactiontree)) {
-			// Not currently needed in RAM
-			LIST_MEM_SUB(workinfo_free, row->transactiontree);
-			free(row->transactiontree);
-			row->transactiontree = strdup(EMPTY);
-			LIST_MEM_ADD(workinfo_free, row->transactiontree);
-		}
+		// Not currently needed in RAM
+		LIST_MEM_SUB(workinfo_free, row->transactiontree);
+		FREENULL(row->transactiontree);
 
 		hex2bin(ndiffbin, row->bits, 4);
 		current_ndiff = diff_from_nbits(ndiffbin);
@@ -2870,9 +2850,9 @@ bool workinfo_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_BLOB("transactiontree", field, row->transactiontree);
-*/
-		row->transactiontree = strdup(EMPTY);
 		LIST_MEM_ADD(workinfo_free, row->transactiontree);
+*/
+		row->transactiontree = EMPTY;
 
 		PQ_GET_FLD(res, i, "merklehash", field, ok);
 		if (!ok)
@@ -2940,8 +2920,7 @@ bool workinfo_fill(PGconn *conn)
 		tick();
 	}
 	if (!ok) {
-		//FREENULL(row->transactiontree);
-		FREENULL(row->merklehash);
+		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
 	}
 
@@ -3690,9 +3669,11 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 				bzero(markersummary, sizeof(*markersummary));
 				markersummary->markerid = workmarkers->markerid;
 				markersummary->userid = sharesummary->userid;
-				markersummary->workername = strdup(sharesummary->workername);
-				LIST_MEM_ADD(markersummary_free, markersummary->workername);
-				ms_root = add_to_ktree(ms_root, ms_item, cmp_markersummary);
+				DUP_POINTER(markersummary_free,
+					    markersummary->workername,
+					    sharesummary->workername);
+				ms_root = add_to_ktree(ms_root, ms_item,
+							cmp_markersummary);
 
 				LOGDEBUG("%s() new ms %"PRId64"/%"PRId64"/%s",
 					 shortname, markersummary->markerid,
@@ -3830,7 +3811,6 @@ flail:
 				bzero(p_markersummary, sizeof(*p_markersummary));
 				p_markersummary->markerid = markersummary->markerid;
 				POOL_MS(p_markersummary);
-				LIST_MEM_ADD(markersummary_free, p_markersummary->workername);
 				markersummary_pool_root = add_to_ktree(markersummary_pool_root,
 								       p_ms_item,
 								       cmp_markersummary);
@@ -4075,8 +4055,8 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 			DATA_SHARESUMMARY(row, item);
 			bzero(row, sizeof(*row));
 			row->userid = userid;
-			row->workername = strdup(workername);
-			LIST_MEM_ADD(sharesummary_free, row->workername);
+			DUP_POINTER(sharesummary_free, row->workername,
+				    workername);
 			row->workinfoid = workinfoid;
 		}
 
@@ -4146,7 +4126,6 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 			DATA_SHARESUMMARY(p_row, p_item);
 			bzero(p_row, sizeof(*p_row));
 			POOL_SS(p_row);
-			LIST_MEM_ADD(sharesummary_free, p_row->workername);
 			p_row->workinfoid = workinfoid;
 		}
 
@@ -4214,7 +4193,7 @@ bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 	K_WUNLOCK(blocks_free);
 
 	DATA_BLOCKS(row, b_item);
-	memcpy(row, oldblocks, sizeof(*row));
+	copy_blocks(row, oldblocks);
 	row->diffacc = diffacc;
 	row->diffinv = diffinv;
 	row->shareacc = shareacc;
@@ -4326,9 +4305,9 @@ unparam:
 }
 
 bool blocks_add(PGconn *conn, char *height, char *blockhash,
-		char *confirmed, char *workinfoid, char *username,
-		char *workername, char *clientid, char *enonce1,
-		char *nonce2, char *nonce, char *reward,
+		char *confirmed, char *info, char *workinfoid,
+		char *username, char *workername, char *clientid,
+		char *enonce1, char *nonce2, char *nonce, char *reward,
 		char *by, char *code, char *inet, tv_t *cd,
 		bool igndup, char *id, K_TREE *trf_root)
 {
@@ -4342,11 +4321,10 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	BLOCKS *row, *oldblocks;
 	USERS *users;
 	char *upd, *ins;
-	char *params[17 + HISTORYDATECOUNT];
+	char *params[18 + HISTORYDATECOUNT];
 	bool ok = false, update_old = false;
 	int n, par = 0;
-	char want = '?';
-	char *st = NULL;
+	char *want = NULL, *st = NULL;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -4398,6 +4376,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			STRNCPY(row->confirmed, confirmed);
+			STRNCPY(row->info, info);
 			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
 			STRNCPY(row->workername, workername);
 			TXT_TO_INT("clientid", clientid, row->clientid);
@@ -4428,6 +4407,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			params[par++] = str_to_buf(row->nonce, NULL, 0);
 			params[par++] = bigint_to_buf(row->reward, NULL, 0);
 			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			params[par++] = str_to_buf(row->info, NULL, 0);
 			params[par++] = double_to_buf(row->diffacc, NULL, 0);
 			params[par++] = double_to_buf(row->diffinv, NULL, 0);
 			params[par++] = double_to_buf(row->shareacc, NULL, 0);
@@ -4440,9 +4420,9 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			ins = "insert into blocks "
 				"(height,blockhash,workinfoid,userid,workername,"
 				"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-				"diffacc,diffinv,shareacc,shareinv,elapsed,"
+				"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 				"statsconfirmed"
-				HISTORYDATECONTROL ") values (" PQPARAM22 ")";
+				HISTORYDATECONTROL ") values (" PQPARAM23 ")";
 
 			if (conn == NULL) {
 				conn = dbconnect();
@@ -4458,10 +4438,11 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 			// We didn't use a Begin
 			ok = true;
-			userinfo_block(row, true);
+			userinfo_block(row, INFO_NEW);
 			goto unparam;
 			break;
 		case BLOCKS_ORPHAN:
+		case BLOCKS_REJECT:
 		case BLOCKS_42:
 			// These shouldn't be possible until startup completes
 			if (!startup_complete) {
@@ -4473,7 +4454,6 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					height, hash_dsp, cd_buf);
 				goto flail;
 			}
-			want = BLOCKS_CONFIRM;
 		case BLOCKS_CONFIRM:
 			if (!old_b_item) {
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
@@ -4482,16 +4462,37 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 					height, hash_dsp, cd_buf);
 				goto flail;
 			}
-			if (confirmed[0] == BLOCKS_CONFIRM)
-				want = BLOCKS_NEW;
-			if (oldblocks->confirmed[0] != want) {
+			switch (confirmed[0]) {
+				case BLOCKS_CONFIRM:
+					if (oldblocks->confirmed[0] != BLOCKS_NEW)
+						want = BLOCKS_NEW_STR;
+					break;
+				case BLOCKS_42:
+					if (oldblocks->confirmed[0] != BLOCKS_CONFIRM)
+						want = BLOCKS_CONFIRM_STR;
+					break;
+				case BLOCKS_ORPHAN:
+					if (oldblocks->confirmed[0] != BLOCKS_NEW &&
+					    oldblocks->confirmed[0] != BLOCKS_CONFIRM)
+						want = BLOCKS_N_C_STR;
+					break;
+				case BLOCKS_REJECT:
+					if (oldblocks->confirmed[0] != BLOCKS_NEW &&
+					    oldblocks->confirmed[0] != BLOCKS_CONFIRM &&
+					    oldblocks->confirmed[0] != BLOCKS_ORPHAN &&
+					    oldblocks->confirmed[0] != BLOCKS_REJECT)
+						want = BLOCKS_N_C_O_R_STR;
+					break;
+			}
+			if (want) {
 				// No mismatch messages during startup
 				if (startup_complete) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
-					LOGERR("%s(): New Status: %s requires Status: %c. "
-						"Ignored: Status: %s, Block: %s/...%s/%s",
+					LOGERR("%s(): New Status: (%s)%s requires Status: %s. "
+						"Ignored: Status: (%s)%s, Block: %s/...%s/%s",
 						__func__,
-						blocks_confirmed(confirmed), want,
+						confirmed, blocks_confirmed(confirmed),
+						want, oldblocks->confirmed,
 						blocks_confirmed(oldblocks->confirmed),
 						height, hash_dsp, cd_buf);
 				}
@@ -4511,8 +4512,10 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			// New is mostly a copy of the old
-			memcpy(row, oldblocks, sizeof(*row));
+			copy_blocks(row, oldblocks);
 			STRNCPY(row->confirmed, confirmed);
+			if (info && *info)
+				STRNCPY(row->info, info);
 			if (confirmed[0] == BLOCKS_CONFIRM) {
 				row->diffacc = pool.diffacc;
 				row->diffinv = pool.diffinv;
@@ -4546,6 +4549,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			params[par++] = str_to_buf(row->blockhash, NULL, 0);
 			params[par++] = tv_to_buf(cd, NULL, 0);
 			params[par++] = str_to_buf(row->confirmed, NULL, 0);
+			params[par++] = str_to_buf(row->info, NULL, 0);
 
 			if (confirmed[0] == BLOCKS_CONFIRM) {
 				params[par++] = double_to_buf(row->diffacc, NULL, 0);
@@ -4553,34 +4557,34 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				params[par++] = double_to_buf(row->shareacc, NULL, 0);
 				params[par++] = double_to_buf(row->shareinv, NULL, 0);
 				HISTORYDATEPARAMS(params, par, row);
-				PARCHKVAL(par, 7 + HISTORYDATECOUNT, params); // 12 as per ins
+				PARCHKVAL(par, 8 + HISTORYDATECOUNT, params); // 13 as per ins
 
 				ins = "insert into blocks "
 					"(height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-					"diffacc,diffinv,shareacc,shareinv,elapsed,"
+					"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed"
 					HISTORYDATECONTROL ") select "
 					"height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,"
-					"$3,$4,$5,$6,$7,elapsed,statsconfirmed,"
-					"$8,$9,$10,$11,$12 from blocks where "
+					"$3,$4,$5,$6,$7,$8,elapsed,statsconfirmed,"
+					"$9,$10,$11,$12,$13 from blocks where "
 					"blockhash=$1 and "EDDB"=$2";
 			} else {
 				HISTORYDATEPARAMS(params, par, row);
-				PARCHKVAL(par, 3 + HISTORYDATECOUNT, params); // 8 as per ins
+				PARCHKVAL(par, 4 + HISTORYDATECOUNT, params); // 9 as per ins
 
 				ins = "insert into blocks "
 					"(height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,confirmed,"
-					"diffacc,diffinv,shareacc,shareinv,elapsed,"
+					"info,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed"
 					HISTORYDATECONTROL ") select "
 					"height,blockhash,workinfoid,userid,workername,"
 					"clientid,enonce1,nonce2,nonce,reward,"
-					"$3,diffacc,diffinv,shareacc,shareinv,elapsed,"
+					"$3,$4,diffacc,diffinv,shareacc,shareinv,elapsed,"
 					"statsconfirmed,"
-					"$4,$5,$6,$7,$8 from blocks where "
+					"$5,$6,$7,$8,$9 from blocks where "
 					"blockhash=$1 and "EDDB"=$2";
 			}
 
@@ -4594,7 +4598,9 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 
 			update_old = true;
 			if (confirmed[0] == BLOCKS_ORPHAN)
-				userinfo_block(row, false);
+				userinfo_block(row, INFO_ORPHAN);
+			else if (confirmed[0] == BLOCKS_REJECT)
+				userinfo_block(row, INFO_REJECT);
 			break;
 		default:
 			LOGERR("%s(): %s.failed.invalid confirm='%s'",
@@ -4684,6 +4690,7 @@ flail:
 				}
 				break;
 			case BLOCKS_ORPHAN:
+			case BLOCKS_REJECT:
 			case BLOCKS_42:
 			default:
 				blk = false;
@@ -4709,14 +4716,14 @@ bool blocks_fill(PGconn *conn)
 	BLOCKS *row;
 	char *field;
 	char *sel;
-	int fields = 17;
+	int fields = 18;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
 		"height,blockhash,workinfoid,userid,workername,"
-		"clientid,enonce1,nonce2,nonce,reward,confirmed,"
+		"clientid,enonce1,nonce2,nonce,reward,confirmed,info,"
 		"diffacc,diffinv,shareacc,shareinv,elapsed,statsconfirmed"
 		HISTORYDATECONTROL
 		" from blocks";
@@ -4805,6 +4812,11 @@ bool blocks_fill(PGconn *conn)
 			break;
 		TXT_TO_STR("confirmed", field, row->confirmed);
 
+		PQ_GET_FLD(res, i, "info", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("info", field, row->info);
+
 		PQ_GET_FLD(res, i, "diffacc", field, ok);
 		if (!ok)
 			break;
@@ -4851,9 +4863,11 @@ bool blocks_fill(PGconn *conn)
 		}
 
 		if (CURRENT(&(row->expirydate))) {
-			_userinfo_block(row, true, false);
+			_userinfo_block(row, INFO_NEW, false);
 			if (row->confirmed[0] == BLOCKS_ORPHAN)
-				_userinfo_block(row, false, false);
+				_userinfo_block(row, INFO_ORPHAN, false);
+			else if (row->confirmed[0] == BLOCKS_REJECT)
+				_userinfo_block(row, INFO_REJECT, false);
 		}
 	}
 	if (!ok)
@@ -5097,6 +5111,7 @@ void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item, tv_t *cd)
 	K_WLOCK(payouts_free);
 	if (!ok) {
 		// Cleanup for the calling function
+		free_payouts_data(p_item);
 		k_add_head(payouts_free, p_item);
 	} else {
 		if (old_p_item) {
@@ -5601,7 +5616,7 @@ bool payouts_fill(PGconn *conn)
 		tick();
 	}
 	if (!ok) {
-		FREENULL(row->stats);
+		free_payouts_data(item);
 		k_add_head(payouts_free, item);
 	}
 
@@ -6425,7 +6440,6 @@ bool markersummary_fill(PGconn *conn)
 			bzero(p_row, sizeof(*p_row));
 			p_row->markerid = row->markerid;
 			POOL_MS(p_row);
-			LIST_MEM_ADD(markersummary_free, p_row->workername);
 			markersummary_pool_root = add_to_ktree(markersummary_pool_root,
 							       p_item,
 							       cmp_markersummary);
@@ -6448,7 +6462,7 @@ bool markersummary_fill(PGconn *conn)
 		tick();
 	}
 	if (!ok) {
-		FREENULL(row->workername);
+		free_markersummary_data(item);
 		k_add_head(markersummary_free, item);
 	}
 
@@ -6605,12 +6619,10 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			}
 		}
 
-		row->poolinstance = strdup(poolinstance);
-		LIST_MEM_ADD(workmarkers_free, poolinstance);
+		DUP_POINTER(workmarkers_free, row->poolinstance, poolinstance);
 		row->workinfoidend = workinfoidend;
 		row->workinfoidstart = workinfoidstart;
-		row->description = strdup(description);
-		LIST_MEM_ADD(workmarkers_free, description);
+		DUP_POINTER(workmarkers_free, row->description, description);
 		STRNCPY(row->status, status);
 		HISTORYDATEINIT(row, cd, by, code, inet);
 		HISTORYDATETRANSFER(trf_root, row);
@@ -6658,23 +6670,7 @@ unparam:
 	K_WLOCK(workmarkers_free);
 	if (!ok) {
 		if (wm_item) {
-			DATA_WORKMARKERS(row, wm_item);
-			if (row->poolinstance) {
-				if (row->poolinstance != EMPTY) {
-					LIST_MEM_SUB(workmarkers_free,
-						     row->poolinstance);
-					free(row->poolinstance);
-				}
-				row->poolinstance = NULL;
-			}
-			if (row->description) {
-				if (row->description != EMPTY) {
-					LIST_MEM_SUB(workmarkers_free,
-						     row->description);
-					free(row->description);
-				}
-				row->description = NULL;
-			}
+			free_workmarkers_data(wm_item);
 			k_add_head(workmarkers_free, wm_item);
 		}
 	}
@@ -6820,8 +6816,10 @@ bool workmarkers_fill(PGconn *conn)
 
 		tick();
 	}
-	if (!ok)
+	if (!ok) {
+		free_workmarkers_data(item);
 		k_add_head(workmarkers_free, item);
+	}
 
 	K_WUNLOCK(workmarkers_free);
 	PQclear(res);
@@ -6920,13 +6918,10 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 		K_WUNLOCK(marks_free);
 		DATA_MARKS(row, m_item);
 		bzero(row, sizeof(*row));
-		row->poolinstance = strdup(poolinstance);
-		LIST_MEM_ADD(marks_free, poolinstance);
+		DUP_POINTER(marks_free, row->poolinstance, poolinstance);
 		row->workinfoid = workinfoid;
-		row->description = strdup(description);
-		LIST_MEM_ADD(marks_free, description);
-		row->extra = strdup(extra);
-		LIST_MEM_ADD(marks_free, extra);
+		DUP_POINTER(marks_free, row->description, description);
+		DUP_POINTER(marks_free, row->extra, extra);
 		STRNCPY(row->marktype, marktype);
 		STRNCPY(row->status, status);
 		HISTORYDATEINIT(row, cd, by, code, inet);
@@ -6991,32 +6986,10 @@ unparam:
 	K_WLOCK(marks_free);
 	if (!ok) {
 		if (m_item) {
-			DATA_MARKS(row, m_item);
-			if (row->poolinstance) {
-				if (row->poolinstance != EMPTY) {
-					LIST_MEM_SUB(marks_free, row->poolinstance);
-					free(row->poolinstance);
-				}
-				row->poolinstance = NULL;
-			}
-			if (row->description) {
-				if (row->description != EMPTY) {
-					LIST_MEM_SUB(marks_free, row->description);
-					free(row->description);
-				}
-				row->description = NULL;
-			}
-			if (row->extra) {
-				if (row->extra != EMPTY) {
-					LIST_MEM_SUB(marks_free, row->extra);
-					free(row->extra);
-				}
-				row->extra = NULL;
-			}
+			free_marks_data(m_item);
 			k_add_head(marks_free, m_item);
 		}
-	}
-	else {
+	} else {
 		if (old_m_item) {
 			marks_root = remove_from_ktree(marks_root, old_m_item, cmp_marks);
 			copy_tv(&(oldmarks->expirydate), cd);
@@ -7123,8 +7096,10 @@ bool marks_fill(PGconn *conn)
 
 		tick();
 	}
-	if (!ok)
+	if (!ok) {
+		free_marks_data(item);
 		k_add_head(marks_free, item);
+	}
 
 	K_WUNLOCK(marks_free);
 	PQclear(res);

@@ -54,8 +54,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.1"
-#define CKDB_VERSION DB_VERSION"-1.200"
+#define DB_VERSION "1.0.2"
+#define CKDB_VERSION DB_VERSION"-1.222"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -66,13 +66,6 @@
 
 #define STRINT(x) STRINT2(x)
 #define STRINT2(x) #x
-
-#define FREENULL(mem) do { \
-		if (mem) { \
-			free(mem); \
-			mem = NULL; \
-		} \
-	} while (0)
 
 // So they can fit into a 1 byte flag field
 #define TRUE_STR "Y"
@@ -105,6 +98,13 @@ extern int switch_state;
 #define BLANK " "
 extern char *EMPTY;
 
+#define FREENULL(mem) do { \
+		if ((mem) && (void *)(mem) != (void *)EMPTY) { \
+			free(mem); \
+			mem = NULL; \
+		} \
+	} while (0)
+
 // To ensure there's space for the ticker
 #define TICK_PREFIX "  "
 
@@ -115,6 +115,7 @@ extern const char *idpatt;
 extern const char *intpatt;
 extern const char *hashpatt;
 extern const char *addrpatt;
+extern const char *strpatt;
 
 /* If a trimmed username is like an address but this many or more characters,
  * disallow it */
@@ -450,17 +451,21 @@ enum cmd_values {
 	} while (0)
 
 #define LIST_MEM_ADD(_list, _fld) do { \
-		size_t __siz; \
-		__siz = strlen(_fld) + 1; \
-		LIST_MEM_ADD_SIZ(_list, __siz); \
+		if ((_fld) && (_fld) != EMPTY) { \
+			size_t __siz; \
+			__siz = strlen(_fld) + 1; \
+			LIST_MEM_ADD_SIZ(_list, __siz); \
+		} \
 	} while (0)
 
 #define LIST_MEM_SUB(_list, _fld) do { \
-		size_t __siz; \
-		__siz = strlen(_fld) + 1; \
-		if (__siz % MEMBASE) \
-			__siz += MEMBASE - (__siz % MEMBASE); \
-		_list->ram -= (int)__siz; \
+		if ((_fld) && (_fld) != EMPTY) { \
+			size_t __siz; \
+			__siz = strlen(_fld) + 1; \
+			if (__siz % MEMBASE) \
+				__siz += MEMBASE - (__siz % MEMBASE); \
+			_list->ram -= (int)__siz; \
+		} \
 	} while (0)
 
 #define SET_POINTER(_list, _fld, _val, _def) do { \
@@ -479,8 +484,25 @@ enum cmd_values {
 					LIST_MEM_ADD(_list, _val); \
 				_fld = strdup(_val); \
 				if (!(_fld)) \
-					quithere(1, "malloc OOM"); \
+					quithere(1, "strdup OOM"); \
 			} \
+		} \
+	} while (0)
+
+#define DUP_POINTER(_list, _fld, _val) do { \
+		if ((_fld) && ((_fld) != EMPTY)) { \
+			if (_list) \
+				LIST_MEM_SUB(_list, _fld); \
+			free(_fld); \
+		} \
+		if (!(_val) || !(*(_val))) \
+			(_fld) = EMPTY; \
+		else { \
+			if (_list) \
+				LIST_MEM_ADD(_list, _val); \
+			_fld = strdup(_val); \
+			if (!(_fld)) \
+				quithere(1, "strdup OOM"); \
 		} \
 	} while (0)
 
@@ -1021,6 +1043,7 @@ typedef struct users {
 	char *userdata;
 	int64_t databits; // non-DB field, Bitmask of userdata content
 	int64_t userbits; // Bitmask of user attributes
+	int32_t lastvalue; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } USERS;
 
@@ -1440,6 +1463,8 @@ typedef struct blocks {
 	char nonce[TXT_SML+1];
 	int64_t reward;
 	char confirmed[TXT_FLAG+1];
+	// block Short:Description to use vs default for 'R' in page_blocks.php
+	char info[TXT_SML+1];
 	double diffacc;
 	double diffinv;
 	double shareacc;
@@ -1487,6 +1512,15 @@ typedef struct blocks {
 #define BLOCKS_42_VALUE 101
 #define BLOCKS_ORPHAN 'O'
 #define BLOCKS_ORPHAN_STR "O"
+#define BLOCKS_REJECT 'R'
+#define BLOCKS_REJECT_STR "R"
+
+#define BLOCKS_N_C_STR BLOCKS_NEW_STR " or " BLOCKS_CONFIRM_STR
+#define BLOCKS_N_C_O_STR BLOCKS_NEW_STR ", " BLOCKS_CONFIRM_STR " or " \
+	BLOCKS_ORPHAN_STR
+#define BLOCKS_N_C_O_R_STR BLOCKS_NEW_STR ", " BLOCKS_CONFIRM_STR ", " \
+	BLOCKS_ORPHAN_STR " or " BLOCKS_REJECT_STR
+
 /* Block height difference required before checking if it's orphaned
  * TODO: add a cmd_blockstatus option to un-orphan a block */
 #define BLOCKS_ORPHAN_CHECK 1
@@ -1500,6 +1534,7 @@ extern const char *blocks_new;
 extern const char *blocks_confirm;
 extern const char *blocks_42;
 extern const char *blocks_orphan;
+extern const char *blocks_reject;
 extern const char *blocks_unknown;
 
 #define KANO -27972
@@ -1572,6 +1607,10 @@ extern cklock_t process_pplns_lock;
 #define PAYOUTS_ORPHAN 'O'
 #define PAYOUTS_ORPHAN_STR "O"
 #define PAYORPHAN(_status) ((_status)[0] == PAYOUTS_ORPHAN)
+// A rejected payout must be ignored
+#define PAYOUTS_REJECT 'R'
+#define PAYOUTS_REJECT_STR "R"
+#define PAYREJECT(_status) ((_status)[0] == PAYOUTS_REJECT)
 
 // Default number of shifts (payouts) to display on web
 #define SHIFTS_DEFAULT 99
@@ -1972,12 +2011,19 @@ extern const char *marktype_shift_end_skip;
 #define MARK_USED_STR "u"
 #define MUSED(_status) (tolower((_status)[0]) == MARK_USED)
 
+enum info_type {
+	INFO_NEW,
+	INFO_ORPHAN,
+	INFO_REJECT
+};
+
 // USERINFO from various incoming data
 typedef struct userinfo {
 	int64_t userid;
 	char username[TXT_BIG+1];
 	int blocks;
 	int orphans; // How many blocks are orphans
+	int rejects; // How many blocks are rejects
 	tv_t last_block;
 	// For all time
 	double diffacc;
@@ -2028,15 +2074,25 @@ extern void sequence_report(bool lock);
 #define REWARDOVERRIDE "MinerReward"
 
 // Data free functions (first)
+#define FREE_ITEM(item) do { } while(0)
+// TODO: make a macro for all other to use above macro
 extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
+extern void free_users_data(K_ITEM *item);
 extern void free_workinfo_data(K_ITEM *item);
 extern void free_sharesummary_data(K_ITEM *item);
+extern void free_payouts_data(K_ITEM *item);
 extern void free_optioncontrol_data(K_ITEM *item);
 extern void free_markersummary_data(K_ITEM *item);
 extern void free_workmarkers_data(K_ITEM *item);
 extern void free_marks_data(K_ITEM *item);
 #define free_seqset_data(_item) _free_seqset_data(_item, false)
 extern void _free_seqset_data(K_ITEM *item, bool lock);
+
+// Data copy functions
+#define COPY_DATA(_new, _old) memcpy(_new, _old, sizeof(*(_new)))
+
+extern void copy_users(USERS *newu, USERS *oldu);
+#define copy_blocks(_newb, _oldb) COPY_DATA(_newb, _oldb)
 
 #define safe_text(_txt) _safe_text(_txt, true)
 #define safe_text_nonull(_txt) _safe_text(_txt, false)
@@ -2270,7 +2326,7 @@ extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
 	_find_markersummary(_markerid, 0, KANO, EMPTY, true)
 #define POOL_MS(_row) do { \
 		(_row)->userid = KANO; \
-		(_row)->workername = strdup(EMPTY); \
+		(_row)->workername = EMPTY; \
 	} while (0)
 extern K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 				   int64_t userid, char *workername, bool pool);
@@ -2303,7 +2359,7 @@ extern K_ITEM *_find_create_userinfo(int64_t userid, bool lock, WHERE_FFL_ARGS);
 extern void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
 			     MARKERSUMMARY *markersummary, bool ss_sub, bool lock);
 #define userinfo_block(_blocks, _isnew) _userinfo_block(_blocks, _isnew, true)
-extern void _userinfo_block(BLOCKS *blocks, bool isnew, bool lock);
+extern void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
@@ -2436,9 +2492,9 @@ extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 			 double shareinv, int64_t elapsed,
 			 char *by, char *code, char *inet, tv_t *cd);
 extern bool blocks_add(PGconn *conn, char *height, char *blockhash,
-			char *confirmed, char *workinfoid, char *username,
-			char *workername, char *clientid, char *enonce1,
-			char *nonce2, char *nonce, char *reward,
+			char *confirmed, char *info, char *workinfoid,
+			char *username, char *workername, char *clientid,
+			char *enonce1, char *nonce2, char *nonce, char *reward,
 			char *by, char *code, char *inet, tv_t *cd,
 			bool igndup, char *id, K_TREE *trf_root);
 extern bool blocks_fill(PGconn *conn);
@@ -2551,5 +2607,7 @@ extern K_ITEM *gen_2fa_key(K_ITEM *old_u_item, int32_t entropy, char *by,
 extern bool check_2fa(USERS *users, int32_t value);
 extern bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 		    char *inet, tv_t *cd, K_TREE *trf_root);
+extern K_ITEM *remove_2fa(K_ITEM *old_u_item, int32_t value, char *by,
+			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 
 #endif

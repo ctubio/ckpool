@@ -165,6 +165,8 @@ const char *hashpatt = "^[A-Fa-f0-9]*$";
  *  and with a simple test must be ADDR_MIN_LEN to ADDR_MAX_LEN (ckdb.h)
  * bitcoind is used to fully validate them when required */
 const char *addrpatt = "^[13][A-HJ-NP-Za-km-z1-9]*$";
+// Strings in socket transfer: space to '~' excluding '='
+const char *strpatt = "^[ -<>-~]*$";
 
 // So the records below have the same 'name' as the klist
 const char Transfer[] = "Transfer";
@@ -423,6 +425,7 @@ const char *blocks_new = "New";
 const char *blocks_confirm = "1-Confirm";
 const char *blocks_42 = "Matured";
 const char *blocks_orphan = "Orphan";
+const char *blocks_reject = "Unworthy";
 const char *blocks_unknown = "?Unknown?";
 
 K_TREE *blocks_root;
@@ -1320,7 +1323,9 @@ static void dealloc_storage()
 	FREE_ALL(auths);
 
 	FREE_TREE(payouts_id);
-	FREE_ALL(payouts);
+	FREE_TREE(payouts);
+	FREE_STORE_DATA(payouts);
+	FREE_LIST_DATA(payouts);
 
 	FREE_ALL(miningpayouts);
 	FREE_ALL(blocks);
@@ -1400,7 +1405,9 @@ static void dealloc_storage()
 	FREE_ALL(useratts);
 
 	FREE_TREE(userid);
-	FREE_ALL(users);
+	FREE_TREE(users);
+	FREE_STORE_DATA(users);
+	FREE_LIST_DATA(users);
 
 	LOGWARNING("%s() transfer/heartbeatqueue/workqueue ...", __func__);
 
@@ -4676,7 +4683,7 @@ static void *listener(void *arg)
 			LOGEMERG("ABORTING");
 			everyone_die = true;
 		}
-		return NULL;
+		goto sayonara;
 	}
 
 	if (!everyone_die) {
@@ -4784,6 +4791,8 @@ static void *listener(void *arg)
 			mutex_unlock(&wq_waitlock);
 		}
 	}
+
+sayonara:
 
 	listener_using_data = false;
 
