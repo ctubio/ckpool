@@ -153,19 +153,9 @@ function trm_force($html)
  return dotrm($html, false);
 }
 #
-function isCrap()
-{
- if (isset($_SERVER['HTTP_USER_AGENT']))
-	return strpos($_SERVER['HTTP_USER_AGENT'],'iP');
- else
-	return false;
-}
-#
 function pghead($css_marker, $script_marker, $name)
 {
  global $page_title;
-
- $iCrap = isCrap();
 
  $head = "<!DOCTYPE html>\n";
 
@@ -178,7 +168,7 @@ function pghead($css_marker, $script_marker, $name)
  $head .= HeadJS();
  $head .= "\n</script>\n";
  $head .= "<style type='text/css'>\n";
- $head .= HeadCSS($iCrap);
+ $head .= HeadCSS();
  $head .= "\n$css_marker\n</style>\n";
 
  $head .= '<meta name="robots" content="noindex">';
@@ -444,8 +434,8 @@ function pgtop($info, $dotop, $user, $douser)
 		if ($who == false)
 		{
 			$top .= '<table cellpadding=0 cellspacing=0 border=0><tr><td>';
-			$top .= '<a href=https://' . $_SERVER['SERVER_NAME'];
-			$top .= '/index.php?Register=1>Login<br>Register</a>';
+			$top .= '<a href="https://' . $_SERVER['SERVER_NAME'];
+			$top .= '/index.php?Register=1">Login<br>Register</a>';
 			$top .= '</td></tr></table>';
 		}
 		else
@@ -479,8 +469,6 @@ function pgtop($info, $dotop, $user, $douser)
 #
 function pgmenu($menus)
 {
- $iCrap = isCrap();
-
  $ret = "\n<table cellpadding=0 cellspacing=0 border=0 width=100% id=n42>";
  $ret .= '<tr><td width=100%>';
  $ret .= '<table cellpadding=0 cellspacing=0 border=0 width=100%>';
@@ -496,35 +484,27 @@ function pgmenu($menus)
 	$side = 'r';
 	continue;
   }
-  if ($iCrap)
+  $ret .= "<td class=navbox$side><table cellpadding=0 cellspacing=0 border=0>";
+  $first = true;
+  foreach ($submenus as $submenu => $item)
   {
-   foreach ($submenus as $submenu => $item)
-	$ret .= "<td class=nav>".makeLink($item)."$submenu</a></td>";
-  }
-  else
-  {
-   $ret .= "<td class=navbox$side><table cellpadding=0 cellspacing=0 border=0>";
-   $first = true;
-   foreach ($submenus as $submenu => $item)
-   {
 	if ($first == true)
 	{
 		$first = false;
 		if ($submenu == $menu)
 		{
-			$ret .= "<tr><td class=nav>".makeLink($item)."$menu</a>";
+			$ret .= "<tr><td class=nav onclick=''>".makeLink($item)."$menu</a>";
 			$ret .= '<div class=sub><table cellpadding=0 cellspacing=0 border=0 width=100%>';
 			continue;
 		}
-		$ret .= "<tr><td class=nav><a>$menu</a>";
+		$ret .= "<tr><td class=nav onclick=''><a>$menu</a>";
 		$ret .= '<div class=sub><table cellpadding=0 cellspacing=0 border=0 width=100%>';
 	}
 	$ret .= "<tr><td class=ts>".makeLink($item,'class=as')."$submenu</a></td></tr>";
-   }
-   if ($first == false)
-	$ret .= '</table></div></td></tr></table>';
-   $ret .= '</td>';
   }
+  if ($first == false)
+	$ret .= '</table></div></td></tr></table>';
+  $ret .= '</td>';
  }
  $ret .= "</tr></table></td></tr></table>\n";
  return $ret;

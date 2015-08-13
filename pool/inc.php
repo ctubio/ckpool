@@ -75,7 +75,7 @@ function jst(){var e=document.getElementById('jst');if(e){e.style.visibility='hi
  return $h;
 }
 #
-function HeadCSS($iCrap = false)
+function HeadCSS()
 {
  $h = "input[type=checkbox] {vertical-align:-2px;}
 form {display:inline-block;}
@@ -106,15 +106,10 @@ input.tiny {width:0px;height:0px;margin:0px;padding:0px;outline:none;border:0px;
 #n42 td.navboxr {float:right;}
 #n42 td.nav {position:relative;}
 #n42 td.ts {border-width:1px;border-color:#0022ee;border-style:solid none none none;}
-";
- if (!$iCrap)
- {
-  $h .= "#n42 div.sub {left:0px;z-index:42;position:absolute;visibility:hidden;}
+#n42 div.sub {left:0px;z-index:42;position:absolute;visibility:hidden;}
 #n42 td.nav:hover {background:#0099ee;}
 #n42 td.nav:hover div.sub {background:#0077ee;visibility:visible;}
-";
- }
- $h .= "h1 {margin-top:20px;float:middle;font-size:20px;}
+h1 {margin-top:20px;float:middle;font-size:20px;}
 .foot, .push {height:50px;}
 .title {background-color:#909090;}
 .even {background-color:#cccccc;}
