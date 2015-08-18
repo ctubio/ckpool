@@ -1981,6 +1981,7 @@ static void *proxy_recv(void *arg)
 	while (42) {
 		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
+		float timeout;
 		time_t now;
 		int ret;
 
@@ -2029,14 +2030,14 @@ static void *proxy_recv(void *arg)
 		 * has likely stopped responding. */
 		ret = epoll_wait(epfd, &event, 1, 600000);
 		if (likely(ret > 0)) {
-			float timeout = 30;
-
 			subproxy = event.data.ptr;
 			cs = &subproxy->cs;
 			if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))
 				ret = -1;
-			else
+			else {
+				timeout = 30;
 				ret = read_socket_line(cs, &timeout);
+			}
 		}
 		if (ret < 1) {
 			LOGNOTICE("Proxy %d:%d %s failed to epoll/read_socket_line in proxy_recv",
@@ -2054,7 +2055,8 @@ static void *proxy_recv(void *arg)
 				LOGNOTICE("Proxy %d:%d unhandled stratum message: %s",
 					  subproxy->id, subproxy->subid, cs->buf);
 			}
-		} while ((ret = read_socket_line(cs, 0)) > 0);
+			timeout = 0;
+		} while ((ret = read_socket_line(cs, &timeout)) > 0);
 	}
 
 	return NULL;
@@ -2082,6 +2084,7 @@ static void *userproxy_recv(void *arg)
 		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
 		connsock_t *cs;
+		float timeout;
 		time_t now;
 		int ret;
 
@@ -2141,7 +2144,8 @@ static void *userproxy_recv(void *arg)
 				LOGNOTICE("Proxy %d:%d unhandled stratum message: %s",
 					  proxy->id, proxy->subid, cs->buf);
 			}
-		} while ((ret = read_socket_line(cs, 0)) > 0);
+			timeout = 0;
+		} while ((ret = read_socket_line(cs, &timeout)) > 0);
 	}
 	return NULL;
 }
