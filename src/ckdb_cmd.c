@@ -6300,6 +6300,60 @@ static char *cmd_userinfo(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+/* Set/show the BTC server settings
+ * You must supply the btcserver to change anything
+ * The format for userpass is username:password
+ * If you don't supply the btcserver it will simply report the current server
+ * If supply btcserver but not the userpass it will use the current userpass
+ * The reply will ONLY contain the URL, not the user/pass */
+static char *cmd_btcset(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_btcserver, *i_userpass;
+	char *btcserver = NULL, *userpass = NULL, *tmp;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char buf[256];
+
+	i_btcserver = optional_name(trf_root, "btcserver", 1, NULL, reply, siz);
+	if (i_btcserver) {
+		btcserver = strdup(transfer_data(i_btcserver));
+		i_userpass = optional_name(trf_root, "userpass", 0, NULL, reply, siz);
+		if (i_userpass)
+			userpass = transfer_data(i_userpass);
+
+		ck_wlock(&btc_lock);
+		btc_server = btcserver;
+		btcserver = NULL;
+		if (userpass) {
+			if (btc_auth) {
+				tmp = btc_auth;
+				while (*tmp)
+					*(tmp++) = '\0';
+			}
+			FREENULL(btc_auth);
+			btc_auth = http_base64(userpass);
+		}
+		ck_wunlock(&btc_lock);
+
+		if (userpass) {
+			tmp = userpass;
+			while (*tmp)
+				*(tmp++) = '\0';
+		}
+	}
+
+	FREENULL(btcserver);
+
+	ck_wlock(&btc_lock);
+	snprintf(buf, sizeof(buf), "ok.btcserver=%s", btc_server);
+	ck_wunlock(&btc_lock);
+	LOGDEBUG("%s.%s.%s", id, cmd, buf);
+	return strdup(buf);
+}
+
 // TODO: limit access by having seperate sockets for each
 #define ACCESS_POOL	"p"
 #define ACCESS_SYSTEM	"s"
@@ -6414,5 +6468,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_PSHIFT,	"pshift",	false,	false,	cmd_pshift,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_SHSTA,	"shsta",	true,	false,	cmd_shsta,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_USERINFO,	"userinfo",	false,	false,	cmd_userinfo,	SEQ_NONE,	ACCESS_WEB },
+	{ CMD_BTCSET,	"btcset",	false,	false,	cmd_btcset,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	NULL }
 };

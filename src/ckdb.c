@@ -278,6 +278,7 @@ static sem_t socketer_sem;
 char *btc_server = "http://127.0.0.1:8330";
 char *btc_auth;
 int btc_timeout = 5;
+cklock_t btc_lock;
 
 char *by_default = "code";
 char *inet_default = "127.0.0.1";
@@ -3935,6 +3936,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_USERSTATUS:
 					case CMD_SHSTA:
 					case CMD_USERINFO:
+					case CMD_BTCSET:
 						ans = ckdb_cmds[msgline->which_cmds].func(NULL,
 								msgline->cmd,
 								msgline->id,
@@ -4274,6 +4276,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_PSHIFT:
 			case CMD_SHSTA:
 			case CMD_USERINFO:
+			case CMD_BTCSET:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,
@@ -5587,6 +5590,7 @@ int main(int argc, char **argv)
 	ckp.main.processname = strdup("main");
 
 	cklock_init(&last_lock);
+	cklock_init(&btc_lock);
 	cklock_init(&seq_lock);
 	cklock_init(&process_pplns_lock);
 

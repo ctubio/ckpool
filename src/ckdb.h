@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.222"
+#define CKDB_VERSION DB_VERSION"-1.223"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -335,6 +335,8 @@ extern cklock_t last_lock;
 extern char *btc_server;
 extern char *btc_auth;
 extern int btc_timeout;
+// Lock access to the above variables so they can be changed
+extern cklock_t btc_lock;
 
 #define EDDB "expirydate"
 #define CDDB "createdate"
@@ -401,6 +403,7 @@ enum cmd_values {
 	CMD_PSHIFT,
 	CMD_SHSTA,
 	CMD_USERINFO,
+	CMD_BTCSET,
 	CMD_END
 };
 
