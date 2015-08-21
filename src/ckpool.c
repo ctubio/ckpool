@@ -521,7 +521,7 @@ int read_socket_line(connsock_t *cs, float *timeout)
 
 	tv_time(&start);
 rewait:
-	if (*timeout <= 0) {
+	if (*timeout < 0) {
 		LOGDEBUG("Timed out in read_socket_line");
 		ret = 0;
 		goto out;
@@ -550,7 +550,7 @@ rewait:
 			if (eom)
 				break;
 			/* Have we used up all the timeout yet? */
-			if (*timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
+			if (*timeout >= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 				goto rewait;
 			LOGERR("Failed to recv in read_socket_line");
 			goto out;
