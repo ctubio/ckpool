@@ -36,30 +36,7 @@
  *  much larger DB tables so that ckdb is effectively ready for messages
  *  almost immediately
  * The first ckpool message allows us to know where ckpool is up to
- *  in the CCLs and thus where to stop processing the CCLs to stay in
- *  sync with ckpool
- * If ckpool isn't running, then the reload will complete at the end of
- *  the last CCL file, however if the 1st message arrives from ckpool while
- *  processing the CCLs, that will mark the point where to stop processing
- *  but can also produce a fatal error at the end of processing, reporting
- *  the ckpool message, if the message was not found in the CCL processing
- *  after the message was received
- *  This can be caused by two circumstances:
- *  1) the disk had not yet written it to the CCL when ckdb read EOF and
- *	ckpool was started at about the same time as the reload completed.
- *	This can be seen if the message displayed in the fatal error IS NOT
- *	in ckdb's message logfile.
- *	A ckdb restart will resolve this
- *  2) ckpool was started at the time of the end of the reload, but the
- *	message was written to disk and found in the CCL before it was
- *	processed in the message queue.
- *	This can be seen if the message displayed in the fatal error IS in
- *	ckdb's message logfile and means the messages after it in ckdb's
- *	message logfile have already been processed.
- *	Again, a ckdb restart will resolve this
- *  In both the above (very rare) cases, if ckdb was to continue running,
- *  it would break the synchronisation and could cause DB problems, so
- *  ckdb aborting and needing a complete restart resolves it
+ *  in the CCLs - see reload_from() for how this is handled
  * The users table, required for the authorise messages, is always updated
  *  immediately
  */
