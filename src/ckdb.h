@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.224"
+#define CKDB_VERSION DB_VERSION"-1.225"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1547,6 +1547,11 @@ extern K_LIST *blocks_free;
 extern K_STORE *blocks_store;
 extern tv_t blocks_stats_time;
 extern bool blocks_stats_rebuild;
+
+// Default number of blocks to display on web
+#define BLOCKS_DEFAULT 42
+// OptionControl can override it
+#define BLOCKS_SETTING_NAME "BlocksPageSize"
 
 // MININGPAYOUTS
 typedef struct miningpayouts {

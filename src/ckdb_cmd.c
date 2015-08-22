@@ -1116,7 +1116,7 @@ static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 }
 
 static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
-			   __maybe_unused tv_t *now, __maybe_unused char *by,
+			   tv_t *now, __maybe_unused char *by,
 			   __maybe_unused char *code, __maybe_unused char *inet,
 			   __maybe_unused tv_t *notcd,
 			   __maybe_unused K_TREE *trf_root)
@@ -1131,9 +1131,13 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int32_t height = -1;
 	tv_t first_cd = {0,0}, stats_tv = {0,0}, stats_tv2 = {0,0};
 	int rows, srows, tot, seq;
+	int64_t maxrows;
 	bool has_stats;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	// 0 means just the system setting
+	maxrows = user_sys_setting(0, BLOCKS_SETTING_NAME, BLOCKS_DEFAULT, now);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
@@ -1158,7 +1162,7 @@ redo:
 	}
 	seq = tot;
 	b_item = last_in_ktree(blocks_root, ctx);
-	while (b_item && rows < 42) {
+	while (b_item && rows < (int)maxrows) {
 		DATA_BLOCKS(blocks, b_item);
 		/* For each block remember the initial createdate
 		 * Reverse sort order the oldest expirydate is first
