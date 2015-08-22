@@ -882,12 +882,17 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 		K_WUNLOCK(workerstatus_free);
 
 		if (ws_err) {
-			LOGERR("%s(): CREATED Missing workerstatus %"PRId64"/%s"
-				WHERE_FFL WHERE_FFL,
-				__func__, userid, workername,
-				file2, func2, line2, WHERE_FFL_PASS);
+			LOGNOTICE("%s(): CREATED Missing workerstatus"
+				  " %"PRId64"/%s"
+				  WHERE_FFL WHERE_FFL,
+				  __func__, userid, workername,
+				  file2, func2, line2, WHERE_FFL_PASS);
 			if (w_err) {
-				LOGERR("%s(): %s Missing worker %"PRId64"/%s",
+				int sta = LOG_ERR;
+				if (w_item)
+					sta = LOG_NOTICE;
+				LOGMSG(sta,
+					"%s(): %s Missing worker %"PRId64"/%s",
 					__func__,
 					w_item ? "CREATED" : "FAILED TO CREATE",
 					userid, workername);
