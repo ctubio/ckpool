@@ -3291,7 +3291,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	if (p_item) {
 		DATA_PAYOUTS(payouts, p_item);
 		tv_to_buf(&(payouts->createdate), cd_buf, sizeof(cd_buf));
-		LOGERR("%s(): payout for block %"PRId32"/%s already exists"
+		LOGERR("%s(): payout for block %"PRId32"/%s already exists "
 			"%"PRId64"/%"PRId64"/%"PRId64"/%s",
 			__func__, height, blockhash, payouts->payoutid,
 			payouts->workinfoidstart, payouts->workinfoidend,
