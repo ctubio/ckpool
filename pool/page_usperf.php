@@ -72,7 +72,8 @@ function dousperf($data, $user)
 	$pg .= '<form>';
 
 	$tt = "<ul class=tip><li>all = all workers</li><li>noname = worker with no workername</li>";
-	$tt .= "<li>or full workername without the username i.e. .worker or _worker</li></ul>";
+	$tt .= "<li>or full workername without the username i.e. .worker or _worker</li>";
+	$tt .= "<li>add a '*' on the end to match multiple workers e.g. .S3*</li></ul>";
 	$pg .= "<span class=q onclick='tip(\"wtip\",6000)'>?</span>";
 	$pg .= "<span class=tip0><span class=notip id=wtip>$tt</span></span>";
 
