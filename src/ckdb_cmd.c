@@ -345,7 +345,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			}
 		}
 		if (key) {
-			char *keystr, *issuer = "Kano";
+			char *keystr, *issuer = "KanoCKDB";
 			char cd_buf[DATE_BUFSIZ];
 			unsigned char *bin;
 			OPTIONCONTROL *oc;
