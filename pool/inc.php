@@ -106,9 +106,11 @@ input.tiny {width:0px;height:0px;margin:0px;padding:0px;outline:none;border:0px;
 #n42 a {color:#fff;text-decoration:none;padding:6px;display:block;}
 #n42 td {min-width:100px;float:left;vertical-align:top;padding:0px 2px;}
 #n42 td.navboxr {float:right;}
+#n42 td.nav0 {position:relative;}
 #n42 td.nav {position:relative;}
 #n42 td.ts {border-width:1px;border-color:#0022ee;border-style:solid none none none;}
 #n42 div.sub {left:0px;z-index:42;position:absolute;visibility:hidden;}
+#n42 td.nav0:hover {background:#0099ee;}
 #n42 td.nav:hover {background:#0099ee;}
 #n42 td.nav:hover div.sub {background:#0077ee;visibility:visible;}
 h1 {margin-top:20px;float:middle;font-size:20px;}
