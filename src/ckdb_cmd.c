@@ -4789,6 +4789,8 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
 			return strdup(reply);
 		}
+		// Original wasn't generated, so reward it
+		reward_shifts(payouts2, true, 1);
 		DATA_PAYOUTS(payouts2, p2_item);
 		DATA_PAYOUTS(old_payouts2, old_p2_item);
 		snprintf(msg, sizeof(msg),
@@ -4858,6 +4860,8 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
 			return strdup(reply);
 		}
+		// Original was generated, so undo the reward
+		reward_shifts(payouts2, true, -1);
 		DATA_PAYOUTS(payouts2, p2_item);
 		DATA_PAYOUTS(old_payouts2, old_p2_item);
 		snprintf(msg, sizeof(msg),
@@ -4875,6 +4879,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			return strdup(reply);
 		TXT_TO_BIGINT("payoutid", transfer_data(i_payoutid), payoutid);
 
+		// payouts_full_expire updates the shift rewards
 		p_item = payouts_full_expire(conn, payoutid, now, true);
 		if (!p_item) {
 			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
@@ -4911,6 +4916,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			return strdup(reply);
 		TXT_TO_CTV("addrdate", transfer_data(i_addrdate), addrdate);
 
+		// process_pplns updates the shift rewards
 		if (addrdate.tv_sec == 0)
 			ok = process_pplns(height, blockhash, NULL);
 		else
@@ -5355,6 +5361,10 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 						   rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			snprintf(tmp, sizeof(tmp), "rewards:%d=%d%c",
+						   rows, wm->rewards, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
 			rows++;
 
 			// Setup for next shift
@@ -5394,7 +5404,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	 * other workers start >= 0 and finish <= rows-1 */
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 				   rows, FLDSEP,
-				   "markerid,shift,start,end", FLDSEP);
+				   "markerid,shift,start,end,rewards", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s", "Shifts");

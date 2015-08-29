@@ -776,8 +776,6 @@ static bool getdata3()
 			goto sukamudai;
 		if (!(ok = miningpayouts_fill(conn)) || everyone_die)
 			goto sukamudai;
-		if (!(ok = payouts_fill(conn)) || everyone_die)
-			goto sukamudai;
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
 		goto sukamudai;
@@ -786,6 +784,11 @@ static bool getdata3()
 	/* must be after workinfo */
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
+	if (!confirm_sharesummary) {
+		/* must be after workmarkers */
+		if (!(ok = payouts_fill(conn)) || everyone_die)
+			goto sukamudai;
+	}
 	if (!(ok = markersummary_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!confirm_sharesummary && !everyone_die)

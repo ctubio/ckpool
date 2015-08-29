@@ -1901,6 +1901,9 @@ typedef struct workmarkers {
 	int64_t workinfoidstart;
 	char *description;
 	char status[TXT_FLAG+1];
+	int rewards; // non-DB field
+	double pps_value; // non-DB field
+	double rewarded; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } WORKMARKERS;
 
@@ -2343,11 +2346,12 @@ extern bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 extern void dsp_workmarkers(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status);
+extern K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status, K_TREE_CTX *ctx);
 extern K_ITEM *find_workmarkerid(int64_t markerid, bool anystatus, char status);
 extern bool workmarkers_generate(PGconn *conn, char *err, size_t siz,
 				 char *by, char *code, char *inet, tv_t *cd,
 				 K_TREE *trf_root, bool none_error);
+extern bool reward_shifts(PAYOUTS *payouts, bool lock, int delta);
 extern cmp_t cmp_marks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_marks(int64_t workinfoid);
 extern const char *marks_marktype(char *marktype);

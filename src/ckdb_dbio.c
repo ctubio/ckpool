@@ -2959,7 +2959,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 	if (reloading && !confirm_sharesummary) {
 		// We only need to know if the workmarker is processed
 		wm_item = find_workmarkers(shares->workinfoid, false,
-					   MARKER_PROCESSED);
+					   MARKER_PROCESSED, NULL);
 		if (wm_item) {
 			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
 				 " %"PRId64"/%s/%ld,%ld",
@@ -3260,7 +3260,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 	if (reloading && !confirm_sharesummary) {
 		// We only need to know if the workmarker is processed
 		wm_item = find_workmarkers(shareerrors->workinfoid, false,
-					   MARKER_PROCESSED);
+					   MARKER_PROCESSED, NULL);
 		if (wm_item) {
 			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
 				 " %"PRId64"/%s/%ld,%ld",
@@ -4024,7 +4024,8 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 		}
 
 		K_RLOCK(workmarkers_free);
-		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED,
+					   NULL);
 		K_RUNLOCK(workmarkers_free);
 		if (wm_item) {
 			DATA_WORKMARKERS(wm, wm_item);
@@ -5465,6 +5466,12 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 		DATA_PAYMENTS_NULL(payments, pm_item);
 	}
 
+	if (PAYGENERATED(payouts->status)) {
+		// Original was generated, so undo the reward
+		reward_shifts(payouts, true, -1);
+
+	}
+
 	ok = true;
 matane:
 	if (begun)
@@ -5612,6 +5619,9 @@ bool payouts_fill(PGconn *conn)
 		payouts_root = add_to_ktree(payouts_root, item, cmp_payouts);
 		payouts_id_root = add_to_ktree(payouts_id_root, item, cmp_payouts_id);
 		k_add_head(payouts_store, item);
+
+		if (CURRENT(&(row->expirydate)) && PAYGENERATED(row->status))
+			reward_shifts(row, false, 1);
 
 		tick();
 	}
@@ -6517,7 +6527,7 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 
 	if (markerid == 0) {
 		K_RLOCK(workmarkers_free);
-		old_wm_item = find_workmarkers(workinfoidend, true, '\0');
+		old_wm_item = find_workmarkers(workinfoidend, true, '\0', NULL);
 		K_RUNLOCK(workmarkers_free);
 	} else {
 		K_RLOCK(workmarkers_free);

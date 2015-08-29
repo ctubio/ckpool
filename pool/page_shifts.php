@@ -14,6 +14,7 @@ function doshifts($data, $user)
  $pg .= "<td class=dr>Avg Hs</td>";
  $pg .= "<td class=dr>Shares</td>";
  $pg .= "<td class=dr>Avg Share</td>";
+ $pg .= "<td class=dr>Rewards</td>";
  $pg .= "</tr>\n";
 
  if (($ans['STATUS'] != 'ok') || !isset($ans['prefix_all']))
@@ -66,6 +67,7 @@ function doshifts($data, $user)
 		else
 			$avgsh = 0;
 		$pg .= '<td class=dr>'.number_format($avgsh, 2).'</td>';
+		$pg .= '<td class=dr>'.$ans['rewards:'.$i].'</td>';
 		$pg .= "</tr>\n";
 	}
  }

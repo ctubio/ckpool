@@ -2070,7 +2070,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	}
 
 	K_RLOCK(workmarkers_free);
-	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED, NULL);
 	K_RUNLOCK(workmarkers_free);
 	// Should never happen?
 	if (wm_item && !reloading) {
@@ -3589,7 +3589,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		 *   block - so abort
 		 * The fix is to create the marks and summaries needed via
 		 *  cmd_marks() then manually trigger the payout generation
-		 *  TODO: via cmd_payouts() ... which isn't available yet */
+		 *  via cmd_payouts() */
 		LOGEMERG("%s(): payout had < 1 (%"PRId64") workmarkers for "
 			 "block %"PRId32"/%"PRId64"/%s/%s/%"PRId64
 			 " beginwi=%"PRId64" ss=%"PRId64" diff=%.1f",
@@ -3810,20 +3810,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 				pa_item = pa_item->next;
 			}
 		} else {
-			/* Address user or normal user without a paymentaddress
-			 * TODO: user table needs a flag to say which it is ...
-			 *  for now use a simple test */
-			bool gotaddr = false;
-			size_t len;
-
-			switch (users->username[0]) {
-				case '1':
-				case '3':
-					len = strlen(users->username);
-					if (len >= ADDR_MIN_LEN && len <= ADDR_MAX_LEN)
-						gotaddr = true;
-			}
-			if (gotaddr) {
+			/* Address user or normal user without a paymentaddress */
+			if (users->userbits & USER_ADDRESS) {
 				K_WLOCK(payments_free);
 				pay_item = k_unlink_head(payments_free);
 				K_WUNLOCK(payments_free);
@@ -3906,6 +3894,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		   ss_count, wm_count, ms_count, usercount, diff_times,
 		   diff_add, cd_buf);
 
+	/* At this point the payout is complete, but it just hasn't been
+	 *  flagged complete yet in the DB */
+
 	K_WLOCK(payouts_free);
 	p2_item = k_unlink_head(payouts_free);
 	K_WUNLOCK(payouts_free);
@@ -3931,12 +3922,19 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	ok = payouts_add(conn, true, p2_item, &old_p2_item, (char *)by_default,
 			 (char *)__func__, (char *)inet_default, &now, NULL,
 			 false);
+
 	if (!ok) {
+		/* All that's required is to mark the payout GENERATED
+		 *  since it already exists in the DB and in RAM, thus a manual
+		 *  cmd_payouts 'generated' is all that's needed to fix it */
 		LOGEMERG("%s(): payout %"PRId64" for block %"PRId32"/%s "
 			 "NOT set generated - it needs to be set manually",
 			 __func__, payouts->payoutid, blocks->height,
 			 blocks->blockhash);
 	}
+
+	// Flag each shift as rewarded
+	reward_shifts(payouts2, true, 1);
 
 	CKPQDisco(&conn, conned);
 
@@ -4146,7 +4144,7 @@ K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 	K_TREE_CTX ctx[1];
 
 	if (markerid == 0) {
-		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED, NULL);
 		if (wm_item) {
 			DATA_WORKMARKERS(wm, wm_item);
 			markerid = wm->markerid;
@@ -4277,11 +4275,14 @@ cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status)
+K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status, K_TREE_CTX *ctx)
 {
 	WORKMARKERS workmarkers, *wm;
-	K_TREE_CTX ctx[1];
+	K_TREE_CTX ctx0[1];
 	K_ITEM look, *wm_item;
+
+	if (ctx == NULL)
+		ctx = ctx0;
 
 	workmarkers.expirydate.tv_sec = default_expiry.tv_sec;
 	workmarkers.expirydate.tv_usec = default_expiry.tv_usec;
@@ -4401,7 +4402,8 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
 	 *  sort order and matching errors */
 	if (wi_fin->workinfoid >= wi_stt->workinfoid) {
 		K_RLOCK(workmarkers_free);
-		old_wm_item = find_workmarkers(wi_fin->workinfoid, true, '\0');
+		old_wm_item = find_workmarkers(wi_fin->workinfoid, true, '\0',
+					       NULL);
 		K_RUNLOCK(workmarkers_free);
 		DATA_WORKMARKERS_NULL(old_wm, old_wm_item);
 		if (old_wm_item && (WMREADY(old_wm->status) ||
@@ -4578,6 +4580,39 @@ bool workmarkers_generate(PGconn *conn, char *err, size_t siz, char *by,
 		}
 	}
 	return true;
+}
+
+// delta = 1 or -1 i.e. reward or undo reward
+bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
+{
+	// TODO: PPS calculations
+	K_TREE_CTX ctx[1];
+	K_ITEM *wm_item;
+	WORKMARKERS *wm;
+	bool did_one = false;
+
+	if (lock)
+		K_WLOCK(workmarkers_free);
+
+	wm_item = find_workmarkers(payouts->workinfoidstart, false,
+				   MARKER_PROCESSED, ctx);
+	while (wm_item) {
+		DATA_WORKMARKERS(wm, wm_item);
+		if (wm->workinfoidstart > payouts->workinfoidend)
+			break;
+		/* The status doesn't matter since we want the rewards passed
+		 *  onto the PROCESSED status if it isn't already processed */
+		if (CURRENT(&(wm->expirydate))) {
+			wm->rewards += delta;
+			did_one = true;
+		}
+		wm_item = next_in_ktree(ctx);
+	}
+
+	if (lock)
+		K_WUNLOCK(workmarkers_free);
+
+	return did_one;
 }
 
 // order by expirydate asc,workinfoid asc
