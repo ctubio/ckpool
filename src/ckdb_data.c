@@ -2924,8 +2924,8 @@ bool check_update_blocks_stats(tv_t *stats)
 					K_RUNLOCK(workinfo_free);
 					if (!w_item) {
 						setnow(&now);
-						if (!blocks->workinfoid != last_missing_workinfoid ||
-						    tvdiff(&now, &last_message) >= 5.0) {
+						if (blocks->workinfoid != last_missing_workinfoid ||
+						    tvdiff(&now, &last_message) >= 15.0) {
 							LOGEMERG("%s(): missing block workinfoid %"
 								 PRId32"/%"PRId64"/%s",
 								 __func__, blocks->height,
