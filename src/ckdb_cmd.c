@@ -1303,12 +1303,16 @@ redo:
 					snprintf(tmp, sizeof(tmp),
 						 "s_seq:%d=%d%c"
 						 "s_desc:%d=%s%c"
+						 "s_height:%d=%d%c"
+						 "s_"CDTRF":%d=%ld%c"
 						 "s_diffratio:%d=%.8f%c"
 						 "s_diffmean:%d=%.8f%c"
 						 "s_cdferl:%d=%.8f%c"
 						 "s_luck:%d=%.8f%c",
 						 srows, seq, FLDSEP,
 						 srows, desc, FLDSEP,
+						 srows, (int)(blocks->height), FLDSEP,
+						 srows, blocks->createdate.tv_sec, FLDSEP,
 						 srows, blocks->diffratio, FLDSEP,
 						 srows, blocks->diffmean, FLDSEP,
 						 srows, blocks->cdferl, FLDSEP,
@@ -1340,7 +1344,8 @@ redo:
 	snprintf(tmp, sizeof(tmp),
 		 "s_rows=%d%cs_flds=%s%c",
 		 srows, FLDSEP,
-		 "s_seq,s_desc,s_diffratio,s_diffmean,s_cdferl,s_luck",
+		 "s_seq,s_desc,s_height,s_"CDTRF",s_diffratio,s_diffmean,"
+		 "s_cdferl,s_luck",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
