@@ -37,7 +37,7 @@ function dompayouts($data, $user)
 
 		$pg .= "<tr class=$row>";
 		$pg .= '<td class=dr>'.$ans['height:'.$i].'</td>';
-		$pg .= '<td class=dr>'.gmdate('d/M H:i',$ans['blockcreatedate:'.$i]).'</td>';
+		$pg .= '<td class=dr>'.gmdate('j/M H:i',$ans['blockcreatedate:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.btcfmt($ans['minerreward:'.$i]).'</td>';
 		$diffused = $ans['diffused:'.$i];
 		$pg .= '<td class=dr>'.difffmt($diffused).'</td>';
