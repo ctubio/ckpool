@@ -34,39 +34,27 @@ function daysago($val)
 	return '';
 
  if ($val < 60)
-	$des = $val.'s';
+	$des = number_format($val,0).'s';
  else
  {
-	$val = round($val/6)/10;
+	$val = $val/60;
 	if ($val < 60)
-		$des = $val.'min';
+		$des = number_format($val,1).'min';
 	else
 	{
-		$val = round($val/6)/10;
+		$val = $val/60;
 		if ($val < 24)
-		{
-			$des = $val.'hr';
-			if ($val != 1)
-				$des .= 's';
-		}
+			$des = number_format($val,1).'hrs';
 		else
 		{
-			$val = round($val/2.4)/10;
-			if ($val < 100)
-			{
-				$des = $val.'day';
-				if ($val != 1)
-					$des .= 's';
-			}
+			$val = $val/24;
+			if ($val < 43)
+				$des = number_format($val,1).'days';
 			else
 			{
-				$val = round($val/0.7)/10;
+				$val = $val/7;
 				if ($val < 10000)
-				{
-					$des = $val.'wk';
-					if ($val != 1)
-						$des .= 's';
-				}
+					$des = number_format($val,1).'wks';
 				else
 					$des = '';
 			}

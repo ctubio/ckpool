@@ -100,6 +100,8 @@ function doblocks($data, $user)
 		$pg .= "<td class=dr>Luck%</td>";
 		$pg .= "</tr>\n";
 
+		$since = $data['info']['lastblock'];
+
 		$count = $ans['s_rows'];
 		for ($i = 0; $i < $count; $i++)
 		{
@@ -109,7 +111,7 @@ function doblocks($data, $user)
 				$row = 'odd';
 
 			$desc = $ans['s_desc:'.$i];
-			$age = daysago($ans['STAMP'] - $ans['s_createdate:'.$i]);
+			$age = daysago($since - $ans['s_createdate:'.$i]);
 			$diff = number_format(100 * $ans['s_diffratio:'.$i], 2);
 			$mean = number_format(100 * $ans['s_diffmean:'.$i], 2);
 
@@ -122,7 +124,7 @@ function doblocks($data, $user)
 
 			$pg .= "<tr class=$row>";
 			$pg .= "<td class=dl>$desc Blocks</td>";
-			$pg .= "<td class=dl>$age</td>";
+			$pg .= "<td class=dr>$age</td>";
 			$pg .= "<td class=dr>$diff%</td>";
 			$pg .= "<td class=dr>$mean%</td>";
 			$pg .= "<td class=dr$bg>$cdferldsp</td>";
