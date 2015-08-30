@@ -772,6 +772,7 @@ static bool getdata3()
 	if (!confirm_sharesummary) {
 		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
 			goto sukamudai;
+		/* FYI must be after blocks */
 		if (!(ok = payments_fill(conn)) || everyone_die)
 			goto sukamudai;
 		if (!(ok = miningpayouts_fill(conn)) || everyone_die)

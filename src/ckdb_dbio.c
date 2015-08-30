@@ -5501,8 +5501,10 @@ bool payouts_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_ITEM *item, *b_item, *b2_item;
+	K_TREE_CTX ctx[1];
 	PAYOUTS *row;
+	BLOCKS *blocks;
 	int n, i;
 	char *field;
 	char *sel;
@@ -5615,6 +5617,29 @@ bool payouts_fill(PGconn *conn)
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
 			break;
+
+		// This also of course, verifies the payouts -> blocks reference
+		b_item = find_blocks(row->height, row->blockhash, ctx);
+		if (!b_item) {
+			LOGERR("%s(): payoutid %"PRId64" references unknown "
+				"block %"PRId32"/%s",
+				__func__, row->payoutid, row->height,
+				row->blockhash);
+			ok = false;
+			break;
+		} else {
+			b2_item = find_blocks_new(b_item, ctx);
+			if (!b2_item) {
+				LOGERR("%s(): payoutid %"PRId64" references "
+					"block %"PRId32"/%s that has no NEW",
+					__func__, row->payoutid, row->height,
+					row->blockhash);
+				ok = false;
+				break;
+			}
+			DATA_BLOCKS(blocks, b2_item);
+			copy_tv(&(row->blockcreatedate), &(blocks->createdate));
+		}
 
 		payouts_root = add_to_ktree(payouts_root, item, cmp_payouts);
 		payouts_id_root = add_to_ktree(payouts_id_root, item, cmp_payouts_id);

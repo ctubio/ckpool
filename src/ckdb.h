@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.228"
+#define CKDB_VERSION DB_VERSION"-1.229"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1578,6 +1578,7 @@ typedef struct payouts {
 	int64_t payoutid;
 	int32_t height;
 	char blockhash[TXT_BIG+1];
+	tv_t blockcreatedate; // non-DB field
 	int64_t minerreward;
 	int64_t workinfoidstart;
 	int64_t workinfoidend;
@@ -2303,6 +2304,7 @@ extern double _blockhash_diff(char *hash, WHERE_FFL_ARGS);
 extern void dsp_blocks(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx);
+extern K_ITEM *find_blocks_new(K_ITEM *b_item, K_TREE_CTX *ctx);
 extern K_ITEM *find_prev_blocks(int32_t height);
 extern const char *blocks_confirmed(char *confirmed);
 extern void zero_on_new_block();

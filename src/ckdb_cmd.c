@@ -4997,6 +4997,11 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
+				snprintf(tmp, sizeof(tmp),
+					 "block"CDTRF":%d=%ld%c", rows,
+					 payouts->blockcreatedate.tv_sec, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
 				bigint_to_buf(payouts->elapsed, reply,
 					      sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "elapsed:%d=%s%c",
@@ -5041,7 +5046,7 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "payoutid,height,elapsed,amount,diffacc,minerreward,diffused,status",
+		 "payoutid,height,block"CDTRF",elapsed,amount,diffacc,minerreward,diffused,status",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 

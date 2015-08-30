@@ -2621,6 +2621,33 @@ K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx)
 	return find_in_ktree(blocks_root, &look, cmp_blocks, ctx);
 }
 
+/* Find the matching NEW block - requires K_RLOCK()
+ * This requires calling find_blocks() first to get ctx */
+K_ITEM *find_blocks_new(K_ITEM *b_item, K_TREE_CTX *ctx)
+{
+	BLOCKS *blocks, *blocks2;
+	K_ITEM *b2_item;
+
+	// Return what was passed in if it was NULL or was the NEW block
+	DATA_BLOCKS_NULL(blocks, b_item);
+	if (!b_item || blocks->confirmed[0] == BLOCKS_NEW)
+		return b_item;
+
+	// NEW should be after the non-NEW block
+	b2_item = next_in_ktree(ctx);
+	DATA_BLOCKS_NULL(blocks2, b2_item);
+	while (b2_item && blocks2->height == blocks->height &&
+	       strcmp(blocks2->blockhash, blocks->blockhash) == 0) {
+		if (blocks2->confirmed[0] == BLOCKS_NEW)
+			return b2_item;
+
+		b2_item = next_in_ktree(ctx);
+		DATA_BLOCKS_NULL(blocks2, b2_item);
+	}
+
+	return NULL;
+}
+
 // Must be R or W locked before call
 K_ITEM *find_prev_blocks(int32_t height)
 {
@@ -3314,22 +3341,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		goto oku;
 	}
 	DATA_BLOCKS(blocks, b_item);
-	b2_item = b_item;
-	DATA_BLOCKS(blocks2, b2_item);
-	while (b2_item && blocks2->height == height &&
-	       strcmp(blocks2->blockhash, blockhash) == 0) {
-		if (blocks2->confirmed[0] == BLOCKS_NEW) {
-			copy_tv(&end_tv, &(blocks2->createdate));
-			if (!addr_cd)
-				addr_cd = &(blocks2->createdate);
-			break;
-		}
-		b2_item = next_in_ktree(b_ctx);
-		DATA_BLOCKS_NULL(blocks2, b2_item);
-	}
+	b2_item = find_blocks_new(b_item, b_ctx);
 	K_RUNLOCK(blocks_free);
-	// If addr_cd was null it should've been set to the block NEW createdate
-	if (!addr_cd || end_tv.tv_sec == 0) {
+	if (!b2_item) {
 		LOGEMERG("%s(): missing %s record for block %"PRId32
 			 "/%"PRId64"/%s/%s/%"PRId64,
 			 __func__, blocks_confirmed(BLOCKS_NEW_STR),
@@ -3338,6 +3352,10 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 			 blocks->reward);
 		goto oku;
 	}
+	DATA_BLOCKS(blocks2, b2_item);
+	copy_tv(&end_tv, &(blocks2->createdate));
+	if (!addr_cd)
+		addr_cd = &(blocks2->createdate);
 
 	LOGDEBUG("%s(): block %"PRId32"/%"PRId64"/%s/%s/%"PRId64,
 		 __func__, blocks->height, blocks->workinfoid,
@@ -3639,6 +3657,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	bzero(payouts, sizeof(*payouts));
 	payouts->height = height;
 	STRNCPY(payouts->blockhash, blockhash);
+	copy_tv(&(payouts->blockcreatedate), &(blocks2->createdate));
 	d64 = blocks->reward * 9 / 1000;
 	g64 = blocks->reward - d64;
 	payouts->minerreward = g64;
@@ -3905,6 +3924,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	payouts2->payoutid = payouts->payoutid;
 	payouts2->height = payouts->height;
 	STRNCPY(payouts2->blockhash, payouts->blockhash);
+	copy_tv(&(payouts2->blockcreatedate), &(payouts->blockcreatedate));
 	payouts2->minerreward = payouts->minerreward;
 	payouts2->workinfoidstart = payouts->workinfoidstart;
 	payouts2->workinfoidend = payouts->workinfoidend;
