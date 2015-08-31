@@ -111,7 +111,7 @@ function doblocks($data, $user)
 				$row = 'odd';
 
 			$desc = $ans['s_desc:'.$i];
-			$age = daysago($since - $ans['s_createdate:'.$i]);
+			$age = gmdate('j/M H:i',$ans['s_createdate:'.$i]);
 			$diff = number_format(100 * $ans['s_diffratio:'.$i], 2);
 			$mean = number_format(100 * $ans['s_diffmean:'.$i], 2);
 
