@@ -4682,7 +4682,7 @@ bool shift_rewards(K_ITEM *wm_item)
 	DATA_WORKMARKERS(wm, wm_item);
 
 	// Deadlock risk since calling code should have workmarkers locked
-	K_WLOCK(payouts_free);
+	K_RLOCK(payouts_free);
 	p_item = find_payouts_wid(wm->workinfoidend, ctx);
 	DATA_PAYOUTS_NULL(payouts, p_item);
 	// a workmarker should not cross a payout boundary
@@ -4693,7 +4693,7 @@ bool shift_rewards(K_ITEM *wm_item)
 		p_item = prev_in_ktree(ctx);
 		DATA_PAYOUTS_NULL(payouts, p_item);
 	}
-	K_WUNLOCK(payouts_free);
+	K_RUNLOCK(payouts_free);
 
 	wm->rewards = rewards;
 	return (rewards > 0);
