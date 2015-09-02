@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.229"
+#define CKDB_VERSION DB_VERSION"-1.230"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1600,6 +1600,7 @@ typedef struct payouts {
 
 extern K_TREE *payouts_root;
 extern K_TREE *payouts_id_root;
+extern K_TREE *payouts_wid_root;
 extern K_LIST *payouts_free;
 extern K_STORE *payouts_store;
 extern cklock_t process_pplns_lock;
@@ -2318,9 +2319,11 @@ extern K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid,
 			  double diffacc);
 extern cmp_t cmp_payouts(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_payouts_wid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_payouts(int32_t height, char *blockhash);
 extern K_ITEM *find_last_payouts();
 extern K_ITEM *find_payoutid(int64_t payoutid);
+extern K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx);
 extern double payout_stats(PAYOUTS *payouts, char *statname);
 extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
@@ -2354,6 +2357,7 @@ extern bool workmarkers_generate(PGconn *conn, char *err, size_t siz,
 				 char *by, char *code, char *inet, tv_t *cd,
 				 K_TREE *trf_root, bool none_error);
 extern bool reward_shifts(PAYOUTS *payouts, bool lock, int delta);
+extern bool shift_rewards(K_ITEM *wm_item);
 extern cmp_t cmp_marks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_marks(int64_t workinfoid);
 extern const char *marks_marktype(char *marktype);

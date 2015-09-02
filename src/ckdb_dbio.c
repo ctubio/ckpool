@@ -5119,12 +5119,15 @@ void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item, tv_t *cd)
 			DATA_PAYOUTS(oldp, old_p_item);
 			payouts_root = remove_from_ktree(payouts_root, old_p_item, cmp_payouts);
 			payouts_id_root = remove_from_ktree(payouts_id_root, old_p_item, cmp_payouts_id);
+			payouts_wid_root = remove_from_ktree(payouts_wid_root, old_p_item, cmp_payouts_wid);
 			copy_tv(&(oldp->expirydate), cd);
 			payouts_root = add_to_ktree(payouts_root, old_p_item, cmp_payouts);
 			payouts_id_root = add_to_ktree(payouts_id_root, old_p_item, cmp_payouts_id);
+			payouts_wid_root = add_to_ktree(payouts_wid_root, old_p_item, cmp_payouts_wid);
 		}
 		payouts_root = add_to_ktree(payouts_root, p_item, cmp_payouts);
 		payouts_id_root = add_to_ktree(payouts_id_root, p_item, cmp_payouts_id);
+		payouts_wid_root = add_to_ktree(payouts_wid_root, p_item, cmp_payouts_wid);
 		k_add_head(payouts_store, p_item);
 	}
 	K_WUNLOCK(payouts_free);
@@ -5431,9 +5434,11 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 	DATA_PAYOUTS(payouts, po_item);
 	payouts_root = remove_from_ktree(payouts_root, po_item, cmp_payouts);
 	payouts_id_root = remove_from_ktree(payouts_id_root, po_item, cmp_payouts_id);
+	payouts_wid_root = remove_from_ktree(payouts_wid_root, po_item, cmp_payouts_wid);
 	copy_tv(&(payouts->expirydate), now);
 	payouts_root = add_to_ktree(payouts_root, po_item, cmp_payouts);
 	payouts_id_root = add_to_ktree(payouts_id_root, po_item, cmp_payouts_id);
+	payouts_wid_root = add_to_ktree(payouts_wid_root, po_item, cmp_payouts_wid);
 
 	mp_item = first_miningpayouts(payoutid, mp_ctx);
 	DATA_MININGPAYOUTS_NULL(mp, mp_item);
@@ -5643,6 +5648,7 @@ bool payouts_fill(PGconn *conn)
 
 		payouts_root = add_to_ktree(payouts_root, item, cmp_payouts);
 		payouts_id_root = add_to_ktree(payouts_id_root, item, cmp_payouts_id);
+		payouts_wid_root = add_to_ktree(payouts_wid_root, item, cmp_payouts_wid);
 		k_add_head(payouts_store, item);
 
 		if (CURRENT(&(row->expirydate)) && PAYGENERATED(row->status))
@@ -6726,6 +6732,8 @@ unparam:
 								   cmp_workmarkers_workinfoid);
 		}
 		if (wm_item) {
+			shift_rewards(wm_item);
+
 			workmarkers_root = add_to_ktree(workmarkers_root,
 							wm_item,
 							cmp_workmarkers);

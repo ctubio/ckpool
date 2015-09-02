@@ -3141,6 +3141,22 @@ cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
+/* order by workinfoidend asc,expirydate asc
+ * This must use workinfoidend, not workinfoidstart, since a change
+ *  in the payout PPLNS N could have 2 payouts with the same start,
+ *  but currently there is only one payout per block
+ *   i.e. workinfoidend can only have one payout */
+cmp_t cmp_payouts_wid(K_ITEM *a, K_ITEM *b)
+{
+	PAYOUTS *pa, *pb;
+	DATA_PAYOUTS(pa, a);
+	DATA_PAYOUTS(pb, b);
+	cmp_t c = CMP_BIGINT(pa->workinfoidend, pb->workinfoidend);
+	if (c == 0)
+		c = CMP_TV(pa->expirydate, pb->expirydate);
+	return c;
+}
+
 K_ITEM *find_payouts(int32_t height, char *blockhash)
 {
 	PAYOUTS payouts;
@@ -3187,6 +3203,25 @@ K_ITEM *find_payoutid(int64_t payoutid)
 	INIT_PAYOUTS(&look);
 	look.data = (void *)(&payouts);
 	return find_in_ktree(payouts_id_root, &look, cmp_payouts_id, ctx);
+}
+
+// First payouts workinfoidend equal or before workinfoidend
+K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx)
+{
+	PAYOUTS payouts;
+	K_TREE_CTX ctx0[1];
+	K_ITEM look;
+
+	if (ctx == NULL)
+		ctx = ctx0;
+
+	payouts.workinfoidend = workinfoidend+1;
+	payouts.expirydate.tv_sec = 0;
+	payouts.expirydate.tv_usec = 0;
+
+	INIT_PAYOUTS(&look);
+	look.data = (void *)(&payouts);
+	return find_before_in_ktree(payouts_wid_root, &look, cmp_payouts_wid, ctx);
 }
 
 /* Values from payout stats, returns -1 if statname isn't found
@@ -4633,6 +4668,35 @@ bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
 		K_WUNLOCK(workmarkers_free);
 
 	return did_one;
+}
+
+// (re)calculate rewards for a shift
+bool shift_rewards(K_ITEM *wm_item)
+{
+	PAYOUTS *payouts = NULL;
+	K_TREE_CTX ctx[1];
+	WORKMARKERS *wm;
+	K_ITEM *p_item;
+	int rewards = 0;
+
+	DATA_WORKMARKERS(wm, wm_item);
+
+	// Deadlock risk since calling code should have workmarkers locked
+	K_WLOCK(payouts_free);
+	p_item = find_payouts_wid(wm->workinfoidend, ctx);
+	DATA_PAYOUTS_NULL(payouts, p_item);
+	// a workmarker should not cross a payout boundary
+	while (p_item && payouts->workinfoidstart <= wm->workinfoidstart &&
+	       wm->workinfoidend <= payouts->workinfoidend) {
+		if (CURRENT(&(payouts->expirydate)))
+			rewards++;
+		p_item = prev_in_ktree(ctx);
+		DATA_PAYOUTS_NULL(payouts, p_item);
+	}
+	K_WUNLOCK(payouts_free);
+
+	wm->rewards = rewards;
+	return (rewards > 0);
 }
 
 // order by expirydate asc,workinfoid asc

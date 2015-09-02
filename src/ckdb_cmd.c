@@ -5541,7 +5541,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(marks, 1, 1);
 	USEINFO(blocks, 1, 1);
 	USEINFO(miningpayouts, 1, 1);
-	USEINFO(payouts, 1, 2);
+	USEINFO(payouts, 1, 3);
 	USEINFO(auths, 1, 1);
 	USEINFO(poolstats, 1, 1);
 	USEINFO(userstats, 2, 1);

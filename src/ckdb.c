@@ -420,6 +420,7 @@ K_STORE *miningpayouts_store;
 // PAYOUTS
 K_TREE *payouts_root;
 K_TREE *payouts_id_root;
+K_TREE *payouts_wid_root;
 K_LIST *payouts_free;
 K_STORE *payouts_store;
 cklock_t process_pplns_lock;
@@ -1086,6 +1087,7 @@ static void alloc_storage()
 	payouts_store = k_new_store(payouts_free);
 	payouts_root = new_ktree();
 	payouts_id_root = new_ktree();
+	payouts_wid_root = new_ktree();
 
 	auths_free = k_new_list("Auths", sizeof(AUTHS),
 					ALLOC_AUTHS, LIMIT_AUTHS, true);
@@ -1304,6 +1306,7 @@ static void dealloc_storage()
 	FREE_ALL(poolstats);
 	FREE_ALL(auths);
 
+	FREE_TREE(payouts_wid);
 	FREE_TREE(payouts_id);
 	FREE_TREE(payouts);
 	FREE_STORE_DATA(payouts);
