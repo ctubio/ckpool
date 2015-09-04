@@ -117,7 +117,9 @@ h1 {margin-top:20px;float:middle;font-size:20px;}
 .foot, .push {height:50px;}
 .title {background-color:#909090;}
 .even {background-color:#cccccc;}
+.evenu td {background-color:#cccccc;border-bottom:2px solid red;}
 .odd {background-color:#a8a8a8;}
+.oddu td {background-color:#a8a8a8;border-bottom:2px solid red;}
 .hid {display:none;}
 .dl {text-align:left;padding:2px 8px;}
 .dr {text-align:right;padding:2px 8px;}

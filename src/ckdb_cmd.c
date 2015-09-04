@@ -5143,6 +5143,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int rows, want, i, where_all;
 	int64_t maxrows;
 	double wm_count, d;
+	int64_t last_payout_start = 0;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -5169,6 +5170,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 		wm_count *= 1.42;
 		if (maxrows < wm_count)
 			maxrows = wm_count;
+		last_payout_start = payouts->workinfoidstart;
 	}
 
 	i_select = optional_name(trf_root, "select", 1, NULL, reply, siz);
@@ -5360,6 +5362,14 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 						   rows, wm->rewards, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			snprintf(tmp, sizeof(tmp), "lastpayoutstart:%d=%s%c",
+						   rows,
+						   (wm->workinfoidstart ==
+						    last_payout_start) ?
+						    "Y" : EMPTY,
+						   FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
 			rows++;
 
 			// Setup for next shift
@@ -5399,7 +5409,8 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	 * other workers start >= 0 and finish <= rows-1 */
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 				   rows, FLDSEP,
-				   "markerid,shift,start,end,rewards", FLDSEP);
+				   "markerid,shift,start,end,rewards,"
+				   "lastpayoutstart", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s", "Shifts");

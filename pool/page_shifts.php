@@ -27,10 +27,14 @@ function doshifts($data, $user)
 	$pg = '<h1>Last '.($count+1).' Shifts</h1>'.$pg;
 	for ($i = 0; $i < $count; $i++)
 	{
+		$u = '';
+		if (isset($ans['lastpayoutstart:'.$i])
+		&&  $ans['lastpayoutstart:'.$i] != '')
+			$u = 'u';
 		if (($i % 2) == 0)
-			$row = 'even';
+			$row = "even$u";
 		else
-			$row = 'odd';
+			$row = "odd$u";
 
 		$pg .= "<tr class=$row>";
 		$shifname = $ans['shift:'.$i];
