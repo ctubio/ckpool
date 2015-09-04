@@ -1483,8 +1483,7 @@ static bool setup_data()
 	if (workinfo_current) {
 		DATA_WORKINFO(wic, workinfo_current);
 		STRNCPY(wi.coinbase1, wic->coinbase1);
-		wi.createdate.tv_sec = 0L;
-		wi.createdate.tv_usec = 0L;
+		DATE_ZERO(&(wi.createdate));
 		INIT_WORKINFO(&look);
 		look.data = (void *)(&wi);
 		// Find the first workinfo for this height
@@ -1524,7 +1523,7 @@ static bool setup_data()
 			(_seqset)->seqdata[_i].firsttime.tv_sec = \
 			(_seqset)->seqdata[_i].firsttime.tv_usec = \
 			(_seqset)->seqdata[_i].lasttime.tv_sec = \
-			(_seqset)->seqdata[_i].lasttime.tv_usec = 0; \
+			(_seqset)->seqdata[_i].lasttime.tv_usec = 0L; \
 		} \
 	} while (0);
 
@@ -2902,7 +2901,7 @@ static void summarise_blocks()
 	K_RUNLOCK(blocks_free);
 	if (!b_prev) {
 		wi_start = 0;
-		elapsed_start.tv_sec = elapsed_start.tv_usec = 0L;
+		DATE_ZERO(&elapsed_start);
 		prev_hi = 0;
 	} else {
 		DATA_BLOCKS(prev_blocks, b_prev);
@@ -2921,7 +2920,7 @@ static void summarise_blocks()
 		copy_tv(&elapsed_start, &(prev_workinfo->createdate));
 		prev_hi = prev_blocks->height;
 	}
-	elapsed_finish.tv_sec = elapsed_finish.tv_usec = 0L;
+	DATE_ZERO(&elapsed_finish);
 
 	// Add up the sharesummaries, abort if any SUMMARY_NEW
 	looksharesummary.workinfoid = wi_finish;
@@ -5121,7 +5120,7 @@ static void confirm_reload()
 		}
 	} else {
 		if (confirm_first_workinfoid == 0) {
-			start.tv_sec = start.tv_usec = 0;
+			DATE_ZERO(&start);
 			LOGWARNING("%s() no start workinfo found ... "
 				   "using time 0", __func__);
 		} else {

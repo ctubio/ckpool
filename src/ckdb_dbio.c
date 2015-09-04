@@ -1079,11 +1079,11 @@ K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 	else
 		TXT_TO_BIGINT("attnum2", attnum2, row->attnum2);
 	if (attdate == NULL || attdate[0] == '\0')
-		row->attdate.tv_sec = row->attdate.tv_usec = 0L;
+		DATE_ZERO(&(row->attdate));
 	else
 		TXT_TO_TV("attdate", attdate, row->attdate);
 	if (attdate2 == NULL || attdate2[0] == '\0')
-		row->attdate2.tv_sec = row->attdate2.tv_usec = 0L;
+		DATE_ZERO(&(row->attdate2));
 	else
 		TXT_TO_TV("attdate2", attdate2, row->attdate2);
 
@@ -2922,7 +2922,8 @@ bool workinfo_fill(PGconn *conn)
 	if (!ok) {
 		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
-	}
+	} else
+		ok = set_prevcreatedate(0);
 
 	//K_WUNLOCK(workinfo_free);
 	PQclear(res);
@@ -4299,6 +4300,7 @@ unparam:
 		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
 		k_add_head(blocks_store, b_item);
 		blocks_stats_rebuild = true;
+		// 'confirmed' is unchanged so no need to recalc *createdate
 	}
 	K_WUNLOCK(blocks_free);
 
@@ -4439,7 +4441,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 			// We didn't use a Begin
 			ok = true;
-			userinfo_block(row, INFO_NEW);
+			userinfo_block(row, INFO_NEW, 1);
 			goto unparam;
 			break;
 		case BLOCKS_ORPHAN:
@@ -4598,10 +4600,49 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			update_old = true;
-			if (confirmed[0] == BLOCKS_ORPHAN)
-				userinfo_block(row, INFO_ORPHAN);
-			else if (confirmed[0] == BLOCKS_REJECT)
-				userinfo_block(row, INFO_REJECT);
+			/* handle confirmed state changes for userinfo
+			 * this case statement handles all possible combinations
+			 *  even if they can't happen (yet) */
+			switch (oldblocks->confirmed[0]) {
+				case BLOCKS_ORPHAN:
+					switch (confirmed[0]) {
+						case BLOCKS_ORPHAN:
+							break;
+						case BLOCKS_REJECT:
+							userinfo_block(row, INFO_ORPHAN, -1);
+							userinfo_block(row, INFO_REJECT, 1);
+							break;
+						default:
+							userinfo_block(row, INFO_ORPHAN, -1);
+							break;
+					}
+					break;
+				case BLOCKS_REJECT:
+					switch (confirmed[0]) {
+						case BLOCKS_REJECT:
+							break;
+						case BLOCKS_ORPHAN:
+							userinfo_block(row, INFO_REJECT, -1);
+							userinfo_block(row, INFO_ORPHAN, 1);
+							break;
+						default:
+							userinfo_block(row, INFO_REJECT, -1);
+							break;
+					}
+					break;
+				default:
+					switch (confirmed[0]) {
+						case BLOCKS_ORPHAN:
+							userinfo_block(row, INFO_ORPHAN, 1);
+							break;
+						case BLOCKS_REJECT:
+							userinfo_block(row, INFO_REJECT, 1);
+							break;
+						default:
+							break;
+					}
+					break;
+			}
 			break;
 		default:
 			LOGERR("%s(): %s.failed.invalid confirm='%s'",
@@ -4639,6 +4680,9 @@ flail:
 		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
 		k_add_head(blocks_store, b_item);
 		blocks_stats_rebuild = true;
+		// recalc the *createdate fields for possibly affected blocks
+		set_blockcreatedate(row->height);
+		set_prevcreatedate(row->height);
 	}
 	K_WUNLOCK(blocks_free);
 
@@ -4712,6 +4756,7 @@ bool blocks_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
+	K_TREE_CTX ctx[1];
 	K_ITEM *item;
 	int n, i;
 	BLOCKS *row;
@@ -4863,16 +4908,30 @@ bool blocks_fill(PGconn *conn)
 			pool.height = row->height;
 		}
 
-		if (CURRENT(&(row->expirydate))) {
-			_userinfo_block(row, INFO_NEW, false);
-			if (row->confirmed[0] == BLOCKS_ORPHAN)
-				_userinfo_block(row, INFO_ORPHAN, false);
-			else if (row->confirmed[0] == BLOCKS_REJECT)
-				_userinfo_block(row, INFO_REJECT, false);
-		}
+		// first add all the NEW blocks
+		if (row->confirmed[0] == BLOCKS_NEW)
+			_userinfo_block(row, INFO_NEW, 1, false);
 	}
+
 	if (!ok)
 		k_add_head(blocks_free, item);
+	else
+		ok = set_blockcreatedate(0);
+
+	// Now update all the CURRENT orphan/reject stats
+	if (ok) {
+		item = first_in_ktree(blocks_root, ctx);
+		while (item) {
+			DATA_BLOCKS(row, item);
+			if (CURRENT(&(row->expirydate))) {
+				if (row->confirmed[0] == BLOCKS_ORPHAN)
+					_userinfo_block(row, INFO_ORPHAN, 1, false);
+				else if (row->confirmed[0] == BLOCKS_REJECT)
+					_userinfo_block(row, INFO_REJECT, 1, false);
+			}
+			item = next_in_ktree(ctx);
+		}
+	}
 
 	K_WUNLOCK(blocks_free);
 	PQclear(res);
@@ -5506,7 +5565,7 @@ bool payouts_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item, *b_item, *b2_item;
+	K_ITEM *item, *b_item;
 	K_TREE_CTX ctx[1];
 	PAYOUTS *row;
 	BLOCKS *blocks;
@@ -5633,17 +5692,10 @@ bool payouts_fill(PGconn *conn)
 			ok = false;
 			break;
 		} else {
-			b2_item = find_blocks_new(b_item, ctx);
-			if (!b2_item) {
-				LOGERR("%s(): payoutid %"PRId64" references "
-					"block %"PRId32"/%s that has no NEW",
-					__func__, row->payoutid, row->height,
-					row->blockhash);
-				ok = false;
-				break;
-			}
-			DATA_BLOCKS(blocks, b2_item);
-			copy_tv(&(row->blockcreatedate), &(blocks->createdate));
+			// blockcreatedate will already be set
+			DATA_BLOCKS(blocks, b_item);
+			copy_tv(&(row->blockcreatedate),
+				&(blocks->blockcreatedate));
 		}
 
 		payouts_root = add_to_ktree(payouts_root, item, cmp_payouts);

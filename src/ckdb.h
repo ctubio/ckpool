@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.231"
+#define CKDB_VERSION DB_VERSION"-1.232"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -269,6 +269,8 @@ extern const tv_t date_eot;
 // All data will be after: 2-Jan-2014 00:00:00+00
 #define DATE_BEGIN 1388620800L
 extern const tv_t date_begin;
+
+#define DATE_ZERO(_tv) (_tv)->tv_sec = (_tv)->tv_usec = 0L
 
 #define BTC_TO_D(_amt) ((double)((_amt) / 100000000.0))
 
@@ -592,8 +594,7 @@ enum cmd_values {
 		STRNCPY(_row->createby, _by); \
 		STRNCPY(_row->createcode, _code); \
 		STRNCPY(_row->createinet, _inet); \
-		_row->modifydate.tv_sec = 0; \
-		_row->modifydate.tv_usec = 0; \
+		DATE_ZERO(&(_row->modifydate)); \
 		_row->modifyby[0] = '\0'; \
 		_row->modifycode[0] = '\0'; \
 		_row->modifyinet[0] = '\0'; \
@@ -615,8 +616,7 @@ enum cmd_values {
 		SET_CREATEBY(_list, _row->createby, _by); \
 		SET_CREATECODE(_list, _row->createcode, _code); \
 		SET_CREATEINET(_list, _row->createinet, _inet); \
-		_row->modifydate.tv_sec = 0; \
-		_row->modifydate.tv_usec = 0; \
+		DATE_ZERO(&(_row->modifydate)); \
 		SET_MODIFYBY(_list, _row->modifyby, EMPTY); \
 		SET_MODIFYCODE(_list, _row->modifycode, EMPTY); \
 		SET_MODIFYINET(_list, _row->modifyinet, EMPTY); \
@@ -1496,6 +1496,10 @@ typedef struct blocks {
 	double diffmean;
 	double cdferl;
 	double luck;
+
+	// To save looking them up when needed
+	tv_t prevcreatedate; // non-DB field
+	tv_t blockcreatedate; // non-DB field
 } BLOCKS;
 
 #define ALLOC_BLOCKS 100
@@ -2305,12 +2309,15 @@ extern double _blockhash_diff(char *hash, WHERE_FFL_ARGS);
 extern void dsp_blocks(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx);
-extern K_ITEM *find_blocks_new(K_ITEM *b_item, K_TREE_CTX *ctx);
 extern K_ITEM *find_prev_blocks(int32_t height);
 extern const char *blocks_confirmed(char *confirmed);
 extern void zero_on_new_block();
 extern void set_block_share_counters();
 extern bool check_update_blocks_stats(tv_t *stats);
+#define set_blockcreatedate(_h) _set_blockcreatedate(_h, WHERE_FFL_HERE)
+extern bool _set_blockcreatedate(int32_t oldest_height, WHERE_FFL_ARGS);
+#define set_prevcreatedate(_h) _set_prevcreatedate(_h, WHERE_FFL_HERE)
+extern bool _set_prevcreatedate(int32_t oldest_height, WHERE_FFL_ARGS);
 extern cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_miningpayouts(int64_t payoutid, int64_t userid);
 extern K_ITEM *first_miningpayouts(int64_t payoutid, K_TREE_CTX *ctx);
@@ -2376,8 +2383,8 @@ extern K_ITEM *_find_create_userinfo(int64_t userid, bool lock, WHERE_FFL_ARGS);
 #define userinfo_update(_s, _ss, _ms) _userinfo_update(_s, _ss, _ms, true, true)
 extern void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
 			     MARKERSUMMARY *markersummary, bool ss_sub, bool lock);
-#define userinfo_block(_blocks, _isnew) _userinfo_block(_blocks, _isnew, true)
-extern void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock);
+#define userinfo_block(_blocks, _isnew, _delta) _userinfo_block(_blocks, _isnew, _delta, true)
+extern void _userinfo_block(BLOCKS *blocks, enum info_type isnew, int delta, bool lock);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c

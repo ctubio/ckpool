@@ -1128,8 +1128,7 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024];
 	char *buf, *desc, desc_buf[64];
 	size_t len, off;
-	int32_t height = -1;
-	tv_t first_cd = {0,0}, stats_tv = {0,0}, stats_tv2 = {0,0};
+	tv_t stats_tv = {0,0}, stats_tv2 = {0,0};
 	int rows, srows, tot, seq;
 	int64_t maxrows;
 	bool has_stats;
@@ -1164,13 +1163,6 @@ redo:
 	b_item = last_in_ktree(blocks_root, ctx);
 	while (b_item && rows < (int)maxrows) {
 		DATA_BLOCKS(blocks, b_item);
-		/* For each block remember the initial createdate
-		 * Reverse sort order the oldest expirydate is first
-		 *  which should be the 'n' record */
-		if (height != blocks->height) {
-			height = blocks->height;
-			copy_tv(&first_cd, &(blocks->createdate));
-		}
 		if (CURRENT(&(blocks->expirydate))) {
 			if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
 			    blocks->confirmed[0] == BLOCKS_REJECT) {
@@ -1207,14 +1199,22 @@ redo:
 			snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			// When block was found
 			snprintf(tmp, sizeof(tmp),
 				 "first"CDTRF":%d=%ld%c", rows,
-				 first_cd.tv_sec, FLDSEP);
+				 blocks->blockcreatedate.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			// Last time block was updated
 			snprintf(tmp, sizeof(tmp),
 				 CDTRF":%d=%ld%c", rows,
 				 blocks->createdate.tv_sec, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			// When previous valid block was found
+			snprintf(tmp, sizeof(tmp),
+				 "prev"CDTRF":%d=%ld%c", rows,
+				 blocks->prevcreatedate.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
@@ -1305,6 +1305,7 @@ redo:
 						 "s_desc:%d=%s%c"
 						 "s_height:%d=%d%c"
 						 "s_"CDTRF":%d=%ld%c"
+						 "s_prev"CDTRF":%d=%ld%c"
 						 "s_diffratio:%d=%.8f%c"
 						 "s_diffmean:%d=%.8f%c"
 						 "s_cdferl:%d=%.8f%c"
@@ -1312,7 +1313,8 @@ redo:
 						 srows, seq, FLDSEP,
 						 srows, desc, FLDSEP,
 						 srows, (int)(blocks->height), FLDSEP,
-						 srows, blocks->createdate.tv_sec, FLDSEP,
+						 srows, blocks->blockcreatedate.tv_sec, FLDSEP,
+						 srows, blocks->prevcreatedate.tv_sec, FLDSEP,
 						 srows, blocks->diffratio, FLDSEP,
 						 srows, blocks->diffmean, FLDSEP,
 						 srows, blocks->cdferl, FLDSEP,
@@ -1344,8 +1346,8 @@ redo:
 	snprintf(tmp, sizeof(tmp),
 		 "s_rows=%d%cs_flds=%s%c",
 		 srows, FLDSEP,
-		 "s_seq,s_desc,s_height,s_"CDTRF",s_diffratio,s_diffmean,"
-		 "s_cdferl,s_luck",
+		 "s_seq,s_desc,s_height,s_"CDTRF",s_prev"CDTRF",s_diffratio,"
+		 "s_diffmean,s_cdferl,s_luck",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -1353,8 +1355,8 @@ redo:
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
 		 "seq,height,blockhash,nonce,reward,workername,first"CDTRF","
-		 CDTRF",confirmed,status,info,statsconf,diffacc,diffinv,"
-		 "shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck",
+		 CDTRF",prev"CDTRF",confirmed,status,info,statsconf,diffacc,"
+		 "diffinv,shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -1706,8 +1708,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	// Add up all user's worker stats to be divided into payout percentages
 	lookworkers.userid = users->userid;
 	lookworkers.workername[0] = '\0';
-	lookworkers.expirydate.tv_sec = 0;
-	lookworkers.expirydate.tv_usec = 0;
+	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
 	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
@@ -1968,8 +1969,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	lookworkers.userid = users->userid;
 	lookworkers.workername[0] = '\0';
-	lookworkers.expirydate.tv_sec = 0;
-	lookworkers.expirydate.tv_usec = 0;
+	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
 	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
@@ -1983,7 +1983,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				copy_tv(&last_share, &(workerstatus->last_share));
 				K_RUNLOCK(workerstatus_free);
 			} else
-				last_share.tv_sec = last_share.tv_usec = 0L;
+				DATE_ZERO(&last_share);
 
 			if (tvdiff(now, &last_share) < oldworkers) {
 				str_to_buf(workers->workername, reply, sizeof(reply));
@@ -2021,7 +2021,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					w_elapsed = -1;
 
 					if (!ws_item) {
-						w_lastshare.tv_sec = 0;
+						w_lastshare.tv_sec = 0L;
 						w_lastdiff = w_diffacc =
 						w_diffinv = w_diffsta =
 						w_diffdup = w_diffhi =
@@ -2029,7 +2029,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 						w_shareinv = w_sharesta =
 						w_sharedup = w_sharehi =
 						w_sharerej = w_active_diffacc = 0;
-						w_active_start.tv_sec = 0;
+						w_active_start.tv_sec = 0L;
 					} else {
 						DATA_WORKERSTATUS(workerstatus, ws_item);
 						// It's bad to read possibly changing data
@@ -4018,8 +4018,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): height %"PRId32, __func__, height);
 
-	block_tv.tv_sec = block_tv.tv_usec = 0L;
-	cd.tv_sec = cd.tv_usec = 0L;
+	DATE_ZERO(&block_tv);
+	DATE_ZERO(&cd);
 	lookblocks.height = height + 1;
 	lookblocks.blockhash[0] = '\0';
 	INIT_BLOCKS(&b_look);
@@ -4446,7 +4446,6 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	PAYMENTS *payments;
 	PAYOUTS *payouts;
 	BLOCKS lookblocks, *blocks;
-	tv_t block_tv = { 0L, 0L };
 	WORKINFO *bworkinfo, *workinfo;
 	char ndiffbin[TXT_SML+1];
 	double ndiff;
@@ -4470,36 +4469,26 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): height %"PRId32, __func__, height);
 
-	lookblocks.height = height + 1;
+	lookblocks.height = height;
 	lookblocks.blockhash[0] = '\0';
 	INIT_BLOCKS(&b_look);
 	b_look.data = (void *)(&lookblocks);
 	K_RLOCK(blocks_free);
-	b_item = find_before_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	b_item = find_after_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	K_RUNLOCK(blocks_free);
 	if (!b_item) {
 		K_RUNLOCK(blocks_free);
-		snprintf(reply, siz, "ERR.no block height %"PRId32, height);
+		snprintf(reply, siz, "ERR.no block height >= %"PRId32, height);
 		return strdup(reply);
 	}
 	DATA_BLOCKS(blocks, b_item);
-	while (b_item && blocks->height == height) {
-		if (blocks->confirmed[0] == BLOCKS_NEW)
-			copy_tv(&block_tv, &(blocks->createdate));
-		// Allow any state, but report it
-		if (CURRENT(&(blocks->expirydate)))
-			break;
-		b_item = prev_in_ktree(b_ctx);
-		DATA_BLOCKS_NULL(blocks, b_item);
-	}
-	K_RUNLOCK(blocks_free);
 	if (!b_item || blocks->height != height) {
 		snprintf(reply, siz, "ERR.no block height %"PRId32, height);
 		return strdup(reply);
 	}
-	if (block_tv.tv_sec == 0) {
-		snprintf(reply, siz, "ERR.block %"PRId32" missing '%s' record",
-				     height,
-				     blocks_confirmed(BLOCKS_NEW_STR));
+	if (blocks->blockcreatedate.tv_sec == 0) {
+		snprintf(reply, siz, "ERR.block %"PRId32" has 0 blockcreatedate",
+				     height);
 		return strdup(reply);
 	}
 	if (!CURRENT(&(blocks->expirydate))) {
@@ -4676,10 +4665,11 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "begin_epoch=%ld%c",
 				   workinfo->createdate.tv_sec, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	tv_to_buf(&block_tv, tv_buf, sizeof(tv_buf));
+	tv_to_buf(&(blocks->blockcreatedate), tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "block_stamp=%s%c", tv_buf, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "block_epoch=%ld%c", block_tv.tv_sec, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "block_epoch=%ld%c",
+				   blocks->blockcreatedate.tv_sec, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	tv_to_buf(&(payouts->lastshareacc), tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "end_stamp=%s%c", tv_buf, FLDSEP);
