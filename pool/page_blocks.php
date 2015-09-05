@@ -93,7 +93,7 @@ function doblocks($data, $user)
 		$pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
 		$pg .= "<tr class=title>";
 		$pg .= "<td class=dl>Description</td>";
-		$pg .= "<td class=dr>Age</td>";
+		$pg .= "<td class=dr>Time</td>";
 		$pg .= "<td class=dr>Diff%</td>";
 		$pg .= "<td class=dr>Mean%</td>";
 		$pg .= "<td class=dr>CDF[Erl]</td>";
