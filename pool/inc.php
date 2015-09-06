@@ -99,6 +99,7 @@ span.hdr {font-weight:bold;text-decoration:underline;}
 span.nn {font-weight:bold;color:red;}
 span.warn {color:orange;font-weight:bold;}
 span.urg {color:red;font-weight:bold;}
+span.notice {color:blue;font-weight:bold;font-size:120%;}
 span.err {color:red;font-weight:bold;font-size:120%;}
 span.alert {color:red;font-weight:bold;font-size:250%;}
 input.tiny {width:0px;height:0px;margin:0px;padding:0px;outline:none;border:0px;}

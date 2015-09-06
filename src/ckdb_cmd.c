@@ -213,7 +213,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int32_t entropy, value;
 	USERS *users;
 	char *action, *buf = NULL, *st = NULL;
-	char *sfa_status = EMPTY, *sfa_error = EMPTY;
+	char *sfa_status = EMPTY, *sfa_error = EMPTY, *sfa_msg = EMPTY;
 	bool ok = false, key = false;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -301,7 +301,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			else {
 				key = false;
 				sfa_status = "ok";
-				sfa_error = "2FA Enabled";
+				sfa_msg = "2FA Enabled";
 			}
 			// Report sfa_error to web
 			ok = true;
@@ -317,7 +317,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 				ok = true;
 				sfa_status = EMPTY;
 				key = false;
-				sfa_error = "2FA Cancelled";
+				sfa_msg = "2FA Cancelled";
 			}
 		} else if (strcmp(action, "new") == 0) {
 			// Can't new if 2FA isn't already present -> setup
@@ -359,7 +359,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 					ok = true;
 					sfa_status = EMPTY;
 					key = false;
-					sfa_error = "2FA Removed";
+					sfa_msg = "2FA Removed";
 				}
 			}
 		}
@@ -430,8 +430,9 @@ dame:
 		return strdup("failed.");
 	}
 
-	snprintf(tmp, sizeof(tmp), "2fa_status=%s%c2fa_error=%s",
-				   sfa_status, FLDSEP, sfa_error);
+	snprintf(tmp, sizeof(tmp), "2fa_status=%s%c2fa_error=%s%c2fa_msg=%s",
+				   sfa_status, FLDSEP, sfa_error, FLDSEP,
+				   sfa_msg);
 	APPEND_REALLOC(buf, off, len, tmp);
 	LOGDEBUG("%s.%s-%s.%s", id, transfer_data(i_username), action, buf);
 	return buf;

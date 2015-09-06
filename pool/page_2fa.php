@@ -11,7 +11,7 @@ function app_txt($ones)
  return $app;
 }
 #
-function set_2fa($data, $user, $tfa, $ans, $err)
+function set_2fa($data, $user, $tfa, $ans, $err, $msg)
 {
  $draw = false;
 
@@ -19,6 +19,9 @@ function set_2fa($data, $user, $tfa, $ans, $err)
 
  if ($err !== null and $err != '')
 	$pg .= "<span class=err>$err<br><br></span>";
+
+ if ($msg !== null and $msg != '')
+	$pg .= "<span class=notice>$msg<br><br></span>";
 
  $pg .= '<table cellpadding=20 cellspacing=0 border=1>';
  $pg .= '<tr class=dc><td><center>';
@@ -162,6 +165,7 @@ function do2fa($data, $user)
 {
  $mailmode = '';
  $err = '';
+ $msg = '';
  $setup = getparam('Setup', false);
  if ($setup === 'Setup')
  {
@@ -248,7 +252,10 @@ function do2fa($data, $user)
 	$tfa = null;
  else
 	$tfa = $ans['2fa_status'];
- $pg = set_2fa($data, $user, $tfa, $ans, $err);
+ if (isset($ans['2fa_msg']))
+	$msg = $ans['2fa_msg'];
+
+ $pg = set_2fa($data, $user, $tfa, $ans, $err, $msg);
  return $pg;
 }
 #
