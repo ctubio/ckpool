@@ -237,14 +237,17 @@ bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 }
 
 K_ITEM *remove_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
-		   char *inet, tv_t *cd,  K_TREE *trf_root)
+		   char *inet, tv_t *cd,  K_TREE *trf_root, bool check)
 {
 	K_ITEM *u_item = NULL;
 	USERS *old_users, *users;
-	bool ok, did = false;
+	bool ok = true, did = false;
 
 	DATA_USERS(old_users, old_u_item);
-	ok = check_2fa(old_users, value);
+	/* N.B. check_2fa will fail if it is called a second time
+	 * with the same value */
+	if (check)
+		ok = check_2fa(old_users, value);
 	if (ok) {
 		K_WLOCK(users_free);
 		u_item = k_unlink_head(users_free);

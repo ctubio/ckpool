@@ -301,9 +301,24 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			else {
 				key = false;
 				sfa_status = "ok";
+				sfa_error = "2FA Enabled";
 			}
 			// Report sfa_error to web
 			ok = true;
+		} else if (strcmp(action, "untest") == 0) {
+			// Can't untest if it's not ready to test
+			if ((users->databits & (USER_TOTPAUTH | USER_TEST2FA))
+			    != (USER_TOTPAUTH | USER_TEST2FA))
+				goto dame;
+			// since it's currently test, the value isn't required
+			u_new = remove_2fa(u_item, 0, by, code, inet, now,
+					   trf_root, false);
+			if (u_new) {
+				ok = true;
+				sfa_status = EMPTY;
+				key = false;
+				sfa_error = "2FA Cancelled";
+			}
 		} else if (strcmp(action, "new") == 0) {
 			// Can't new if 2FA isn't already present -> setup
 			if ((users->databits & USER_TOTPAUTH) == 0)
@@ -329,18 +344,22 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			// Can't remove if 2FA isn't already present
 			if (!(users->databits & (USER_TOTPAUTH | USER_TEST2FA)))
 				goto dame;
+			// remove requires value
 			value = (int32_t)atoi(transfer_data(i_value));
 			if (!check_2fa(users, value)) {
 				sfa_error = "Invalid code";
 				// Report sfa_error to web
 				ok = true;
 			} else {
+				/* already tested 2fa so don't retest, also,
+				 *  a retest will fail using the same value */
 				u_new = remove_2fa(u_item, value, by, code,
-						   inet, now, trf_root);
+						   inet, now, trf_root, false);
 				if (u_new) {
 					ok = true;
 					sfa_status = EMPTY;
 					key = false;
+					sfa_error = "2FA Removed";
 				}
 			}
 		}

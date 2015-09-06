@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.233"
+#define CKDB_VERSION DB_VERSION"-1.240"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2633,6 +2633,7 @@ extern bool check_2fa(USERS *users, int32_t value);
 extern bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 		    char *inet, tv_t *cd, K_TREE *trf_root);
 extern K_ITEM *remove_2fa(K_ITEM *old_u_item, int32_t value, char *by,
-			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+			  char *code, char *inet, tv_t *cd, K_TREE *trf_root,
+			  bool check);
 
 #endif
