@@ -1715,7 +1715,7 @@ static void *proxy_send(void *arg)
 	return NULL;
 }
 
-static void passthrough_send(ckpool_t __maybe_unused *ckp, pass_msg_t *pm)
+static void passthrough_send(ckpool_t *ckp, pass_msg_t *pm)
 {
 	int len, sent;
 
@@ -1723,8 +1723,9 @@ static void passthrough_send(ckpool_t __maybe_unused *ckp, pass_msg_t *pm)
 	len = strlen(pm->msg);
 	sent = write_socket(pm->cs->fd, pm->msg, len);
 	if (sent != len) {
-		/* FIXME: Do something about this? */
-		LOGWARNING("Failed to passthrough %d bytes of message %s", len, pm->msg);
+		LOGWARNING("Failed to passthrough %d bytes of message %s, attempting reconnect",
+			   len, pm->msg);
+		send_proc(ckp->generator, "reconnect");
 	}
 	free(pm->msg);
 	free(pm);

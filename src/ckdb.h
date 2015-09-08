@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.222"
+#define CKDB_VERSION DB_VERSION"-1.241"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -270,6 +270,8 @@ extern const tv_t date_eot;
 #define DATE_BEGIN 1388620800L
 extern const tv_t date_begin;
 
+#define DATE_ZERO(_tv) (_tv)->tv_sec = (_tv)->tv_usec = 0L
+
 #define BTC_TO_D(_amt) ((double)((_amt) / 100000000.0))
 
 // argv -y - don't run in ckdb mode, just confirm sharesummaries
@@ -335,6 +337,8 @@ extern cklock_t last_lock;
 extern char *btc_server;
 extern char *btc_auth;
 extern int btc_timeout;
+// Lock access to the above variables so they can be changed
+extern cklock_t btc_lock;
 
 #define EDDB "expirydate"
 #define CDDB "createdate"
@@ -401,6 +405,7 @@ enum cmd_values {
 	CMD_PSHIFT,
 	CMD_SHSTA,
 	CMD_USERINFO,
+	CMD_BTCSET,
 	CMD_END
 };
 
@@ -589,8 +594,7 @@ enum cmd_values {
 		STRNCPY(_row->createby, _by); \
 		STRNCPY(_row->createcode, _code); \
 		STRNCPY(_row->createinet, _inet); \
-		_row->modifydate.tv_sec = 0; \
-		_row->modifydate.tv_usec = 0; \
+		DATE_ZERO(&(_row->modifydate)); \
 		_row->modifyby[0] = '\0'; \
 		_row->modifycode[0] = '\0'; \
 		_row->modifyinet[0] = '\0'; \
@@ -612,8 +616,7 @@ enum cmd_values {
 		SET_CREATEBY(_list, _row->createby, _by); \
 		SET_CREATECODE(_list, _row->createcode, _code); \
 		SET_CREATEINET(_list, _row->createinet, _inet); \
-		_row->modifydate.tv_sec = 0; \
-		_row->modifydate.tv_usec = 0; \
+		DATE_ZERO(&(_row->modifydate)); \
 		SET_MODIFYBY(_list, _row->modifyby, EMPTY); \
 		SET_MODIFYCODE(_list, _row->modifycode, EMPTY); \
 		SET_MODIFYINET(_list, _row->modifyinet, EMPTY); \
@@ -1493,6 +1496,10 @@ typedef struct blocks {
 	double diffmean;
 	double cdferl;
 	double luck;
+
+	// To save looking them up when needed
+	tv_t prevcreatedate; // non-DB field
+	tv_t blockcreatedate; // non-DB field
 } BLOCKS;
 
 #define ALLOC_BLOCKS 100
@@ -1545,6 +1552,11 @@ extern K_STORE *blocks_store;
 extern tv_t blocks_stats_time;
 extern bool blocks_stats_rebuild;
 
+// Default number of blocks to display on web
+#define BLOCKS_DEFAULT 42
+// OptionControl can override it
+#define BLOCKS_SETTING_NAME "BlocksPageSize"
+
 // MININGPAYOUTS
 typedef struct miningpayouts {
 	int64_t payoutid;
@@ -1570,6 +1582,7 @@ typedef struct payouts {
 	int64_t payoutid;
 	int32_t height;
 	char blockhash[TXT_BIG+1];
+	tv_t blockcreatedate; // non-DB field
 	int64_t minerreward;
 	int64_t workinfoidstart;
 	int64_t workinfoidend;
@@ -1591,6 +1604,7 @@ typedef struct payouts {
 
 extern K_TREE *payouts_root;
 extern K_TREE *payouts_id_root;
+extern K_TREE *payouts_wid_root;
 extern K_LIST *payouts_free;
 extern K_STORE *payouts_store;
 extern cklock_t process_pplns_lock;
@@ -1893,6 +1907,9 @@ typedef struct workmarkers {
 	int64_t workinfoidstart;
 	char *description;
 	char status[TXT_FLAG+1];
+	int rewards; // non-DB field
+	double pps_value; // non-DB field
+	double rewarded; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } WORKMARKERS;
 
@@ -2297,6 +2314,10 @@ extern const char *blocks_confirmed(char *confirmed);
 extern void zero_on_new_block();
 extern void set_block_share_counters();
 extern bool check_update_blocks_stats(tv_t *stats);
+#define set_blockcreatedate(_h) _set_blockcreatedate(_h, WHERE_FFL_HERE)
+extern bool _set_blockcreatedate(int32_t oldest_height, WHERE_FFL_ARGS);
+#define set_prevcreatedate(_h) _set_prevcreatedate(_h, WHERE_FFL_HERE)
+extern bool _set_prevcreatedate(int32_t oldest_height, WHERE_FFL_ARGS);
 extern cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_miningpayouts(int64_t payoutid, int64_t userid);
 extern K_ITEM *first_miningpayouts(int64_t payoutid, K_TREE_CTX *ctx);
@@ -2305,9 +2326,11 @@ extern K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid,
 			  double diffacc);
 extern cmp_t cmp_payouts(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_payouts_wid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_payouts(int32_t height, char *blockhash);
 extern K_ITEM *find_last_payouts();
 extern K_ITEM *find_payoutid(int64_t payoutid);
+extern K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx);
 extern double payout_stats(PAYOUTS *payouts, char *statname);
 extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
@@ -2335,11 +2358,13 @@ extern bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 extern void dsp_workmarkers(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status);
+extern K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status, K_TREE_CTX *ctx);
 extern K_ITEM *find_workmarkerid(int64_t markerid, bool anystatus, char status);
 extern bool workmarkers_generate(PGconn *conn, char *err, size_t siz,
 				 char *by, char *code, char *inet, tv_t *cd,
 				 K_TREE *trf_root, bool none_error);
+extern bool reward_shifts(PAYOUTS *payouts, bool lock, int delta);
+extern bool shift_rewards(K_ITEM *wm_item);
 extern cmp_t cmp_marks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_marks(int64_t workinfoid);
 extern const char *marks_marktype(char *marktype);
@@ -2358,8 +2383,8 @@ extern K_ITEM *_find_create_userinfo(int64_t userid, bool lock, WHERE_FFL_ARGS);
 #define userinfo_update(_s, _ss, _ms) _userinfo_update(_s, _ss, _ms, true, true)
 extern void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
 			     MARKERSUMMARY *markersummary, bool ss_sub, bool lock);
-#define userinfo_block(_blocks, _isnew) _userinfo_block(_blocks, _isnew, true)
-extern void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock);
+#define userinfo_block(_blocks, _isnew, _delta) _userinfo_block(_blocks, _isnew, _delta, true)
+extern void _userinfo_block(BLOCKS *blocks, enum info_type isnew, int delta, bool lock);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
@@ -2608,6 +2633,7 @@ extern bool check_2fa(USERS *users, int32_t value);
 extern bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
 		    char *inet, tv_t *cd, K_TREE *trf_root);
 extern K_ITEM *remove_2fa(K_ITEM *old_u_item, int32_t value, char *by,
-			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+			  char *code, char *inet, tv_t *cd, K_TREE *trf_root,
+			  bool check);
 
 #endif

@@ -36,30 +36,7 @@
  *  much larger DB tables so that ckdb is effectively ready for messages
  *  almost immediately
  * The first ckpool message allows us to know where ckpool is up to
- *  in the CCLs and thus where to stop processing the CCLs to stay in
- *  sync with ckpool
- * If ckpool isn't running, then the reload will complete at the end of
- *  the last CCL file, however if the 1st message arrives from ckpool while
- *  processing the CCLs, that will mark the point where to stop processing
- *  but can also produce a fatal error at the end of processing, reporting
- *  the ckpool message, if the message was not found in the CCL processing
- *  after the message was received
- *  This can be caused by two circumstances:
- *  1) the disk had not yet written it to the CCL when ckdb read EOF and
- *	ckpool was started at about the same time as the reload completed.
- *	This can be seen if the message displayed in the fatal error IS NOT
- *	in ckdb's message logfile.
- *	A ckdb restart will resolve this
- *  2) ckpool was started at the time of the end of the reload, but the
- *	message was written to disk and found in the CCL before it was
- *	processed in the message queue.
- *	This can be seen if the message displayed in the fatal error IS in
- *	ckdb's message logfile and means the messages after it in ckdb's
- *	message logfile have already been processed.
- *	Again, a ckdb restart will resolve this
- *  In both the above (very rare) cases, if ckdb was to continue running,
- *  it would break the synchronisation and could cause DB problems, so
- *  ckdb aborting and needing a complete restart resolves it
+ *  in the CCLs - see reload_from() for how this is handled
  * The users table, required for the authorise messages, is always updated
  *  immediately
  */
@@ -301,6 +278,7 @@ static sem_t socketer_sem;
 char *btc_server = "http://127.0.0.1:8330";
 char *btc_auth;
 int btc_timeout = 5;
+cklock_t btc_lock;
 
 char *by_default = "code";
 char *inet_default = "127.0.0.1";
@@ -442,6 +420,7 @@ K_STORE *miningpayouts_store;
 // PAYOUTS
 K_TREE *payouts_root;
 K_TREE *payouts_id_root;
+K_TREE *payouts_wid_root;
 K_LIST *payouts_free;
 K_STORE *payouts_store;
 cklock_t process_pplns_lock;
@@ -794,11 +773,10 @@ static bool getdata3()
 	if (!confirm_sharesummary) {
 		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
 			goto sukamudai;
+		/* FYI must be after blocks */
 		if (!(ok = payments_fill(conn)) || everyone_die)
 			goto sukamudai;
 		if (!(ok = miningpayouts_fill(conn)) || everyone_die)
-			goto sukamudai;
-		if (!(ok = payouts_fill(conn)) || everyone_die)
 			goto sukamudai;
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
@@ -808,6 +786,11 @@ static bool getdata3()
 	/* must be after workinfo */
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
+	if (!confirm_sharesummary) {
+		/* must be after workmarkers */
+		if (!(ok = payouts_fill(conn)) || everyone_die)
+			goto sukamudai;
+	}
 	if (!(ok = markersummary_fill(conn)) || everyone_die)
 		goto sukamudai;
 	if (!confirm_sharesummary && !everyone_die)
@@ -1104,6 +1087,7 @@ static void alloc_storage()
 	payouts_store = k_new_store(payouts_free);
 	payouts_root = new_ktree();
 	payouts_id_root = new_ktree();
+	payouts_wid_root = new_ktree();
 
 	auths_free = k_new_list("Auths", sizeof(AUTHS),
 					ALLOC_AUTHS, LIMIT_AUTHS, true);
@@ -1322,6 +1306,7 @@ static void dealloc_storage()
 	FREE_ALL(poolstats);
 	FREE_ALL(auths);
 
+	FREE_TREE(payouts_wid);
 	FREE_TREE(payouts_id);
 	FREE_TREE(payouts);
 	FREE_STORE_DATA(payouts);
@@ -1498,8 +1483,7 @@ static bool setup_data()
 	if (workinfo_current) {
 		DATA_WORKINFO(wic, workinfo_current);
 		STRNCPY(wi.coinbase1, wic->coinbase1);
-		wi.createdate.tv_sec = 0L;
-		wi.createdate.tv_usec = 0L;
+		DATE_ZERO(&(wi.createdate));
 		INIT_WORKINFO(&look);
 		look.data = (void *)(&wi);
 		// Find the first workinfo for this height
@@ -1539,7 +1523,7 @@ static bool setup_data()
 			(_seqset)->seqdata[_i].firsttime.tv_sec = \
 			(_seqset)->seqdata[_i].firsttime.tv_usec = \
 			(_seqset)->seqdata[_i].lasttime.tv_sec = \
-			(_seqset)->seqdata[_i].lasttime.tv_usec = 0; \
+			(_seqset)->seqdata[_i].lasttime.tv_usec = 0L; \
 		} \
 	} while (0);
 
@@ -2917,7 +2901,7 @@ static void summarise_blocks()
 	K_RUNLOCK(blocks_free);
 	if (!b_prev) {
 		wi_start = 0;
-		elapsed_start.tv_sec = elapsed_start.tv_usec = 0L;
+		DATE_ZERO(&elapsed_start);
 		prev_hi = 0;
 	} else {
 		DATA_BLOCKS(prev_blocks, b_prev);
@@ -2936,7 +2920,7 @@ static void summarise_blocks()
 		copy_tv(&elapsed_start, &(prev_workinfo->createdate));
 		prev_hi = prev_blocks->height;
 	}
-	elapsed_finish.tv_sec = elapsed_finish.tv_usec = 0L;
+	DATE_ZERO(&elapsed_finish);
 
 	// Add up the sharesummaries, abort if any SUMMARY_NEW
 	looksharesummary.workinfoid = wi_finish;
@@ -3958,6 +3942,7 @@ static void *socketer(__maybe_unused void *arg)
 					case CMD_USERSTATUS:
 					case CMD_SHSTA:
 					case CMD_USERINFO:
+					case CMD_BTCSET:
 						ans = ckdb_cmds[msgline->which_cmds].func(NULL,
 								msgline->cmd,
 								msgline->id,
@@ -4297,6 +4282,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_PSHIFT:
 			case CMD_SHSTA:
 			case CMD_USERINFO:
+			case CMD_BTCSET:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,
@@ -5134,7 +5120,7 @@ static void confirm_reload()
 		}
 	} else {
 		if (confirm_first_workinfoid == 0) {
-			start.tv_sec = start.tv_usec = 0;
+			DATE_ZERO(&start);
 			LOGWARNING("%s() no start workinfo found ... "
 				   "using time 0", __func__);
 		} else {
@@ -5610,6 +5596,7 @@ int main(int argc, char **argv)
 	ckp.main.processname = strdup("main");
 
 	cklock_init(&last_lock);
+	cklock_init(&btc_lock);
 	cklock_init(&seq_lock);
 	cklock_init(&process_pplns_lock);
 

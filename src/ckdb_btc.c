@@ -32,9 +32,11 @@ static char *btc_data(char *json, size_t *len)
 
 	APPEND_REALLOC_INIT(buf, off, *len);
 	APPEND_REALLOC(buf, off, *len, "POST / HTTP/1.1\n");
+	ck_wlock(&btc_lock);
 	snprintf(tmp, sizeof(tmp), "Authorization: Basic %s\n", btc_auth);
 	APPEND_REALLOC(buf, off, *len, tmp);
 	snprintf(tmp, sizeof(tmp), "Host: %s/\n", btc_server);
+	ck_wunlock(&btc_lock);
 	APPEND_REALLOC(buf, off, *len, tmp);
 	APPEND_REALLOC(buf, off, *len, "Content-Type: application/json\n");
 	snprintf(tmp, sizeof(tmp), "Content-Length: %d\n\n", (int)strlen(json));

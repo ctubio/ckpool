@@ -369,8 +369,7 @@ void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t s
 			long sec, nsec;
 			int c;
 			// Caller test for tv_sec=0 for failure
-			((tv_t *)data)->tv_sec = 0L;
-			((tv_t *)data)->tv_usec = 0L;
+			DATE_ZERO((tv_t *)data);
 			c = sscanf(fld, "%ld,%ld", &sec, &nsec);
 			if (c > 0) {
 				((tv_t *)data)->tv_sec = (time_t)sec;
@@ -882,12 +881,17 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 		K_WUNLOCK(workerstatus_free);
 
 		if (ws_err) {
-			LOGERR("%s(): CREATED Missing workerstatus %"PRId64"/%s"
-				WHERE_FFL WHERE_FFL,
-				__func__, userid, workername,
-				file2, func2, line2, WHERE_FFL_PASS);
+			LOGNOTICE("%s(): CREATED Missing workerstatus"
+				  " %"PRId64"/%s"
+				  WHERE_FFL WHERE_FFL,
+				  __func__, userid, workername,
+				  file2, func2, line2, WHERE_FFL_PASS);
 			if (w_err) {
-				LOGERR("%s(): %s Missing worker %"PRId64"/%s",
+				int sta = LOG_ERR;
+				if (w_item)
+					sta = LOG_NOTICE;
+				LOGMSG(sta,
+					"%s(): %s Missing worker %"PRId64"/%s",
 					__func__,
 					w_item ? "CREATED" : "FAILED TO CREATE",
 					userid, workername);
@@ -1469,8 +1473,7 @@ K_ITEM *first_workers(int64_t userid, K_TREE_CTX *ctx)
 
 	workers.userid = userid;
 	workers.workername[0] = '\0';
-	workers.expirydate.tv_sec = 0L;
-	workers.expirydate.tv_usec = 0L;
+	DATE_ZERO(&(workers.expirydate));
 
 	INIT_WORKERS(&look);
 	look.data = (void *)(&workers);
@@ -1623,8 +1626,7 @@ K_ITEM *find_paymentaddresses_create(int64_t userid, K_TREE_CTX *ctx)
 	K_ITEM look, *item;
 
 	paymentaddresses.userid = userid;
-	paymentaddresses.createdate.tv_sec = 0;
-	paymentaddresses.createdate.tv_usec = 0;
+	DATE_ZERO(&(paymentaddresses.createdate));
 	paymentaddresses.payaddress[0] = '\0';
 
 	INIT_PAYMENTADDRESSES(&look);
@@ -1844,8 +1846,7 @@ K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height)
 	 *  activationdate will all be the default value and not
 	 *  decide the outcome */
 	STRNCPY(optioncontrol.optionname, optionname);
-	optioncontrol.activationdate.tv_sec = 0L;
-	optioncontrol.activationdate.tv_usec = 0L;
+	DATE_ZERO(&(optioncontrol.activationdate));
 	optioncontrol.activationheight = OPTIONCONTROL_HEIGHT - 1;
 	optioncontrol.expirydate.tv_sec = default_expiry.tv_sec;
 	optioncontrol.expirydate.tv_usec = default_expiry.tv_usec;
@@ -2040,8 +2041,8 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 
 	LOGDEBUG("%s(): age", __func__);
 
-	ss_first->tv_sec = ss_first->tv_usec =
-	ss_last->tv_sec = ss_last->tv_usec = 0;
+	DATE_ZERO(ss_first);
+	DATE_ZERO(ss_last);
 	*ss_count = *s_count = *s_diff = 0;
 
 	wi_item = find_workinfo(workinfoid, NULL);
@@ -2065,7 +2066,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	}
 
 	K_RLOCK(workmarkers_free);
-	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED, NULL);
 	K_RUNLOCK(workmarkers_free);
 	// Should never happen?
 	if (wm_item && !reloading) {
@@ -2137,8 +2138,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		lookshares.workinfoid = workinfoid;
 		lookshares.userid = sharesummary->userid;
 		strcpy(lookshares.workername, sharesummary->workername);
-		lookshares.createdate.tv_sec = 0;
-		lookshares.createdate.tv_usec = 0;
+		DATE_ZERO(&(lookshares.createdate));
 
 		s_look.data = (void *)(&lookshares);
 		K_WLOCK(shares_free);
@@ -2385,8 +2385,8 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 				      cmp_sharesummary_workinfoid, ctx);
 	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 
-	ss_first_min.tv_sec = ss_first_min.tv_usec =
-	ss_last_max.tv_sec = ss_last_max.tv_usec = 0;
+	DATE_ZERO(&ss_first_min);
+	DATE_ZERO(&ss_last_max);
 	ss_count_tot = s_count_tot = s_diff_tot = 0;
 
 	found = false;
@@ -2628,8 +2628,7 @@ K_ITEM *find_prev_blocks(int32_t height)
 	 * not NEW, blocks, which might not find the right one */
 	lookblocks.height = height;
 	lookblocks.blockhash[0] = '\0';
-	lookblocks.expirydate.tv_sec = 0L;
-	lookblocks.expirydate.tv_usec = 0L;
+	DATE_ZERO(&(lookblocks.expirydate));
 
 	INIT_BLOCKS(&look);
 	look.data = (void *)(&lookblocks);
@@ -2919,8 +2918,8 @@ bool check_update_blocks_stats(tv_t *stats)
 					K_RUNLOCK(workinfo_free);
 					if (!w_item) {
 						setnow(&now);
-						if (!blocks->workinfoid != last_missing_workinfoid ||
-						    tvdiff(&now, &last_message) >= 5.0) {
+						if (blocks->workinfoid != last_missing_workinfoid ||
+						    tvdiff(&now, &last_message) >= 15.0) {
 							LOGEMERG("%s(): missing block workinfoid %"
 								 PRId32"/%"PRId64"/%s",
 								 __func__, blocks->height,
@@ -2988,6 +2987,184 @@ bool check_update_blocks_stats(tv_t *stats)
 	return true;
 }
 
+// Must be under K_WLOCK(blocks_free) when called except during DB load
+bool _set_blockcreatedate(int32_t oldest_height, WHERE_FFL_ARGS)
+{
+	K_TREE_CTX ctx[1];
+	BLOCKS *blocks;
+	K_ITEM *b_item;
+	int32_t height;
+	char blockhash[TXT_BIG+1];
+	char cd_buf[DATE_BUFSIZ];
+	tv_t createdate;
+	bool ok = true;
+
+	// No blocks?
+	if (blocks_store->count == 0)
+		return true;
+
+	height = 0;
+	blockhash[0] = '\0';
+	DATE_ZERO(&createdate);
+	b_item = last_in_ktree(blocks_root, ctx);
+	DATA_BLOCKS_NULL(blocks, b_item);
+	while (b_item && blocks->height >= oldest_height) {
+		// NEW will be first going back
+		if (blocks->confirmed[0] == BLOCKS_NEW) {
+			height = blocks->height;
+			STRNCPY(blockhash, blocks->blockhash);
+			copy_tv(&createdate, &(blocks->createdate));
+		}
+		if (blocks->height != height ||
+		    strcmp(blocks->blockhash, blockhash) != 0) {
+			// Missing NEW
+			tv_to_buf(&(blocks->expirydate), cd_buf, sizeof(cd_buf));
+			LOGEMERG("%s() block %"PRId32"/%s/%s/%s has no '"
+				 BLOCKS_NEW_STR "' prev was %"PRId32"/%s."
+				 WHERE_FFL,
+				 __func__,
+				 blocks->height, blocks->blockhash,
+				 blocks->confirmed, cd_buf,
+				 height, blockhash, WHERE_FFL_PASS);
+			ok = false;
+
+			height = blocks->height;
+			STRNCPY(blockhash, blocks->blockhash);
+			// set a useable (incorrect) value
+			copy_tv(&createdate, &(blocks->createdate));
+		}
+		// Always update it
+		copy_tv(&(blocks->blockcreatedate), &createdate);
+
+		b_item = prev_in_ktree(ctx);
+		DATA_BLOCKS_NULL(blocks, b_item);
+	}
+	return ok;
+}
+
+// Must be under K_WLOCK(blocks_free) when called except during DB load
+bool _set_prevcreatedate(int32_t oldest_height, WHERE_FFL_ARGS)
+{
+	K_ITEM look, *b_item = NULL, *wi_item;
+	BLOCKS lookblocks, *blocks = NULL;
+	K_TREE_CTX b_ctx[1], wi_ctx[1];
+	WORKINFO *workinfo;
+	char curr_blockhash[TXT_BIG+1];
+	char cd_buf[DATE_BUFSIZ];
+	int32_t curr_height;
+	tv_t prev_createdate;
+	tv_t curr_createdate;
+	bool ok = true, currok = false;
+
+	// No blocks?
+	if (blocks_store->count == 0)
+		return true;
+
+	// Find first 'ok' block before oldest_height
+	lookblocks.height = oldest_height;
+	lookblocks.blockhash[0] = '\0';
+	DATE_ZERO(&(lookblocks.expirydate));
+
+	INIT_BLOCKS(&look);
+	look.data = (void *)(&lookblocks);
+	b_item = find_before_in_ktree(blocks_root, &look, cmp_blocks, b_ctx);
+	while (b_item) {
+		DATA_BLOCKS(blocks, b_item);
+		if (CURRENT(&(blocks->expirydate)) &&
+		    blocks->confirmed[0] != BLOCKS_ORPHAN &&
+		    blocks->confirmed[0] != BLOCKS_REJECT)
+			break;
+		b_item = prev_in_ktree(b_ctx);
+	}
+
+	// Setup prev_createdate
+	if (b_item) {
+		/* prev_createdate is the ok b_item (before oldest_height)
+		 * _set_blockcreatedate() should always be called
+		 *  before calling _set_prevcreatedate() */
+		copy_tv(&prev_createdate, &(blocks->blockcreatedate));
+
+		/* Move b_item forward to the next block
+		 *  since we don't have the prev value for b_item and
+		 *  also don't need to update the b_item block */
+		curr_height = blocks->height;
+		STRNCPY(curr_blockhash, blocks->blockhash);
+		while (b_item && blocks->height == curr_height &&
+		       strcmp(blocks->blockhash, curr_blockhash) == 0) {
+			b_item = next_in_ktree(b_ctx);
+			DATA_BLOCKS_NULL(blocks, b_item);
+		}
+	} else {
+		/* There's none before oldest_height, so instead use:
+		 *  'Pool Start' = first workinfo createdate */
+		K_RLOCK(workinfo_free);
+		wi_item = first_in_ktree(workinfo_root, wi_ctx);
+		K_RUNLOCK(workinfo_free);
+		if (wi_item) {
+			DATA_WORKINFO(workinfo, wi_item);
+			copy_tv(&prev_createdate, &(workinfo->createdate));
+		} else {
+			/* Shouldn't be possible since this function is first
+			 *  called after workinfo is loaded and the workinfo
+			 *  for each block must exist - thus data corruption */
+			DATE_ZERO(&prev_createdate);
+			LOGEMERG("%s() DB/tree corruption - blocks exist but "
+				 "no workinfo exist!"
+				 WHERE_FFL,
+				 __func__, WHERE_FFL_PASS);
+			ok = false;
+		}
+		b_item = first_in_ktree(blocks_root, b_ctx);
+	}
+
+	// curr_* is unset and will be set first time in the while loop
+	curr_height = 0;
+	curr_blockhash[0] = '\0';
+	DATE_ZERO(&curr_createdate);
+	currok = false;
+	while (b_item) {
+		DATA_BLOCKS(blocks, b_item);
+		// While the same block, keep setting it
+		if (blocks->height == curr_height &&
+		    strcmp(blocks->blockhash, curr_blockhash) == 0) {
+			copy_tv(&(blocks->prevcreatedate), &prev_createdate);
+		} else {
+			// Next block - if currok then 'prev' becomes 'curr'
+			if (currok)
+				copy_tv(&prev_createdate, &curr_createdate);
+
+			// New curr - CURRENT will be first
+			if (!CURRENT(&(blocks->expirydate))) {
+				tv_to_buf(&(blocks->expirydate), cd_buf,
+					  sizeof(cd_buf));
+				LOGEMERG("%s() block %"PRId32"/%s/%s/%s first "
+					 "record is not CURRENT" WHERE_FFL,
+					 __func__,
+					 blocks->height, blocks->blockhash,
+					 blocks->confirmed, cd_buf,
+					 WHERE_FFL_PASS);
+				ok = false;
+			}
+
+			curr_height = blocks->height;
+			STRNCPY(curr_blockhash, blocks->blockhash);
+			copy_tv(&curr_createdate, &(blocks->blockcreatedate));
+
+			if (CURRENT(&(blocks->expirydate)) &&
+			    blocks->confirmed[0] != BLOCKS_ORPHAN &&
+			    blocks->confirmed[0] != BLOCKS_REJECT)
+				currok = true;
+			else
+				currok = false;
+
+			// Set it
+			copy_tv(&(blocks->prevcreatedate), &prev_createdate);
+		}
+		b_item = next_in_ktree(b_ctx);
+	}
+	return ok;
+}
+
 /* order by payoutid asc,userid asc,expirydate asc
  * i.e. only one payout amount per block per user */
 cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b)
@@ -3031,8 +3208,7 @@ K_ITEM *first_miningpayouts(int64_t payoutid, K_TREE_CTX *ctx)
 
 	miningpayouts.payoutid = payoutid;
 	miningpayouts.userid = 0;
-	miningpayouts.expirydate.tv_sec = 0;
-	miningpayouts.expirydate.tv_usec = 0;
+	DATE_ZERO(&(miningpayouts.expirydate));
 
 	INIT_MININGPAYOUTS(&look);
 	look.data = (void *)(&miningpayouts);
@@ -3109,6 +3285,22 @@ cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
+/* order by workinfoidend asc,expirydate asc
+ * This must use workinfoidend, not workinfoidstart, since a change
+ *  in the payout PPLNS N could have 2 payouts with the same start,
+ *  but currently there is only one payout per block
+ *   i.e. workinfoidend can only have one payout */
+cmp_t cmp_payouts_wid(K_ITEM *a, K_ITEM *b)
+{
+	PAYOUTS *pa, *pb;
+	DATA_PAYOUTS(pa, a);
+	DATA_PAYOUTS(pb, b);
+	cmp_t c = CMP_BIGINT(pa->workinfoidend, pb->workinfoidend);
+	if (c == 0)
+		c = CMP_TV(pa->expirydate, pb->expirydate);
+	return c;
+}
+
 K_ITEM *find_payouts(int32_t height, char *blockhash)
 {
 	PAYOUTS payouts;
@@ -3155,6 +3347,24 @@ K_ITEM *find_payoutid(int64_t payoutid)
 	INIT_PAYOUTS(&look);
 	look.data = (void *)(&payouts);
 	return find_in_ktree(payouts_id_root, &look, cmp_payouts_id, ctx);
+}
+
+// First payouts workinfoidend equal or before workinfoidend
+K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx)
+{
+	PAYOUTS payouts;
+	K_TREE_CTX ctx0[1];
+	K_ITEM look;
+
+	if (ctx == NULL)
+		ctx = ctx0;
+
+	payouts.workinfoidend = workinfoidend+1;
+	DATE_ZERO(&(payouts.expirydate));
+
+	INIT_PAYOUTS(&look);
+	look.data = (void *)(&payouts);
+	return find_before_in_ktree(payouts_wid_root, &look, cmp_payouts_wid, ctx);
 }
 
 /* Values from payout stats, returns -1 if statname isn't found
@@ -3252,9 +3462,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	PAYMENTS *payments;
 	WORKINFO *workinfo;
 	PAYOUTS *payouts, *payouts2;
-	BLOCKS *blocks, *blocks2;
+	BLOCKS *blocks;
 	USERS *users;
-	K_ITEM *p_item, *old_p_item, *b_item, *b2_item, *w_item, *wb_item;
+	K_ITEM *p_item, *old_p_item, *b_item, *w_item, *wb_item;
 	K_ITEM *u_item, *mu_item, *oc_item, *pay_item, *p2_item, *old_p2_item;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKMARKERS lookworkmarkers, *workmarkers;
@@ -3291,7 +3501,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	if (p_item) {
 		DATA_PAYOUTS(payouts, p_item);
 		tv_to_buf(&(payouts->createdate), cd_buf, sizeof(cd_buf));
-		LOGERR("%s(): payout for block %"PRId32"/%s already exists"
+		LOGERR("%s(): payout for block %"PRId32"/%s already exists "
 			"%"PRId64"/%"PRId64"/%"PRId64"/%s",
 			__func__, height, blockhash, payouts->payoutid,
 			payouts->workinfoidstart, payouts->workinfoidend,
@@ -3302,37 +3512,16 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	// Check the block status
 	K_RLOCK(blocks_free);
 	b_item = find_blocks(height, blockhash, b_ctx);
+	K_RUNLOCK(blocks_free);
 	if (!b_item) {
-		K_RUNLOCK(blocks_free);
 		LOGERR("%s(): no block %"PRId32"/%s for payout",
 			__func__, height, blockhash);
 		goto oku;
 	}
 	DATA_BLOCKS(blocks, b_item);
-	b2_item = b_item;
-	DATA_BLOCKS(blocks2, b2_item);
-	while (b2_item && blocks2->height == height &&
-	       strcmp(blocks2->blockhash, blockhash) == 0) {
-		if (blocks2->confirmed[0] == BLOCKS_NEW) {
-			copy_tv(&end_tv, &(blocks2->createdate));
-			if (!addr_cd)
-				addr_cd = &(blocks2->createdate);
-			break;
-		}
-		b2_item = next_in_ktree(b_ctx);
-		DATA_BLOCKS_NULL(blocks2, b2_item);
-	}
-	K_RUNLOCK(blocks_free);
-	// If addr_cd was null it should've been set to the block NEW createdate
-	if (!addr_cd || end_tv.tv_sec == 0) {
-		LOGEMERG("%s(): missing %s record for block %"PRId32
-			 "/%"PRId64"/%s/%s/%"PRId64,
-			 __func__, blocks_confirmed(BLOCKS_NEW_STR),
-			 blocks->height, blocks->workinfoid,
-			 blocks->workername, blocks->confirmed,
-			 blocks->reward);
-		goto oku;
-	}
+	copy_tv(&end_tv, &(blocks->blockcreatedate));
+	if (!addr_cd)
+		addr_cd = &(blocks->blockcreatedate);
 
 	LOGDEBUG("%s(): block %"PRId32"/%"PRId64"/%s/%s/%"PRId64,
 		 __func__, blocks->height, blocks->workinfoid,
@@ -3363,11 +3552,11 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 
 	// Get the PPLNS N values
 	K_RLOCK(optioncontrol_free);
-	oc_item = find_optioncontrol(PPLNSDIFFTIMES, &(blocks->createdate),
+	oc_item = find_optioncontrol(PPLNSDIFFTIMES, &(blocks->blockcreatedate),
 				     height);
 	K_RUNLOCK(optioncontrol_free);
 	if (!oc_item) {
-		tv_to_buf(&(blocks->createdate), cd_buf, sizeof(cd_buf));
+		tv_to_buf(&(blocks->blockcreatedate), cd_buf, sizeof(cd_buf));
 		LOGEMERG("%s(): missing optioncontrol %s (%s/%"PRId32")",
 			 __func__, PPLNSDIFFTIMES, cd_buf, blocks->height);
 		goto oku;
@@ -3376,11 +3565,11 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	diff_times = atof(optioncontrol->optionvalue);
 
 	K_RLOCK(optioncontrol_free);
-	oc_item = find_optioncontrol(PPLNSDIFFADD, &(blocks->createdate),
+	oc_item = find_optioncontrol(PPLNSDIFFADD, &(blocks->blockcreatedate),
 				     height);
 	K_RUNLOCK(optioncontrol_free);
 	if (!oc_item) {
-		tv_to_buf(&(blocks->createdate), cd_buf, sizeof(cd_buf));
+		tv_to_buf(&(blocks->blockcreatedate), cd_buf, sizeof(cd_buf));
 		LOGEMERG("%s(): missing optioncontrol %s (%s/%"PRId32")",
 			 __func__, PPLNSDIFFADD, cd_buf, blocks->height);
 		goto oku;
@@ -3431,7 +3620,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		end_workinfoid = sharesummary->workinfoid;
 	/* Add up all sharesummaries until >= diff_want
 	 * also record the latest lastshare - that will be the end pplns time
-	 *  which will be >= blocks->createdate */
+	 *  which will be >= blocks->blockcreatedate */
 	while (total_diff < diff_want && ss_item) {
 		switch (sharesummary->complete[0]) {
 			case SUMMARY_CONFIRM:
@@ -3584,7 +3773,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		 *   block - so abort
 		 * The fix is to create the marks and summaries needed via
 		 *  cmd_marks() then manually trigger the payout generation
-		 *  TODO: via cmd_payouts() ... which isn't available yet */
+		 *  via cmd_payouts() */
 		LOGEMERG("%s(): payout had < 1 (%"PRId64") workmarkers for "
 			 "block %"PRId32"/%"PRId64"/%s/%s/%"PRId64
 			 " beginwi=%"PRId64" ss=%"PRId64" diff=%.1f",
@@ -3634,6 +3823,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	bzero(payouts, sizeof(*payouts));
 	payouts->height = height;
 	STRNCPY(payouts->blockhash, blockhash);
+	copy_tv(&(payouts->blockcreatedate), &(blocks->blockcreatedate));
 	d64 = blocks->reward * 9 / 1000;
 	g64 = blocks->reward - d64;
 	payouts->minerreward = g64;
@@ -3805,20 +3995,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 				pa_item = pa_item->next;
 			}
 		} else {
-			/* Address user or normal user without a paymentaddress
-			 * TODO: user table needs a flag to say which it is ...
-			 *  for now use a simple test */
-			bool gotaddr = false;
-			size_t len;
-
-			switch (users->username[0]) {
-				case '1':
-				case '3':
-					len = strlen(users->username);
-					if (len >= ADDR_MIN_LEN && len <= ADDR_MAX_LEN)
-						gotaddr = true;
-			}
-			if (gotaddr) {
+			/* Address user or normal user without a paymentaddress */
+			if (users->userbits & USER_ADDRESS) {
 				K_WLOCK(payments_free);
 				pay_item = k_unlink_head(payments_free);
 				K_WUNLOCK(payments_free);
@@ -3901,6 +4079,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		   ss_count, wm_count, ms_count, usercount, diff_times,
 		   diff_add, cd_buf);
 
+	/* At this point the payout is complete, but it just hasn't been
+	 *  flagged complete yet in the DB */
+
 	K_WLOCK(payouts_free);
 	p2_item = k_unlink_head(payouts_free);
 	K_WUNLOCK(payouts_free);
@@ -3909,6 +4090,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	payouts2->payoutid = payouts->payoutid;
 	payouts2->height = payouts->height;
 	STRNCPY(payouts2->blockhash, payouts->blockhash);
+	copy_tv(&(payouts2->blockcreatedate), &(payouts->blockcreatedate));
 	payouts2->minerreward = payouts->minerreward;
 	payouts2->workinfoidstart = payouts->workinfoidstart;
 	payouts2->workinfoidend = payouts->workinfoidend;
@@ -3926,12 +4108,19 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	ok = payouts_add(conn, true, p2_item, &old_p2_item, (char *)by_default,
 			 (char *)__func__, (char *)inet_default, &now, NULL,
 			 false);
+
 	if (!ok) {
+		/* All that's required is to mark the payout GENERATED
+		 *  since it already exists in the DB and in RAM, thus a manual
+		 *  cmd_payouts 'generated' is all that's needed to fix it */
 		LOGEMERG("%s(): payout %"PRId64" for block %"PRId32"/%s "
 			 "NOT set generated - it needs to be set manually",
 			 __func__, payouts->payoutid, blocks->height,
 			 blocks->blockhash);
 	}
+
+	// Flag each shift as rewarded
+	reward_shifts(payouts2, true, 1);
 
 	CKPQDisco(&conn, conned);
 
@@ -4141,7 +4330,7 @@ K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 	K_TREE_CTX ctx[1];
 
 	if (markerid == 0) {
-		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED, NULL);
 		if (wm_item) {
 			DATA_WORKMARKERS(wm, wm_item);
 			markerid = wm->markerid;
@@ -4272,11 +4461,14 @@ cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status)
+K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status, K_TREE_CTX *ctx)
 {
 	WORKMARKERS workmarkers, *wm;
-	K_TREE_CTX ctx[1];
+	K_TREE_CTX ctx0[1];
 	K_ITEM look, *wm_item;
+
+	if (ctx == NULL)
+		ctx = ctx0;
 
 	workmarkers.expirydate.tv_sec = default_expiry.tv_sec;
 	workmarkers.expirydate.tv_usec = default_expiry.tv_usec;
@@ -4363,8 +4555,7 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
 	look.data = (void *)(&workinfo);
 	K_RLOCK(workinfo_free);
 	if (before) {
-		workinfo.expirydate.tv_sec = 0;
-		workinfo.expirydate.tv_usec = 0;
+		DATE_ZERO(&(workinfo.expirydate));
 		wi_fin_item = find_before_in_ktree(workinfo_root, &look,
 						   cmp_workinfo, ctx);
 		while (wi_fin_item) {
@@ -4396,7 +4587,8 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
 	 *  sort order and matching errors */
 	if (wi_fin->workinfoid >= wi_stt->workinfoid) {
 		K_RLOCK(workmarkers_free);
-		old_wm_item = find_workmarkers(wi_fin->workinfoid, true, '\0');
+		old_wm_item = find_workmarkers(wi_fin->workinfoid, true, '\0',
+					       NULL);
 		K_RUNLOCK(workmarkers_free);
 		DATA_WORKMARKERS_NULL(old_wm, old_wm_item);
 		if (old_wm_item && (WMREADY(old_wm->status) ||
@@ -4573,6 +4765,68 @@ bool workmarkers_generate(PGconn *conn, char *err, size_t siz, char *by,
 		}
 	}
 	return true;
+}
+
+// delta = 1 or -1 i.e. reward or undo reward
+bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
+{
+	// TODO: PPS calculations
+	K_TREE_CTX ctx[1];
+	K_ITEM *wm_item;
+	WORKMARKERS *wm;
+	bool did_one = false;
+
+	if (lock)
+		K_WLOCK(workmarkers_free);
+
+	wm_item = find_workmarkers(payouts->workinfoidstart, false,
+				   MARKER_PROCESSED, ctx);
+	while (wm_item) {
+		DATA_WORKMARKERS(wm, wm_item);
+		if (wm->workinfoidstart > payouts->workinfoidend)
+			break;
+		/* The status doesn't matter since we want the rewards passed
+		 *  onto the PROCESSED status if it isn't already processed */
+		if (CURRENT(&(wm->expirydate))) {
+			wm->rewards += delta;
+			did_one = true;
+		}
+		wm_item = next_in_ktree(ctx);
+	}
+
+	if (lock)
+		K_WUNLOCK(workmarkers_free);
+
+	return did_one;
+}
+
+// (re)calculate rewards for a shift
+bool shift_rewards(K_ITEM *wm_item)
+{
+	PAYOUTS *payouts = NULL;
+	K_TREE_CTX ctx[1];
+	WORKMARKERS *wm;
+	K_ITEM *p_item;
+	int rewards = 0;
+
+	DATA_WORKMARKERS(wm, wm_item);
+
+	// Deadlock risk since calling code should have workmarkers locked
+	K_RLOCK(payouts_free);
+	p_item = find_payouts_wid(wm->workinfoidend, ctx);
+	DATA_PAYOUTS_NULL(payouts, p_item);
+	// a workmarker should not cross a payout boundary
+	while (p_item && payouts->workinfoidstart <= wm->workinfoidstart &&
+	       wm->workinfoidend <= payouts->workinfoidend) {
+		if (CURRENT(&(payouts->expirydate)))
+			rewards++;
+		p_item = prev_in_ktree(ctx);
+		DATA_PAYOUTS_NULL(payouts, p_item);
+	}
+	K_RUNLOCK(payouts_free);
+
+	wm->rewards = rewards;
+	return (rewards > 0);
 }
 
 // order by expirydate asc,workinfoid asc
@@ -4897,7 +5151,7 @@ void _userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
 }
 
 // N.B. good blocks = blocks - (orphans + rejects)
-void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock)
+void _userinfo_block(BLOCKS *blocks, enum info_type isnew, int delta, bool lock)
 {
 	USERINFO *row;
 	K_ITEM *item;
@@ -4907,12 +5161,12 @@ void _userinfo_block(BLOCKS *blocks, enum info_type isnew, bool lock)
 	if (lock)
 		K_WLOCK(userinfo_free);
 	if (isnew == INFO_NEW) {
-		row->blocks++;
+		row->blocks += delta;
 		copy_tv(&(row->last_block), &(blocks->createdate));
 	} else if (isnew == INFO_ORPHAN)
-		row->orphans++;
+		row->orphans += delta;
 	else if (isnew == INFO_REJECT)
-		row->rejects++;
+		row->rejects += delta;
 
 	if (lock)
 		K_WUNLOCK(userinfo_free);

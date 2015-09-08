@@ -11,7 +11,7 @@ function app_txt($ones)
  return $app;
 }
 #
-function set_2fa($data, $user, $tfa, $ans, $err)
+function set_2fa($data, $user, $tfa, $ans, $err, $msg)
 {
  $draw = false;
 
@@ -20,10 +20,12 @@ function set_2fa($data, $user, $tfa, $ans, $err)
  if ($err !== null and $err != '')
 	$pg .= "<span class=err>$err<br><br></span>";
 
+ if ($msg !== null and $msg != '')
+	$pg .= "<span class=notice>$msg<br><br></span>";
+
  $pg .= '<table cellpadding=20 cellspacing=0 border=1>';
  $pg .= '<tr class=dc><td><center>';
 
- $pg .= makeForm('2fa');
  $pg .= '<table cellpadding=5 cellspacing=0 border=0>';
  $pg .= '<tr class=dc><td>';
  switch ($tfa)
@@ -33,9 +35,10 @@ function set_2fa($data, $user, $tfa, $ans, $err)
 	$pg .= "You don't have Two Factor Authentication (2FA) setup yet<br><br>";
 	$pg .= 'To use 2FA you need an App on your phone/tablet<br>';
 	$pg .= app_txt('ones');
+	$pg .= makeForm('2fa');
 	$pg .= 'Click here to begin the setup process for 2FA: ';
 	$pg .= '<input type=submit name=Setup value=Setup>';
-	$pg .= '</td></tr>';
+	$pg .= '</form></td></tr>';
 	break;
   case 'test':
 	$pg .= '<tr class=dc><td>';
@@ -66,8 +69,9 @@ function set_2fa($data, $user, $tfa, $ans, $err)
 	$pg .= '<div id=can0><canvas id=can width=1 height=1>';
 	$pg .= 'A qrcode will show here if your browser supports html5/canvas';
 	$pg .= "</canvas></div><br>";
+	$pg .= makeForm('2fa');
 	$pg .= 'Then enter your App 2FA Value: <input name=Value value="" size=10> ';
-	$pg .= '<input type=submit name=Test value=Test></td></tr>';
+	$pg .= '<input type=submit name=Test value=Test></form></td></tr>';
 	$pg .= '<tr class=dl><td>';
 	$pg .= app_txt('2FA apps');
 	$pg .= '<span class=urg>N.B.</span> if you wish to setup 2FA on more than one device,<br>';
@@ -79,20 +83,32 @@ function set_2fa($data, $user, $tfa, $ans, $err)
 	$pg .= 'so your should copy it and store it somewhere securely.<br>';
 	$pg .= 'For security reasons, the site will not show you an active <span class=urg>2FA Secret Key</span>.<br>';
 	$pg .= '</td></tr>';
+	$pg .= '<tr class=dl><td>';
+	$pg .= makeForm('2fa');
+	$pg .= '<br>If you wish to cancel setting up 2FA, click here: ';
+	$pg .= '<input type=submit name=Cancel value=Cancel></form></td></tr>';
 	break;
   case 'ok':
 	$pg .= '<tr class=dc><td>';
 	$pg .= '2FA is enabled on your account.<br><br>';
 	$pg .= 'If you wish to replace your Secret Key with a new one:<br><br>';
+	$pg .= makeForm('2fa');
 	$pg .= 'Current 2FA Value: <input name=Value value="" size=10> ';
-	$pg .= '<input type=submit name=New value=New><span class=st1>*</span><br><br>';
+	$pg .= '<input type=submit name=New value=New><span class=st1>*</span>';
+	$pg .= '</form><br><br>';
 	$pg .= '<span class=st1>*</span>WARNING: replacing the Secret Key will disable 2FA<br>';
 	$pg .= 'until you successfully test the new key,<br>';
 	$pg .= 'thus getting a new key is effectively the same as disabling 2FA.<br><br>';
 	$pg .= '</td></tr>';
+	$pg .= '<tr class=dc><td>';
+	$pg .= makeForm('2fa');
+	$pg .= 'If you wish to remove 2FA from your account,<br>';
+	$pg .= 'enter your App 2FA Value: <input name=Value value="" size=10><br>';
+	$pg .= 'then click remove: <input type=submit name=Remove value=Remove>';
+	$pg .= '</form></td></tr>';
 	break;
  }
- $pg .= '</table></form>';
+ $pg .= '</table>';
  $pg .= '</center></td></tr>';
 
  $pg .= '<tr class=dl><td>';
@@ -147,34 +163,53 @@ function set_2fa($data, $user, $tfa, $ans, $err)
 #
 function do2fa($data, $user)
 {
+ $mailmode = '';
  $err = '';
+ $msg = '';
  $setup = getparam('Setup', false);
- $testemail = false;
  if ($setup === 'Setup')
  {
 	// rand() included as part of the entropy
 	$ans = get2fa($user, 'setup', rand(1073741824,2147483647), 0);
-	$testemail = true;
+	$mailmode = 'Setup';
  }
  else
  {
-	$value = getparam('Value', false);
-	$test = getparam('Test', false);
-	if ($test === 'Test' and $value !== null)
+	$can = getparam('Cancel', false);
+	if ($can === 'Cancel')
 	{
-		$ans = get2fa($user, 'test', 0, $value);
-		$testemail = true;
+		$ans = get2fa($user, 'untest', 0, 0);
+		$mailmode = 'Cancel';
 	}
 	else
 	{
-		$nw = getparam('New', false);
-		if ($nw === 'New' and $value !== null)
+		$value = getparam('Value', false);
+		$test = getparam('Test', false);
+		if ($test === 'Test' and $value !== null)
 		{
-			$ans = get2fa($user, 'new', rand(1073741824,2147483647), $value);
-			$testemail = true;
+			$ans = get2fa($user, 'test', 0, $value);
+			$mailmode = 'Test';
 		}
 		else
-			$ans = get2fa($user, '', 0, 0);
+		{
+			$nw = getparam('New', false);
+			if ($nw === 'New' and $value !== null)
+			{
+				$ans = get2fa($user, 'new', rand(1073741824,2147483647), $value);
+				$mailmode = 'New';
+			}
+			else
+			{
+				$rem = getparam('Remove', false);
+				if ($rem === 'Remove' and $value !== null)
+				{
+					$ans = get2fa($user, 'remove', 0, $value);
+					$mailmode = 'Remove';
+				}
+				else
+					$ans = get2fa($user, '', 0, 0);
+			}
+		}
 	}
  }
  if ($ans['STATUS'] != 'ok')
@@ -184,7 +219,7 @@ function do2fa($data, $user)
 	if (isset($ans['2fa_error']))
 		$err = $ans['2fa_error'];
 
-	if ($testemail and $err == '')
+	if ($mailmode != '' and $err == '')
 	{
 		$ans2 = userSettings($user);
 		if ($ans2['STATUS'] != 'ok')
@@ -199,12 +234,16 @@ function do2fa($data, $user)
 				$err = 'An error occurred, check your details below';
 			else
 			{
-				if ($setup === 'Setup')
+				if ($mailmode === 'Setup')
 					twofaSetup($email, zeip(), $emailinfo);
-				else if ($test === 'Test')
+				else if ($mailmode === 'Test')
 					twofaEnabled($email, zeip(), $emailinfo);
-				else if ($nw === 'New')
+				else if ($mailmode === 'New')
 					twofaSetup($email, zeip(), $emailinfo);
+				else if ($mailmode === 'Cancel')
+					twofaCancel($email, zeip(), $emailinfo);
+				else if ($mailmode === 'Remove')
+					twofaRemove($email, zeip(), $emailinfo);
 			}
 		}
 	}
@@ -213,7 +252,10 @@ function do2fa($data, $user)
 	$tfa = null;
  else
 	$tfa = $ans['2fa_status'];
- $pg = set_2fa($data, $user, $tfa, $ans, $err);
+ if (isset($ans['2fa_msg']))
+	$msg = $ans['2fa_msg'];
+
+ $pg = set_2fa($data, $user, $tfa, $ans, $err, $msg);
  return $pg;
 }
 #

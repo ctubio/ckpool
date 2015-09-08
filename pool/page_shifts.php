@@ -14,6 +14,7 @@ function doshifts($data, $user)
  $pg .= "<td class=dr>Avg Hs</td>";
  $pg .= "<td class=dr>Shares</td>";
  $pg .= "<td class=dr>Avg Share</td>";
+ $pg .= "<td class=dr>Rewards</td>";
  $pg .= "</tr>\n";
 
  if (($ans['STATUS'] != 'ok') || !isset($ans['prefix_all']))
@@ -26,10 +27,14 @@ function doshifts($data, $user)
 	$pg = '<h1>Last '.($count+1).' Shifts</h1>'.$pg;
 	for ($i = 0; $i < $count; $i++)
 	{
+		$u = '';
+		if (isset($ans['lastpayoutstart:'.$i])
+		&&  $ans['lastpayoutstart:'.$i] != '')
+			$u = 'u';
 		if (($i % 2) == 0)
-			$row = 'even';
+			$row = "even$u";
 		else
-			$row = 'odd';
+			$row = "odd$u";
 
 		$pg .= "<tr class=$row>";
 		$shifname = $ans['shift:'.$i];
@@ -66,6 +71,7 @@ function doshifts($data, $user)
 		else
 			$avgsh = 0;
 		$pg .= '<td class=dr>'.number_format($avgsh, 2).'</td>';
+		$pg .= '<td class=dr>'.$ans['rewards:'.$i].'</td>';
 		$pg .= "</tr>\n";
 	}
  }
