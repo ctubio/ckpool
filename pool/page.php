@@ -490,7 +490,7 @@ function pgmenu($menus)
 		$first = false;
 		if ($submenu == $menu)
 		{
-			$ret .= "<tr><td class=nav onclick=''>".makeLink($item)."$menu</a>";
+			$ret .= "<tr><td class=nav0>".makeLink($item)."$menu</a>";
 			$ret .= '<div class=sub><table cellpadding=0 cellspacing=0 border=0 width=100%>';
 			continue;
 		}

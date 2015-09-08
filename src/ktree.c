@@ -89,15 +89,11 @@ static void show_ktree(K_TREE *root, char *path, int pos, char *(*dsp_funct)(K_I
 
 	path[pos] = '\0';
 
-	switch(root->red)
-	{
-	case RED_RED:
+	if (root->red == RED_RED)
 		col = 'R';
-		break;
-	case RED_BLACK:
+	else
+	// if (root->red == RED_BLACK)
 		col = 'B';
-		break;
-	}
 
 	printf(" %c %s=%s\n", col, path, dsp_funct(root->data));
 

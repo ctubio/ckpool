@@ -1079,11 +1079,11 @@ K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 	else
 		TXT_TO_BIGINT("attnum2", attnum2, row->attnum2);
 	if (attdate == NULL || attdate[0] == '\0')
-		row->attdate.tv_sec = row->attdate.tv_usec = 0L;
+		DATE_ZERO(&(row->attdate));
 	else
 		TXT_TO_TV("attdate", attdate, row->attdate);
 	if (attdate2 == NULL || attdate2[0] == '\0')
-		row->attdate2.tv_sec = row->attdate2.tv_usec = 0L;
+		DATE_ZERO(&(row->attdate2));
 	else
 		TXT_TO_TV("attdate2", attdate2, row->attdate2);
 
@@ -2922,7 +2922,8 @@ bool workinfo_fill(PGconn *conn)
 	if (!ok) {
 		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
-	}
+	} else
+		ok = set_prevcreatedate(0);
 
 	//K_WUNLOCK(workinfo_free);
 	PQclear(res);
@@ -2959,7 +2960,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 	if (reloading && !confirm_sharesummary) {
 		// We only need to know if the workmarker is processed
 		wm_item = find_workmarkers(shares->workinfoid, false,
-					   MARKER_PROCESSED);
+					   MARKER_PROCESSED, NULL);
 		if (wm_item) {
 			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
 				 " %"PRId64"/%s/%ld,%ld",
@@ -3260,7 +3261,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 	if (reloading && !confirm_sharesummary) {
 		// We only need to know if the workmarker is processed
 		wm_item = find_workmarkers(shareerrors->workinfoid, false,
-					   MARKER_PROCESSED);
+					   MARKER_PROCESSED, NULL);
 		if (wm_item) {
 			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
 				 " %"PRId64"/%s/%ld,%ld",
@@ -4024,7 +4025,8 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 		}
 
 		K_RLOCK(workmarkers_free);
-		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED);
+		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED,
+					   NULL);
 		K_RUNLOCK(workmarkers_free);
 		if (wm_item) {
 			DATA_WORKMARKERS(wm, wm_item);
@@ -4298,6 +4300,7 @@ unparam:
 		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
 		k_add_head(blocks_store, b_item);
 		blocks_stats_rebuild = true;
+		// 'confirmed' is unchanged so no need to recalc *createdate
 	}
 	K_WUNLOCK(blocks_free);
 
@@ -4438,7 +4441,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 			// We didn't use a Begin
 			ok = true;
-			userinfo_block(row, INFO_NEW);
+			userinfo_block(row, INFO_NEW, 1);
 			goto unparam;
 			break;
 		case BLOCKS_ORPHAN:
@@ -4597,10 +4600,49 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			}
 
 			update_old = true;
-			if (confirmed[0] == BLOCKS_ORPHAN)
-				userinfo_block(row, INFO_ORPHAN);
-			else if (confirmed[0] == BLOCKS_REJECT)
-				userinfo_block(row, INFO_REJECT);
+			/* handle confirmed state changes for userinfo
+			 * this case statement handles all possible combinations
+			 *  even if they can't happen (yet) */
+			switch (oldblocks->confirmed[0]) {
+				case BLOCKS_ORPHAN:
+					switch (confirmed[0]) {
+						case BLOCKS_ORPHAN:
+							break;
+						case BLOCKS_REJECT:
+							userinfo_block(row, INFO_ORPHAN, -1);
+							userinfo_block(row, INFO_REJECT, 1);
+							break;
+						default:
+							userinfo_block(row, INFO_ORPHAN, -1);
+							break;
+					}
+					break;
+				case BLOCKS_REJECT:
+					switch (confirmed[0]) {
+						case BLOCKS_REJECT:
+							break;
+						case BLOCKS_ORPHAN:
+							userinfo_block(row, INFO_REJECT, -1);
+							userinfo_block(row, INFO_ORPHAN, 1);
+							break;
+						default:
+							userinfo_block(row, INFO_REJECT, -1);
+							break;
+					}
+					break;
+				default:
+					switch (confirmed[0]) {
+						case BLOCKS_ORPHAN:
+							userinfo_block(row, INFO_ORPHAN, 1);
+							break;
+						case BLOCKS_REJECT:
+							userinfo_block(row, INFO_REJECT, 1);
+							break;
+						default:
+							break;
+					}
+					break;
+			}
 			break;
 		default:
 			LOGERR("%s(): %s.failed.invalid confirm='%s'",
@@ -4638,6 +4680,9 @@ flail:
 		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
 		k_add_head(blocks_store, b_item);
 		blocks_stats_rebuild = true;
+		// recalc the *createdate fields for possibly affected blocks
+		set_blockcreatedate(row->height);
+		set_prevcreatedate(row->height);
 	}
 	K_WUNLOCK(blocks_free);
 
@@ -4711,6 +4756,7 @@ bool blocks_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
+	K_TREE_CTX ctx[1];
 	K_ITEM *item;
 	int n, i;
 	BLOCKS *row;
@@ -4862,16 +4908,30 @@ bool blocks_fill(PGconn *conn)
 			pool.height = row->height;
 		}
 
-		if (CURRENT(&(row->expirydate))) {
-			_userinfo_block(row, INFO_NEW, false);
-			if (row->confirmed[0] == BLOCKS_ORPHAN)
-				_userinfo_block(row, INFO_ORPHAN, false);
-			else if (row->confirmed[0] == BLOCKS_REJECT)
-				_userinfo_block(row, INFO_REJECT, false);
-		}
+		// first add all the NEW blocks
+		if (row->confirmed[0] == BLOCKS_NEW)
+			_userinfo_block(row, INFO_NEW, 1, false);
 	}
+
 	if (!ok)
 		k_add_head(blocks_free, item);
+	else
+		ok = set_blockcreatedate(0);
+
+	// Now update all the CURRENT orphan/reject stats
+	if (ok) {
+		item = first_in_ktree(blocks_root, ctx);
+		while (item) {
+			DATA_BLOCKS(row, item);
+			if (CURRENT(&(row->expirydate))) {
+				if (row->confirmed[0] == BLOCKS_ORPHAN)
+					_userinfo_block(row, INFO_ORPHAN, 1, false);
+				else if (row->confirmed[0] == BLOCKS_REJECT)
+					_userinfo_block(row, INFO_REJECT, 1, false);
+			}
+			item = next_in_ktree(ctx);
+		}
+	}
 
 	K_WUNLOCK(blocks_free);
 	PQclear(res);
@@ -5118,12 +5178,15 @@ void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item, tv_t *cd)
 			DATA_PAYOUTS(oldp, old_p_item);
 			payouts_root = remove_from_ktree(payouts_root, old_p_item, cmp_payouts);
 			payouts_id_root = remove_from_ktree(payouts_id_root, old_p_item, cmp_payouts_id);
+			payouts_wid_root = remove_from_ktree(payouts_wid_root, old_p_item, cmp_payouts_wid);
 			copy_tv(&(oldp->expirydate), cd);
 			payouts_root = add_to_ktree(payouts_root, old_p_item, cmp_payouts);
 			payouts_id_root = add_to_ktree(payouts_id_root, old_p_item, cmp_payouts_id);
+			payouts_wid_root = add_to_ktree(payouts_wid_root, old_p_item, cmp_payouts_wid);
 		}
 		payouts_root = add_to_ktree(payouts_root, p_item, cmp_payouts);
 		payouts_id_root = add_to_ktree(payouts_id_root, p_item, cmp_payouts_id);
+		payouts_wid_root = add_to_ktree(payouts_wid_root, p_item, cmp_payouts_wid);
 		k_add_head(payouts_store, p_item);
 	}
 	K_WUNLOCK(payouts_free);
@@ -5430,9 +5493,11 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 	DATA_PAYOUTS(payouts, po_item);
 	payouts_root = remove_from_ktree(payouts_root, po_item, cmp_payouts);
 	payouts_id_root = remove_from_ktree(payouts_id_root, po_item, cmp_payouts_id);
+	payouts_wid_root = remove_from_ktree(payouts_wid_root, po_item, cmp_payouts_wid);
 	copy_tv(&(payouts->expirydate), now);
 	payouts_root = add_to_ktree(payouts_root, po_item, cmp_payouts);
 	payouts_id_root = add_to_ktree(payouts_id_root, po_item, cmp_payouts_id);
+	payouts_wid_root = add_to_ktree(payouts_wid_root, po_item, cmp_payouts_wid);
 
 	mp_item = first_miningpayouts(payoutid, mp_ctx);
 	DATA_MININGPAYOUTS_NULL(mp, mp_item);
@@ -5465,6 +5530,12 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 		DATA_PAYMENTS_NULL(payments, pm_item);
 	}
 
+	if (PAYGENERATED(payouts->status)) {
+		// Original was generated, so undo the reward
+		reward_shifts(payouts, true, -1);
+
+	}
+
 	ok = true;
 matane:
 	if (begun)
@@ -5494,8 +5565,10 @@ bool payouts_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_ITEM *item, *b_item;
+	K_TREE_CTX ctx[1];
 	PAYOUTS *row;
+	BLOCKS *blocks;
 	int n, i;
 	char *field;
 	char *sel;
@@ -5609,9 +5682,29 @@ bool payouts_fill(PGconn *conn)
 		if (!ok)
 			break;
 
+		// This also of course, verifies the payouts -> blocks reference
+		b_item = find_blocks(row->height, row->blockhash, ctx);
+		if (!b_item) {
+			LOGERR("%s(): payoutid %"PRId64" references unknown "
+				"block %"PRId32"/%s",
+				__func__, row->payoutid, row->height,
+				row->blockhash);
+			ok = false;
+			break;
+		} else {
+			// blockcreatedate will already be set
+			DATA_BLOCKS(blocks, b_item);
+			copy_tv(&(row->blockcreatedate),
+				&(blocks->blockcreatedate));
+		}
+
 		payouts_root = add_to_ktree(payouts_root, item, cmp_payouts);
 		payouts_id_root = add_to_ktree(payouts_id_root, item, cmp_payouts_id);
+		payouts_wid_root = add_to_ktree(payouts_wid_root, item, cmp_payouts_wid);
 		k_add_head(payouts_store, item);
+
+		if (CURRENT(&(row->expirydate)) && PAYGENERATED(row->status))
+			reward_shifts(row, false, 1);
 
 		tick();
 	}
@@ -6517,7 +6610,7 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 
 	if (markerid == 0) {
 		K_RLOCK(workmarkers_free);
-		old_wm_item = find_workmarkers(workinfoidend, true, '\0');
+		old_wm_item = find_workmarkers(workinfoidend, true, '\0', NULL);
 		K_RUNLOCK(workmarkers_free);
 	} else {
 		K_RLOCK(workmarkers_free);
@@ -6691,6 +6784,8 @@ unparam:
 								   cmp_workmarkers_workinfoid);
 		}
 		if (wm_item) {
+			shift_rewards(wm_item);
+
 			workmarkers_root = add_to_ktree(workmarkers_root,
 							wm_item,
 							cmp_workmarkers);

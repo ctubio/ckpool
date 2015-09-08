@@ -213,7 +213,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int32_t entropy, value;
 	USERS *users;
 	char *action, *buf = NULL, *st = NULL;
-	char *sfa_status = EMPTY, *sfa_error = EMPTY;
+	char *sfa_status = EMPTY, *sfa_error = EMPTY, *sfa_msg = EMPTY;
 	bool ok = false, key = false;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -301,9 +301,24 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			else {
 				key = false;
 				sfa_status = "ok";
+				sfa_msg = "2FA Enabled";
 			}
 			// Report sfa_error to web
 			ok = true;
+		} else if (strcmp(action, "untest") == 0) {
+			// Can't untest if it's not ready to test
+			if ((users->databits & (USER_TOTPAUTH | USER_TEST2FA))
+			    != (USER_TOTPAUTH | USER_TEST2FA))
+				goto dame;
+			// since it's currently test, the value isn't required
+			u_new = remove_2fa(u_item, 0, by, code, inet, now,
+					   trf_root, false);
+			if (u_new) {
+				ok = true;
+				sfa_status = EMPTY;
+				key = false;
+				sfa_msg = "2FA Cancelled";
+			}
 		} else if (strcmp(action, "new") == 0) {
 			// Can't new if 2FA isn't already present -> setup
 			if ((users->databits & USER_TOTPAUTH) == 0)
@@ -329,23 +344,27 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			// Can't remove if 2FA isn't already present
 			if (!(users->databits & (USER_TOTPAUTH | USER_TEST2FA)))
 				goto dame;
+			// remove requires value
 			value = (int32_t)atoi(transfer_data(i_value));
 			if (!check_2fa(users, value)) {
 				sfa_error = "Invalid code";
 				// Report sfa_error to web
 				ok = true;
 			} else {
+				/* already tested 2fa so don't retest, also,
+				 *  a retest will fail using the same value */
 				u_new = remove_2fa(u_item, value, by, code,
-						   inet, now, trf_root);
+						   inet, now, trf_root, false);
 				if (u_new) {
 					ok = true;
 					sfa_status = EMPTY;
 					key = false;
+					sfa_msg = "2FA Removed";
 				}
 			}
 		}
 		if (key) {
-			char *keystr, *issuer = "Kano";
+			char *keystr, *issuer = "KanoCKDB";
 			char cd_buf[DATE_BUFSIZ];
 			unsigned char *bin;
 			OPTIONCONTROL *oc;
@@ -411,8 +430,9 @@ dame:
 		return strdup("failed.");
 	}
 
-	snprintf(tmp, sizeof(tmp), "2fa_status=%s%c2fa_error=%s",
-				   sfa_status, FLDSEP, sfa_error);
+	snprintf(tmp, sizeof(tmp), "2fa_status=%s%c2fa_error=%s%c2fa_msg=%s",
+				   sfa_status, FLDSEP, sfa_error, FLDSEP,
+				   sfa_msg);
 	APPEND_REALLOC(buf, off, len, tmp);
 	LOGDEBUG("%s.%s-%s.%s", id, transfer_data(i_username), action, buf);
 	return buf;
@@ -1116,7 +1136,7 @@ static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 }
 
 static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
-			   __maybe_unused tv_t *now, __maybe_unused char *by,
+			   tv_t *now, __maybe_unused char *by,
 			   __maybe_unused char *code, __maybe_unused char *inet,
 			   __maybe_unused tv_t *notcd,
 			   __maybe_unused K_TREE *trf_root)
@@ -1128,12 +1148,15 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024];
 	char *buf, *desc, desc_buf[64];
 	size_t len, off;
-	int32_t height = -1;
-	tv_t first_cd = {0,0}, stats_tv = {0,0}, stats_tv2 = {0,0};
+	tv_t stats_tv = {0,0}, stats_tv2 = {0,0};
 	int rows, srows, tot, seq;
+	int64_t maxrows;
 	bool has_stats;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	// 0 means just the system setting
+	maxrows = user_sys_setting(0, BLOCKS_SETTING_NAME, BLOCKS_DEFAULT, now);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
@@ -1158,15 +1181,8 @@ redo:
 	}
 	seq = tot;
 	b_item = last_in_ktree(blocks_root, ctx);
-	while (b_item && rows < 42) {
+	while (b_item && rows < (int)maxrows) {
 		DATA_BLOCKS(blocks, b_item);
-		/* For each block remember the initial createdate
-		 * Reverse sort order the oldest expirydate is first
-		 *  which should be the 'n' record */
-		if (height != blocks->height) {
-			height = blocks->height;
-			copy_tv(&first_cd, &(blocks->createdate));
-		}
 		if (CURRENT(&(blocks->expirydate))) {
 			if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
 			    blocks->confirmed[0] == BLOCKS_REJECT) {
@@ -1203,14 +1219,22 @@ redo:
 			snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			// When block was found
 			snprintf(tmp, sizeof(tmp),
 				 "first"CDTRF":%d=%ld%c", rows,
-				 first_cd.tv_sec, FLDSEP);
+				 blocks->blockcreatedate.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			// Last time block was updated
 			snprintf(tmp, sizeof(tmp),
 				 CDTRF":%d=%ld%c", rows,
 				 blocks->createdate.tv_sec, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			// When previous valid block was found
+			snprintf(tmp, sizeof(tmp),
+				 "prev"CDTRF":%d=%ld%c", rows,
+				 blocks->prevcreatedate.tv_sec, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
 			snprintf(tmp, sizeof(tmp),
@@ -1299,12 +1323,18 @@ redo:
 					snprintf(tmp, sizeof(tmp),
 						 "s_seq:%d=%d%c"
 						 "s_desc:%d=%s%c"
+						 "s_height:%d=%d%c"
+						 "s_"CDTRF":%d=%ld%c"
+						 "s_prev"CDTRF":%d=%ld%c"
 						 "s_diffratio:%d=%.8f%c"
 						 "s_diffmean:%d=%.8f%c"
 						 "s_cdferl:%d=%.8f%c"
 						 "s_luck:%d=%.8f%c",
 						 srows, seq, FLDSEP,
 						 srows, desc, FLDSEP,
+						 srows, (int)(blocks->height), FLDSEP,
+						 srows, blocks->blockcreatedate.tv_sec, FLDSEP,
+						 srows, blocks->prevcreatedate.tv_sec, FLDSEP,
 						 srows, blocks->diffratio, FLDSEP,
 						 srows, blocks->diffmean, FLDSEP,
 						 srows, blocks->cdferl, FLDSEP,
@@ -1336,7 +1366,8 @@ redo:
 	snprintf(tmp, sizeof(tmp),
 		 "s_rows=%d%cs_flds=%s%c",
 		 srows, FLDSEP,
-		 "s_seq,s_desc,s_diffratio,s_diffmean,s_cdferl,s_luck",
+		 "s_seq,s_desc,s_height,s_"CDTRF",s_prev"CDTRF",s_diffratio,"
+		 "s_diffmean,s_cdferl,s_luck",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -1344,8 +1375,8 @@ redo:
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
 		 "seq,height,blockhash,nonce,reward,workername,first"CDTRF","
-		 CDTRF",confirmed,status,info,statsconf,diffacc,diffinv,"
-		 "shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck",
+		 CDTRF",prev"CDTRF",confirmed,status,info,statsconf,diffacc,"
+		 "diffinv,shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -1697,8 +1728,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	// Add up all user's worker stats to be divided into payout percentages
 	lookworkers.userid = users->userid;
 	lookworkers.workername[0] = '\0';
-	lookworkers.expirydate.tv_sec = 0;
-	lookworkers.expirydate.tv_usec = 0;
+	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
 	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
@@ -1959,8 +1989,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	lookworkers.userid = users->userid;
 	lookworkers.workername[0] = '\0';
-	lookworkers.expirydate.tv_sec = 0;
-	lookworkers.expirydate.tv_usec = 0;
+	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
 	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
@@ -1974,7 +2003,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				copy_tv(&last_share, &(workerstatus->last_share));
 				K_RUNLOCK(workerstatus_free);
 			} else
-				last_share.tv_sec = last_share.tv_usec = 0L;
+				DATE_ZERO(&last_share);
 
 			if (tvdiff(now, &last_share) < oldworkers) {
 				str_to_buf(workers->workername, reply, sizeof(reply));
@@ -2012,7 +2041,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					w_elapsed = -1;
 
 					if (!ws_item) {
-						w_lastshare.tv_sec = 0;
+						w_lastshare.tv_sec = 0L;
 						w_lastdiff = w_diffacc =
 						w_diffinv = w_diffsta =
 						w_diffdup = w_diffhi =
@@ -2020,7 +2049,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 						w_shareinv = w_sharesta =
 						w_sharedup = w_sharehi =
 						w_sharerej = w_active_diffacc = 0;
-						w_active_start.tv_sec = 0;
+						w_active_start.tv_sec = 0L;
 					} else {
 						DATA_WORKERSTATUS(workerstatus, ws_item);
 						// It's bad to read possibly changing data
@@ -4009,8 +4038,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): height %"PRId32, __func__, height);
 
-	block_tv.tv_sec = block_tv.tv_usec = 0L;
-	cd.tv_sec = cd.tv_usec = 0L;
+	DATE_ZERO(&block_tv);
+	DATE_ZERO(&cd);
 	lookblocks.height = height + 1;
 	lookblocks.blockhash[0] = '\0';
 	INIT_BLOCKS(&b_look);
@@ -4437,7 +4466,6 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	PAYMENTS *payments;
 	PAYOUTS *payouts;
 	BLOCKS lookblocks, *blocks;
-	tv_t block_tv = { 0L, 0L };
 	WORKINFO *bworkinfo, *workinfo;
 	char ndiffbin[TXT_SML+1];
 	double ndiff;
@@ -4461,36 +4489,26 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): height %"PRId32, __func__, height);
 
-	lookblocks.height = height + 1;
+	lookblocks.height = height;
 	lookblocks.blockhash[0] = '\0';
 	INIT_BLOCKS(&b_look);
 	b_look.data = (void *)(&lookblocks);
 	K_RLOCK(blocks_free);
-	b_item = find_before_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	b_item = find_after_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	K_RUNLOCK(blocks_free);
 	if (!b_item) {
 		K_RUNLOCK(blocks_free);
-		snprintf(reply, siz, "ERR.no block height %"PRId32, height);
+		snprintf(reply, siz, "ERR.no block height >= %"PRId32, height);
 		return strdup(reply);
 	}
 	DATA_BLOCKS(blocks, b_item);
-	while (b_item && blocks->height == height) {
-		if (blocks->confirmed[0] == BLOCKS_NEW)
-			copy_tv(&block_tv, &(blocks->createdate));
-		// Allow any state, but report it
-		if (CURRENT(&(blocks->expirydate)))
-			break;
-		b_item = prev_in_ktree(b_ctx);
-		DATA_BLOCKS_NULL(blocks, b_item);
-	}
-	K_RUNLOCK(blocks_free);
 	if (!b_item || blocks->height != height) {
 		snprintf(reply, siz, "ERR.no block height %"PRId32, height);
 		return strdup(reply);
 	}
-	if (block_tv.tv_sec == 0) {
-		snprintf(reply, siz, "ERR.block %"PRId32" missing '%s' record",
-				     height,
-				     blocks_confirmed(BLOCKS_NEW_STR));
+	if (blocks->blockcreatedate.tv_sec == 0) {
+		snprintf(reply, siz, "ERR.block %"PRId32" has 0 blockcreatedate",
+				     height);
 		return strdup(reply);
 	}
 	if (!CURRENT(&(blocks->expirydate))) {
@@ -4667,10 +4685,11 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "begin_epoch=%ld%c",
 				   workinfo->createdate.tv_sec, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	tv_to_buf(&block_tv, tv_buf, sizeof(tv_buf));
+	tv_to_buf(&(blocks->blockcreatedate), tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "block_stamp=%s%c", tv_buf, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "block_epoch=%ld%c", block_tv.tv_sec, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "block_epoch=%ld%c",
+				   blocks->blockcreatedate.tv_sec, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	tv_to_buf(&(payouts->lastshareacc), tv_buf, sizeof(tv_buf));
 	snprintf(tmp, sizeof(tmp), "end_stamp=%s%c", tv_buf, FLDSEP);
@@ -4780,6 +4799,8 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
 			return strdup(reply);
 		}
+		// Original wasn't generated, so reward it
+		reward_shifts(payouts2, true, 1);
 		DATA_PAYOUTS(payouts2, p2_item);
 		DATA_PAYOUTS(old_payouts2, old_p2_item);
 		snprintf(msg, sizeof(msg),
@@ -4849,6 +4870,8 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
 			return strdup(reply);
 		}
+		// Original was generated, so undo the reward
+		reward_shifts(payouts2, true, -1);
 		DATA_PAYOUTS(payouts2, p2_item);
 		DATA_PAYOUTS(old_payouts2, old_p2_item);
 		snprintf(msg, sizeof(msg),
@@ -4866,6 +4889,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			return strdup(reply);
 		TXT_TO_BIGINT("payoutid", transfer_data(i_payoutid), payoutid);
 
+		// payouts_full_expire updates the shift rewards
 		p_item = payouts_full_expire(conn, payoutid, now, true);
 		if (!p_item) {
 			snprintf(reply, siz, "failed payout %"PRId64, payoutid);
@@ -4902,6 +4926,7 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 			return strdup(reply);
 		TXT_TO_CTV("addrdate", transfer_data(i_addrdate), addrdate);
 
+		// process_pplns updates the shift rewards
 		if (addrdate.tv_sec == 0)
 			ok = process_pplns(height, blockhash, NULL);
 		else
@@ -4982,6 +5007,11 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							   rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
+				snprintf(tmp, sizeof(tmp),
+					 "block"CDTRF":%d=%ld%c", rows,
+					 payouts->blockcreatedate.tv_sec, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
 				bigint_to_buf(payouts->elapsed, reply,
 					      sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "elapsed:%d=%s%c",
@@ -5026,7 +5056,7 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "payoutid,height,elapsed,amount,diffacc,minerreward,diffused,status",
+		 "payoutid,height,block"CDTRF",elapsed,amount,diffacc,minerreward,diffused,status",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -5037,15 +5067,16 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
-/* Find the offset, in list, of the workername
- * -1 means NULL list, empty list or not found */
-static int worker_offset(char **list, char *workername)
+typedef struct worker_match {
+	char *worker;
+	bool match;
+	size_t len;
+	bool used;
+} WM;
+
+static char *worker_offset(char *workername)
 {
 	char *c1, *c2;
-	int i;
-
-	if (!list || !(*list))
-		return -1;
 
 	/* Find the start of the workername including the SEP */
 	c1 = strchr(workername, WORKSEP1);
@@ -5057,11 +5088,8 @@ static int worker_offset(char **list, char *workername)
 	// No workername after the username
 	if (!c1)
 		c1 = WORKERS_EMPTY;
-	for (i = 0; list[i]; i++) {
-		if (strcmp(c1, list[i]) == 0)
-			return i;
-	}
-	return -1;
+
+	return c1;
 }
 
 /* Some arbitrarily large limit, increase it if needed
@@ -5069,28 +5097,19 @@ static int worker_offset(char **list, char *workername)
 #define SELECT_LIMIT 63
 
 /* select is a string of workernames separated by WORKERS_SEL_SEP
- * Return an array of strings of select broken up
- * The array is terminated by NULL
+ * Setup the wm array of workers with select broken up
+ * The wm array is terminated by workers = NULL
  *  and will have 0 elements if select is NULL/empty
- * The count of the first occurrence of WORKERS_ALL is returned in *all_count,
+ * The count of the first occurrence of WORKERS_ALL is returned,
  *  or -1 if WORKERS_ALL isn't found */
-static char **select_list(char *select, int *all_count)
+static int select_list(WM *wm, char *select)
 {
-	size_t len, offset, siz;
-	char **list = NULL;
-	int count;
+	int count, all_count = -1;
+	size_t len, offset;
 	char *end;
 
-	*all_count = -1;
-
-	siz = sizeof(char *) * (SELECT_LIMIT + 1);
-	list = malloc(siz);
-	if (!list)
-		quithere(1, "malloc (%d) OOM", (int)siz);
-	list[0] = NULL;
-
 	if (select == NULL || *select == '\0')
-		return list;
+		return all_count;
 
 	len = strlen(select);
 	count = 0;
@@ -5099,24 +5118,24 @@ static char **select_list(char *select, int *all_count)
 		if (select[offset] == WORKERS_SEL_SEP)
 			offset++;
 		else {
-			list[count] = select + offset;
-			list[count+1] = NULL;
-			end = strchr(list[count], WORKERS_SEL_SEP);
+			wm[count].worker = select + offset;
+			wm[count+1].worker = NULL;
+			end = strchr(wm[count].worker, WORKERS_SEL_SEP);
 			if (end != NULL) {
 				offset = 1 + end - select;
 				*end = '\0';
 			}
 
-			if (*all_count == -1 &&
-			    strcasecmp(list[count], WORKERS_ALL) == 0) {
-				*all_count = count;
+			if (all_count == -1 &&
+			    strcasecmp(wm[count].worker, WORKERS_ALL) == 0) {
+				all_count = count;
 			}
 
 			if (end == NULL || ++count > SELECT_LIMIT)
 				break;
 		}
 	}
-	return list;
+	return all_count;
 }
 
 static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
@@ -5129,7 +5148,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_TREE_CTX wm_ctx[1], ms_ctx[1];
 	WORKMARKERS *wm;
 	WORKINFO *wi;
-	MARKERSUMMARY markersummary, *ms, ms_add;
+	MARKERSUMMARY markersummary, *ms, ms_add[SELECT_LIMIT+1];
 	PAYOUTS *payouts;
 	USERS *users;
 	MARKS *marks = NULL;
@@ -5137,14 +5156,14 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024];
 	size_t siz = sizeof(reply);
 	char *select = NULL;
-	char **selects = NULL;
-	bool used[SELECT_LIMIT];
-	char *buf;
+	WM workm[SELECT_LIMIT+1];
+	char *buf, *work;
 	size_t len, off;
 	tv_t marker_end = { 0L, 0L };
 	int rows, want, i, where_all;
 	int64_t maxrows;
 	double wm_count, d;
+	int64_t last_payout_start = 0;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -5171,23 +5190,34 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 		wm_count *= 1.42;
 		if (maxrows < wm_count)
 			maxrows = wm_count;
+		last_payout_start = payouts->workinfoidstart;
 	}
 
 	i_select = optional_name(trf_root, "select", 1, NULL, reply, siz);
 	if (i_select)
 		select = strdup(transfer_data(i_select));
 
-	selects = select_list(select, &where_all);
+	bzero(workm, sizeof(workm));
+	where_all = select_list(&(workm[0]), select);
 	// Nothing selected = all
-	if (*selects == NULL) {
+	if (workm[0].worker == NULL) {
 		where_all = 0;
-		selects[0] = WORKERS_ALL;
-		selects[1] = NULL;
+		workm[0].worker = WORKERS_ALL;
+	} else {
+		for (i = 0; workm[i].worker; i++) {
+			// N.B. len is only used if match is true
+			len = workm[i].len = strlen(workm[i].worker);
+			// If at least 3 characters and last is '*'
+			if (len > 2 && workm[i].worker[len-1] == '*') {
+				workm[i].worker[len-1] = '\0';
+				workm[i].match = true;
+				workm[i].len--;
+			}
+		}
 	}
 
-	bzero(used, sizeof(used));
 	if (where_all >= 0)
-		used[where_all] = true;
+		workm[where_all].used = true;
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
@@ -5216,7 +5246,12 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 					wm->workinfoidend);
 			}
 
-			bzero(&ms_add, sizeof(ms_add));
+			// Zero everything for this shift
+			bzero(ms_add, sizeof(ms_add));
+			for (i = 0; workm[i].worker; i++) {
+				if (i != where_all)
+					workm[i].used = false;
+			}
 
 			markersummary.markerid = wm->markerid;
 			markersummary.userid = users->userid;
@@ -5227,49 +5262,56 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			DATA_MARKERSUMMARY_NULL(ms, ms_item);
 			while (ms_item && ms->markerid == wm->markerid &&
 			       ms->userid == users->userid) {
-				ms_add.diffacc += ms->diffacc;
-				ms_add.diffsta += ms->diffsta;
-				ms_add.diffdup += ms->diffdup;
-				ms_add.diffhi += ms->diffhi;
-				ms_add.diffrej += ms->diffrej;
-				ms_add.shareacc += ms->shareacc;
-				ms_add.sharesta += ms->sharesta;
-				ms_add.sharedup += ms->sharedup;
-				ms_add.sharehi += ms->sharehi;
-				ms_add.sharerej += ms->sharerej;
-
-				want = worker_offset(selects, ms->workername);
-				if (want >= 0) {
-					used[want] = true;
-					double_to_buf(ms->diffacc, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "%d_diffacc:%d=%s%c",
-								   want, rows, reply, FLDSEP);
-					APPEND_REALLOC(buf, off, len, tmp);
-
-					d = ms->diffsta + ms->diffdup +
-					    ms->diffhi + ms->diffrej;
-					double_to_buf(d, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "%d_diffinv:%d=%s%c",
-								   want, rows, reply, FLDSEP);
-					APPEND_REALLOC(buf, off, len, tmp);
-
-					double_to_buf(ms->shareacc, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "%d_shareacc:%d=%s%c",
-								   want, rows, reply, FLDSEP);
-					APPEND_REALLOC(buf, off, len, tmp);
-
-					d = ms->sharesta + ms->sharedup +
-					    ms->sharehi + ms->sharerej;
-					double_to_buf(d, reply, sizeof(reply));
-					snprintf(tmp, sizeof(tmp), "%d_shareinv:%d=%s%c",
-								   want, rows, reply, FLDSEP);
-					APPEND_REALLOC(buf, off, len, tmp);
+				work = worker_offset(ms->workername);
+				for (want = 0; workm[want].worker; want++) {
+					if ((want == where_all) ||
+					    (workm[want].match && strncmp(work, workm[want].worker, workm[want].len) == 0) ||
+					    (!(workm[want].match) && strcmp(workm[want].worker, work) == 0)) {
+						workm[want].used = true;
+						ms_add[want].diffacc += ms->diffacc;
+						ms_add[want].diffsta += ms->diffsta;
+						ms_add[want].diffdup += ms->diffdup;
+						ms_add[want].diffhi += ms->diffhi;
+						ms_add[want].diffrej += ms->diffrej;
+						ms_add[want].shareacc += ms->shareacc;
+						ms_add[want].sharesta += ms->sharesta;
+						ms_add[want].sharedup += ms->sharedup;
+						ms_add[want].sharehi += ms->sharehi;
+						ms_add[want].sharerej += ms->sharerej;
+					}
 				}
-
 				ms_item = next_in_ktree(ms_ctx);
 				DATA_MARKERSUMMARY_NULL(ms, ms_item);
 			}
 			K_RUNLOCK(markersummary_free);
+
+			for (i = 0; i <= SELECT_LIMIT; i++) {
+				if (workm[i].used) {
+					double_to_buf(ms_add[i].diffacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_diffacc:%d=%s%c",
+								   i, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					d = ms_add[i].diffsta + ms_add[i].diffdup +
+					    ms_add[i].diffhi + ms_add[i].diffrej;
+					double_to_buf(d, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_diffinv:%d=%s%c",
+								   i, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(ms_add[i].shareacc, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_shareacc:%d=%s%c",
+								   i, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					d = ms_add[i].sharesta + ms_add[i].sharedup +
+					    ms_add[i].sharehi + ms_add[i].sharerej;
+					double_to_buf(d, reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "%d_shareinv:%d=%s%c",
+								   i, rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+				}
+			}
 
 			if (marker_end.tv_sec == 0L) {
 				wi_item = next_workinfo(wm->workinfoidend, NULL);
@@ -5286,7 +5328,6 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 							wm->workinfoidend);
 						snprintf(reply, siz, "data error 1");
 						free(buf);
-						free(selects);
 						return(strdup(reply));
 					}
 					DATA_WORKINFO(wi, wi_item);
@@ -5307,7 +5348,6 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 					wm->workinfoidstart);
 				snprintf(reply, siz, "data error 2");
 				free(buf);
-				free(selects);
 				return(strdup(reply));
 			}
 			DATA_WORKINFO(wi, wi_item);
@@ -5338,35 +5378,18 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 						   rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
-			if (where_all >= 0) {
-				double_to_buf(ms_add.diffacc, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_diffacc:%d=%s%c",
-							   where_all, rows,
-							   reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "rewards:%d=%d%c",
+						   rows, wm->rewards, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
 
-				d = ms_add.diffsta + ms_add.diffdup +
-				    ms_add.diffhi + ms_add.diffrej;
-				double_to_buf(d, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_diffinv:%d=%s%c",
-							   where_all, rows,
-							   reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "lastpayoutstart:%d=%s%c",
+						   rows,
+						   (wm->workinfoidstart ==
+						    last_payout_start) ?
+						    "Y" : EMPTY,
+						   FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
 
-				double_to_buf(ms_add.shareacc, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_shareacc:%d=%s%c",
-							   where_all, rows,
-							   reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-
-				d = ms_add.sharesta + ms_add.sharedup +
-				    ms_add.sharehi + ms_add.sharerej;
-				double_to_buf(d, reply, sizeof(reply));
-				snprintf(tmp, sizeof(tmp), "%d_shareinv:%d=%s%c",
-							   where_all, rows,
-							   reply, FLDSEP);
-				APPEND_REALLOC(buf, off, len, tmp);
-			}
 			rows++;
 
 			// Setup for next shift
@@ -5379,11 +5402,13 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	K_RUNLOCK(workmarkers_free);
 
-	for (i = 0; selects[i]; i++) {
-		if (used[i]) {
+	for (i = 0; workm[i].worker; i++) {
+		if (workm[i].used) {
 			snprintf(tmp, sizeof(tmp),
-				 "%d_worker=%s%c",
-				 i, selects[i], FLDSEP);
+				 "%d_worker=%s%s%c",
+				 i, workm[i].worker,
+				 workm[i].match ? "*" : EMPTY,
+				 FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 			snprintf(tmp, sizeof(tmp),
 				 "%d_flds=%s%c", i,
@@ -5404,13 +5429,14 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	 * other workers start >= 0 and finish <= rows-1 */
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 				   rows, FLDSEP,
-				   "markerid,shift,start,end", FLDSEP);
+				   "markerid,shift,start,end,rewards,"
+				   "lastpayoutstart", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s", "Shifts");
 	APPEND_REALLOC(buf, off, len, tmp);
-	for (i = 0; selects[i]; i++) {
-		if (used[i]) {
+	for (i = 0; workm[i].worker; i++) {
+		if (workm[i].used) {
 			snprintf(tmp, sizeof(tmp), ",Worker_%d", i);
 			APPEND_REALLOC(buf, off, len, tmp);
 		}
@@ -5418,15 +5444,14 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	snprintf(tmp, sizeof(tmp), "%carp=", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	for (i = 0; selects[i]; i++) {
-		if (used[i]) {
+	for (i = 0; workm[i].worker; i++) {
+		if (workm[i].used) {
 			snprintf(tmp, sizeof(tmp), ",%d_", i);
 			APPEND_REALLOC(buf, off, len, tmp);
 		}
 	}
 
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
-	free(selects);
 	return(buf);
 }
 
@@ -5537,7 +5562,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(marks, 1, 1);
 	USEINFO(blocks, 1, 1);
 	USEINFO(miningpayouts, 1, 1);
-	USEINFO(payouts, 1, 2);
+	USEINFO(payouts, 1, 3);
 	USEINFO(auths, 1, 1);
 	USEINFO(poolstats, 1, 1);
 	USEINFO(userstats, 2, 1);
@@ -6300,6 +6325,60 @@ static char *cmd_userinfo(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+/* Set/show the BTC server settings
+ * You must supply the btcserver to change anything
+ * The format for userpass is username:password
+ * If you don't supply the btcserver it will simply report the current server
+ * If supply btcserver but not the userpass it will use the current userpass
+ * The reply will ONLY contain the URL, not the user/pass */
+static char *cmd_btcset(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *notcd, K_TREE *trf_root)
+{
+	K_ITEM *i_btcserver, *i_userpass;
+	char *btcserver = NULL, *userpass = NULL, *tmp;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char buf[256];
+
+	i_btcserver = optional_name(trf_root, "btcserver", 1, NULL, reply, siz);
+	if (i_btcserver) {
+		btcserver = strdup(transfer_data(i_btcserver));
+		i_userpass = optional_name(trf_root, "userpass", 0, NULL, reply, siz);
+		if (i_userpass)
+			userpass = transfer_data(i_userpass);
+
+		ck_wlock(&btc_lock);
+		btc_server = btcserver;
+		btcserver = NULL;
+		if (userpass) {
+			if (btc_auth) {
+				tmp = btc_auth;
+				while (*tmp)
+					*(tmp++) = '\0';
+			}
+			FREENULL(btc_auth);
+			btc_auth = http_base64(userpass);
+		}
+		ck_wunlock(&btc_lock);
+
+		if (userpass) {
+			tmp = userpass;
+			while (*tmp)
+				*(tmp++) = '\0';
+		}
+	}
+
+	FREENULL(btcserver);
+
+	ck_wlock(&btc_lock);
+	snprintf(buf, sizeof(buf), "ok.btcserver=%s", btc_server);
+	ck_wunlock(&btc_lock);
+	LOGDEBUG("%s.%s.%s", id, cmd, buf);
+	return strdup(buf);
+}
+
 // TODO: limit access by having seperate sockets for each
 #define ACCESS_POOL	"p"
 #define ACCESS_SYSTEM	"s"
@@ -6414,5 +6493,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_PSHIFT,	"pshift",	false,	false,	cmd_pshift,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
 	{ CMD_SHSTA,	"shsta",	true,	false,	cmd_shsta,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_USERINFO,	"userinfo",	false,	false,	cmd_userinfo,	SEQ_NONE,	ACCESS_WEB },
+	{ CMD_BTCSET,	"btcset",	false,	false,	cmd_btcset,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	NULL }
 };

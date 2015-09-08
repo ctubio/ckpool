@@ -65,7 +65,8 @@ function doregres($data, $u)
  <td class=dl><input type=submit name=Register value=Register></td></tr>
 <tr><td colspan=2 class=dc><br><font size=-1><span class=st1>*</span>
  All fields are required<br>Your Username can't be a BTC address</font></td></tr>
-<tr><td colspan=2 class=dc><br>". passrequires() . "</td></tr>
+<tr><td colspan=2 class=dc><font size=-1><br>Note: your username is upper/lowercase sensitive,<br>
+and you must also have upper/lowercase correct on all your miners<br><br>" . passrequires() . "</font></td></tr>
 </table>
 </form>";
 

@@ -28,6 +28,42 @@ function dq($str)
  return str_replace('"', "\\\"", $str);
 }
 #
+function daysago($val)
+{
+ if ($val < -13)
+	return '';
+
+ if ($val < 60)
+	$des = number_format($val,0).'s';
+ else
+ {
+	$val = $val/60;
+	if ($val < 60)
+		$des = number_format($val,1).'min';
+	else
+	{
+		$val = $val/60;
+		if ($val < 24)
+			$des = number_format($val,1).'hrs';
+		else
+		{
+			$val = $val/24;
+			if ($val < 43)
+				$des = number_format($val,1).'days';
+			else
+			{
+				$val = $val/7;
+				if ($val < 10000)
+					$des = number_format($val,1).'wks';
+				else
+					$des = '';
+			}
+		}
+	}
+ }
+ return $des;
+}
+#
 function howlongago($sec)
 {
  if ($sec < 60)
