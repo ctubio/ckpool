@@ -926,7 +926,7 @@ static char *cmd_poolstats_do(PGconn *conn, char *cmd, char *id, char *by,
 	row.createdate.tv_usec = date_eot.tv_usec;
 	INIT_POOLSTATS(&look);
 	look.data = (void *)(&row);
-	ps = find_before_in_ktree(poolstats_root, &look, cmp_poolstats, ctx);
+	ps = find_before_in_ktree(poolstats_root, &look, ctx);
 	if (!ps)
 		store = true;
 	else {
@@ -1730,7 +1730,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	lookworkers.workername[0] = '\0';
 	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
-	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
+	w_item = find_after_in_ktree(workers_root, &w_look, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
@@ -1991,7 +1991,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	lookworkers.workername[0] = '\0';
 	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
-	w_item = find_after_in_ktree(workers_root, &w_look, cmp_workers, w_ctx);
+	w_item = find_after_in_ktree(workers_root, &w_look, w_ctx);
 	DATA_WORKERS_NULL(workers, w_item);
 	rows = 0;
 	while (w_item && workers->userid == users->userid) {
@@ -3285,7 +3285,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		INIT_USERSTATS(&look);
 		look.data = (void *)(&lookuserstats);
 		K_RLOCK(userstats_free);
-		us_item = find_before_in_ktree(userstats_root, &look, cmp_userstats, ctx);
+		us_item = find_before_in_ktree(userstats_root, &look, ctx);
 		DATA_USERSTATS_NULL(userstats, us_item);
 		while (us_item && userstats->userid == users->userid) {
 			if (tvdiff(now, &(userstats->statsdate)) < USERSTATS_PER_S) {
@@ -4045,7 +4045,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	INIT_BLOCKS(&b_look);
 	b_look.data = (void *)(&lookblocks);
 	K_RLOCK(blocks_free);
-	b_item = find_before_in_ktree(blocks_root, &b_look, cmp_blocks, ctx);
+	b_item = find_before_in_ktree(blocks_root, &b_look, ctx);
 	if (!b_item) {
 		K_RUNLOCK(blocks_free);
 		snprintf(reply, siz, "ERR.no block height %d", height);
@@ -4120,7 +4120,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	ss_count = wm_count = ms_count = 0;
 
 	mu_store = k_new_store(miningpayouts_free);
-	mu_root = new_ktree();
+	mu_root = new_ktree(cmp_mu);
 
 	looksharesummary.workinfoid = block_workinfoid;
 	looksharesummary.userid = MAXID;
@@ -4130,8 +4130,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RLOCK(sharesummary_free);
 	K_RLOCK(workmarkers_free);
 	K_RLOCK(markersummary_free);
-	ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
-					cmp_sharesummary_workinfoid, ctx);
+	ss_item = find_before_in_ktree(sharesummary_workinfoid_root,
+					&ss_look, ctx);
 	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	if (ss_item)
 		end_workinfoid = sharesummary->workinfoid;
@@ -4204,8 +4204,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			lookworkmarkers.workinfoidend = block_workinfoid + 1;
 		INIT_WORKMARKERS(&wm_look);
 		wm_look.data = (void *)(&lookworkmarkers);
-		wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
-					       cmp_workmarkers_workinfoid, wm_ctx);
+		wm_item = find_before_in_ktree(workmarkers_workinfoid_root,
+						&wm_look, wm_ctx);
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 		LOGDEBUG("%s(): workmarkers < %"PRId64, __func__, lookworkmarkers.workinfoidend);
 		while (total_diff < diff_want && wm_item && CURRENT(&(workmarkers->expirydate))) {
@@ -4220,8 +4220,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				lookmarkersummary.workername = EMPTY;
 				INIT_MARKERSUMMARY(&ms_look);
 				ms_look.data = (void *)(&lookmarkersummary);
-				ms_item = find_before_in_ktree(markersummary_root, &ms_look,
-							       cmp_markersummary, ms_ctx);
+				ms_item = find_before_in_ktree(markersummary_root,
+								&ms_look, ms_ctx);
 				DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
 				// add the whole markerid
 				while (ms_item && markersummary->markerid == workmarkers->markerid) {
@@ -4431,7 +4431,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	// So web can always verify it received all data
 	APPEND_REALLOC(buf, off, len, "pplns_last=1");
 
-	mu_root = free_ktree(mu_root, NULL);
+	free_ktree(mu_root, NULL);
 	K_WLOCK(mu_store);
 	k_list_transfer_to_head(mu_store, miningpayouts_free);
 	K_WUNLOCK(mu_store);
@@ -4441,7 +4441,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 
 shazbot:
-	mu_root = free_ktree(mu_root, NULL);
+
+	free_ktree(mu_root, NULL);
 	K_WLOCK(mu_store);
 	k_list_transfer_to_head(mu_store, miningpayouts_free);
 	K_WUNLOCK(mu_store);
@@ -4494,7 +4495,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	INIT_BLOCKS(&b_look);
 	b_look.data = (void *)(&lookblocks);
 	K_RLOCK(blocks_free);
-	b_item = find_after_in_ktree(blocks_root, &b_look, cmp_blocks, b_ctx);
+	b_item = find_after_in_ktree(blocks_root, &b_look, b_ctx);
 	K_RUNLOCK(blocks_free);
 	if (!b_item) {
 		K_RUNLOCK(blocks_free);
@@ -5257,8 +5258,8 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			markersummary.userid = users->userid;
 			markersummary.workername = EMPTY;
 			K_RLOCK(markersummary_free);
-			ms_item = find_after_in_ktree(markersummary_root, &ms_look,
-						      cmp_markersummary, ms_ctx);
+			ms_item = find_after_in_ktree(markersummary_root,
+							&ms_look, ms_ctx);
 			DATA_MARKERSUMMARY_NULL(ms, ms_item);
 			while (ms_item && ms->markerid == wm->markerid &&
 			       ms->userid == users->userid) {
