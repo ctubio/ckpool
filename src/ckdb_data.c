@@ -4861,7 +4861,9 @@ bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
  *  and thus if the shift is expired the counter is ignored
  * We only need to (re)calculate it when the workmarker is created
  * Payouts code processing will increment/decrement all current rewards as
- *  needed with reward_shifts() when payouts are added/changed/removed */
+ *  needed with reward_shifts() when payouts are added/changed/removed,
+ *  however, the last shift in a payout can be created after the payout
+ *  is generated so we need to update all from the payouts */
 bool shift_rewards(K_ITEM *wm_item)
 {
 	PAYOUTS *payouts = NULL;
@@ -4869,6 +4871,7 @@ bool shift_rewards(K_ITEM *wm_item)
 	WORKMARKERS *wm;
 	K_ITEM *p_item;
 	int rewards = 0;
+	double pps = 0.0;
 
 	DATA_WORKMARKERS(wm, wm_item);
 
@@ -4879,14 +4882,19 @@ bool shift_rewards(K_ITEM *wm_item)
 	// a workmarker should not cross a payout boundary
 	while (p_item && payouts->workinfoidstart <= wm->workinfoidstart &&
 	       wm->workinfoidend <= payouts->workinfoidend) {
-		if (CURRENT(&(payouts->expirydate)))
+		if (CURRENT(&(payouts->expirydate))) {
 			rewards++;
+			pps += (double)(payouts->minerreward) /
+				payouts->diffused;
+		}
 		p_item = prev_in_ktree(ctx);
 		DATA_PAYOUTS_NULL(payouts, p_item);
 	}
 	K_RUNLOCK(payouts_free);
 
 	wm->rewards = rewards;
+	wm->rewarded = pps;
+
 	return (rewards > 0);
 }
 
