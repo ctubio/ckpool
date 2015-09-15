@@ -95,7 +95,7 @@ function doshifts($data, $user)
 	}
  }
  $pg .= "</table>\n";
- $pg .= "<span class=st1>*</span> The PPS value unit is satoshis<br>";
+ $pg .= "<span class=st1>*</span> The Rewarded value unit is satoshis per 1diff share<br>";
 
  return $pg;
 }
