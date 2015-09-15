@@ -269,6 +269,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 					__func__,
 					st = safe_text_nonull(users->username),
 					users->databits);
+				FREENULL(st);
 				goto dame;
 		}
 
@@ -5073,6 +5074,7 @@ typedef struct worker_match {
 	bool match;
 	size_t len;
 	bool used;
+	bool everused;
 } WM;
 
 static char *worker_offset(char *workername)
@@ -5158,7 +5160,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	size_t siz = sizeof(reply);
 	char *select = NULL;
 	WM workm[SELECT_LIMIT+1];
-	char *buf, *work;
+	char *buf = NULL, *work, *st = NULL;
 	size_t len, off;
 	tv_t marker_end = { 0L, 0L };
 	int rows, want, i, where_all;
@@ -5198,12 +5200,19 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (i_select)
 		select = strdup(transfer_data(i_select));
 
+	APPEND_REALLOC_INIT(buf, off, len);
+	snprintf(tmp, sizeof(tmp), " select='%s'",
+		 select ? st = safe_text_nonull(select) : "null");
+	FREENULL(st);
+	APPEND_REALLOC(buf, off, len, tmp);
+
 	bzero(workm, sizeof(workm));
 	where_all = select_list(&(workm[0]), select);
 	// Nothing selected = all
 	if (workm[0].worker == NULL) {
 		where_all = 0;
 		workm[0].worker = WORKERS_ALL;
+		APPEND_REALLOC(buf, off, len, " no workers");
 	} else {
 		for (i = 0; workm[i].worker; i++) {
 			// N.B. len is only used if match is true
@@ -5214,11 +5223,23 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 				workm[i].match = true;
 				workm[i].len--;
 			}
+			snprintf(tmp, sizeof(tmp), " workm[%d]=%s,%s,%d",
+						   i, st = safe_text_nonull(workm[i].worker),
+						   workm[i].match ? "Y" : "N",
+						   (int)(workm[i].len));
+			FREENULL(st);
+			APPEND_REALLOC(buf, off, len, tmp);
 		}
 	}
 
 	if (where_all >= 0)
 		workm[where_all].used = true;
+
+	snprintf(tmp, sizeof(tmp), " where_all=%d", where_all);
+	APPEND_REALLOC(buf, off, len, tmp);
+	LOGDEBUG("%s() user=%"PRId64"/%s' %s",
+		 __func__, users->userid, users->username, buf+1);
+	FREENULL(buf);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
@@ -5269,6 +5290,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 					    (workm[want].match && strncmp(work, workm[want].worker, workm[want].len) == 0) ||
 					    (!(workm[want].match) && strcmp(workm[want].worker, work) == 0)) {
 						workm[want].used = true;
+						workm[want].everused = true;
 						ms_add[want].diffacc += ms->diffacc;
 						ms_add[want].diffsta += ms->diffsta;
 						ms_add[want].diffdup += ms->diffdup;
@@ -5414,7 +5436,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RUNLOCK(workmarkers_free);
 
 	for (i = 0; workm[i].worker; i++) {
-		if (workm[i].used) {
+		if (workm[i].everused) {
 			snprintf(tmp, sizeof(tmp),
 				 "%d_worker=%s%s%c",
 				 i, workm[i].worker,
@@ -5448,7 +5470,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "arn=%s", "Shifts");
 	APPEND_REALLOC(buf, off, len, tmp);
 	for (i = 0; workm[i].worker; i++) {
-		if (workm[i].used) {
+		if (workm[i].everused) {
 			snprintf(tmp, sizeof(tmp), ",Worker_%d", i);
 			APPEND_REALLOC(buf, off, len, tmp);
 		}
@@ -5457,7 +5479,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "%carp=", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	for (i = 0; workm[i].worker; i++) {
-		if (workm[i].used) {
+		if (workm[i].everused) {
 			snprintf(tmp, sizeof(tmp), ",%d_", i);
 			APPEND_REALLOC(buf, off, len, tmp);
 		}
