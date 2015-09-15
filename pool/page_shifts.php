@@ -16,7 +16,7 @@ function doshifts($data, $user)
  $pg .= "<td class=dr>Shares</td>";
  $pg .= "<td class=dr>Avg Share</td>";
  $pg .= "<td class=dr>Rewards</td>";
- $pg .= "<td class=dr>PPS<span class=st1>*</span></td>";
+ $pg .= "<td class=dr>Rewarded<span class=st1>*</span></td>";
  $pg .= "<td class=dr>PPS%</td>";
  $pg .= "</tr>\n";
 
