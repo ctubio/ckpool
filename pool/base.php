@@ -126,9 +126,12 @@ function btcfmt($amt)
  return number_format($amt, 8);
 }
 #
-function utcd($when)
+function utcd($when, $brief = false)
 {
- return gmdate('Y-m-d H:i:s+00', round($when));
+ if ($brief)
+	 return gmdate('M-d H:i:s', round($when));
+ else
+	 return gmdate('Y-m-d H:i:s+00', round($when));
 }
 #
 global $sipre;

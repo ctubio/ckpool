@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.300"
+#define CKDB_VERSION DB_VERSION"-1.301"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1294,6 +1294,7 @@ typedef struct optioncontrol {
 
 // Value it must default to (to work properly)
 #define OPTIONCONTROL_HEIGHT 1
+#define MAX_HEIGHT 999999999
 
 // Test it here rather than obscuring the #define elsewhere
 #if ((OPTIONCONTROL_HEIGHT+1) != START_POOL_HEIGHT)
@@ -1345,6 +1346,13 @@ extern K_ITEM *workinfo_current;
 extern tv_t last_bc;
 // current network diff
 extern double current_ndiff;
+
+// Offset in binary coinbase1 of the block number
+#define BLOCKNUM_OFFSET 42
+// Initial block reward (satoshi)
+#define REWARD_BASE 5000000000.0
+// How many blocks per halving
+#define REWARD_HALVE 210000.0
 
 // SHARES shares.id.json={...}
 typedef struct shares {
@@ -2090,6 +2098,8 @@ extern void sequence_report(bool lock);
 
 #define REWARDOVERRIDE "MinerReward"
 
+#define PPSOVERRIDE "PPSValue"
+
 // Data free functions (first)
 #define FREE_ITEM(item) do { } while(0)
 // TODO: make a macro for all other to use above macro
@@ -2264,7 +2274,7 @@ extern K_ITEM *find_first_paypayid(int64_t userid, int64_t payoutid, K_TREE_CTX 
 extern cmp_t cmp_accountbalance(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_accountbalance(int64_t userid);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height);
+extern K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t height);
 extern int64_t user_sys_setting(int64_t userid, char *setting_name,
 				int64_t setting_default, tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
@@ -2279,6 +2289,7 @@ extern bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by,
 			 char *code, char *inet, tv_t *cd, tv_t *ss_first,
 			 tv_t *ss_last, int64_t *ss_count, int64_t *s_count,
 			 int64_t *s_diff);
+extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);

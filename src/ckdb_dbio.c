@@ -6628,12 +6628,13 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 				 WHERE_FFL_PASS);
 			goto rollback;
 		}
-		w_item = find_workinfo(workinfoidend, NULL);
-		if (!w_item)
-			goto rollback;
 		w_item = find_workinfo(workinfoidstart, NULL);
 		if (!w_item)
 			goto rollback;
+		w_item = find_workinfo(workinfoidend, NULL);
+		if (!w_item)
+			goto rollback;
+
 		K_WLOCK(workmarkers_free);
 		wm_item = k_unlink_head(workmarkers_free);
 		K_WUNLOCK(workmarkers_free);
@@ -6698,6 +6699,7 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			PGLOGERR("Insert", rescode, conn);
 			goto rollback;
 		}
+		row->pps_value = workinfo_pps(w_item, workinfoidend, true);
 	}
 
 	ok = true;
@@ -6837,9 +6839,18 @@ bool workmarkers_fill(PGconn *conn)
 		add_to_ktree(workmarkers_workinfoid_root, item);
 		k_add_head(workmarkers_store, item);
 
+		wi_item = find_workinfo(row->workinfoidend, NULL);
+		if (!wi_item) {
+			LOGERR("%s(): ERROR workmarkerid %"PRId64
+				" wid end %"PRId64" doesn't exist! "
+				"PPS value will be zero",
+				__func__, row->markerid,
+				row->workinfoidend);
+		}
+		row->pps_value = workinfo_pps(wi_item, row->workinfoidend, false);
+
 		if (dbstatus.newest_workmarker_workinfoid < row->workinfoidend) {
 			dbstatus.newest_workmarker_workinfoid = row->workinfoidend;
-			wi_item = find_workinfo(row->workinfoidend, NULL);
 			if (!wi_item) {
 				LOGEMERG("%s(): FAILURE workmarkerid %"PRId64
 					 " wid end %"PRId64" doesn't exist! "

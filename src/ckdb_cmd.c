@@ -5383,6 +5383,16 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 						   rows, wm->rewards, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			// Use %.15e -> 16 non-leading-zero decimal places
+			snprintf(tmp, sizeof(tmp), "ppsvalue:%d=%.15f%c",
+						   rows, wm->pps_value, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+			// Use %.15e -> 16 non-leading-zero decimal places
+			snprintf(tmp, sizeof(tmp), "ppsrewarded:%d=%.15e%c",
+						   rows, wm->rewarded, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
 			snprintf(tmp, sizeof(tmp), "lastpayoutstart:%d=%s%c",
 						   rows,
 						   (wm->workinfoidstart ==
@@ -5431,7 +5441,8 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 				   rows, FLDSEP,
 				   "markerid,shift,start,end,rewards,"
-				   "lastpayoutstart", FLDSEP);
+				   "ppsvalue,ppsrewarded,lastpayoutstart",
+				   FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s", "Shifts");

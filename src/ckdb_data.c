@@ -1822,7 +1822,7 @@ static bool _reward_override_name(int32_t height, char *buf, size_t siz,
 }
 
 // Must be R or W locked before call
-K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height)
+K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t height)
 {
 	OPTIONCONTROL optioncontrol, *oc, *ocbest;
 	K_TREE_CTX ctx[1];
@@ -1832,6 +1832,9 @@ K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height)
 	 * 1) activationdate is <= now
 	 *  and
 	 * 2) height <= specified height (pool.height = current)
+	 * The logic being: if 'now' is after the record activation date
+	 *  and 'height' is after the record activation height then
+	 *  the record is active
 	 * Remember the active record with the newest activationdate
 	 * If two records have the same activation date, then
 	 *  remember the active record with the highest height
@@ -2195,6 +2198,61 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	}
 bye:
 	return ok;
+}
+
+
+// The PPS value of a 1diff share for the given workinfoid
+double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock)
+{
+	OPTIONCONTROL *optioncontrol;
+	K_ITEM *oc_item;
+	char oc_name[TXT_SML+1];
+	char coinbase1bin[TXT_SML+1];
+	char ndiffbin[TXT_SML+1];
+	WORKINFO *workinfo;
+	double w_diff;
+	int w_blocknum;
+	size_t len;
+
+	// Allow optioncontrol override for a given workinfoid
+	snprintf(oc_name, sizeof(oc_name), PPSOVERRIDE"_%"PRId64, workinfoid);
+	if (lock)
+		K_RLOCK(optioncontrol_free);
+	// No time/height control is used, just find the latest record
+	oc_item = find_optioncontrol(oc_name, &date_eot, MAX_HEIGHT);
+	if (lock)
+		K_RUNLOCK(optioncontrol_free);
+
+	// Value is a floating point double of satoshi
+	if (oc_item) {
+		DATA_OPTIONCONTROL(optioncontrol, oc_item);
+		return atof(optioncontrol->optionvalue);
+	}
+
+	if (!w_item) {
+		LOGERR("%s(): missing workinfo %"PRId64,
+			__func__, workinfoid);
+		return 0.0;
+	}
+
+	DATA_WORKINFO(workinfo, w_item);
+	len = strlen(workinfo->coinbase1);
+	if (len < (BLOCKNUM_OFFSET * 2 + 4) || (len & 1)) {
+		LOGERR("%s(): Invalid coinbase1 len %d - "
+			"should be >= %d and even - for wid %"PRId64,
+			__func__, (int)len, (BLOCKNUM_OFFSET * 2 + 4),
+			workinfoid);
+		return 0.0;
+	}
+
+	hex2bin(ndiffbin, workinfo->bits, 4);
+	w_diff = diff_from_nbits(ndiffbin);
+	hex2bin(coinbase1bin, workinfo->coinbase1 + (BLOCKNUM_OFFSET * 2),
+		(len - (BLOCKNUM_OFFSET * 2)) >> 1);
+	w_blocknum = get_sernumber((uchar *)coinbase1bin);
+
+	// BASE halving to determine coinbase reward then divided by difficulty
+	return(REWARD_BASE * pow(0.5, floor((double)w_blocknum / REWARD_HALVE)) / w_diff);
 }
 
 // order by workinfoid asc,userid asc,workername asc,createdate asc,nonce asc,expirydate desc
@@ -4767,6 +4825,10 @@ bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
 	K_ITEM *wm_item;
 	WORKMARKERS *wm;
 	bool did_one = false;
+	double payout_pps;
+
+	payout_pps = (double)delta * (double)(payouts->minerreward) /
+			payouts->diffused;
 
 	if (lock)
 		K_WLOCK(workmarkers_free);
@@ -4781,6 +4843,7 @@ bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
 		 *  onto the PROCESSED status if it isn't already processed */
 		if (CURRENT(&(wm->expirydate))) {
 			wm->rewards += delta;
+			wm->rewarded += payout_pps;
 			did_one = true;
 		}
 		wm_item = next_in_ktree(ctx);
@@ -4792,7 +4855,13 @@ bool reward_shifts(PAYOUTS *payouts, bool lock, int delta)
 	return did_one;
 }
 
-// (re)calculate rewards for a shift
+/* (re)calculate rewards for a shift
+ * N.B. we don't need to zero/undo a workmarkers rewards directly
+ *  since this is just a counter of how many times it's been rewarded
+ *  and thus if the shift is expired the counter is ignored
+ * We only need to (re)calculate it when the workmarker is created
+ * Payouts code processing will increment/decrement all current rewards as
+ *  needed with reward_shifts() when payouts are added/changed/removed */
 bool shift_rewards(K_ITEM *wm_item)
 {
 	PAYOUTS *payouts = NULL;
