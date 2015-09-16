@@ -81,7 +81,7 @@ function doshifts($data, $user)
 		$pg .= '<td class=dr>'.$ans['rewards:'.$i].'</td>';
 		$ppsr = (float)$ans['ppsrewarded:'.$i];
 		if ($ppsr > 0)
-			$ppsd = sprintf('%.3e', $ppsr);
+			$ppsd = sprintf('%.5f', $ppsr);
 		else
 			$ppsd = '0';
 		$pg .= "<td class=dr>$ppsd</td>";
