@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.303"
+#define CKDB_VERSION DB_VERSION"-1.310"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -438,8 +438,8 @@ enum cmd_values {
 // CCLs are every ...
 #define ROLL_S 3600
 
-#define LOGQUE(_msg) log_queue_message(_msg)
-#define LOGFILE(_msg) rotating_log_nolock(_msg)
+#define LOGQUE(_msg, _db) log_queue_message(_msg, _db)
+#define LOGFILE(_msg, _prefix) rotating_log_nolock(_msg, _prefix)
 #define LOGDUP "dup."
 
 // ***
@@ -711,6 +711,7 @@ enum cmd_values {
 // LOGQUEUE
 typedef struct logqueue {
 	char *msg;
+	bool db;
 } LOGQUEUE;
 
 #define ALLOC_LOGQUEUE 1024
@@ -2608,6 +2609,13 @@ extern bool check_db_version(PGconn *conn);
 // *** ckdb_cmd.c
 // ***
 
+// TODO: limit access by having seperate sockets for each
+#define ACCESS_POOL	(1 << 0)
+#define ACCESS_SYSTEM	(1 << 1)
+#define ACCESS_WEB	(1 << 2)
+#define ACCESS_PROXY	(1 << 3)
+#define ACCESS_CKDB	(1 << 4)
+
 struct CMDS {
 	enum cmd_values cmd_val;
 	char *cmd_str;
@@ -2616,7 +2624,7 @@ struct CMDS {
 	char *(*func)(PGconn *, char *, char *, tv_t *, char *, char *,
 			char *, tv_t *, K_TREE *);
 	enum seq_num seq;
-	char *access;
+	int access;
 };
 
 extern struct CMDS ckdb_cmds[];

@@ -497,17 +497,18 @@ K_TREE *userinfo_root;
 K_LIST *userinfo_free;
 K_STORE *userinfo_store;
 
-static char logname[512];
+static char logname_db[512];
+static char logname_io[512];
 static char *dbcode;
 
 // low spec version of rotating_log() - no locking
-static bool rotating_log_nolock(char *msg)
+static bool rotating_log_nolock(char *msg, char *prefix)
 {
 	char *filename;
 	FILE *fp;
 	bool ok = false;
 
-	filename = rotating_filename(logname, time(NULL));
+	filename = rotating_filename(prefix, time(NULL));
 	fp = fopen(filename, "a+e");
 	if (unlikely(!fp)) {
 		LOGERR("Failed to fopen %s in rotating_log!", filename);
@@ -523,7 +524,7 @@ stageleft:
 	return ok;
 }
 
-static void log_queue_message(char *msg)
+static void log_queue_message(char *msg, bool db)
 {
 	K_ITEM *lq_item;
 	LOGQUEUE *lq;
@@ -534,6 +535,7 @@ static void log_queue_message(char *msg)
 	lq->msg = strdup(msg);
 	if (!(lq->msg))
 		quithere(1, "malloc (%d) OOM", (int)strlen(msg));
+	lq->db = db;
 	k_add_tail(logqueue_store, lq_item);
 	K_WUNLOCK(logqueue_free);
 }
@@ -2518,11 +2520,17 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	}
 
 	if (ckdb_cmds[msgline->which_cmds].cmd_val == CMD_END) {
+		LOGQUE(buf, false);
 		LOGERR("Listener received unknown command: '%.42s...",
 			st2 = safe_text(buf));
 		FREENULL(st2);
 		goto nogood;
 	}
+
+	if (ckdb_cmds[msgline->which_cmds].access & ACCESS_POOL)
+		LOGQUE(buf, true);
+	else
+		LOGQUE(buf, false);
 
 	if (noid) {
 		if (ckdb_cmds[msgline->which_cmds].noid) {
@@ -3614,7 +3622,8 @@ static void *logger(__maybe_unused void *arg)
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstart.%ld,%ld",
 				   now.tv_sec, now.tv_usec);
-	LOGFILE(buf);
+	LOGFILE(buf, logname_db);
+	LOGFILE(buf, logname_io);
 
 	while (!everyone_die) {
 		K_WLOCK(logqueue_free);
@@ -3622,7 +3631,10 @@ static void *logger(__maybe_unused void *arg)
 		K_WUNLOCK(logqueue_free);
 		while (lq_item) {
 			DATA_LOGQUEUE(lq, lq_item);
-			LOGFILE(lq->msg);
+			if (lq->db)
+				LOGFILE(lq->msg, logname_db);
+			else
+				LOGFILE(lq->msg, logname_io);
 			FREENULL(lq->msg);
 
 			K_WLOCK(logqueue_free);
@@ -3641,14 +3653,18 @@ static void *logger(__maybe_unused void *arg)
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstopping.%d.%ld,%ld",
 				   count, now.tv_sec, now.tv_usec);
-	LOGFILE(buf);
+	LOGFILE(buf, logname_db);
+	LOGFILE(buf, logname_io);
 	if (count)
 		LOGERR("%s", buf);
 	lq_item = logqueue_store->head;
 	copy_tv(&then, &now);
 	while (lq_item) {
 		DATA_LOGQUEUE(lq, lq_item);
-		LOGFILE(lq->msg);
+		if (lq->db)
+			LOGFILE(lq->msg, logname_db);
+		else
+			LOGFILE(lq->msg, logname_io);
 		FREENULL(lq->msg);
 		count--;
 		setnow(&now);
@@ -3666,7 +3682,8 @@ static void *logger(__maybe_unused void *arg)
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstop.%ld,%ld",
 				   now.tv_sec, now.tv_usec);
-	LOGFILE(buf);
+	LOGFILE(buf, logname_db);
+	LOGFILE(buf, logname_io);
 	LOGWARNING("%s", buf);
 
 	return NULL;
@@ -3687,8 +3704,7 @@ static void *socketer(__maybe_unused void *arg)
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	unixsock_t *us = &pi->us;
 	char *end, *ans = NULL, *rep = NULL, *buf = NULL, *dot;
-	char *last_auth = NULL, *reply_auth = NULL;
-	char *last_addrauth = NULL, *reply_addrauth = NULL;
+	// No dup check for pool stats, the SEQ code will handle that
 	char *last_chkpass = NULL, *reply_chkpass = NULL;
 	char *last_adduser = NULL, *reply_adduser = NULL;
 	char *last_newpass = NULL, *reply_newpass = NULL;
@@ -3768,10 +3784,7 @@ static void *socketer(__maybe_unused void *arg)
 			dup = false;
 			show_dup = true;
 			// These are ordered approximately most likely first
-			if (last_auth && strcmp(last_auth, buf) == 0) {
-				reply_last = reply_auth;
-				dup = true;
-			} else if (last_chkpass && strcmp(last_chkpass, buf) == 0) {
+			if (last_chkpass && strcmp(last_chkpass, buf) == 0) {
 				reply_last = reply_chkpass;
 				dup = true;
 			} else if (last_adduser && strcmp(last_adduser, buf) == 0) {
@@ -3782,9 +3795,6 @@ static void *socketer(__maybe_unused void *arg)
 				dup = true;
 			} else if (last_newid && strcmp(last_newid, buf) == 0) {
 				reply_last = reply_newid;
-				dup = true;
-			} else if (last_addrauth && strcmp(last_addrauth, buf) == 0) {
-				reply_last = reply_addrauth;
 				dup = true;
 			} else if (last_userset && strcmp(last_userset, buf) == 0) {
 				reply_last = reply_userset;
@@ -3814,7 +3824,8 @@ static void *socketer(__maybe_unused void *arg)
 					*dot = '\0';
 				snprintf(reply, sizeof(reply), "%s%ld,%ld.%s",
 					 LOGDUP, now.tv_sec, now.tv_usec, duptype);
-				LOGQUE(reply);
+				// dup cant be pool
+				LOGQUE(reply, false);
 				if (show_dup)
 					LOGWARNING("Duplicate '%s' message received", duptype);
 				else
@@ -3823,7 +3834,6 @@ static void *socketer(__maybe_unused void *arg)
 				int seqentryflags = SE_SOCKET;
 				if (!reload_queue_complete)
 					seqentryflags = SE_EARLYSOCK;
-				LOGQUE(buf);
 				cmdnum = breakdown(&ml_item, buf, &now, seqentryflags);
 				DATA_MSGLINE(msgline, ml_item);
 				replied = false;
@@ -3956,12 +3966,6 @@ static void *socketer(__maybe_unused void *arg)
 						send_unix_msg(sockd, rep);
 						FREENULL(ans);
 						switch (cmdnum) {
-							case CMD_AUTH:
-								STORELASTREPLY(auth);
-								break;
-							case CMD_ADDRAUTH:
-								STORELASTREPLY(addrauth);
-								break;
 							case CMD_CHKPASS:
 								STORELASTREPLY(chkpass);
 								break;
@@ -4233,7 +4237,6 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 				__func__, count);
 		}
 
-		LOGQUE(buf);
 		// ml_item is set for all but CMD_REPLY
 		cmdnum = breakdown(&ml_item, buf, &now, SE_RELOAD);
 		DATA_MSGLINE(msgline, ml_item);
@@ -4444,7 +4447,8 @@ static bool reload_from(tv_t *start)
 	copy_tv(&begin, &now);
 	tvs_to_buf(&now, run, sizeof(run));
 	snprintf(reload_buf, MAX_READ, "reload.%s.s0", run);
-	LOGQUE(reload_buf);
+	LOGQUE(reload_buf, true);
+	LOGQUE(reload_buf, false);
 
 	conn = dbconnect();
 
@@ -4537,7 +4541,8 @@ static bool reload_from(tv_t *start)
 		diff = 1;
 
 	snprintf(reload_buf, MAX_READ, "reload.%s.%"PRIu64, run, total);
-	LOGQUE(reload_buf);
+	LOGQUE(reload_buf, true);
+	LOGQUE(reload_buf, false);
 	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s %.2f/s",
 		   __func__,
 		   processing, processing == 1 ? "" : "s",
@@ -5582,7 +5587,11 @@ int main(int argc, char **argv)
 		quit(1, "Failed to open log file %s", buf);
 	ckp.logfd = fileno(ckp.logfp);
 
-	snprintf(logname, sizeof(logname), "%s%s-db%s-",
+	// -db is ckpool messages
+	snprintf(logname_db, sizeof(logname_db), "%s%s-db%s-",
+				ckp.logdir, ckp.name, dbcode);
+	// -io is everything else
+	snprintf(logname_io, sizeof(logname_io), "%s%s-io%s-",
 				ckp.logdir, ckp.name, dbcode);
 
 	setnow(&now);

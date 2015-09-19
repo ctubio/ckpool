@@ -6413,13 +6413,6 @@ static char *cmd_btcset(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(buf);
 }
 
-// TODO: limit access by having seperate sockets for each
-#define ACCESS_POOL	"p"
-#define ACCESS_SYSTEM	"s"
-#define ACCESS_WEB	"w"
-#define ACCESS_PROXY	"x"
-#define ACCESS_CKDB	"c"
-
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -6482,8 +6475,8 @@ static char *cmd_btcset(__maybe_unused PGconn *conn, char *cmd, char *id,
 //	  cmd_val	cmd_str		noid	createdate func		seq		access
 struct CMDS ckdb_cmds[] = {
 	{ CMD_TERMINATE, "terminate",	true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM },
-	{ CMD_PING,	"ping",		true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
-	{ CMD_VERSION,	"version",	true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM ACCESS_POOL ACCESS_WEB },
+	{ CMD_PING,	"ping",		true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
+	{ CMD_VERSION,	"version",	true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
 	{ CMD_LOGLEVEL,	"loglevel",	true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_FLUSH,	"flush",	true,	false,	NULL,		SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_SHARELOG,	STR_WORKINFO,	false,	true,	cmd_sharelog,	SEQ_WORKINFO,	ACCESS_POOL },
@@ -6516,15 +6509,15 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_GETOPTS,	"getopts",	false,	false,	cmd_getopts,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_SETOPTS,	"setopts",	false,	false,	cmd_setopts,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_DSP,	"dsp",		false,	false,	cmd_dsp,	SEQ_NONE,	ACCESS_SYSTEM },
-	{ CMD_STATS,	"stats",	true,	false,	cmd_stats,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
-	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
-	{ CMD_PPLNS2,	"pplns2",	false,	false,	cmd_pplns2,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
+	{ CMD_STATS,	"stats",	true,	false,	cmd_stats,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
+	{ CMD_PPLNS,	"pplns",	false,	false,	cmd_pplns,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
+	{ CMD_PPLNS2,	"pplns2",	false,	false,	cmd_pplns2,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
 	{ CMD_PAYOUTS,	"payouts",	false,	false,	cmd_payouts,	SEQ_NONE,	ACCESS_SYSTEM },
-	{ CMD_MPAYOUTS,	"mpayouts",	false,	false,	cmd_mpayouts,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
-	{ CMD_SHIFTS,	"shifts",	false,	false,	cmd_shifts,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
-	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
+	{ CMD_MPAYOUTS,	"mpayouts",	false,	false,	cmd_mpayouts,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
+	{ CMD_SHIFTS,	"shifts",	false,	false,	cmd_shifts,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
+	{ CMD_USERSTATUS,"userstatus",	false,	false,	cmd_userstatus,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
 	{ CMD_MARKS,	"marks",	false,	false,	cmd_marks,	SEQ_NONE,	ACCESS_SYSTEM },
-	{ CMD_PSHIFT,	"pshift",	false,	false,	cmd_pshift,	SEQ_NONE,	ACCESS_SYSTEM ACCESS_WEB },
+	{ CMD_PSHIFT,	"pshift",	false,	false,	cmd_pshift,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
 	{ CMD_SHSTA,	"shsta",	true,	false,	cmd_shsta,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_USERINFO,	"userinfo",	false,	false,	cmd_userinfo,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_BTCSET,	"btcset",	false,	false,	cmd_btcset,	SEQ_NONE,	ACCESS_SYSTEM },
