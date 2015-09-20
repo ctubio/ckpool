@@ -2623,6 +2623,7 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	char *ins;
 	char *params[11 + HISTORYDATECOUNT];
 	int n, par = 0;
+	bool zero_active = false;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -2730,13 +2731,18 @@ unparam:
 		if (workinfo_current) {
 			WORKINFO *wic;
 			DATA_WORKINFO(wic, workinfo_current);
-			if (cmp_height(wic->coinbase1, row->coinbase1) != 0)
+			if (cmp_height(wic->coinbase1, row->coinbase1) != 0) {
 				copy_tv(&last_bc, cd);
+				zero_active = true;
+			}
 		}
 
 		workinfo_current = item;
 	}
 	K_WUNLOCK(workinfo_free);
+
+	if (zero_active)
+		zero_all_active(cd);
 
 	return workinfoid;
 }

@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.310"
+#define CKDB_VERSION DB_VERSION"-1.311"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2211,6 +2211,7 @@ extern K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 					 bool create, const char *file2,
 					 const char *func2, const int line2,
 					 WHERE_FFL_ARGS);
+extern void zero_all_active(tv_t *when);
 extern void workerstatus_ready();
 #define workerstatus_update(_auths, _shares, _userstats) \
 	_workerstatus_update(_auths, _shares, _userstats, WHERE_FFL_HERE)

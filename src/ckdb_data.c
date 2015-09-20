@@ -913,6 +913,23 @@ static void zero_on_idle(tv_t *when, WORKERSTATUS *workerstatus)
 	workerstatus->active_sharehi = workerstatus->active_sharerej = 0.0;
 }
 
+void zero_all_active(tv_t *when)
+{
+	WORKERSTATUS *workerstatus;
+	K_TREE_CTX ws_ctx[1];
+	K_ITEM *ws_item;
+
+	K_WLOCK(workerstatus_free);
+	ws_item = first_in_ktree(workerstatus_root, ws_ctx);
+	while (ws_item) {
+		DATA_WORKERSTATUS(workerstatus, ws_item);
+		zero_on_idle(when, workerstatus);
+		ws_item = next_in_ktree(ws_ctx);
+	}
+
+	K_WUNLOCK(workerstatus_free);
+}
+
 /* All data is loaded, now update workerstatus fields
    TODO: combine set_block_share_counters() with this? */
 void workerstatus_ready()
