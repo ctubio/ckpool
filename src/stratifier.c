@@ -1773,7 +1773,7 @@ retry:
 				LOGDEBUG("%ds elapsed in strat_loop, updating gbt base",
 					 ckp->update_interval);
 				update_base(ckp, GEN_NORMAL);
-			} else {
+			} else if (!ckp->passthrough) {
 				LOGDEBUG("%ds elapsed in strat_loop, pinging miners",
 					 ckp->update_interval);
 				broadcast_ping(sdata);
