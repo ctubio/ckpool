@@ -1757,6 +1757,8 @@ int main(int argc, char **argv)
 		ckp.serverurl = ckzalloc(sizeof(char *));
 	if (ckp.proxy && !ckp.proxies)
 		quit(0, "No proxy entries found in config file %s", ckp.config);
+	if (ckp.redirector && !ckp.redirecturls)
+		quit(0, "No redirect entries found in config file %s", ckp.config);
 
 	/* Create the log directory */
 	trail_slash(&ckp.logdir);
