@@ -1538,12 +1538,13 @@ retry:
 	}
 
 	cs = alive->cs;
-	LOGNOTICE("Connected to upstream server %s:%s as proxy%s", cs->url, cs->port,
-		  ckp->passthrough ? " in passthrough mode" : "");
 	if (ckp->passthrough) {
+		LOGWARNING("Connected to upstream server %s:%s as proxy in passthrough mode",
+			   cs->url, cs->port);
 		create_pthread(&alive->pth_precv, passthrough_recv, alive);
 		alive->passsends = create_ckmsgq(ckp, "passsend", &passthrough_send);
 	} else {
+		LOGNOTICE("Connected to upstream server %s:%s as proxy", cs->url, cs->port);
 		create_pthread(&alive->pth_precv, proxy_recv, alive);
 		mutex_init(&alive->psend_lock);
 		cond_init(&alive->psend_cond);
