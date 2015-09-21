@@ -1261,9 +1261,9 @@ static void *proxy_recv(void *arg)
 	while (42) {
 		notify_instance_t *ni, *tmp;
 		share_msg_t *share, *tmpshare;
-		int retries = 0, ret;
 		float timeout;
 		time_t now;
+		int ret;
 
 		now = time(NULL);
 
@@ -1290,14 +1290,14 @@ static void *proxy_recv(void *arg)
 
 		/* If we don't get an update within 10 minutes the upstream pool
 		 * has likely stopped responding. */
-		timeout = 10;
+		timeout = 600;
 		do {
 			if (cs->fd == -1) {
 				ret = -1;
 				break;
 			}
 			ret = read_socket_line(cs, &timeout);
-		} while (ret == 0 && ++retries < 120);
+		} while (ret == 0 && timeout > 0);
 
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
@@ -1403,7 +1403,7 @@ static void *passthrough_recv(void *arg)
 
 		do {
 			ret = read_socket_line(cs, &timeout);
-		} while (ret == 0);
+		} while (ret == 0 && timeout > 0);
 
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
@@ -1538,12 +1538,13 @@ retry:
 	}
 
 	cs = alive->cs;
-	LOGNOTICE("Connected to upstream server %s:%s as proxy%s", cs->url, cs->port,
-		  ckp->passthrough ? " in passthrough mode" : "");
 	if (ckp->passthrough) {
+		LOGWARNING("Connected to upstream server %s:%s as proxy in passthrough mode",
+			   cs->url, cs->port);
 		create_pthread(&alive->pth_precv, passthrough_recv, alive);
 		alive->passsends = create_ckmsgq(ckp, "passsend", &passthrough_send);
 	} else {
+		LOGNOTICE("Connected to upstream server %s:%s as proxy", cs->url, cs->port);
 		create_pthread(&alive->pth_precv, proxy_recv, alive);
 		mutex_init(&alive->psend_lock);
 		cond_init(&alive->psend_cond);
