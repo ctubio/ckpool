@@ -1290,8 +1290,8 @@ static void *proxy_recv(void *arg)
 
 		/* If we don't get an update within 10 minutes the upstream pool
 		 * has likely stopped responding. */
-		timeout = 10;
 		do {
+			timeout = 10;
 			if (cs->fd == -1) {
 				ret = -1;
 				break;
