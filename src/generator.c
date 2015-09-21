@@ -2575,10 +2575,8 @@ reconnect:
 		goto out;
 	if (proxi != cproxy) {
 		proxi = cproxy;
-		if (!ckp->passthrough) {
-			LOGWARNING("Successfully connected to proxy %d %s as proxy",
-				   proxi->id, proxi->url);
-		}
+		LOGWARNING("Successfully connected to proxy %d %s as proxy%s",
+			   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
 	}
 retry:
 	clear_unix_msg(&umsg);
