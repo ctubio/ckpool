@@ -1261,9 +1261,9 @@ static void *proxy_recv(void *arg)
 	while (42) {
 		notify_instance_t *ni, *tmp;
 		share_msg_t *share, *tmpshare;
-		int retries = 0, ret;
 		float timeout;
 		time_t now;
+		int ret;
 
 		now = time(NULL);
 
@@ -1290,14 +1290,14 @@ static void *proxy_recv(void *arg)
 
 		/* If we don't get an update within 10 minutes the upstream pool
 		 * has likely stopped responding. */
+		timeout = 600;
 		do {
-			timeout = 10;
 			if (cs->fd == -1) {
 				ret = -1;
 				break;
 			}
 			ret = read_socket_line(cs, &timeout);
-		} while (ret == 0 && ++retries < 120);
+		} while (ret == 0 && timeout > 0);
 
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
@@ -1403,7 +1403,7 @@ static void *passthrough_recv(void *arg)
 
 		do {
 			ret = read_socket_line(cs, &timeout);
-		} while (ret == 0);
+		} while (ret == 0 && timeout > 0);
 
 		if (ret < 1) {
 			/* Send ourselves a reconnect message */
