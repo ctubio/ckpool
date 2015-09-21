@@ -1717,14 +1717,16 @@ static void *proxy_send(void *arg)
 
 static void passthrough_send(ckpool_t *ckp, pass_msg_t *pm)
 {
+	connsock_t *cs = pm->cs;
 	int len, sent;
 
 	LOGDEBUG("Sending upstream json msg: %s", pm->msg);
 	len = strlen(pm->msg);
-	sent = write_socket(pm->cs->fd, pm->msg, len);
-	if (sent != len) {
+	sent = write_socket(cs->fd, pm->msg, len);
+	if (unlikely(sent != len)) {
 		LOGWARNING("Failed to passthrough %d bytes of message %s, attempting reconnect",
 			   len, pm->msg);
+		Close(cs->fd);
 		reconnect_generator(ckp);
 	}
 	free(pm->msg);
@@ -1912,8 +1914,6 @@ static void *passthrough_recv(void *arg)
 			}
 			sleep(5);
 		}
-		if (!alive)
-			reconnect_generator(ckp);
 
 		/* Make sure we receive a line within 90 seconds */
 		ret = read_socket_line(cs, &timeout);
