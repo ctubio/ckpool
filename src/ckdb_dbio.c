@@ -2993,9 +2993,8 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 		userinfo_update(shares, NULL, NULL);
 	}
 
-	sharesummary_update(shares, NULL, NULL, shares->createby,
-			    shares->createcode, shares->createinet,
-			    &(shares->createdate));
+	sharesummary_update(shares, NULL, shares->createby, shares->createcode,
+			    shares->createinet, &(shares->createdate));
 
 	return true;
 }
@@ -3288,10 +3287,8 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 		}
 	}
 
-	sharesummary_update(NULL, shareerrors, NULL,
-			    shareerrors->createby,
-			    shareerrors->createcode,
-			    shareerrors->createinet,
+	sharesummary_update(NULL, shareerrors, shareerrors->createby,
+			    shareerrors->createcode, shareerrors->createinet,
 			    &(shareerrors->createdate));
 
 	return true;
@@ -3541,9 +3538,17 @@ static void markersummary_to_pool(MARKERSUMMARY *p_row, MARKERSUMMARY *row)
 	     !tv_newer(&(p_row->firstshare), &(row->firstshare))) {
 		copy_tv(&(p_row->firstshare), &(row->firstshare));
 	}
-	if (tv_newer(&(p_row->lastshare), &(row->lastshare))) {
+	if (tv_newer(&(p_row->lastshare), &(row->lastshare)))
 		copy_tv(&(p_row->lastshare), &(row->lastshare));
-		p_row->lastdiffacc = row->lastdiffacc;
+	if (row->diffacc > 0) {
+		if (!p_row->firstshareacc.tv_sec ||
+		     !tv_newer(&(p_row->firstshareacc), &(row->firstshareacc))) {
+			copy_tv(&(p_row->firstshareacc), &(row->firstshareacc));
+		}
+		if (tv_newer(&(p_row->lastshareacc), &(row->lastshareacc))) {
+			copy_tv(&(p_row->lastshareacc), &(row->lastshareacc));
+			p_row->lastdiffacc = row->lastdiffacc;
+		}
 	}
 }
 
@@ -3553,7 +3558,7 @@ static void markersummary_to_pool(MARKERSUMMARY *p_row, MARKERSUMMARY *row)
  *  so that is probably the best solution since
  *  we should be watching the pool all the time :)
  * The cause would most likely be either a code bug or a DB problem
- *  so there many be no obvious automated fix
+ *  so there may be no obvious automated fix
  *  and flagging the workmarkers to be skipped may or may not be the solution,
  *  thus manual intervention will be the rule for now */
 bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
@@ -3686,9 +3691,17 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		     !tv_newer(&(markersummary->firstshare), &(sharesummary->firstshare))) {
 			copy_tv(&(markersummary->firstshare), &(sharesummary->firstshare));
 		}
-		if (tv_newer(&(markersummary->lastshare), &(sharesummary->lastshare))) {
+		if (tv_newer(&(markersummary->lastshare), &(sharesummary->lastshare)))
 			copy_tv(&(markersummary->lastshare), &(sharesummary->lastshare));
-			markersummary->lastdiffacc = sharesummary->lastdiffacc;
+		if (sharesummary->diffacc > 0) {
+			if (!markersummary->firstshareacc.tv_sec ||
+			     !tv_newer(&(markersummary->firstshareacc), &(sharesummary->firstshareacc))) {
+				copy_tv(&(markersummary->firstshareacc), &(sharesummary->firstshareacc));
+			}
+			if (tv_newer(&(markersummary->lastshareacc), &(sharesummary->lastshareacc))) {
+				copy_tv(&(markersummary->lastshareacc), &(sharesummary->lastshareacc));
+				markersummary->lastdiffacc = sharesummary->lastdiffacc;
+			}
 		}
 
 		diffacc += sharesummary->diffacc;
@@ -3844,50 +3857,29 @@ flail:
 	return ok;
 }
 
-// no longer used
-#if 0
-static void sharesummary_to_pool(SHARESUMMARY *p_row, SHARESUMMARY *row)
-{
-	p_row->diffacc += row->diffacc;
-	p_row->diffsta += row->diffsta;
-	p_row->diffdup += row->diffdup;
-	p_row->diffhi += row->diffhi;
-	p_row->diffrej += row->diffrej;
-	p_row->shareacc += row->shareacc;
-	p_row->sharesta += row->sharesta;
-	p_row->sharedup += row->sharedup;
-	p_row->sharehi += row->sharehi;
-	p_row->sharerej += row->sharerej;
-	p_row->sharecount += row->sharecount;
-	p_row->errorcount += row->errorcount;
-	if (!p_row->firstshare.tv_sec ||
-	     !tv_newer(&(p_row->firstshare), &(row->firstshare))) {
-		copy_tv(&(p_row->firstshare), &(row->firstshare));
-	}
-	if (tv_newer(&(p_row->lastshare), &(row->lastshare))) {
-		copy_tv(&(p_row->lastshare), &(row->lastshare));
-		p_row->lastdiffacc = row->lastdiffacc;
-	}
-}
-#endif
-
 static void set_sharesummary_stats(SHARESUMMARY *row, SHARES *s_row,
 				   SHAREERRORS *e_row, bool new,
 				   double *tdf, double *tdl)
 {
 	tv_t *createdate;
-	double diff;
 
-	if (s_row) {
+	if (s_row)
 		createdate = &(s_row->createdate);
-		diff = s_row->diff;
-	} else {
+	else
 		createdate = &(e_row->createdate);
-		diff = 0;
-	}
 
-	if (new)
-		zero_sharesummary(row, createdate, diff);
+	if (new) {
+		zero_sharesummary(row);
+		copy_tv(&(row->firstshare), createdate);
+		copy_tv(&(row->lastshare), createdate);
+	} else {
+		if (!row->firstshare.tv_sec ||
+		     !tv_newer(&(row->firstshare), createdate)) {
+			copy_tv(&(row->firstshare), createdate);
+		}
+		if (tv_newer(&(row->lastshare), createdate))
+			copy_tv(&(row->lastshare), createdate);
+	}
 
 	if (s_row) {
 		row->sharecount += 1;
@@ -3895,6 +3887,17 @@ static void set_sharesummary_stats(SHARESUMMARY *row, SHARES *s_row,
 			case SE_NONE:
 				row->diffacc += s_row->diff;
 				row->shareacc++;
+				// should always be true
+				if (s_row->diff > 0) {
+					if (!row->firstshareacc.tv_sec ||
+					     !tv_newer(&(row->firstshareacc), createdate)) {
+						copy_tv(&(row->firstshareacc), createdate);
+					}
+					if (tv_newer(&(row->lastshareacc), createdate)) {
+						copy_tv(&(row->lastshareacc), createdate);
+						row->lastdiffacc = s_row->diff;
+					}
+				}
 				break;
 			case SE_STALE:
 				row->diffsta += s_row->diff;
@@ -3916,15 +3919,10 @@ static void set_sharesummary_stats(SHARESUMMARY *row, SHARES *s_row,
 	} else
 		row->errorcount += 1;
 
+	// Only if required
 	if (!new) {
 		*tdf = tvdiff(createdate, &(row->firstshare));
-		if (*tdf < 0.0)
-			copy_tv(&(row->firstshare), createdate);
 		*tdl = tvdiff(createdate, &(row->lastshare));
-		if (*tdl >= 0.0) {
-			copy_tv(&(row->lastshare), createdate);
-			row->lastdiffacc = diff;
-		}
 	}
 }
 
@@ -3946,166 +3944,149 @@ char *ooo_status(char *buf, size_t siz)
 }
 
 // No longer stored in the DB but fields are updated as before
-bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
-				char *by, char *code, char *inet, tv_t *cd,
-				WHERE_FFL_ARGS)
+bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
+			  char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS)
 {
 	WORKMARKERS *wm;
 	SHARESUMMARY *row, *p_row;
-	K_ITEM *item, *wm_item, *p_item = NULL;
+	K_ITEM *ss_item, *wm_item, *p_item = NULL;
 	bool new = false, p_new = false;
 	int64_t userid, workinfoid;
 	char *workername;
-	tv_t *createdate;
 	char *st = NULL, *db = NULL;
 	char ooo_buf[256];
 	double tdf, tdl;
 
 	LOGDEBUG("%s(): update", __func__);
 
-	// this will never be a pool_ summary
-	if (ss_item) {
-		if (s_row || e_row) {
-			quithere(1, "ERR: only one of s_row, e_row and "
-				    "ss_item allowed" WHERE_FFL,
+	if (s_row) {
+		if (e_row) {
+			quithere(1, "ERR: only one of s_row and e_row allowed"
+				    WHERE_FFL,
 				    WHERE_FFL_PASS);
 		}
-		item = ss_item;
-		DATA_SHARESUMMARY(row, item);
-		row->complete[0] = SUMMARY_COMPLETE;
-		row->complete[1] = '\0';
+		userid = s_row->userid;
+		workername = s_row->workername;
+		workinfoid = s_row->workinfoid;
 	} else {
-		if (s_row) {
-			if (e_row) {
-				quithere(1, "ERR: only one of s_row, e_row "
-					    "(and ss_item) allowed" WHERE_FFL,
-					    WHERE_FFL_PASS);
-			}
-			userid = s_row->userid;
-			workername = s_row->workername;
-			workinfoid = s_row->workinfoid;
-			createdate = &(s_row->createdate);
-		} else {
-			if (!e_row) {
-				quithere(1, "ERR: all s_row, e_row and "
-					    "ss_item are NULL" WHERE_FFL,
-					    WHERE_FFL_PASS);
-			}
-			userid = e_row->userid;
-			workername = e_row->workername;
-			workinfoid = e_row->workinfoid;
-			createdate = &(e_row->createdate);
+		if (!e_row) {
+			quithere(1, "ERR: both s_row and e_row are NULL"
+				    WHERE_FFL,
+				    WHERE_FFL_PASS);
 		}
-
-		K_RLOCK(workmarkers_free);
-		wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED,
-					   NULL);
-		K_RUNLOCK(workmarkers_free);
-		if (wm_item) {
-			DATA_WORKMARKERS(wm, wm_item);
-			LOGERR("%s(): attempt to update sharesummary "
-			       "with %s %"PRId64"/%"PRId64"/%s "CDDB" %s"
-			       " but processed workmarkers %"PRId64" exists",
-				__func__, s_row ? "shares" : "shareerrors",
-				workinfoid, userid, st = safe_text(workername),
-					db = ctv_to_buf(createdate, NULL, 0),
-					wm->markerid);
-				FREENULL(st);
-				FREENULL(db);
-				return false;
-		}
-
-		K_RLOCK(sharesummary_free);
-		item = find_sharesummary(userid, workername, workinfoid);
-		p_item = find_sharesummary_p(workinfoid);
-		K_RUNLOCK(sharesummary_free);
-
-		if (item) {
-			DATA_SHARESUMMARY(row, item);
-		} else {
-			new = true;
-			K_WLOCK(sharesummary_free);
-			item = k_unlink_head(sharesummary_free);
-			K_WUNLOCK(sharesummary_free);
-			DATA_SHARESUMMARY(row, item);
-			bzero(row, sizeof(*row));
-			row->userid = userid;
-			DUP_POINTER(sharesummary_free, row->workername,
-				    workername);
-			row->workinfoid = workinfoid;
-		}
-
-		// N.B. this directly updates the non-key data
-		set_sharesummary_stats(row, s_row, e_row, new, &tdf, &tdl);
-
-		if (!new) {
-			// don't LOG '=' in case shares come from ckpool with the same timestamp
-			if (tdf < 0.0) {
-				char *tmp1, *tmp2;
-				int level = LOG_DEBUG;
-				// WARNING for shares exceeding the OOOLIMIT but not during startup
-				if (tdf < OOOLIMIT) {
-					ooof++;
-					if (startup_complete)
-						level = LOG_WARNING;
-				} else
-					ooof0++;
-				LOGMSG(level, "%s(): OoO %s "CDDB" (%s) is < summary"
-					" firstshare (%s) (%s)",
-					__func__, s_row ? "shares" : "shareerrors",
-					(tmp1 = ctv_to_buf(createdate, NULL, 0)),
-					(tmp2 = ctv_to_buf(&(row->firstshare), NULL, 0)),
-					ooo_status(ooo_buf, sizeof(ooo_buf)));
-				free(tmp2);
-				free(tmp1);
-			}
-
-			// don't LOG '=' in case shares come from ckpool with the same timestamp
-			if (tdl < 0.0) {
-				char *tmp1, *tmp2;
-				int level = LOG_DEBUG;
-				// WARNING for shares exceeding the OOOLIMIT but not during startup
-				if (tdl < OOOLIMIT) {
-					oool++;
-					if (startup_complete)
-						level = LOG_WARNING;
-				} else
-					oool0++;
-				LOGMSG(level, "%s(): OoO %s "CDDB" (%s) is < summary"
-					" lastshare (%s) (%s)",
-					__func__, s_row ? "shares" : "shareerrors",
-					(tmp1 = ctv_to_buf(createdate, NULL, 0)),
-					(tmp2 = ctv_to_buf(&(row->lastshare), NULL, 0)),
-					ooo_status(ooo_buf, sizeof(ooo_buf)));
-				free(tmp2);
-				free(tmp1);
-			}
-
-			if (row->complete[0] != SUMMARY_NEW) {
-				LOGDEBUG("%s(): updating sharesummary not '%c'"
-					 " %"PRId64"/%s/%"PRId64"/%s",
-					__func__, SUMMARY_NEW, row->userid,
-					st = safe_text_nonull(row->workername),
-					row->workinfoid, row->complete);
-				FREENULL(st);
-			}
-		}
-
-		if (p_item) {
-			DATA_SHARESUMMARY(p_row, p_item);
-		} else {
-			p_new = true;
-			K_WLOCK(sharesummary_free);
-			p_item = k_unlink_head(sharesummary_free);
-			K_WUNLOCK(sharesummary_free);
-			DATA_SHARESUMMARY(p_row, p_item);
-			bzero(p_row, sizeof(*p_row));
-			POOL_SS(p_row);
-			p_row->workinfoid = workinfoid;
-		}
-
-		set_sharesummary_stats(p_row, s_row, e_row, p_new, &tdf, &tdl);
+		userid = e_row->userid;
+		workername = e_row->workername;
+		workinfoid = e_row->workinfoid;
 	}
+
+	K_RLOCK(workmarkers_free);
+	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED,
+				   NULL);
+	K_RUNLOCK(workmarkers_free);
+	if (wm_item) {
+		DATA_WORKMARKERS(wm, wm_item);
+		LOGERR("%s(): attempt to update sharesummary "
+		       "with %s %"PRId64"/%"PRId64"/%s "CDDB" %s"
+		       " but processed workmarkers %"PRId64" exists",
+			__func__, s_row ? "shares" : "shareerrors",
+			workinfoid, userid, st = safe_text(workername),
+				db = ctv_to_buf(cd, NULL, 0),
+				wm->markerid);
+			FREENULL(st);
+			FREENULL(db);
+			return false;
+	}
+
+	K_RLOCK(sharesummary_free);
+	ss_item = find_sharesummary(userid, workername, workinfoid);
+	p_item = find_sharesummary_p(workinfoid);
+	K_RUNLOCK(sharesummary_free);
+
+	if (ss_item) {
+		DATA_SHARESUMMARY(row, ss_item);
+	} else {
+		new = true;
+		K_WLOCK(sharesummary_free);
+		ss_item = k_unlink_head(sharesummary_free);
+		K_WUNLOCK(sharesummary_free);
+		DATA_SHARESUMMARY(row, ss_item);
+		bzero(row, sizeof(*row));
+		row->userid = userid;
+		DUP_POINTER(sharesummary_free, row->workername,
+			    workername);
+		row->workinfoid = workinfoid;
+	}
+
+	// N.B. this directly updates the non-key data
+	set_sharesummary_stats(row, s_row, e_row, new, &tdf, &tdl);
+
+	if (!new) {
+		// don't LOG '=' in case shares come from ckpool with the same timestamp
+		if (tdf < 0.0) {
+			char *tmp1, *tmp2;
+			int level = LOG_DEBUG;
+			// WARNING for shares exceeding the OOOLIMIT but not during startup
+			if (tdf < OOOLIMIT) {
+				ooof++;
+				if (startup_complete)
+					level = LOG_WARNING;
+			} else
+				ooof0++;
+			LOGMSG(level, "%s(): OoO %s "CDDB" (%s) is < summary"
+				" firstshare (%s) (%s)",
+				__func__, s_row ? "shares" : "shareerrors",
+				(tmp1 = ctv_to_buf(cd, NULL, 0)),
+				(tmp2 = ctv_to_buf(&(row->firstshare), NULL, 0)),
+				ooo_status(ooo_buf, sizeof(ooo_buf)));
+			free(tmp2);
+			free(tmp1);
+		}
+
+		// don't LOG '=' in case shares come from ckpool with the same timestamp
+		if (tdl < 0.0) {
+			char *tmp1, *tmp2;
+			int level = LOG_DEBUG;
+			// WARNING for shares exceeding the OOOLIMIT but not during startup
+			if (tdl < OOOLIMIT) {
+				oool++;
+				if (startup_complete)
+					level = LOG_WARNING;
+			} else
+				oool0++;
+			LOGMSG(level, "%s(): OoO %s "CDDB" (%s) is < summary"
+				" lastshare (%s) (%s)",
+				__func__, s_row ? "shares" : "shareerrors",
+				(tmp1 = ctv_to_buf(cd, NULL, 0)),
+				(tmp2 = ctv_to_buf(&(row->lastshare), NULL, 0)),
+				ooo_status(ooo_buf, sizeof(ooo_buf)));
+			free(tmp2);
+			free(tmp1);
+		}
+
+		if (row->complete[0] != SUMMARY_NEW) {
+			LOGDEBUG("%s(): updating sharesummary not '%c'"
+				 " %"PRId64"/%s/%"PRId64"/%s",
+				__func__, SUMMARY_NEW, row->userid,
+				st = safe_text_nonull(row->workername),
+				row->workinfoid, row->complete);
+			FREENULL(st);
+		}
+	}
+
+	if (p_item) {
+		DATA_SHARESUMMARY(p_row, p_item);
+	} else {
+		p_new = true;
+		K_WLOCK(sharesummary_free);
+		p_item = k_unlink_head(sharesummary_free);
+		K_WUNLOCK(sharesummary_free);
+		DATA_SHARESUMMARY(p_row, p_item);
+		bzero(p_row, sizeof(*p_row));
+		POOL_SS(p_row);
+		p_row->workinfoid = workinfoid;
+	}
+
+	set_sharesummary_stats(p_row, s_row, e_row, p_new, &tdf, &tdl);
 
 	MODIFYDATEPOINTERS(sharesummary_free, row, cd, by, code, inet);
 
@@ -4113,9 +4094,9 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 	if (new || p_new) {
 		K_WLOCK(sharesummary_free);
 		if (new) {
-			add_to_ktree(sharesummary_root, item);
-			add_to_ktree(sharesummary_workinfoid_root, item);
-			k_add_head(sharesummary_store, item);
+			add_to_ktree(sharesummary_root, ss_item);
+			add_to_ktree(sharesummary_workinfoid_root, ss_item);
+			k_add_head(sharesummary_store, ss_item);
 		}
 		if (p_new) {
 			add_to_ktree(sharesummary_pool_root, p_item);
@@ -4123,6 +4104,23 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 		}
 		K_WUNLOCK(sharesummary_free);
 	}
+
+	return true;
+}
+
+// No key fields are modified
+bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
+			tv_t *cd, WHERE_FFL_ARGS)
+{
+	SHARESUMMARY *row;
+
+	LOGDEBUG("%s(): update", __func__);
+
+	DATA_SHARESUMMARY(row, ss_item);
+	row->complete[0] = SUMMARY_COMPLETE;
+	row->complete[1] = '\0';
+
+	MODIFYDATEPOINTERS(sharesummary_free, row, cd, by, code, inet);
 
 	return true;
 }
@@ -6263,7 +6261,7 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 	bool conned = false;
 	PGresult *res;
 	MARKERSUMMARY *row;
-	char *params[18 + MODIFYDATECOUNT];
+	char *params[20 + MODIFYDATECOUNT];
 	int n, par = 0;
 	char *ins;
 	bool ok = false;
@@ -6294,6 +6292,8 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 	params[par++] = bigint_to_buf(row->errorcount, NULL, 0);
 	params[par++] = tv_to_buf(&(row->firstshare), NULL, 0);
 	params[par++] = tv_to_buf(&(row->lastshare), NULL, 0);
+	params[par++] = tv_to_buf(&(row->firstshareacc), NULL, 0);
+	params[par++] = tv_to_buf(&(row->lastshareacc), NULL, 0);
 	params[par++] = double_to_buf(row->lastdiffacc, NULL, 0);
 	MODIFYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
@@ -6301,7 +6301,8 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 	ins = "insert into markersummary "
 		"(markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
 		"diffrej,shareacc,sharesta,sharedup,sharehi,sharerej,"
-		"sharecount,errorcount,firstshare,lastshare,lastdiffacc"
+		"sharecount,errorcount,firstshare,lastshare,firstshareacc,"
+		"lastshareacc,lastdiffacc"
 		MODIFYDATECONTROL ") values (" PQPARAM26 ")";
 
 	LOGDEBUG("%s() adding ms %"PRId64"/%"PRId64"/%s/%.0f",
@@ -6344,7 +6345,7 @@ bool markersummary_fill(PGconn *conn)
 	MARKERSUMMARY *row, *p_row;
 	char *field;
 	char *sel;
-	int fields = 18;
+	int fields = 20;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
@@ -6356,8 +6357,8 @@ bool markersummary_fill(PGconn *conn)
 	sel = "select "
 		"markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
 		"diffrej,shareacc,sharesta,sharedup,sharehi,sharerej,"
-		"sharecount,errorcount,firstshare,lastshare,"
-		"lastdiffacc"
+		"sharecount,errorcount,firstshare,lastshare,firstshareacc,"
+		"lastshareacc,lastdiffacc"
 		MODIFYDATECONTROL
 		" from markersummary";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -6476,6 +6477,16 @@ bool markersummary_fill(PGconn *conn)
 			break;
 		TXT_TO_TV("lastshare", field, row->lastshare);
 
+		PQ_GET_FLD(res, i, "firstshareacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("firstshareacc", field, row->firstshareacc);
+
+		PQ_GET_FLD(res, i, "lastshareacc", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_TV("lastshareacc", field, row->lastshareacc);
+
 		PQ_GET_FLD(res, i, "lastdiffacc", field, ok);
 		if (!ok)
 			break;
@@ -6484,6 +6495,16 @@ bool markersummary_fill(PGconn *conn)
 		MODIFYDATEFLDPOINTERS(markersummary_free, res, i, row, ok);
 		if (!ok)
 			break;
+
+		/* Save having to do this everywhere in the code for old data
+		 * It's not always accurate, but soon after when it's not,
+		 *  and also what was used before the 2 fields were added */
+		if (row->diffacc > 0) {
+			if (row->firstshareacc.tv_sec == 0L)
+				copy_tv(&(row->firstshareacc), &(row->firstshare));
+			if (row->lastshareacc.tv_sec == 0L)
+				copy_tv(&(row->lastshareacc), &(row->lastshare));
+		}
 
 		add_to_ktree(markersummary_root, item);
 		add_to_ktree(markersummary_userid_root, item);

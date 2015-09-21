@@ -267,6 +267,7 @@ static bool seqdata_reload_lost = false;
 tv_t last_heartbeat;
 tv_t last_workinfo;
 tv_t last_share;
+tv_t last_share_acc;
 tv_t last_share_inv;
 tv_t last_auth;
 cklock_t last_lock;
@@ -2950,12 +2951,14 @@ static void summarise_blocks()
 			return;
 		}
 		has_ss = true;
-		if (elapsed_start.tv_sec == 0 ||
-		    !tv_newer(&elapsed_start, &(sharesummary->firstshare))) {
-			copy_tv(&elapsed_start, &(sharesummary->firstshare));
+		if (sharesummary->diffacc > 0) {
+			if (elapsed_start.tv_sec == 0 ||
+			    !tv_newer(&elapsed_start, &(sharesummary->firstshareacc))) {
+				copy_tv(&elapsed_start, &(sharesummary->firstshareacc));
+			}
+			if (tv_newer(&elapsed_finish, &(sharesummary->lastshareacc)))
+				copy_tv(&elapsed_finish, &(sharesummary->lastshareacc));
 		}
-		if (tv_newer(&elapsed_finish, &(sharesummary->lastshare)))
-			copy_tv(&elapsed_finish, &(sharesummary->lastshare));
 
 		diffacc += sharesummary->diffacc;
 		diffinv += sharesummary->diffsta + sharesummary->diffdup +
@@ -3003,12 +3006,14 @@ static void summarise_blocks()
 			DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
 			while (ms_item && markersummary->markerid == workmarkers->markerid) {
 				has_ms = true;
-				if (elapsed_start.tv_sec == 0 ||
-				    !tv_newer(&elapsed_start, &(markersummary->firstshare))) {
-					copy_tv(&elapsed_start, &(markersummary->firstshare));
+				if (markersummary->diffacc > 0) {
+					if (elapsed_start.tv_sec == 0 ||
+					    !tv_newer(&elapsed_start, &(markersummary->firstshareacc))) {
+						copy_tv(&elapsed_start, &(markersummary->firstshareacc));
+					}
+					if (tv_newer(&elapsed_finish, &(markersummary->lastshareacc)))
+						copy_tv(&elapsed_finish, &(markersummary->lastshareacc));
 				}
-				if (tv_newer(&elapsed_finish, &(markersummary->lastshare)))
-					copy_tv(&elapsed_finish, &(markersummary->lastshare));
 
 				diffacc += markersummary->diffacc;
 				diffinv += markersummary->diffsta + markersummary->diffdup +
@@ -3149,7 +3154,7 @@ static void make_a_shift_mark()
 	MARKS *marks = NULL, *sh_marks = NULL;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
 	bool was_block = false, ok;
-	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ];
+	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ], cd_buf3[DATE_BUFSIZ];
 	int used_wid;
 
 	/* If there are no CURRENT marks, make the first one by
@@ -3225,12 +3230,13 @@ static void make_a_shift_mark()
 	}
 	K_RUNLOCK(sharesummary_free);
 	if (ss_item) {
-		tv_to_buf(&(sharesummary->lastshare), cd_buf, sizeof(cd_buf));
-		tv_to_buf(&(sharesummary->createdate), cd_buf2, sizeof(cd_buf2));
-		LOGDEBUG("%s() last sharesummary %s/%s/%"PRId64"/%s/%s",
+		tv_to_buf(&(sharesummary->lastshareacc), cd_buf, sizeof(cd_buf));
+		tv_to_buf(&(sharesummary->lastshare), cd_buf2, sizeof(cd_buf2));
+		tv_to_buf(&(sharesummary->createdate), cd_buf3, sizeof(cd_buf3));
+		LOGDEBUG("%s() last sharesummary %s/%s/%"PRId64"/%s/%s/%s",
 			 __func__, sharesummary->complete,
 			 sharesummary->workername,
-			 ss_age_wid, cd_buf, cd_buf2);
+			 ss_age_wid, cd_buf, cd_buf2, cd_buf3);
 	}
 	LOGDEBUG("%s() age sharesummary limit wid %"PRId64, __func__, ss_age_wid);
 
@@ -3407,16 +3413,18 @@ static void make_a_shift_mark()
 				/* Not aged = shift not complete
 				 * Though, it shouldn't happen */
 				if (sharesummary->complete[0] == SUMMARY_NEW) {
-					tv_to_buf(&(sharesummary->lastshare),
+					tv_to_buf(&(sharesummary->lastshareacc),
 						  cd_buf, sizeof(cd_buf));
-					tv_to_buf(&(sharesummary->createdate),
+					tv_to_buf(&(sharesummary->lastshare),
 						  cd_buf2, sizeof(cd_buf2));
+					tv_to_buf(&(sharesummary->createdate),
+						  cd_buf3, sizeof(cd_buf3));
 					LOGEMERG("%s() ERR unaged sharesummary "
-						 "%s/%s/%"PRId64"/%s/%s",
+						 "%s/%s/%"PRId64"/%s/%s/%s",
 						 __func__, sharesummary->complete,
 						 sharesummary->workername,
 						 sharesummary->workinfoid,
-						 cd_buf, cd_buf2);
+						 cd_buf, cd_buf2, cd_buf3);
 					return;
 				}
 			}
@@ -4690,6 +4698,7 @@ static void *listener(void *arg)
 		setnow(&last_heartbeat);
 		copy_tv(&last_workinfo, &last_heartbeat);
 		copy_tv(&last_share, &last_heartbeat);
+		copy_tv(&last_share_acc, &last_heartbeat);
 		copy_tv(&last_share_inv, &last_heartbeat);
 		copy_tv(&last_auth, &last_heartbeat);
 		ck_wunlock(&last_lock);

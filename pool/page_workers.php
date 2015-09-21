@@ -61,6 +61,7 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 		$all[] = array('workername' => $ans['workername:'.$i],
 				'w_lastshare' => $ans['w_lastshare:'.$i],
+				'w_lastshareacc' => $ans['w_lastshareacc:'.$i],
 				'w_lastdiff' => $ans['w_lastdiff:'.$i],
 				'w_shareacc' => $ans['w_shareacc:'.$i],
 				'w_diffacc' => $ans['w_diffacc:'.$i],
@@ -80,6 +81,8 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 		if ($old !== false && $lst > $old)
 			continue;
 
+		$lstacc = $now - $all[$i]['w_lastshareacc'];
+
 		if ((($offset) % 2) == 0)
 			$row = 'even';
 		else
@@ -93,7 +96,7 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 			$ld = '&nbsp;';
 		$pg .= "<td class=dr>$ld</td>";
 
-		$pg .= "<td class=dr data-srt=$lst>".howlongago($lst).'</td>';
+		$pg .= "<td class=dr data-srt=$lstacc>".howlongago($lstacc).'</td>';
 
 		$shareacc = number_format($all[$i]['w_shareacc'], 0);
 		$totshare += $all[$i]['w_shareacc'];

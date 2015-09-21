@@ -54,8 +54,8 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.2"
-#define CKDB_VERSION DB_VERSION"-1.311"
+#define DB_VERSION "1.0.3"
+#define CKDB_VERSION DB_VERSION"-1.320"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -312,6 +312,7 @@ extern bool everyone_die;
 extern tv_t last_heartbeat;
 extern tv_t last_workinfo;
 extern tv_t last_share;
+extern tv_t last_share_acc;
 extern tv_t last_share_inv;
 extern tv_t last_auth;
 extern cklock_t last_lock;
@@ -1435,6 +1436,8 @@ typedef struct sharesummary {
 	int64_t errorcount;
 	tv_t firstshare;
 	tv_t lastshare;
+	tv_t firstshareacc;
+	tv_t lastshareacc;
 	double lastdiffacc;
 	char complete[TXT_FLAG+1];
 	MODIFYDATECONTROLPOINTERS;
@@ -1830,7 +1833,8 @@ typedef struct workerstatus {
 	char workername[TXT_BIG+1];
 	tv_t last_auth;
 	tv_t last_share;
-	double last_diff;
+	tv_t last_share_acc;
+	double last_diff_acc;
 	tv_t last_stats;
 	tv_t last_idle;
 	// Below gets reset on each block
@@ -1890,6 +1894,8 @@ typedef struct markersummary {
 	int64_t errorcount;
 	tv_t firstshare;
 	tv_t lastshare;
+	tv_t firstshareacc;
+	tv_t lastshareacc;
 	double lastdiffacc;
 	MODIFYDATECONTROLPOINTERS;
 } MARKERSUMMARY;
@@ -2297,7 +2303,7 @@ extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
-extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
+extern void zero_sharesummary(SHARESUMMARY *row);
 #define find_sharesummary(_userid, _workername, _workinfoid) \
 	_find_sharesummary(_userid, _workername, _workinfoid, false)
 #define find_sharesummary_p(_workinfoid) \
@@ -2518,12 +2524,16 @@ extern bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmar
 						char *by, char *code, char *inet,
 						tv_t *cd, K_TREE *trf_root);
 extern char *ooo_status(char *buf, size_t siz);
-#define sharesummary_update(_s_row, _e_row, _ss_item, _by, _code, _inet, _cd) \
-		_sharesummary_update(_s_row, _e_row, _ss_item, _by, _code, _inet, _cd, \
+#define sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd) \
+	_sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd, \
 					WHERE_FFL_HERE)
-extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
-				 char *by, char *code, char *inet, tv_t *cd,
+extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
+				 char *code, char *inet, tv_t *cd,
 				 WHERE_FFL_ARGS);
+#define sharesummary_age(_ss_item, _by, _code, _inet, _cd) \
+	_sharesummary_age(_ss_item, _by, _code, _inet, _cd, WHERE_FFL_HERE)
+extern bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
+				tv_t *cd, WHERE_FFL_ARGS);
 extern bool sharesummary_fill(PGconn *conn);
 extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 			 double diffacc, double diffinv, double shareacc,

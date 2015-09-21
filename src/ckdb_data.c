@@ -958,7 +958,12 @@ void workerstatus_ready()
 				     &(markersummary->lastshare))) {
 				copy_tv(&(workerstatus->last_share),
 					&(markersummary->lastshare));
-				workerstatus->last_diff =
+			}
+			if (tv_newer(&(workerstatus->last_share_acc),
+				     &(markersummary->lastshareacc))) {
+				copy_tv(&(workerstatus->last_share_acc),
+					&(markersummary->lastshareacc));
+				workerstatus->last_diff_acc =
 					markersummary->lastdiffacc;
 			}
 		}
@@ -973,7 +978,12 @@ void workerstatus_ready()
 				     &(sharesummary->lastshare))) {
 				copy_tv(&(workerstatus->last_share),
 					&(sharesummary->lastshare));
-				workerstatus->last_diff =
+			}
+			if (tv_newer(&(workerstatus->last_share_acc),
+				     &(sharesummary->lastshareacc))) {
+				copy_tv(&(workerstatus->last_share_acc),
+					&(sharesummary->lastshareacc));
+				workerstatus->last_diff_acc =
 					sharesummary->lastdiffacc;
 			}
 		}
@@ -1017,10 +1027,8 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
 			K_WLOCK(workerstatus_free);
-			if (tv_newer(&(row->last_share), &(shares->createdate))) {
+			if (tv_newer(&(row->last_share), &(shares->createdate)))
 				copy_tv(&(row->last_share), &(shares->createdate));
-				row->last_diff = shares->diff;
-			}
 			if (row->active_start.tv_sec == 0)
 				copy_tv(&(row->active_start), &(shares->createdate));
 			switch (shares->errn) {
@@ -1029,6 +1037,12 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 					row->block_shareacc++;
 					row->active_diffacc += shares->diff;
 					row->active_shareacc++;
+					if (tv_newer(&(row->last_share_acc),
+						     &(shares->createdate))) {
+						copy_tv(&(row->last_share_acc),
+							&(shares->createdate));
+						row->last_diff_acc = shares->diff;
+					}
 					break;
 				case SE_STALE:
 					row->block_diffinv += shares->diff;
@@ -2118,7 +2132,8 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		error[0] = '\0';
 		skipupdate = false;
 		/* Reloading during a confirm will not have any old data
-		 * so finding an aged sharesummary here is an error */
+		 *  so finding an aged sharesummary here is an error
+		 * N.B. this can only happen with (very) old reload files */
 		if (reloading) {
 			if (sharesummary->complete[0] == SUMMARY_COMPLETE) {
 				ss_already++;
@@ -2134,7 +2149,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		}
 
 		if (!skipupdate) {
-			if (!sharesummary_update(NULL, NULL, ss_item, by, code, inet, cd)) {
+			if (!sharesummary_age(ss_item, by, code, inet, cd)) {
 				ss_failed++;
 				LOGERR("%s(): Failed to age sharesummary %"PRId64"/%s/%"PRId64,
 					__func__, sharesummary->userid,
@@ -2364,17 +2379,17 @@ cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff)
+void zero_sharesummary(SHARESUMMARY *row)
 {
 	row->diffacc = row->diffsta = row->diffdup = row->diffhi =
 	row->diffrej = row->shareacc = row->sharesta = row->sharedup =
 	row->sharehi = row->sharerej = 0.0;
 	row->sharecount = row->errorcount = 0;
-	row->firstshare.tv_sec = cd->tv_sec;
-	row->firstshare.tv_usec = cd->tv_usec;
-	row->lastshare.tv_sec = row->firstshare.tv_sec;
-	row->lastshare.tv_usec = row->firstshare.tv_usec;
-	row->lastdiffacc = diff;
+	DATE_ZERO(&(row->firstshare));
+	DATE_ZERO(&(row->lastshare));
+	DATE_ZERO(&(row->firstshareacc));
+	DATE_ZERO(&(row->lastshareacc));
+	row->lastdiffacc = 0;
 	row->complete[0] = SUMMARY_NEW;
 	row->complete[1] = '\0';
 }
@@ -3690,7 +3705,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	if (ss_item)
 		end_workinfoid = sharesummary->workinfoid;
 	/* Add up all sharesummaries until >= diff_want
-	 * also record the latest lastshare - that will be the end pplns time
+	 * also record the latest lastshareacc - that will be the end pplns time
 	 *  which will be >= blocks->blockcreatedate */
 	while (total_diff < diff_want && ss_item) {
 		switch (sharesummary->complete[0]) {
@@ -3723,10 +3738,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		acc_share_count += sharesummary->shareacc;
 		total_diff += sharesummary->diffacc;
 		begin_workinfoid = sharesummary->workinfoid;
-		// TODO: add lastshareacc to sharesummary and markersummary
-		if (sharesummary->shareacc > 0 &&
-		    tv_newer(&end_tv, &(sharesummary->lastshare)))
-			copy_tv(&end_tv, &(sharesummary->lastshare));
+		if (tv_newer(&end_tv, &(sharesummary->lastshareacc)))
+			copy_tv(&end_tv, &(sharesummary->lastshareacc));
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     sharesummary->userid,
 				     sharesummary->diffacc);
@@ -3760,10 +3773,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		total_share_count += sharesummary->sharecount;
 		acc_share_count += sharesummary->shareacc;
 		total_diff += sharesummary->diffacc;
-		// TODO: add lastshareacc to sharesummary and markersummary
-		if (sharesummary->shareacc > 0 &&
-		    tv_newer(&end_tv, &(sharesummary->lastshare)))
-			copy_tv(&end_tv, &(sharesummary->lastshare));
+		if (tv_newer(&end_tv, &(sharesummary->lastshareacc)))
+			copy_tv(&end_tv, &(sharesummary->lastshareacc));
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     sharesummary->userid,
 				     sharesummary->diffacc);
@@ -3812,9 +3823,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 					acc_share_count += markersummary->shareacc;
 					total_diff += markersummary->diffacc;
 					begin_workinfoid = workmarkers->workinfoidstart;
-					if (markersummary->shareacc > 0 &&
-					    tv_newer(&end_tv, &(markersummary->lastshare)))
-						copy_tv(&end_tv, &(markersummary->lastshare));
+					if (tv_newer(&end_tv, &(markersummary->lastshareacc)))
+						copy_tv(&end_tv, &(markersummary->lastshareacc));
 					mu_root = upd_add_mu(mu_root, mu_store,
 							     markersummary->userid,
 							     markersummary->diffacc);

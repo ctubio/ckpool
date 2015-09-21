@@ -2001,6 +2001,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
 				K_RLOCK(workerstatus_free);
+				// good or bad - either means active
 				copy_tv(&last_share, &(workerstatus->last_share));
 				K_RUNLOCK(workerstatus_free);
 			} else
@@ -2028,7 +2029,9 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					double w_hashrate24hr;
 					int64_t w_elapsed;
 					tv_t w_lastshare;
-					double w_lastdiff, w_diffacc, w_diffinv;
+					tv_t w_lastshareacc;
+					double w_lastdiffacc, w_diffacc;
+					double w_diffinv;
 					double w_diffsta, w_diffdup;
 					double w_diffhi, w_diffrej;
 					double w_shareacc, w_shareinv;
@@ -2042,8 +2045,9 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					w_elapsed = -1;
 
 					if (!ws_item) {
-						w_lastshare.tv_sec = 0L;
-						w_lastdiff = w_diffacc =
+						w_lastshare.tv_sec =
+						w_lastshareacc.tv_sec = 0L;
+						w_lastdiffacc = w_diffacc =
 						w_diffinv = w_diffsta =
 						w_diffdup = w_diffhi =
 						w_diffrej = w_shareacc =
@@ -2056,7 +2060,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 						// It's bad to read possibly changing data
 						K_RLOCK(workerstatus_free);
 						w_lastshare.tv_sec = workerstatus->last_share.tv_sec;
-						w_lastdiff = workerstatus->last_diff;
+						w_lastshareacc.tv_sec = workerstatus->last_share_acc.tv_sec;
+						w_lastdiffacc = workerstatus->last_diff_acc;
 						w_diffacc = workerstatus->block_diffacc;
 						w_diffinv = workerstatus->block_diffinv;
 						w_diffsta = workerstatus->block_diffsta;
@@ -2112,7 +2117,11 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					snprintf(tmp, sizeof(tmp), "w_lastshare:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
-					double_to_buf(w_lastdiff, reply, sizeof(reply));
+					int_to_buf((int)(w_lastshareacc.tv_sec), reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp), "w_lastshareacc:%d=%s%c", rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+
+					double_to_buf(w_lastdiffacc, reply, sizeof(reply));
 					snprintf(tmp, sizeof(tmp), "w_lastdiff:%d=%s%c", rows, reply, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 
@@ -2185,7 +2194,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 "workername,difficultydefault,idlenotificationenabled,"
 		 "idlenotificationtime",
 		 stats ? ",w_hashrate5m,w_hashrate1hr,w_hashrate24hr,"
-		 "w_elapsed,w_lastshare,"
+		 "w_elapsed,w_lastshare,w_lastshareacc,"
 		 "w_lastdiff,w_diffacc,w_diffinv,"
 		 "w_diffsta,w_diffdup,w_diffhi,w_diffrej,"
 		 "w_shareacc,w_shareinv,"
@@ -2504,10 +2513,11 @@ wiconf:
 			int32_t errn;
 			TXT_TO_INT("errn", transfer_data(i_errn), errn);
 			ck_wlock(&last_lock);
+			setnow(&last_share);
 			if (errn == SE_NONE)
-				setnow(&last_share);
+				copy_tv(&last_share_acc, &last_share);
 			else
-				setnow(&last_share_inv);
+				copy_tv(&last_share_inv, &last_share);
 			ck_wunlock(&last_lock);
 		}
 		LOGDEBUG("%s.ok.added %s", id, transfer_data(i_nonce));
@@ -3113,6 +3123,9 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	ftv_to_buf(&last_share, reply, siz);
 	snprintf(tmp, sizeof(tmp), "lastsh=%s%c", reply, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
+	ftv_to_buf(&last_share_acc, reply, siz);
+	snprintf(tmp, sizeof(tmp), "lastshacc=%s%c", reply, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	ftv_to_buf(&last_share_inv, reply, siz);
 	snprintf(tmp, sizeof(tmp), "lastshinv=%s%c", reply, FLDSEP);
@@ -4137,7 +4150,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (ss_item)
 		end_workinfoid = sharesummary->workinfoid;
 	/* add up all sharesummaries until >= diff_want
-	 * also record the latest lastshare - that will be the end pplns time
+	 * also record the latest lastshareacc - that will be the end pplns time
 	 *  which will be >= block_tv */
 	while (total_diff < diff_want && ss_item) {
 		switch (sharesummary->complete[0]) {
@@ -4159,8 +4172,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 		acc_share_count += sharesummary->shareacc;
 		total_diff += (int64_t)(sharesummary->diffacc);
 		begin_workinfoid = sharesummary->workinfoid;
-		if (tv_newer(&end_tv, &(sharesummary->lastshare)))
-			copy_tv(&end_tv, &(sharesummary->lastshare));
+		if (tv_newer(&end_tv, &(sharesummary->lastshareacc)))
+			copy_tv(&end_tv, &(sharesummary->lastshareacc));
 		mu_root = upd_add_mu(mu_root, mu_store,
 				     sharesummary->userid,
 				     (int64_t)(sharesummary->diffacc));
@@ -4233,8 +4246,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 					acc_share_count += markersummary->shareacc;
 					total_diff += (int64_t)(markersummary->diffacc);
 					begin_workinfoid = workmarkers->workinfoidstart;
-					if (tv_newer(&end_tv, &(markersummary->lastshare)))
-						copy_tv(&end_tv, &(markersummary->lastshare));
+					if (tv_newer(&end_tv, &(markersummary->lastshareacc)))
+						copy_tv(&end_tv, &(markersummary->lastshareacc));
 					mu_root = upd_add_mu(mu_root, mu_store,
 							     markersummary->userid,
 							     (int64_t)(markersummary->diffacc));
@@ -6521,5 +6534,5 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_SHSTA,	"shsta",	true,	false,	cmd_shsta,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_USERINFO,	"userinfo",	false,	false,	cmd_userinfo,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_BTCSET,	"btcset",	false,	false,	cmd_btcset,	SEQ_NONE,	ACCESS_SYSTEM },
-	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	NULL }
+	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

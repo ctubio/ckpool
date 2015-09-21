@@ -99,7 +99,7 @@ function howlongago($sec)
  return $des;
 }
 #
-function howmanyhrs($tot)
+function howmanyhrs($tot, $days = false)
 {
  $sec = round($tot);
  if ($sec < 60)
@@ -114,7 +114,14 @@ function howmanyhrs($tot)
 	{
 		$hr = floor($min / 60);
 		$min -= $hr * 60;
-		$des = $hr.'hr '.$min.'m '.$sec.'s';
+		if ($days && $hr > 23)
+		{
+			$dy = floor($hr / 24);
+			$hr -= $dy * 24;
+			$des = $dy.'d '.$hr.'hr '.$min.'m '.$sec.'s';
+		}
+		else
+			$des = $hr.'hr '.$min.'m '.$sec.'s';
 	}
  }
  return $des;
