@@ -1370,6 +1370,12 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	return client;
 }
 
+/* passthrough subclients have client_ids in the high bits */
+static inline bool passthrough_subclient(const int64_t client_id)
+{
+	return (client_id > 0xffffffffll);
+}
+
 static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid,
 					      int *session_id, const int64_t id)
 {
@@ -1377,6 +1383,10 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	int64_t old_id = 0;
 	uint64_t ret = 0;
 	int slen;
+
+	/* Don't allow passthrough subclients to resume */
+	if (passthrough_subclient(id))
+		goto out;
 
 	if (!sessionid)
 		goto out;
