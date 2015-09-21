@@ -1725,7 +1725,7 @@ static void passthrough_send(ckpool_t *ckp, pass_msg_t *pm)
 	if (sent != len) {
 		LOGWARNING("Failed to passthrough %d bytes of message %s, attempting reconnect",
 			   len, pm->msg);
-		send_proc(ckp->generator, "reconnect");
+		reconnect_generator(ckp);
 	}
 	free(pm->msg);
 	free(pm);
@@ -1897,10 +1897,8 @@ static void *passthrough_recv(void *arg)
 
 	rename_proc("passrecv");
 
-	if (proxy_alive(ckp, proxi, cs, false)) {
-		reconnect_generator(ckp);
-		LOGWARNING("Proxy %d:%s connection established", proxi->id, proxi->url);
-	}
+	if (proxy_alive(ckp, proxi, cs, false))
+		LOGWARNING("Passthrough proxy %d:%s connection established", proxi->id, proxi->url);
 	alive = proxi->alive;
 
 	while (42) {
@@ -1924,7 +1922,6 @@ static void *passthrough_recv(void *arg)
 				   proxi->id, proxi->url);
 			alive = proxi->alive = false;
 			Close(cs->fd);
-			reconnect_generator(ckp);
 			continue;
 		}
 		/* Simply forward the message on, as is, to the connector to
@@ -2573,7 +2570,7 @@ reconnect:
 	cproxy = wait_best_proxy(ckp, gdata);
 	if (!cproxy)
 		goto out;
-	if (proxi != cproxy) {
+	if (proxi != cproxy || ckp->passthrough) {
 		proxi = cproxy;
 		LOGWARNING("Successfully connected to proxy %d %s as proxy%s",
 			   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
