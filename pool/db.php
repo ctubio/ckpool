@@ -139,13 +139,15 @@ function msgEncode($cmd, $id, $fields, $user)
 {
  global $send_sep, $fld_sep, $val_sep;
 
- $t = time() % 10000;
+ $now = time();
+ $t = $now % 10000;
  $msg = $cmd . $send_sep . $id.$t . $send_sep;
  foreach ($fields as $name => $value)
 	$msg .= $name . $val_sep . $value . $fld_sep;
  $msg .= 'createcode' . $val_sep . 'php' . $fld_sep;
  $msg .= 'createby' . $val_sep . $user . $fld_sep;
- $msg .= 'createinet' . $val_sep . zeip();
+ $msg .= 'createinet' . $val_sep . zeip(). $fld_sep;
+ $msg .= 'webtime' . $val_sep . $now;
  adm($user, $msg);
  return $msg;
 }

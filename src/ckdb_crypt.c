@@ -36,7 +36,7 @@ char *_tob32(USERS *users, unsigned char *bin, size_t len, char *name,
 	if (osiz != olen) {
 		LOGEMERG("%s() of '%s' data for '%s' invalid olen=%d != osiz=%d"
 			 WHERE_FFL,
-			 __func__, name, safe_text_nonull(users->username),
+			 __func__, name, st = safe_text_nonull(users->username),
 			 (int)olen, (int)osiz, WHERE_FFL_PASS);
 		FREENULL(st);
 		olen = osiz;
@@ -59,8 +59,8 @@ char *_tob32(USERS *users, unsigned char *bin, size_t len, char *name,
 				 "ch=%d, i=%d j=%d bits=%d bin=0x%s len=%d "
 				 "olen=%d" WHERE_FFL,
 				 __func__, name,
-				 safe_text_nonull(users->username), ch, i, j,
-				 bits, binstr, (int)len, (int)olen,
+				 st = safe_text_nonull(users->username),
+				 ch, i, j, bits, binstr, (int)len, (int)olen,
 				 WHERE_FFL_PASS);
 			FREENULL(st);
 			FREENULL(binstr);

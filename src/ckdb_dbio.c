@@ -513,14 +513,14 @@ unparam:
 		free_users_data(item);
 		k_add_head(users_free, item);
 	} else {
-		users_root = remove_from_ktree(users_root, u_item, cmp_users);
-		userid_root = remove_from_ktree(userid_root, u_item, cmp_userid);
+		remove_from_ktree(users_root, u_item);
+		remove_from_ktree(userid_root, u_item);
 		copy_tv(&(users->expirydate), cd);
-		users_root = add_to_ktree(users_root, u_item, cmp_users);
-		userid_root = add_to_ktree(userid_root, u_item, cmp_userid);
+		add_to_ktree(users_root, u_item);
+		add_to_ktree(userid_root, u_item);
 
-		users_root = add_to_ktree(users_root, item, cmp_users);
-		userid_root = add_to_ktree(userid_root, item, cmp_userid);
+		add_to_ktree(users_root, item);
+		add_to_ktree(userid_root, item);
 		k_add_head(users_store, item);
 	}
 	K_WUNLOCK(users_free);
@@ -648,8 +648,8 @@ unitem:
 		free_users_data(item);
 		k_add_head(users_free, item);
 	} else {
-		users_root = add_to_ktree(users_root, item, cmp_users);
-		userid_root = add_to_ktree(userid_root, item, cmp_userid);
+		add_to_ktree(users_root, item);
+		add_to_ktree(userid_root, item);
 		k_add_head(users_store, item);
 	}
 	K_WUNLOCK(users_free);
@@ -760,14 +760,14 @@ unparam:
 		free_users_data(u_item);
 		k_add_head(users_free, u_item);
 	} else {
-		users_root = remove_from_ktree(users_root, old_u_item, cmp_users);
-		userid_root = remove_from_ktree(userid_root, old_u_item, cmp_userid);
+		remove_from_ktree(users_root, old_u_item);
+		remove_from_ktree(userid_root, old_u_item);
 		copy_tv(&(old_users->expirydate), cd);
-		users_root = add_to_ktree(users_root, old_u_item, cmp_users);
-		userid_root = add_to_ktree(userid_root, old_u_item, cmp_userid);
+		add_to_ktree(users_root, old_u_item);
+		add_to_ktree(userid_root, old_u_item);
 
-		users_root = add_to_ktree(users_root, u_item, cmp_users);
-		userid_root = add_to_ktree(userid_root, u_item, cmp_userid);
+		add_to_ktree(users_root, u_item);
+		add_to_ktree(userid_root, u_item);
 		k_add_head(users_store, u_item);
 	}
 	K_WUNLOCK(users_free);
@@ -883,8 +883,8 @@ bool users_fill(PGconn *conn)
 
 		username_trim(row);
 
-		users_root = add_to_ktree(users_root, item, cmp_users);
-		userid_root = add_to_ktree(userid_root, item, cmp_userid);
+		add_to_ktree(users_root, item);
+		add_to_ktree(userid_root, item);
 		k_add_head(users_store, item);
 	}
 	if (!ok) {
@@ -1011,11 +1011,11 @@ unparam:
 	if (ok) {
 		// Update it
 		if (old_item) {
-			useratts_root = remove_from_ktree(useratts_root, old_item, cmp_useratts);
+			remove_from_ktree(useratts_root, old_item);
 			copy_tv(&(old_useratts->expirydate), cd);
-			useratts_root = add_to_ktree(useratts_root, old_item, cmp_useratts);
+			add_to_ktree(useratts_root, old_item);
 		}
-		useratts_root = add_to_ktree(useratts_root, ua_item, cmp_useratts);
+		add_to_ktree(useratts_root, ua_item);
 		k_add_head(useratts_store, ua_item);
 	}
 	K_WUNLOCK(useratts_free);
@@ -1162,9 +1162,9 @@ unparam:
 
 	K_WLOCK(useratts_free);
 	if (ok && item) {
-		useratts_root = remove_from_ktree(useratts_root, item, cmp_useratts);
+		remove_from_ktree(useratts_root, item);
 		copy_tv(&(useratts->expirydate), cd);
-		useratts_root = add_to_ktree(useratts_root, item, cmp_useratts);
+		add_to_ktree(useratts_root, item);
 	}
 	K_WUNLOCK(useratts_free);
 
@@ -1269,7 +1269,7 @@ bool useratts_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		useratts_root = add_to_ktree(useratts_root, item, cmp_useratts);
+		add_to_ktree(useratts_root, item);
 		k_add_head(useratts_store, item);
 	}
 	if (!ok)
@@ -1400,7 +1400,7 @@ unitem:
 	if (!ret)
 		k_add_head(workers_free, item);
 	else {
-		workers_root = add_to_ktree(workers_root, item, cmp_workers);
+		add_to_ktree(workers_root, item);
 		k_add_head(workers_store, item);
 		// Ensure there is a matching workerstatus
 		find_create_workerstatus(userid, workername,
@@ -1639,7 +1639,7 @@ bool workers_fill(PGconn *conn)
 			break;
 		TXT_TO_BIGINT("workerid", field, row->workerid);
 
-		workers_root = add_to_ktree(workers_root, item, cmp_workers);
+		add_to_ktree(workers_root, item);
 		k_add_head(workers_store, item);
 
 		/* Make sure a workerstatus exists for each worker
@@ -1869,15 +1869,11 @@ unparam:
 			else {
 				// It wasn't a match, thus it was expired
 				n++;
-				paymentaddresses_root = remove_from_ktree(paymentaddresses_root, item,
-									  cmp_paymentaddresses);
-				paymentaddresses_create_root = remove_from_ktree(paymentaddresses_create_root,
-										 item, cmp_payaddr_create);
+				remove_from_ktree(paymentaddresses_root, item);
+				remove_from_ktree(paymentaddresses_create_root, item);
 				copy_tv(&(row->expirydate), cd);
-				paymentaddresses_root = add_to_ktree(paymentaddresses_root, item,
-								     cmp_paymentaddresses);
-				paymentaddresses_create_root = add_to_ktree(paymentaddresses_create_root,
-									    item, cmp_payaddr_create);
+				add_to_ktree(paymentaddresses_root, item);
+				add_to_ktree(paymentaddresses_create_root, item);
 			}
 			item = prev;
 			DATA_PAYMENTADDRESSES_NULL(row, item);
@@ -1889,10 +1885,8 @@ unparam:
 			next = match->next;
 			DATA_PAYMENTADDRESSES(pa, match);
 			if (!pa->match) {
-				paymentaddresses_root = add_to_ktree(paymentaddresses_root, match,
-								     cmp_paymentaddresses);
-				paymentaddresses_create_root = add_to_ktree(paymentaddresses_create_root,
-									    match, cmp_payaddr_create);
+				add_to_ktree(paymentaddresses_root, match);
+				add_to_ktree(paymentaddresses_create_root, match);
 				k_unlink_item(pa_store, match);
 				k_add_head(paymentaddresses_store, match);
 				count++;
@@ -1981,10 +1975,8 @@ bool paymentaddresses_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		paymentaddresses_root = add_to_ktree(paymentaddresses_root, item,
-						     cmp_paymentaddresses);
-		paymentaddresses_create_root = add_to_ktree(paymentaddresses_create_root,
-							    item, cmp_payaddr_create);
+		add_to_ktree(paymentaddresses_root, item);
+		add_to_ktree(paymentaddresses_create_root, item);
 		k_add_head(paymentaddresses_store, item);
 	}
 	if (!ok)
@@ -2015,11 +2007,11 @@ void payments_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item, tv_t *cd)
 	} else {
 		if (old_p_item) {
 			DATA_PAYMENTS(oldp, old_p_item);
-			payments_root = remove_from_ktree(payments_root, old_p_item, cmp_payments);
+			remove_from_ktree(payments_root, old_p_item);
 			copy_tv(&(oldp->expirydate), cd);
-			payments_root = add_to_ktree(payments_root, old_p_item, cmp_payments);
+			add_to_ktree(payments_root, old_p_item);
 		}
-		payments_root = add_to_ktree(payments_root, p_item, cmp_payments);
+		add_to_ktree(payments_root, p_item);
 		k_add_head(payments_store, p_item);
 	}
 	K_WUNLOCK(payments_free);
@@ -2252,7 +2244,7 @@ bool payments_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		payments_root = add_to_ktree(payments_root, item, cmp_payments);
+		add_to_ktree(payments_root, item);
 		k_add_head(payments_store, item);
 	}
 	if (!ok)
@@ -2358,7 +2350,7 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	INIT_OPTIONCONTROL(&look);
 	look.data = (void *)row;
 	K_RLOCK(optioncontrol_free);
-	old_item = find_in_ktree(optioncontrol_root, &look, cmp_optioncontrol, ctx);
+	old_item = find_in_ktree(optioncontrol_root, &look, ctx);
 	K_RUNLOCK(optioncontrol_free);
 
 	if (!conn) {
@@ -2446,13 +2438,12 @@ nostart:
 	} else {
 		// Discard old
 		if (old_item) {
-			optioncontrol_root = remove_from_ktree(optioncontrol_root, old_item,
-							       cmp_optioncontrol);
+			remove_from_ktree(optioncontrol_root, old_item);
 			k_unlink_item(optioncontrol_store, old_item);
 			free_optioncontrol_data(old_item);
 			k_add_head(optioncontrol_free, old_item);
 		}
-		optioncontrol_root = add_to_ktree(optioncontrol_root, oc_item, cmp_optioncontrol);
+		add_to_ktree(optioncontrol_root, oc_item);
 		k_add_head(optioncontrol_store, oc_item);
 		if (strcmp(row->optionname, SWITCH_STATE_NAME) == 0) {
 			switch_state = atoi(row->optionvalue);
@@ -2584,7 +2575,7 @@ bool optioncontrol_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		optioncontrol_root = add_to_ktree(optioncontrol_root, item, cmp_optioncontrol);
+		add_to_ktree(optioncontrol_root, item);
 		k_add_head(optioncontrol_store, item);
 
 		// There should only be one CURRENT version of switch_state
@@ -2632,6 +2623,7 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	char *ins;
 	char *params[11 + HISTORYDATECOUNT];
 	int n, par = 0;
+	bool zero_active = false;
 
 	LOGDEBUG("%s(): add", __func__);
 
@@ -2659,7 +2651,7 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	HISTORYDATETRANSFER(trf_root, row);
 
 	K_WLOCK(workinfo_free);
-	if (find_in_ktree(workinfo_root, item, cmp_workinfo, ctx)) {
+	if (find_in_ktree(workinfo_root, item, ctx)) {
 		workinfoid = row->workinfoid;
 		free_workinfo_data(item);
 		k_add_head(workinfo_free, item);
@@ -2732,20 +2724,25 @@ unparam:
 		hex2bin(ndiffbin, row->bits, 4);
 		current_ndiff = diff_from_nbits(ndiffbin);
 
-		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
+		add_to_ktree(workinfo_root, item);
 		k_add_head(workinfo_store, item);
 
 		// Remember the bc = 'cd' when the height changes
 		if (workinfo_current) {
 			WORKINFO *wic;
 			DATA_WORKINFO(wic, workinfo_current);
-			if (cmp_height(wic->coinbase1, row->coinbase1) != 0)
+			if (cmp_height(wic->coinbase1, row->coinbase1) != 0) {
 				copy_tv(&last_bc, cd);
+				zero_active = true;
+			}
 		}
 
 		workinfo_current = item;
 	}
 	K_WUNLOCK(workinfo_free);
+
+	if (zero_active)
+		zero_all_active(cd);
 
 	return workinfoid;
 }
@@ -2900,9 +2897,9 @@ bool workinfo_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		workinfo_root = add_to_ktree(workinfo_root, item, cmp_workinfo);
+		add_to_ktree(workinfo_root, item);
 		if (!confirm_sharesummary)
-			workinfo_height_root = add_to_ktree(workinfo_height_root, item, cmp_workinfo_height);
+			add_to_ktree(workinfo_height_root, item);
 		k_add_head(workinfo_store, item);
 
 		if (tv_newer(&(dbstatus.newest_createdate_workinfo), &(row->createdate))) {
@@ -3027,9 +3024,7 @@ static void shares_process_early(PGconn *conn, int64_t good_wid, tv_t *good_cd,
 	}
 	es_item = last_in_ktree(shares_early_root, ctx);
 	if (es_item) {
-		shares_early_root = remove_from_ktree(shares_early_root,
-						      es_item,
-						      cmp_shares);
+		remove_from_ktree(shares_early_root, es_item);
 		k_unlink_item(shares_early_store, es_item);
 	}
 	K_WUNLOCK(shares_free);
@@ -3078,7 +3073,7 @@ static void shares_process_early(PGconn *conn, int64_t good_wid, tv_t *good_cd,
 	return;
 redo:
 	K_WLOCK(shares_free);
-	shares_early_root = add_to_ktree(shares_early_root, es_item, cmp_shares);
+	add_to_ktree(shares_early_root, es_item);
 	k_add_tail(shares_early_store, es_item);
 	K_WUNLOCK(shares_free);
 	return;
@@ -3093,7 +3088,7 @@ keep:
 		early_shares->oldcount, early_shares->redo);
 	FREENULL(st);
 	K_WLOCK(shares_free);
-	shares_root = add_to_ktree(shares_root, es_item, cmp_shares);
+	add_to_ktree(shares_root, es_item);
 	k_add_head(shares_store, es_item);
 	K_WUNLOCK(shares_free);
 	return;
@@ -3200,8 +3195,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		shares->oldcount = 0;
 		K_WLOCK(shares_free);
 		// They need to be sorted by workinfoid
-		shares_early_root = add_to_ktree(shares_early_root, s_item,
-						 cmp_shares);
+		add_to_ktree(shares_early_root, s_item);
 		k_add_head(shares_early_store, s_item);
 		K_WUNLOCK(shares_free);
 		/* It was all OK except the missing workinfoid
@@ -3212,7 +3206,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	ok = shares_process(conn, shares, trf_root);
 	if (ok) {
 		K_WLOCK(shares_free);
-		shares_root = add_to_ktree(shares_root, s_item, cmp_shares);
+		add_to_ktree(shares_root, s_item);
 		k_add_head(shares_store, s_item);
 		K_WUNLOCK(shares_free);
 
@@ -3327,9 +3321,7 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 	}
 	es_item = last_in_ktree(shareerrors_early_root, ctx);
 	if (es_item) {
-		shareerrors_early_root = remove_from_ktree(shareerrors_early_root,
-							   es_item,
-							   cmp_shareerrors);
+		remove_from_ktree(shareerrors_early_root, es_item);
 		k_unlink_item(shareerrors_early_store, es_item);
 	}
 	K_WUNLOCK(shareerrors_free);
@@ -3381,8 +3373,7 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 	return;
 redo:
 	K_WLOCK(shareerrors_free);
-	shareerrors_early_root = add_to_ktree(shareerrors_early_root, es_item,
-					      cmp_shareerrors);
+	add_to_ktree(shareerrors_early_root, es_item);
 	k_add_tail(shareerrors_early_store, es_item);
 	K_WUNLOCK(shareerrors_free);
 	return;
@@ -3397,7 +3388,7 @@ keep:
 		early_shareerrors->oldcount, early_shareerrors->redo);
 	FREENULL(st);
 	K_WLOCK(shareerrors_free);
-	shareerrors_root = add_to_ktree(shareerrors_root, es_item, cmp_shareerrors);
+	add_to_ktree(shareerrors_root, es_item);
 	k_add_head(shareerrors_store, es_item);
 	K_WUNLOCK(shareerrors_free);
 	return;
@@ -3494,9 +3485,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 		shareerrors->oldcount = 0;
 		K_WLOCK(shareerrors_free);
 		// They need to be sorted by workinfoid
-		shareerrors_early_root = add_to_ktree(shareerrors_early_root,
-						      s_item,
-						      cmp_shareerrors);
+		add_to_ktree(shareerrors_early_root, s_item);
 		k_add_head(shareerrors_early_store, s_item);
 		K_WUNLOCK(shareerrors_free);
 		/* It was all OK except the missing workinfoid
@@ -3507,8 +3496,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	ok = shareerrors_process(conn, shareerrors, trf_root);
 	if (ok) {
 		K_WLOCK(shareerrors_free);
-		shareerrors_root = add_to_ktree(shareerrors_root, s_item,
-						cmp_shareerrors);
+		add_to_ktree(shareerrors_root, s_item);
 		k_add_head(shareerrors_store, s_item);
 		K_WUNLOCK(shareerrors_free);
 
@@ -3597,7 +3585,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 	K_STORE *old_sharesummary_store = k_new_store(sharesummary_free);
 	K_STORE *new_markersummary_store = k_new_store(markersummary_free);
-	K_TREE *ms_root = new_ktree();
+	K_TREE *ms_root = new_ktree(cmp_markersummary);
 
 	if (!CURRENT(&(workmarkers->expirydate))) {
 		reason = "unexpired";
@@ -3617,8 +3605,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	INIT_MARKERSUMMARY(&ms_look);
 	ms_look.data = (void *)(&lookmarkersummary);
 	K_RLOCK(markersummary_free);
-	ms_item = find_after_in_ktree(markersummary_root, &ms_look,
-					cmp_markersummary, ms_ctx);
+	ms_item = find_after_in_ktree(markersummary_root, &ms_look, ms_ctx);
 	K_RUNLOCK(markersummary_free);
 	DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
 	if (ms_item && markersummary->markerid == workmarkers->markerid) {
@@ -3640,8 +3627,8 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	 * Those incoming shares will not be touching the sharesummaries
 	 *  we are processing here */
 	K_RLOCK(sharesummary_free);
-	ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
-					cmp_sharesummary_workinfoid, ss_ctx);
+	ss_item = find_before_in_ktree(sharesummary_workinfoid_root,
+					&ss_look, ss_ctx);
 	K_RUNLOCK(sharesummary_free);
 	while (ss_item) {
 		DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -3659,8 +3646,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 			lookmarkersummary.workername = sharesummary->workername;
 
 			ms_look.data = (void *)(&lookmarkersummary);
-			ms_item = find_in_ktree(ms_root, &ms_look,
-						cmp_markersummary, ms_ctx);
+			ms_item = find_in_ktree(ms_root, &ms_look, ms_ctx);
 			if (!ms_item) {
 				K_WLOCK(markersummary_free);
 				ms_item = k_unlink_head(markersummary_free);
@@ -3673,8 +3659,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 				DUP_POINTER(markersummary_free,
 					    markersummary->workername,
 					    sharesummary->workername);
-				ms_root = add_to_ktree(ms_root, ms_item,
-							cmp_markersummary);
+				add_to_ktree(ms_root, ms_item);
 
 				LOGDEBUG("%s() new ms %"PRId64"/%"PRId64"/%s",
 					 shortname, markersummary->markerid,
@@ -3796,12 +3781,8 @@ flail:
 		ms_item = new_markersummary_store->head;
 		while (ms_item) {
 			// move the new markersummaries into the trees/stores
-			markersummary_root = add_to_ktree(markersummary_root,
-							  ms_item,
-							  cmp_markersummary);
-			markersummary_userid_root = add_to_ktree(markersummary_userid_root,
-								 ms_item,
-								 cmp_markersummary_userid);
+			add_to_ktree(markersummary_root, ms_item);
+			add_to_ktree(markersummary_userid_root, ms_item);
 
 			// create/update the pool markersummaries
 			DATA_MARKERSUMMARY(markersummary, ms_item);
@@ -3812,9 +3793,7 @@ flail:
 				bzero(p_markersummary, sizeof(*p_markersummary));
 				p_markersummary->markerid = markersummary->markerid;
 				POOL_MS(p_markersummary);
-				markersummary_pool_root = add_to_ktree(markersummary_pool_root,
-								       p_ms_item,
-								       cmp_markersummary);
+				add_to_ktree(markersummary_pool_root, p_ms_item);
 				k_add_head(markersummary_pool_store, p_ms_item);
 			}
 			markersummary_to_pool(p_markersummary, markersummary);
@@ -3828,20 +3807,14 @@ flail:
 		ss_item = old_sharesummary_store->head;
 		while (ss_item) {
 			// remove the old sharesummaries from the trees
-			sharesummary_root = remove_from_ktree(sharesummary_root,
-							      ss_item,
-							      cmp_sharesummary);
-			sharesummary_workinfoid_root = remove_from_ktree(sharesummary_workinfoid_root,
-									 ss_item,
-									 cmp_sharesummary_workinfoid);
+			remove_from_ktree(sharesummary_root, ss_item);
+			remove_from_ktree(sharesummary_workinfoid_root, ss_item);
 
 			// remove the pool sharesummaries
 			DATA_SHARESUMMARY(sharesummary, ss_item);
 			p_ss_item = find_sharesummary_p(sharesummary->workinfoid);
 			if (p_ss_item) {
-				sharesummary_pool_root = remove_from_ktree(sharesummary_pool_root,
-									   p_ss_item,
-									   cmp_sharesummary);
+				remove_from_ktree(sharesummary_pool_root, p_ss_item);
 				k_unlink_item(sharesummary_pool_store, p_ss_item);
 				free_sharesummary_data(p_ss_item);
 				k_add_head(sharesummary_free, p_ss_item);
@@ -3864,7 +3837,7 @@ flail:
 			   workmarkers->description,
 			   workmarkers->status);
 	}
-	ms_root = free_ktree(ms_root, NULL);
+	free_ktree(ms_root, NULL);
 	new_markersummary_store = k_free_store(new_markersummary_store);
 	old_sharesummary_store = k_free_store(old_sharesummary_store);
 
@@ -4140,16 +4113,12 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
 	if (new || p_new) {
 		K_WLOCK(sharesummary_free);
 		if (new) {
-			sharesummary_root = add_to_ktree(sharesummary_root, item, cmp_sharesummary);
-			sharesummary_workinfoid_root = add_to_ktree(sharesummary_workinfoid_root,
-								    item,
-								    cmp_sharesummary_workinfoid);
+			add_to_ktree(sharesummary_root, item);
+			add_to_ktree(sharesummary_workinfoid_root, item);
 			k_add_head(sharesummary_store, item);
 		}
 		if (p_new) {
-			sharesummary_pool_root = add_to_ktree(sharesummary_pool_root,
-							      p_item,
-							      cmp_sharesummary);
+			add_to_ktree(sharesummary_pool_root, p_item);
 			k_add_head(sharesummary_pool_store, p_item);
 		}
 		K_WUNLOCK(sharesummary_free);
@@ -4290,14 +4259,14 @@ unparam:
 		k_add_head(blocks_free, b_item);
 	else {
 		if (update_old) {
-			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks);
+			remove_from_ktree(blocks_root, old_b_item);
 			copy_tv(&(oldblocks->expirydate), cd);
-			blocks_root = add_to_ktree(blocks_root, old_b_item, cmp_blocks);
+			add_to_ktree(blocks_root, old_b_item);
 			// Copy it over to avoid having to recalculate it
 			row->netdiff = oldblocks->netdiff;
 		} else
 			row->netdiff = 0;
-		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
+		add_to_ktree(blocks_root, b_item);
 		k_add_head(blocks_store, b_item);
 		blocks_stats_rebuild = true;
 		// 'confirmed' is unchanged so no need to recalc *createdate
@@ -4670,14 +4639,14 @@ flail:
 		k_add_head(blocks_free, b_item);
 	else {
 		if (update_old) {
-			blocks_root = remove_from_ktree(blocks_root, old_b_item, cmp_blocks);
+			remove_from_ktree(blocks_root, old_b_item);
 			copy_tv(&(oldblocks->expirydate), cd);
-			blocks_root = add_to_ktree(blocks_root, old_b_item, cmp_blocks);
+			add_to_ktree(blocks_root, old_b_item);
 			// Copy it over to avoid having to recalculate it
 			row->netdiff = oldblocks->netdiff;
 		} else
 			row->netdiff = 0;
-		blocks_root = add_to_ktree(blocks_root, b_item, cmp_blocks);
+		add_to_ktree(blocks_root, b_item);
 		k_add_head(blocks_store, b_item);
 		blocks_stats_rebuild = true;
 		// recalc the *createdate fields for possibly affected blocks
@@ -4897,7 +4866,7 @@ bool blocks_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		blocks_root = add_to_ktree(blocks_root, item, cmp_blocks);
+		add_to_ktree(blocks_root, item);
 		k_add_head(blocks_store, item);
 
 		if (tv_newer(&(dbstatus.newest_createdate_blocks), &(row->createdate)))
@@ -4958,11 +4927,11 @@ void miningpayouts_add_ram(bool ok, K_ITEM *mp_item, K_ITEM *old_mp_item, tv_t *
 	} else {
 		if (old_mp_item) {
 			DATA_MININGPAYOUTS(oldmp, old_mp_item);
-			miningpayouts_root = remove_from_ktree(miningpayouts_root, old_mp_item, cmp_miningpayouts);
+			remove_from_ktree(miningpayouts_root, old_mp_item);
 			copy_tv(&(oldmp->expirydate), cd);
-			miningpayouts_root = add_to_ktree(miningpayouts_root, old_mp_item, cmp_miningpayouts);
+			add_to_ktree(miningpayouts_root, old_mp_item);
 		}
-		miningpayouts_root = add_to_ktree(miningpayouts_root, mp_item, cmp_miningpayouts);
+		add_to_ktree(miningpayouts_root, mp_item);
 		k_add_head(miningpayouts_store, mp_item);
 	}
 	K_WUNLOCK(miningpayouts_free);
@@ -5142,7 +5111,7 @@ bool miningpayouts_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		miningpayouts_root = add_to_ktree(miningpayouts_root, item, cmp_miningpayouts);
+		add_to_ktree(miningpayouts_root, item);
 		k_add_head(miningpayouts_store, item);
 
 		tick();
@@ -5176,17 +5145,17 @@ void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item, tv_t *cd)
 	} else {
 		if (old_p_item) {
 			DATA_PAYOUTS(oldp, old_p_item);
-			payouts_root = remove_from_ktree(payouts_root, old_p_item, cmp_payouts);
-			payouts_id_root = remove_from_ktree(payouts_id_root, old_p_item, cmp_payouts_id);
-			payouts_wid_root = remove_from_ktree(payouts_wid_root, old_p_item, cmp_payouts_wid);
+			remove_from_ktree(payouts_root, old_p_item);
+			remove_from_ktree(payouts_id_root, old_p_item);
+			remove_from_ktree(payouts_wid_root, old_p_item);
 			copy_tv(&(oldp->expirydate), cd);
-			payouts_root = add_to_ktree(payouts_root, old_p_item, cmp_payouts);
-			payouts_id_root = add_to_ktree(payouts_id_root, old_p_item, cmp_payouts_id);
-			payouts_wid_root = add_to_ktree(payouts_wid_root, old_p_item, cmp_payouts_wid);
+			add_to_ktree(payouts_root, old_p_item);
+			add_to_ktree(payouts_id_root, old_p_item);
+			add_to_ktree(payouts_wid_root, old_p_item);
 		}
-		payouts_root = add_to_ktree(payouts_root, p_item, cmp_payouts);
-		payouts_id_root = add_to_ktree(payouts_id_root, p_item, cmp_payouts_id);
-		payouts_wid_root = add_to_ktree(payouts_wid_root, p_item, cmp_payouts_wid);
+		add_to_ktree(payouts_root, p_item);
+		add_to_ktree(payouts_id_root, p_item);
+		add_to_ktree(payouts_wid_root, p_item);
 		k_add_head(payouts_store, p_item);
 	}
 	K_WUNLOCK(payouts_free);
@@ -5491,22 +5460,22 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 
 	// No more possible errors, so update the ram tables
 	DATA_PAYOUTS(payouts, po_item);
-	payouts_root = remove_from_ktree(payouts_root, po_item, cmp_payouts);
-	payouts_id_root = remove_from_ktree(payouts_id_root, po_item, cmp_payouts_id);
-	payouts_wid_root = remove_from_ktree(payouts_wid_root, po_item, cmp_payouts_wid);
+	remove_from_ktree(payouts_root, po_item);
+	remove_from_ktree(payouts_id_root, po_item);
+	remove_from_ktree(payouts_wid_root, po_item);
 	copy_tv(&(payouts->expirydate), now);
-	payouts_root = add_to_ktree(payouts_root, po_item, cmp_payouts);
-	payouts_id_root = add_to_ktree(payouts_id_root, po_item, cmp_payouts_id);
-	payouts_wid_root = add_to_ktree(payouts_wid_root, po_item, cmp_payouts_wid);
+	add_to_ktree(payouts_root, po_item);
+	add_to_ktree(payouts_id_root, po_item);
+	add_to_ktree(payouts_wid_root, po_item);
 
 	mp_item = first_miningpayouts(payoutid, mp_ctx);
 	DATA_MININGPAYOUTS_NULL(mp, mp_item);
 	while (mp_item && mp->payoutid == payoutid) {
 		if (CURRENT(&(mp->expirydate))) {
 			next_item = next_in_ktree(mp_ctx);
-			miningpayouts_root = remove_from_ktree(miningpayouts_root, mp_item, cmp_miningpayouts);
+			remove_from_ktree(miningpayouts_root, mp_item);
 			copy_tv(&(mp->expirydate), now);
-			miningpayouts_root = add_to_ktree(miningpayouts_root, mp_item, cmp_miningpayouts);
+			add_to_ktree(miningpayouts_root, mp_item);
 			mp_item = next_item;
 		} else
 			mp_item = next_in_ktree(mp_ctx);
@@ -5520,9 +5489,9 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 		if (payments->payoutid == payoutid &&
 		    CURRENT(&(payments->expirydate))) {
 			next_item = next_in_ktree(pm_ctx);
-			payments_root = remove_from_ktree(payments_root, pm_item, cmp_payments);
+			remove_from_ktree(payments_root, pm_item);
 			copy_tv(&(payments->expirydate), now);
-			payments_root = add_to_ktree(payments_root, pm_item, cmp_payments);
+			add_to_ktree(payments_root, pm_item);
 			pm_item = next_item;
 		} else
 			pm_item = next_in_ktree(pm_ctx);
@@ -5698,9 +5667,9 @@ bool payouts_fill(PGconn *conn)
 				&(blocks->blockcreatedate));
 		}
 
-		payouts_root = add_to_ktree(payouts_root, item, cmp_payouts);
-		payouts_id_root = add_to_ktree(payouts_id_root, item, cmp_payouts_id);
-		payouts_wid_root = add_to_ktree(payouts_wid_root, item, cmp_payouts_wid);
+		add_to_ktree(payouts_root, item);
+		add_to_ktree(payouts_id_root, item);
+		add_to_ktree(payouts_wid_root, item);
 		k_add_head(payouts_store, item);
 
 		if (CURRENT(&(row->expirydate)) && PAYGENERATED(row->status))
@@ -5792,7 +5761,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 	HISTORYDATETRANSFER(trf_root, row);
 
 	K_WLOCK(auths_free);
-	if (find_in_ktree(auths_root, a_item, cmp_auths, ctx)) {
+	if (find_in_ktree(auths_root, a_item, ctx)) {
 		k_add_head(auths_free, a_item);
 		K_WUNLOCK(auths_free);
 
@@ -5825,7 +5794,7 @@ unitem:
 	if (!ok)
 		k_add_head(auths_free, a_item);
 	else {
-		auths_root = add_to_ktree(auths_root, a_item, cmp_auths);
+		add_to_ktree(auths_root, a_item);
 		k_add_head(auths_store, a_item);
 	}
 #endif
@@ -5875,7 +5844,7 @@ bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 	SIMPLEDATEINIT(row, cd, by, code, inet);
 	SIMPLEDATETRANSFER(trf_root, row);
 
-	if (igndup && find_in_ktree(poolstats_root, p_item, cmp_poolstats, ctx)) {
+	if (igndup && find_in_ktree(poolstats_root, p_item, ctx)) {
 		K_WLOCK(poolstats_free);
 		k_add_head(poolstats_free, p_item);
 		K_WUNLOCK(poolstats_free);
@@ -5937,7 +5906,7 @@ unparam:
 	if (!ok)
 		k_add_head(poolstats_free, p_item);
 	else {
-		poolstats_root = add_to_ktree(poolstats_root, p_item, cmp_poolstats);
+		add_to_ktree(poolstats_root, p_item);
 		k_add_head(poolstats_store, p_item);
 	}
 	K_WUNLOCK(poolstats_free);
@@ -6083,7 +6052,7 @@ bool poolstats_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		poolstats_root = add_to_ktree(poolstats_root, item, cmp_poolstats);
+		add_to_ktree(poolstats_root, item);
 		k_add_head(poolstats_store, item);
 
 		if (tv_newer(&(dbstatus.newest_createdate_poolstats), &(row->createdate)))
@@ -6186,15 +6155,13 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 		K_WLOCK(userstats_free);
 		us_next = userstats_eos_store->head;
 		while (us_next) {
-			us_item = find_in_ktree(userstats_root, us_next,
-						cmp_userstats, ctx);
+			us_item = find_in_ktree(userstats_root, us_next, ctx);
 			if (!us_item) {
 				// New user+worker - store it in RAM
 				us_match = us_next;
 				us_next = us_match->next;
 				k_unlink_item(userstats_eos_store, us_match);
-				userstats_root = add_to_ktree(userstats_root, us_match,
-								cmp_userstats);
+				add_to_ktree(userstats_root, us_match);
 				k_add_head(userstats_store, us_match);
 			} else {
 				DATA_USERSTATS(next, us_next);
@@ -6270,12 +6237,10 @@ bool workerstats_add(char *poolinstance, char *elapsed, char *username,
 	workerstatus_update(NULL, NULL, row);
 
 	K_WLOCK(userstats_free);
-	us_match = find_in_ktree(userstats_root, us_item,
-				 cmp_userstats, ctx);
+	us_match = find_in_ktree(userstats_root, us_item, ctx);
 	if (!us_match) {
 		// New user+worker - store it in RAM
-		userstats_root = add_to_ktree(userstats_root, us_item,
-						cmp_userstats);
+		add_to_ktree(userstats_root, us_item);
 		k_add_head(userstats_store, us_item);
 	} else {
 		DATA_USERSTATS(match, us_match);
@@ -6520,8 +6485,8 @@ bool markersummary_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		markersummary_root = add_to_ktree(markersummary_root, item, cmp_markersummary);
-		markersummary_userid_root = add_to_ktree(markersummary_userid_root, item, cmp_markersummary_userid);
+		add_to_ktree(markersummary_root, item);
+		add_to_ktree(markersummary_userid_root, item);
 		k_add_head(markersummary_store, item);
 
 		p_item = find_markersummary_p(row->markerid);
@@ -6533,9 +6498,7 @@ bool markersummary_fill(PGconn *conn)
 			bzero(p_row, sizeof(*p_row));
 			p_row->markerid = row->markerid;
 			POOL_MS(p_row);
-			markersummary_pool_root = add_to_ktree(markersummary_pool_root,
-							       p_item,
-							       cmp_markersummary);
+			add_to_ktree(markersummary_pool_root, p_item);
 			k_add_head(markersummary_pool_store, p_item);
 		} else {
 			DATA_MARKERSUMMARY(p_row, p_item);
@@ -6671,12 +6634,13 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 				 WHERE_FFL_PASS);
 			goto rollback;
 		}
-		w_item = find_workinfo(workinfoidend, NULL);
-		if (!w_item)
-			goto rollback;
 		w_item = find_workinfo(workinfoidstart, NULL);
 		if (!w_item)
 			goto rollback;
+		w_item = find_workinfo(workinfoidend, NULL);
+		if (!w_item)
+			goto rollback;
+
 		K_WLOCK(workmarkers_free);
 		wm_item = k_unlink_head(workmarkers_free);
 		K_WUNLOCK(workmarkers_free);
@@ -6741,6 +6705,7 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			PGLOGERR("Insert", rescode, conn);
 			goto rollback;
 		}
+		row->pps_value = workinfo_pps(w_item, workinfoidend, true);
 	}
 
 	ok = true;
@@ -6769,29 +6734,18 @@ unparam:
 	}
 	else {
 		if (old_wm_item) {
-			workmarkers_root = remove_from_ktree(workmarkers_root,
-							     old_wm_item,
-							     cmp_workmarkers);
-			workmarkers_workinfoid_root = remove_from_ktree(workmarkers_workinfoid_root,
-									old_wm_item,
-									cmp_workmarkers_workinfoid);
+			remove_from_ktree(workmarkers_root, old_wm_item);
+			remove_from_ktree(workmarkers_workinfoid_root,
+					  old_wm_item);
 			copy_tv(&(oldworkmarkers->expirydate), cd);
-			workmarkers_root = add_to_ktree(workmarkers_root,
-							old_wm_item,
-							cmp_workmarkers);
-			workmarkers_workinfoid_root = add_to_ktree(workmarkers_workinfoid_root,
-								   old_wm_item,
-								   cmp_workmarkers_workinfoid);
+			add_to_ktree(workmarkers_root, old_wm_item);
+			add_to_ktree(workmarkers_workinfoid_root, old_wm_item);
 		}
 		if (wm_item) {
 			shift_rewards(wm_item);
 
-			workmarkers_root = add_to_ktree(workmarkers_root,
-							wm_item,
-							cmp_workmarkers);
-			workmarkers_workinfoid_root = add_to_ktree(workmarkers_workinfoid_root,
-								   wm_item,
-								   cmp_workmarkers_workinfoid);
+			add_to_ktree(workmarkers_root, wm_item);
+			add_to_ktree(workmarkers_workinfoid_root, wm_item);
 			k_add_head(workmarkers_store, wm_item);
 		}
 	}
@@ -6887,14 +6841,22 @@ bool workmarkers_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		workmarkers_root = add_to_ktree(workmarkers_root, item, cmp_workmarkers);
-		workmarkers_workinfoid_root = add_to_ktree(workmarkers_workinfoid_root,
-							   item, cmp_workmarkers_workinfoid);
+		add_to_ktree(workmarkers_root, item);
+		add_to_ktree(workmarkers_workinfoid_root, item);
 		k_add_head(workmarkers_store, item);
+
+		wi_item = find_workinfo(row->workinfoidend, NULL);
+		if (!wi_item) {
+			LOGERR("%s(): ERROR workmarkerid %"PRId64
+				" wid end %"PRId64" doesn't exist! "
+				"PPS value will be zero",
+				__func__, row->markerid,
+				row->workinfoidend);
+		}
+		row->pps_value = workinfo_pps(wi_item, row->workinfoidend, false);
 
 		if (dbstatus.newest_workmarker_workinfoid < row->workinfoidend) {
 			dbstatus.newest_workmarker_workinfoid = row->workinfoidend;
-			wi_item = find_workinfo(row->workinfoidend, NULL);
 			if (!wi_item) {
 				LOGEMERG("%s(): FAILURE workmarkerid %"PRId64
 					 " wid end %"PRId64" doesn't exist! "
@@ -7086,12 +7048,12 @@ unparam:
 		}
 	} else {
 		if (old_m_item) {
-			marks_root = remove_from_ktree(marks_root, old_m_item, cmp_marks);
+			remove_from_ktree(marks_root, old_m_item);
 			copy_tv(&(oldmarks->expirydate), cd);
-			marks_root = add_to_ktree(marks_root, old_m_item, cmp_marks);
+			add_to_ktree(marks_root, old_m_item);
 		}
 		if (m_item) {
-			marks_root = add_to_ktree(marks_root, m_item, cmp_marks);
+			add_to_ktree(marks_root, m_item);
 			k_add_head(marks_store, m_item);
 		}
 	}
@@ -7186,7 +7148,7 @@ bool marks_fill(PGconn *conn)
 		if (!ok)
 			break;
 
-		marks_root = add_to_ktree(marks_root, item, cmp_marks);
+		add_to_ktree(marks_root, item);
 		k_add_head(marks_store, item);
 
 		tick();
