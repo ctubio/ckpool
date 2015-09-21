@@ -1138,7 +1138,7 @@ static void drop_allclients(ckpool_t *ckp)
 	ck_wunlock(&sdata->instance_lock);
 
 	if (kills)
-		LOGNOTICE("Dropped %d instances", kills);
+		LOGNOTICE("Dropped %d instances for dropall request", kills);
 }
 
 /* Copy only the relevant parts of the master sdata for each subproxy */
