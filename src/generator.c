@@ -1908,11 +1908,12 @@ static void *passthrough_recv(void *arg)
 		int ret;
 
 		while (!proxy_alive(ckp, proxi, cs, true)) {
-			if (alive) {
-				alive = false;
-				reconnect_generator(ckp);
-			}
+			alive = false;
 			sleep(5);
+		}
+		if (!alive) {
+			reconnect_generator(ckp);
+			alive = true;
 		}
 
 		/* Make sure we receive a line within 90 seconds */
