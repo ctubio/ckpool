@@ -184,6 +184,7 @@ char *pqerrmsg(PGconn *conn)
 #define PQPARAM23 PQPARAM16 ",$17,$18,$19,$20,$21,$22,$23"
 #define PQPARAM26 PQPARAM22 ",$23,$24,$25,$26"
 #define PQPARAM27 PQPARAM26 ",$27"
+#define PQPARAM28 PQPARAM26 ",$27,$28"
 
 #define PARCHK(_par, _params) do { \
 		if (_par != (int)(sizeof(_params)/sizeof(_params[0]))) { \
@@ -6303,7 +6304,7 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 		"diffrej,shareacc,sharesta,sharedup,sharehi,sharerej,"
 		"sharecount,errorcount,firstshare,lastshare,firstshareacc,"
 		"lastshareacc,lastdiffacc"
-		MODIFYDATECONTROL ") values (" PQPARAM26 ")";
+		MODIFYDATECONTROL ") values (" PQPARAM28 ")";
 
 	LOGDEBUG("%s() adding ms %"PRId64"/%"PRId64"/%s/%.0f",
 		 __func__, row->markerid, row->userid,
