@@ -3578,8 +3578,6 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	bool ok = false, conned = false;
 	int64_t diffacc, shareacc;
 	char *reason = NULL;
-	char *params[2];
-	int n, par = 0;
 	int ss_count, ms_count;
 	char *st = NULL;
 
@@ -3753,9 +3751,6 @@ rollback:
 
 	PQclear(res);
 flail:
-	for (n = 0; n < par; n++)
-		free(params[n]);
-
 	if (conned)
 		PQfinish(conn);
 
