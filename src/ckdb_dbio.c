@@ -6872,13 +6872,30 @@ bool workmarkers_fill(PGconn *conn)
 		}
 		row->pps_value = workinfo_pps(wi_item, row->workinfoidend, false);
 
-		if (dbstatus.newest_workmarker_workinfoid < row->workinfoidend) {
+		if (CURRENT(&(row->expirydate)) &&
+		    !WMPROCESSED(row->status)) {
+			LOGWARNING("%s(): WARNING workmarkerid %"PRId64" (%s)"
+				   " wid end %"PRId64" isn't processed! (%s) "
+				   "You should abort ckdb and mark it if it "
+				   "actually has already been processed",
+				   __func__, row->markerid, row->description,
+				   row->workinfoidend, row->status);
+		}
+
+		/* Ignore any workmarker that isn't processed, so that the
+		 *  necessary data to process it can be reloaded, if the
+		 *  workmarker is after the last processed shift
+		 * Any CURRENT non-processed workmarkers will give a console
+		 *  warning (above) */
+		if (CURRENT(&(row->expirydate)) &&
+		    WMPROCESSED(row->status) &&
+		    dbstatus.newest_workmarker_workinfoid < row->workinfoidend) {
 			dbstatus.newest_workmarker_workinfoid = row->workinfoidend;
 			if (!wi_item) {
 				LOGEMERG("%s(): FAILURE workmarkerid %"PRId64
 					 " wid end %"PRId64" doesn't exist! "
 					 "You should abort ckdb and fix it, "
-					 " since the reload may skip some data",
+					 "since the reload may skip some data",
 					 __func__, row->markerid,
 					 row->workinfoidend);
 			} else {
