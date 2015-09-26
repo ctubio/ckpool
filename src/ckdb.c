@@ -3611,8 +3611,10 @@ static void *marker(__maybe_unused void *arg)
 		}
 		if (everyone_die)
 			break;
-		else
-			make_a_shift_mark();
+		else {
+			if (markersummary_auto)
+				make_a_shift_mark();
+		}
 
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
@@ -3620,8 +3622,10 @@ static void *marker(__maybe_unused void *arg)
 		}
 		if (everyone_die)
 			break;
-		else
-			make_a_workmarker();
+		else {
+			if (markersummary_auto)
+				make_a_workmarker();
+		}
 
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
