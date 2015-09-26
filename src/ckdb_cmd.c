@@ -5738,7 +5738,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	action = transfer_data(i_action);
 
 	if (strcasecmp(action, "add") == 0) {
-		/* Add a mark
+		/* Add a mark, -m will automatically do this
 		 * Require marktype
 		 * Require workinfoid for all but 'b'
 		 * If marktype is 'b' or 'p' then require height/block (number)
@@ -5944,7 +5944,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 					   trf_root);
 		}
 	} else if (strcasecmp(action, "generate") == 0) {
-		/* Generate workmarkers
+		/* Generate workmarkers, -m will automatically do this
 		 * No parameters */
 		tmp[0] = '\0';
 		ok = workmarkers_generate(conn, tmp, sizeof(tmp),
@@ -6005,8 +6005,43 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	} else if (strcasecmp(action, "sum") == 0) {
 		/* For the last available workmarker,
 		 *  summarise it's sharesummaries into markersummaries
+		 *  -m will automatically do this
 		 * No parameters */
 		ok = make_markersummaries(true, by, code, inet, cd, trf_root);
+		if (!ok) {
+			snprintf(reply, siz, "%s failed", action);
+			LOGERR("%s.%s", id, reply);
+			return strdup(reply);
+		}
+	} else if (strcasecmp(action, "ready") == 0) {
+		/* Mark a processed workmarker as ready
+		 *  for fixing problems with markersummaries
+		 * Requires markerid */
+		i_markerid = require_name(trf_root, "markerid", 1, (char *)intpatt, reply, siz);
+		if (!i_markerid)
+			return strdup(reply);
+		TXT_TO_BIGINT("markerid", transfer_data(i_markerid), markerid);
+		K_RLOCK(workmarkers_free);
+		wm_item = find_workmarkerid(markerid, true, '\0');
+		K_RUNLOCK(workmarkers_free);
+		if (!wm_item) {
+			snprintf(reply, siz,
+				 "unknown workmarkers with markerid %"PRId64, markerid);
+			return strdup(reply);
+		}
+		DATA_WORKMARKERS(workmarkers, wm_item);
+		if (!WMPROCESSED(workmarkers->status)) {
+			snprintf(reply, siz,
+				 "markerid isn't processed %"PRId64, markerid);
+			return strdup(reply);
+		}
+		ok = workmarkers_process(NULL, false, true, markerid,
+					 workmarkers->poolinstance,
+					 workmarkers->workinfoidend,
+					 workmarkers->workinfoidstart,
+					 workmarkers->description,
+					 MARKER_READY_STR,
+					 by, code, inet, cd, trf_root);
 		if (!ok) {
 			snprintf(reply, siz, "%s failed", action);
 			LOGERR("%s.%s", id, reply);
@@ -6040,6 +6075,63 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 					 workmarkers->description,
 					 MARKER_PROCESSED_STR,
 					 by, code, inet, cd, trf_root);
+		if (!ok) {
+			snprintf(reply, siz, "%s failed", action);
+			LOGERR("%s.%s", id, reply);
+			return strdup(reply);
+		}
+	} else if (strcasecmp(action, "cancel") == 0) {
+		/* Cancel(delete) all the markersummaries in a workmarker
+		 * This can only be done if the workmarker isn't processed
+		 * It reports on the console, summary information of the
+		 *  markersummaries that were deleted
+		 *
+		 * WARNING ... if you do this after the workmarker has been
+		 *  processed, there will no longer be any matching shares,
+		 *  sharesummaries or workmarkers in ram, so you'd need to
+		 *  restart ckdb to regenerate the markersummaries
+		 *  HOWEVER, ckdb wont reload the shares if there is a later
+		 *  workmarker that is processed
+		 *
+		 * SS_to_MS will complain if any markersummaries already exist
+		 *  when processing a workmarker
+		 * Normally you would use 'processed' if the markersummaries
+		 *  are OK, and just the workmarker failed to be updated to
+		 *  processed status
+		 * However, if there is actually something wrong with the
+		 *  shift data (markersummaries) you can delete them and they
+		 *  will be regenerated
+		 *  This will usually only work as expected if the last
+		 *   workmarker isn't marked as processed, but somehow there
+		 *   are markersummaries for it in the DB, thus the reload
+		 *   will reload all the shares for the workmarker then it
+		 *   will print a warning every 13s on the console saying
+		 *   that it can't process the workmarker
+		 *   In this case you would cancel the workmarker then ckdb
+		 *    will regenerate it from the shares/sharesummaries in ram
+		 *
+		 * Requires markerid */
+		i_markerid = require_name(trf_root, "markerid", 1, (char *)intpatt, reply, siz);
+		if (!i_markerid)
+			return strdup(reply);
+		TXT_TO_BIGINT("markerid", transfer_data(i_markerid), markerid);
+		K_RLOCK(workmarkers_free);
+		wm_item = find_workmarkerid(markerid, true, '\0');
+		K_RUNLOCK(workmarkers_free);
+		if (!wm_item) {
+			snprintf(reply, siz,
+				 "unknown workmarkers with markerid %"PRId64, markerid);
+			return strdup(reply);
+		}
+		DATA_WORKMARKERS(workmarkers, wm_item);
+		if (WMPROCESSED(workmarkers->status)) {
+			snprintf(reply, siz,
+				 "can't cancel a processed markerid %"PRId64,
+				 markerid);
+			return strdup(reply);
+		}
+
+		ok = delete_markersummaries(NULL, workmarkers);
 		if (!ok) {
 			snprintf(reply, siz, "%s failed", action);
 			LOGERR("%s.%s", id, reply);

@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.323"
+#define CKDB_VERSION DB_VERSION"-1.330"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2523,6 +2523,7 @@ extern bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 extern bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 						char *by, char *code, char *inet,
 						tv_t *cd, K_TREE *trf_root);
+extern bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm);
 extern char *ooo_status(char *buf, size_t siz);
 #define sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd) \
 	_sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd, \

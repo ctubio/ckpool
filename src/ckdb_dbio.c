@@ -3567,7 +3567,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 				       K_TREE *trf_root)
 {
 	// shorter name for log messages
-	const char *shortname = "SS_to_MS";
+	static const char *shortname = "SS_to_MS";
 	ExecStatusType rescode;
 	PGresult *res;
 	K_TREE_CTX ss_ctx[1], ms_ctx[1];
@@ -3613,6 +3613,14 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	K_RUNLOCK(markersummary_free);
 	DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
 	if (ms_item && markersummary->markerid == workmarkers->markerid) {
+		/* The fix here is either to set the workmarker as processed
+		 *  with the marks action=processed
+		 *  if the markersummaries are OK but the workmarker failed to
+		 *  have it's status set to processed
+		 * OR
+		 *  delete the markersummaries with the marks action=cancel
+		 *  so this will continue and regenerate the markersummaries
+		 */
 		reason = "markersummaries already exist";
 		goto flail;
 	}
@@ -3849,6 +3857,162 @@ flail:
 	free_ktree(ms_root, NULL);
 	new_markersummary_store = k_free_store(new_markersummary_store);
 	old_sharesummary_store = k_free_store(old_sharesummary_store);
+
+	return ok;
+}
+
+bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm)
+{
+	// shorter name for log messages
+	static const char *shortname = "DEL_MS";
+	K_STORE *del_markersummary_store = NULL;
+	ExecStatusType rescode;
+	PGresult *res;
+	K_TREE_CTX ms_ctx[1];
+	MARKERSUMMARY *markersummary = NULL, lookmarkersummary;
+	K_ITEM *ms_item, ms_look, *p_ms_item = NULL;
+	bool ok = false, conned = false;
+	int64_t diffacc, shareacc;
+	char *reason = "unknown";
+	int ms_count;
+	char *params[1];
+	int par = 0, ms_del = 0;
+	char *del, *tuples = NULL;
+
+	if (WMPROCESSED(wm->status)) {
+		reason = "status processed";
+		goto flail;
+	}
+
+	LOGWARNING("%s() Deleting: markersummaries for workmarkers "
+		   "%"PRId64"/%s/End %"PRId64"/Stt %"PRId64"/%s/%s",
+		   shortname, wm->markerid, wm->poolinstance,
+		   wm->workinfoidend, wm->workinfoidstart, wm->description,
+		   wm->status);
+
+	del_markersummary_store = k_new_store(markersummary_free);
+
+	lookmarkersummary.markerid = wm->markerid;
+	lookmarkersummary.userid = 0;
+	lookmarkersummary.workername = EMPTY;
+
+	ms_count = diffacc = shareacc = 0;
+	ms_item = NULL;
+
+	INIT_MARKERSUMMARY(&ms_look);
+	ms_look.data = (void *)(&lookmarkersummary);
+
+	K_WLOCK(workmarkers_free);
+	K_WLOCK(markersummary_free);
+
+	ms_item = find_after_in_ktree(markersummary_root, &ms_look, ms_ctx);
+	DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
+	if (!ms_item || markersummary->markerid != wm->markerid) {
+		reason = "no markersummaries";
+		goto flail;
+	}
+
+	// Build the delete list of markersummaries
+	while (ms_item && markersummary->markerid == wm->markerid) {
+		ms_count++;
+		diffacc += markersummary->diffacc;
+		shareacc += markersummary->shareacc;
+
+		k_unlink_item(markersummary_store, ms_item);
+		k_add_tail(del_markersummary_store, ms_item);
+
+		ms_item = next_in_ktree(ms_ctx);
+		DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
+	}
+
+	par = 0;
+	params[par++] = bigint_to_buf(wm->markerid, NULL, 0);
+	PARCHK(par, params);
+
+	del = "delete from markersummary where markerid=$1";
+
+	if (conn == NULL) {
+		conn = dbconnect();
+		conned = true;
+	}
+
+	res = PQexecParams(conn, del, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
+	rescode = PQresultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Delete", rescode, conn);
+		reason = "db error";
+		goto unparam;
+	}
+
+	if (PGOK(rescode)) {
+		tuples = PQcmdTuples(res);
+		if (tuples && *tuples) {
+			ms_del = atoi(tuples);
+			if (ms_del != ms_count) {
+				LOGERR("%s() deleted markersummaries should be"
+					" %d but deleted=%d",
+					shortname, ms_count, ms_del);
+				reason = "del mismatch";
+				goto unparam;
+			}
+		}
+	}
+
+	ok = true;
+unparam:
+	PQclear(res);
+flail:
+	if (conned)
+		PQfinish(conn);
+
+	if (!ok) {
+		if (del_markersummary_store && del_markersummary_store->count) {
+			k_list_transfer_to_head(del_markersummary_store,
+						markersummary_store);
+		}
+	} else {
+		/* TODO: add a list garbage collection thread so as to not
+		 *  invalidate the data immediately (free_*), rather after
+		 *  some delay */
+		ms_item = del_markersummary_store->head;
+		while (ms_item) {
+			remove_from_ktree(markersummary_root, ms_item);
+			remove_from_ktree(markersummary_userid_root, ms_item);
+			free_markersummary_data(ms_item);
+			ms_item = ms_item->next;
+		}
+
+		k_list_transfer_to_head(del_markersummary_store,
+					markersummary_free);
+
+		p_ms_item = find_markersummary_p(wm->markerid);
+		if (p_ms_item) {
+			remove_from_ktree(markersummary_pool_root, p_ms_item);
+			free_markersummary_data(p_ms_item);
+			k_unlink_item(markersummary_pool_store, p_ms_item);
+			k_add_head(markersummary_free, p_ms_item);
+		}
+	}
+
+	K_WUNLOCK(markersummary_free);
+	K_WUNLOCK(workmarkers_free);
+
+	if (!ok) {
+		// already displayed the full workmarkers detail at the top
+		LOGERR("%s() %s: workmarkers %"PRId64"/%s/%s",
+			shortname, reason, wm->markerid, wm->description,
+			wm->status);
+	} else {
+		LOGWARNING("%s() Deleted: %d ms %"PRId64" shares "
+			   "%"PRId64" diff for workmarkers %"PRId64"/%s/"
+			   "End %"PRId64"/Stt %"PRId64"/%s/%s",
+			   shortname, ms_count, shareacc, diffacc,
+			   wm->markerid, wm->poolinstance, wm->workinfoidend,
+			   wm->workinfoidstart, wm->description, wm->status);
+	}
+
+	if (del_markersummary_store)
+		del_markersummary_store = k_free_store(del_markersummary_store);
 
 	return ok;
 }
@@ -6876,8 +7040,9 @@ bool workmarkers_fill(PGconn *conn)
 		    !WMPROCESSED(row->status)) {
 			LOGWARNING("%s(): WARNING workmarkerid %"PRId64" (%s)"
 				   " wid end %"PRId64" isn't processed! (%s) "
-				   "You should abort ckdb and mark it if it "
-				   "actually has already been processed",
+				   "You need to correct it after the startup "
+				   "completes, with a marks action: processed"
+				   " or cancel",
 				   __func__, row->markerid, row->description,
 				   row->workinfoidend, row->status);
 		}
