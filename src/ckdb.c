@@ -3153,6 +3153,7 @@ static void make_a_shift_mark()
 	BLOCKS *blocks = NULL;
 	MARKS *marks = NULL, *sh_marks = NULL;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
+	char wi_bits[TXT_SML+1];
 	bool was_block = false, ok;
 	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ], cd_buf3[DATE_BUFSIZ];
 	int used_wid;
@@ -3365,6 +3366,7 @@ static void make_a_shift_mark()
 	marks_wid = 0;
 	used_wid = 0;
 	prev_wid = 0;
+	wi_bits[0] = '\0';
 	while (wi_item) {
 		DATA_WORKINFO(workinfo, wi_item);
 		if (CURRENT(&(workinfo->expirydate))) {
@@ -3375,6 +3377,33 @@ static void make_a_shift_mark()
 				LOGDEBUG("%s() not enough aged workinfos (%d)",
 					 __func__, used_wid);
 				return;
+			}
+			if (wi_bits[0] == '\0')
+				STRNCPY(wi_bits, workinfo->bits);
+			else {
+				/* Did difficulty change?
+				 * Stop at the last workinfo, before the diff
+				 *  changed
+				 * IMPORTANT: this change will create different
+				 *  shifts if you were to reload a database,
+				 *  that you rolled back from after a diff
+				 *  change to before a diff change, if the data
+				 *  at the diff change was created with a
+				 *  version of ckdb before V1.323
+				 * THUS if that was the case, then some payouts
+				 *  that were generated before the rollback will
+				 *  be a small bit different to those created
+				 *  after reloading the same data */
+				if (strcmp(wi_bits, workinfo->bits) != 0) {
+					LOGDEBUG("%s() OK shift stops at diff"
+						 " change '%s->%s' %"PRId64
+						 "->%"PRId64,
+						 __func__, wi_bits,
+						 workinfo->bits, prev_wid,
+						 workinfo->workinfoid);
+					marks_wid = prev_wid;
+					break;
+				}
 			}
 			/* Did we find a pool restart? i.e. a wid skip
 			 * These will usually be a much larger jump,
