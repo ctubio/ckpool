@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.332"
+#define CKDB_VERSION DB_VERSION"-1.333"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -95,6 +95,7 @@ extern int switch_state;
 #define SWITCH_STATE_AUTHWORKERS 1
 #define SWITCH_STATE_ALL 666666
 
+extern bool genpayout_auto;
 extern bool markersummary_auto;
 
 #define BLANK " "

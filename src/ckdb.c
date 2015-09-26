@@ -125,6 +125,7 @@ static char *status_chars = "|/-\\";
 
 static char *restorefrom;
 
+bool genpayout_auto;
 bool markersummary_auto;
 
 int switch_state = SWITCH_STATE_ALL;
@@ -1431,6 +1432,13 @@ static bool setup_data()
 	cksem_init(&socketer_sem);
 	mutex_init(&wq_waitlock);
 	cond_init(&wq_waitcond);
+
+	LOGWARNING("%sStartup payout generation state is %s",
+		   genpayout_auto ? "" : "WARNING: ",
+		   genpayout_auto ? "On" : "Off");
+	LOGWARNING("%sStartup mark generation state is %s",
+		   markersummary_auto ? "" : "WARNING: ",
+		   markersummary_auto ? "On" : "Off");
 
 	alloc_storage();
 
@@ -3054,7 +3062,12 @@ static void summarise_blocks()
 			   diffacc, diffinv, shareacc, shareinv, elapsed);
 
 		// Now the summarisation is confirmed, generate the payout data
-		pplns_block(blocks);
+		if (genpayout_auto)
+			pplns_block(blocks);
+		else {
+			LOGWARNING("%s() Auto payout generation disabled",
+				   __func__);
+		}
 	} else {
 		LOGERR("%s() block %d, failed to confirm stats",
 			__func__, blocks->height);
@@ -5402,11 +5415,13 @@ static void check_restore_dir(char *name)
 static struct option long_options[] = {
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
+	// generate = enable payout pplns auto generation
+	{ "generate",		no_argument,		0,	'g' },
 	{ "help",		no_argument,		0,	'h' },
 	{ "killold",		no_argument,		0,	'k' },
 	{ "loglevel",		required_argument,	0,	'l' },
-	// markersummary = enable markersummary auto generation
-	{ "markersummary",	no_argument,		0,	'm' },
+	// marker = enable mark/workmarker/markersummary auto generation
+	{ "marker",		no_argument,		0,	'm' },
 	{ "name",		required_argument,	0,	'n' },
 	{ "dbpass",		required_argument,	0,	'p' },
 	{ "btc-pass",		required_argument,	0,	'P' },
@@ -5461,6 +5476,9 @@ int main(int argc, char **argv)
 				kill = optarg;
 				while (*kill)
 					*(kill++) = ' ';
+				break;
+			case 'g':
+				genpayout_auto = true;
 				break;
 			case 'h':
 				for (j = 0; long_options[j].val; j++) {

@@ -4947,6 +4947,28 @@ static char *cmd_payouts(PGconn *conn, char *cmd, char *id, tv_t *now,
 		else
 			ok = process_pplns(height, blockhash, &addrdate);
 
+	} else if (strcasecmp(action, "genon") == 0) {
+		/* Turn on auto payout generation
+		 *  and report the before/after status
+		 * No parameters */
+		bool old = genpayout_auto;
+		genpayout_auto = true;
+		snprintf(msg, sizeof(msg), "payout generation state was %s,"
+					   " now %s",
+					   old ? "On" : "Off",
+					   genpayout_auto ? "On" : "Off");
+		ok = true;
+	} else if (strcasecmp(action, "genoff") == 0) {
+		/* Turn off auto payout generation
+		 *  and report the before/after status
+		 * No parameters */
+		bool old = genpayout_auto;
+		genpayout_auto = false;
+		snprintf(msg, sizeof(msg), "payout generation state was %s,"
+					   " now %s",
+					   old ? "On" : "Off",
+					   genpayout_auto ? "On" : "Off");
+		ok = true;
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
 		LOGERR("%s.%s", id, reply);
