@@ -125,8 +125,7 @@ static char *status_chars = "|/-\\";
 
 static char *restorefrom;
 
-// Only accessed in here
-static bool markersummary_auto;
+bool markersummary_auto;
 
 int switch_state = SWITCH_STATE_ALL;
 

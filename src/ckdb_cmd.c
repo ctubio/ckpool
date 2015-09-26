@@ -5738,7 +5738,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	action = transfer_data(i_action);
 
 	if (strcasecmp(action, "add") == 0) {
-		/* Add a mark, -m will automatically do this
+		/* Add a mark, -m/genon will automatically do this
 		 * Require marktype
 		 * Require workinfoid for all but 'b'
 		 * If marktype is 'b' or 'p' then require height/block (number)
@@ -5944,7 +5944,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 					   trf_root);
 		}
 	} else if (strcasecmp(action, "generate") == 0) {
-		/* Generate workmarkers, -m will automatically do this
+		/* Generate workmarkers, -m/genon will automatically do this
 		 * No parameters */
 		tmp[0] = '\0';
 		ok = workmarkers_generate(conn, tmp, sizeof(tmp),
@@ -6005,7 +6005,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	} else if (strcasecmp(action, "sum") == 0) {
 		/* For the last available workmarker,
 		 *  summarise it's sharesummaries into markersummaries
-		 *  -m will automatically do this
+		 *  -m/genon will automatically do this
 		 * No parameters */
 		ok = make_markersummaries(true, by, code, inet, cd, trf_root);
 		if (!ok) {
@@ -6087,11 +6087,21 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 		 *  markersummaries that were deleted
 		 *
 		 * WARNING ... if you do this after the workmarker has been
-		 *  processed, there will no longer be any matching shares,
-		 *  sharesummaries or workmarkers in ram, so you'd need to
-		 *  restart ckdb to regenerate the markersummaries
+		 *  processed, after switching it to ready, there will no
+		 *  longer be any matching shares or sharesummaries in ram
+		 *  to regenerate the markersummaries, so you'd need to restart
+		 *  ckdb to reload the shares to regenerate the markersummaries
 		 *  HOWEVER, ckdb wont reload the shares if there is a later
-		 *  workmarker that is processed
+		 *  workmarker that is already processed
+		 *
+		 * To reprocess an already processed workmarker, you'd have
+		 *  to firstly turn off auto processing with genoff, then
+		 *  change the required workmarker, and all after it, to
+		 *  ready, then cancel them all, then finally restart ckdb
+		 *  which will reload all the necessary shares and regenerate
+		 *  the markersummaries
+		 *  Of course if you don't have ALL the necessary shares in
+		 *   the CCLs then you'd lose data doing this
 		 *
 		 * SS_to_MS will complain if any markersummaries already exist
 		 *  when processing a workmarker
@@ -6137,6 +6147,28 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 			LOGERR("%s.%s", id, reply);
 			return strdup(reply);
 		}
+	} else if (strcasecmp(action, "genon") == 0) {
+		/* Turn on auto marker generation and processing
+		 *  and report the before/after status
+		 * No parameters */
+		bool old = markersummary_auto;
+		markersummary_auto = true;
+		snprintf(msg, sizeof(msg), "mark generation state was %s,"
+					   " now %s",
+					   old ? "On" : "Off",
+					   markersummary_auto ? "On" : "Off");
+		ok = true;
+	} else if (strcasecmp(action, "genoff") == 0) {
+		/* Turn off auto marker generation and processing
+		 *  and report the before/after status
+		 * No parameters */
+		bool old = markersummary_auto;
+		markersummary_auto = false;
+		snprintf(msg, sizeof(msg), "mark generation state was %s,"
+					   " now %s",
+					   old ? "On" : "Off",
+					   markersummary_auto ? "On" : "Off");
+		ok = true;
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
 		LOGERR("%s.%s", id, reply);
