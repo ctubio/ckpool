@@ -3154,6 +3154,12 @@ ASSERT4((sizeof(shift_words) == (sizeof(char *) * SHIFT_WORDS)));
 // Number of workinfoids per shift
 #define WID_PER_SHIFT 100
 
+// A diff change will end the current shift if it occurs after this block
+#define SHIFT_DIFF_BLOCK 376500
+
+// optioncontrol name to override the SHIFT_DIFF_BLOCK value
+#define SHIFT_DIFF_BLOCK_STR "ShiftDiffBlock"
+
 static void make_a_shift_mark()
 {
 	K_TREE_CTX ss_ctx[1], m_ctx[1], wi_ctx[1], b_ctx[1];
@@ -3165,8 +3171,10 @@ static void make_a_shift_mark()
 	BLOCKS *blocks = NULL;
 	MARKS *marks = NULL, *sh_marks = NULL;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
+	int64_t shiftdiffblock = SHIFT_DIFF_BLOCK;
+	int32_t height;
 	char wi_bits[TXT_SML+1];
-	bool was_block = false, ok;
+	bool was_block = false, ok, oc_look = true;
 	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ], cd_buf3[DATE_BUFSIZ];
 	int used_wid;
 
@@ -3393,28 +3401,41 @@ static void make_a_shift_mark()
 			if (wi_bits[0] == '\0')
 				STRNCPY(wi_bits, workinfo->bits);
 			else {
+				/* Make sure you set the SHIFT_DIFF_BLOCK_STR
+				 *  optioncontrol if you changed ckdb to V1.323
+				 *  before the diff change, before the block=
+				 *  SHIFT_DIFF_BLOCK default value
+				 * This however, would only affect a reload
+				 *  after that if the reload crossed the
+				 *  previous diff change and the shifts had not
+				 *  already been stored in the DB (i.e. next to
+				 *  zero probability)
+				 * However a DB rollback and reload across that
+				 *  diff change would be affected */
+				if (oc_look) {
+					shiftdiffblock = sys_setting(SHIFT_DIFF_BLOCK_STR,
+								     SHIFT_DIFF_BLOCK,
+								     &date_eot);
+					oc_look = false;
+				}
 				/* Did difficulty change?
 				 * Stop at the last workinfo, before the diff
-				 *  changed
-				 * IMPORTANT: this change will create different
-				 *  shifts if you were to reload a database,
-				 *  that you rolled back from after a diff
-				 *  change to before a diff change, if the data
-				 *  at the diff change was created with a
-				 *  version of ckdb before V1.323
-				 * THUS if that was the case, then some payouts
-				 *  that were generated before the rollback will
-				 *  be a small bit different to those created
-				 *  after reloading the same data */
+				 *  changed */
 				if (strcmp(wi_bits, workinfo->bits) != 0) {
-					LOGDEBUG("%s() OK shift stops at diff"
-						 " change '%s->%s' %"PRId64
-						 "->%"PRId64,
-						 __func__, wi_bits,
-						 workinfo->bits, prev_wid,
-						 workinfo->workinfoid);
-					marks_wid = prev_wid;
-					break;
+					height = coinbase1height(workinfo->coinbase1);
+					if (height > (int32_t)shiftdiffblock) {
+						LOGDEBUG("%s() OK shift stops at diff"
+							 " change '%s->%s' %"PRId64
+							 "->%"PRId64" height %"PRId32
+							 " limit %"PRId64,
+							 __func__, wi_bits,
+							 workinfo->bits, prev_wid,
+							 workinfo->workinfoid,
+							 height,
+							 shiftdiffblock);
+						marks_wid = prev_wid;
+						break;
+					}
 				}
 			}
 			/* Did we find a pool restart? i.e. a wid skip
@@ -5466,7 +5487,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:hkl:mn:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:ghkl:mn:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);

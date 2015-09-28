@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.333"
+#define CKDB_VERSION DB_VERSION"-1.334"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2286,8 +2286,9 @@ extern cmp_t cmp_accountbalance(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_accountbalance(int64_t userid);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t height);
+#define sys_setting(_name, _def, _now) user_sys_setting(0, _name, _def, _now)
 extern int64_t user_sys_setting(int64_t userid, char *setting_name,
-				int64_t setting_default, tv_t *now);
+				int64_t setting_default, const tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
 #define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
 extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);

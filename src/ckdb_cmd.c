@@ -1156,8 +1156,7 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	// 0 means just the system setting
-	maxrows = user_sys_setting(0, BLOCKS_SETTING_NAME, BLOCKS_DEFAULT, now);
+	maxrows = sys_setting(BLOCKS_SETTING_NAME, BLOCKS_DEFAULT, now);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");

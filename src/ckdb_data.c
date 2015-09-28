@@ -1922,7 +1922,7 @@ K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t height)
  *  i.e. ensure now and pool.height are correct (e.g. during a reload)
  */
 int64_t user_sys_setting(int64_t userid, char *setting_name,
-			 int64_t setting_default, tv_t *now)
+			 int64_t setting_default, const tv_t *now)
 {
 	OPTIONCONTROL *optioncontrol;
 	K_ITEM *ua_item, *oc_item;
