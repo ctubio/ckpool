@@ -1387,8 +1387,8 @@ redo:
 	return buf;
 }
 
-static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
-			     tv_t *now, char *by, char *code, char *inet,
+static char *cmd_blockstatus(PGconn *conn, char *cmd, char *id, tv_t *now,
+			     char *by, char *code, char *inet,
 			     __maybe_unused tv_t *cd, K_TREE *trf_root)
 {
 	K_ITEM *i_height, *i_blockhash, *i_action, *i_info;
@@ -1437,7 +1437,7 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 		switch (blocks->confirmed[0]) {
 			case BLOCKS_NEW:
 			case BLOCKS_CONFIRM:
-				ok = blocks_add(conn, transfer_data(i_height),
+				ok = blocks_add(conn, height,
 						      blocks->blockhash,
 						      BLOCKS_ORPHAN_STR, info,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
@@ -1478,7 +1478,7 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 			case BLOCKS_CONFIRM:
 			case BLOCKS_ORPHAN:
 			case BLOCKS_REJECT:
-				ok = blocks_add(conn, transfer_data(i_height),
+				ok = blocks_add(conn, height,
 						      blocks->blockhash,
 						      BLOCKS_REJECT_STR, info,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
@@ -1507,7 +1507,7 @@ static char *cmd_blockstatus(__maybe_unused PGconn *conn, char *cmd, char *id,
 		// Confirm a new block that wasn't confirmed due to some bug
 		switch (blocks->confirmed[0]) {
 			case BLOCKS_NEW:
-				ok = blocks_add(conn, transfer_data(i_height),
+				ok = blocks_add(conn, height,
 						      blocks->blockhash,
 						      BLOCKS_CONFIRM_STR, info,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
@@ -2644,23 +2644,19 @@ awconf:
 }
 
 // TODO: the confirm update: identify block changes from workinfo height?
-static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
-			   char *code, char *inet, tv_t *cd, bool igndup,
-			   K_TREE *trf_root)
+static char *cmd_blocks_do(PGconn *conn, char *cmd, int32_t height, char *id,
+			   char *by, char *code, char *inet, tv_t *cd,
+			   bool igndup, K_TREE *trf_root)
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	K_ITEM *i_height, *i_blockhash, *i_confirmed, *i_workinfoid, *i_username;
+	K_ITEM *i_blockhash, *i_confirmed, *i_workinfoid, *i_username;
 	K_ITEM *i_workername, *i_clientid, *i_enonce1, *i_nonce2, *i_nonce, *i_reward;
 	TRANSFER *transfer;
 	char *msg;
 	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
-
-	i_height = require_name(trf_root, "height", 1, NULL, reply, siz);
-	if (!i_height)
-		return strdup(reply);
 
 	i_blockhash = require_name(trf_root, "blockhash", 1, NULL, reply, siz);
 	if (!i_blockhash)
@@ -2707,7 +2703,7 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
 				return strdup(reply);
 
 			msg = "added";
-			ok = blocks_add(conn, transfer_data(i_height),
+			ok = blocks_add(conn, height,
 					      transfer_data(i_blockhash),
 					      transfer_data(i_confirmed),
 					      EMPTY,
@@ -2724,7 +2720,7 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, char *id, char *by,
 			break;
 		case BLOCKS_CONFIRM:
 			msg = "confirmed";
-			ok = blocks_add(conn, transfer_data(i_height),
+			ok = blocks_add(conn, height,
 					      transfer_data(i_blockhash),
 					      transfer_data(i_confirmed),
 					      EMPTY,
@@ -2757,17 +2753,28 @@ static char *cmd_blocks(PGconn *conn, char *cmd, char *id,
 			char *code, char *inet, tv_t *cd,
 			K_TREE *trf_root)
 {
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
 	bool igndup = false;
+	K_ITEM *i_height;
+	int32_t height;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_height = require_name(trf_root, "height", 1, NULL, reply, siz);
+	if (!i_height)
+		return strdup(reply);
+
+	TXT_TO_INT("height", transfer_data(i_height), height);
 
 	// confirm_summaries() doesn't call this
 	if (reloading) {
-		if (tv_equal(cd, &(dbstatus.newest_createdate_blocks)))
+		// Since they're blocks, just try them all
+		if (height <= dbstatus.newest_height_blocks)
 			igndup = true;
-		else if (tv_newer(cd, &(dbstatus.newest_createdate_blocks)))
-			return NULL;
 	}
 
-	return cmd_blocks_do(conn, cmd, id, by, code, inet, cd, igndup, trf_root);
+	return cmd_blocks_do(conn, cmd, height, id, by, code, inet, cd, igndup, trf_root);
 }
 
 static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,

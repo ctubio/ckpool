@@ -4434,7 +4434,7 @@ unparam:
 	return ok;
 }
 
-bool blocks_add(PGconn *conn, char *height, char *blockhash,
+bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 		char *confirmed, char *info, char *workinfoid,
 		char *username, char *workername, char *clientid,
 		char *enonce1, char *nonce2, char *nonce, char *reward,
@@ -4465,7 +4465,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 	DATA_BLOCKS(row, b_item);
 	bzero(row, sizeof(*row));
 
-	TXT_TO_INT("height", height, row->height);
+	row->height = height;
 	STRNCPY(row->blockhash, blockhash);
 
 	dsp_hash(blockhash, hash_dsp, sizeof(hash_dsp));
@@ -4486,7 +4486,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				if (!igndup) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 					LOGERR("%s(): Duplicate (%s) blocks ignored, Status: "
-						"%s, Block: %s/...%s/%s",
+						"%s, Block: %"PRId32"/...%s/%s",
 						__func__,
 						blocks_confirmed(oldblocks->confirmed),
 						blocks_confirmed(confirmed),
@@ -4578,7 +4578,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 			if (!startup_complete) {
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 				LOGERR("%s(): Status: %s invalid during startup. "
-					"Ignored: Block: %s/...%s/%s",
+					"Ignored: Block: %"PRId32"/...%s/%s",
 					__func__,
 					blocks_confirmed(confirmed),
 					height, hash_dsp, cd_buf);
@@ -4587,7 +4587,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 		case BLOCKS_CONFIRM:
 			if (!old_b_item) {
 				tv_to_buf(cd, cd_buf, sizeof(cd_buf));
-				LOGERR("%s(): Can't %s a non-existent Block: %s/...%s/%s",
+				LOGERR("%s(): Can't %s a non-existent Block: %"PRId32"/...%s/%s",
 					__func__, blocks_confirmed(confirmed),
 					height, hash_dsp, cd_buf);
 				goto flail;
@@ -4619,7 +4619,7 @@ bool blocks_add(PGconn *conn, char *height, char *blockhash,
 				if (startup_complete) {
 					tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 					LOGERR("%s(): New Status: (%s)%s requires Status: %s. "
-						"Ignored: Status: (%s)%s, Block: %s/...%s/%s",
+						"Ignored: Status: (%s)%s, Block: %"PRId32"/...%s/%s",
 						__func__,
 						confirmed, blocks_confirmed(confirmed),
 						want, oldblocks->confirmed,
@@ -4870,7 +4870,7 @@ flail:
 				break;
 		}
 
-		LOGWARNING("%s(): %sStatus: %s, Block: %s/...%s Diff %s%s",
+		LOGWARNING("%s(): %sStatus: %s, Block: %"PRId32"/...%s Diff %s%s",
 			   __func__, blk ? "BLOCK! " : "",
 			   blocks_confirmed(confirmed),
 			   height, hash_dsp, diff, tmp);
@@ -5029,6 +5029,9 @@ bool blocks_fill(PGconn *conn)
 
 		if (tv_newer(&(dbstatus.newest_createdate_blocks), &(row->createdate)))
 			copy_tv(&(dbstatus.newest_createdate_blocks), &(row->createdate));
+
+		if (dbstatus.newest_height_blocks < row->height)
+			dbstatus.newest_height_blocks = row->height;
 
 		if (pool.workinfoid < row->workinfoid) {
 			pool.workinfoid = row->workinfoid;

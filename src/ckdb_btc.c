@@ -308,7 +308,6 @@ bool btc_valid_address(char *addr)
 void btc_blockstatus(BLOCKS *blocks)
 {
 	char hash[TXT_BIG+1];
-	char height_str[32];
 	char *blockhash;
 	int32_t confirms;
 	size_t len;
@@ -348,14 +347,12 @@ void btc_blockstatus(BLOCKS *blocks)
 		return;
 
 	if (strcmp(blockhash, hash) != 0) {
-		snprintf(height_str, sizeof(height_str), "%d", blocks->height);
-		LOGERR("%s() flagging block %d(%s) as %s pool=%s btc=%s",
-			__func__,
-			blocks->height, height_str,
+		LOGERR("%s() flagging block %d as %s pool=%s btc=%s",
+			__func__, blocks->height,
 			blocks_confirmed(BLOCKS_ORPHAN_STR),
 			hash, blockhash);
 
-		ok = blocks_add(NULL, height_str,
+		ok = blocks_add(NULL, blocks->height,
 				      blocks->blockhash,
 				      BLOCKS_ORPHAN_STR, EMPTY,
 				      EMPTY, EMPTY, EMPTY, EMPTY,
@@ -371,14 +368,12 @@ void btc_blockstatus(BLOCKS *blocks)
 
 	confirms = btc_confirms(hash);
 	if (confirms >= BLOCKS_42_VALUE) {
-		snprintf(height_str, sizeof(height_str), "%d", blocks->height);
-		LOGERR("%s() flagging block %d(%s) as %s confirms=%d(%d)",
-			__func__,
-			blocks->height, height_str,
+		LOGERR("%s() flagging block %d as %s confirms=%d(%d)",
+			__func__, blocks->height,
 			blocks_confirmed(BLOCKS_42_STR),
 			confirms, BLOCKS_42_VALUE);
 
-		ok = blocks_add(NULL, height_str,
+		ok = blocks_add(NULL, blocks->height,
 				      blocks->blockhash,
 				      BLOCKS_42_STR, EMPTY,
 				      EMPTY, EMPTY, EMPTY, EMPTY,

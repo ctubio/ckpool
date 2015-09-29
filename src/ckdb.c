@@ -826,7 +826,8 @@ static bool reload()
 	tv_to_buf(&(dbstatus.newest_createdate_poolstats), buf, sizeof(buf));
 	LOGWARNING("%s(): %s newest DB poolstats (ignored)", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_blocks), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB blocks (ignored)", __func__, buf);
+	LOGWARNING("%s(): %"PRId32"/%s newest DB blocks (ignored)",
+		   __func__, dbstatus.newest_height_blocks, buf);
 
 	copy_tv(&start, &(dbstatus.newest_createdate_workmarker_workinfo));
 	reason = "workmarkers";

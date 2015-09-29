@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.340"
+#define CKDB_VERSION DB_VERSION"-1.350"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -138,6 +138,7 @@ typedef struct loadstatus {
 	tv_t newest_createdate_workinfo;
 	tv_t newest_createdate_poolstats;
 	tv_t newest_createdate_blocks;
+	int32_t newest_height_blocks;
 } LOADSTATUS;
 extern LOADSTATUS dbstatus;
 
@@ -2545,7 +2546,7 @@ extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 			 double diffacc, double diffinv, double shareacc,
 			 double shareinv, int64_t elapsed,
 			 char *by, char *code, char *inet, tv_t *cd);
-extern bool blocks_add(PGconn *conn, char *height, char *blockhash,
+extern bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 			char *confirmed, char *info, char *workinfoid,
 			char *username, char *workername, char *clientid,
 			char *enonce1, char *nonce2, char *nonce, char *reward,
