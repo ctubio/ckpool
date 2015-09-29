@@ -5795,7 +5795,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 				TXT_TO_INT("height", transfer_data(i_height),
 					   height);
 				K_RLOCK(blocks_free);
-				b_item = find_prev_blocks(height+1);
+				b_item = find_prev_blocks(height+1, NULL);
 				K_RUNLOCK(blocks_free);
 				if (b_item) {
 					DATA_BLOCKS(blocks, b_item);
@@ -6571,6 +6571,488 @@ static char *cmd_btcset(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(buf);
 }
 
+/* Query CKDB for certain information
+ * See each string compare below of 'request' for the list of queries
+ * For non-error conditions, rows=0 means there were no matching results
+ *  for the request, and rows=n is placed last in the reply */
+static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *cd, K_TREE *trf_root)
+{
+	K_TREE_CTX ctx[1];
+	char cd_buf[DATE_BUFSIZ];
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char tmp[1024] = "";
+	char msg[1024] = "";
+	char *buf = NULL;
+	size_t len, off;
+	K_ITEM *i_request;
+	char *request;
+	bool ok = false;
+	int rows = 0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_request = require_name(trf_root, "request", 1, NULL, reply, siz);
+	if (!i_request)
+		return strdup(reply);
+	request = transfer_data(i_request);
+
+	APPEND_REALLOC_INIT(buf, off, len);
+	APPEND_REALLOC(buf, off, len, "ok.");
+
+	if (strcasecmp(request, "block") == 0) {
+		/* return DB information for the blocks with height=value
+		 * if expired= is present, it will also return expired records */
+		K_ITEM *i_height, *i_expired, *b_item;
+		bool expired = false;
+		BLOCKS *blocks;
+		int32_t height;
+
+		i_height = require_name(trf_root, "height",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_height)
+			return strdup(reply);
+		TXT_TO_INT("height", transfer_data(i_height), height);
+
+		i_expired = optional_name(trf_root, "expired",
+					  0, NULL, reply, siz);
+		if (i_expired)
+			expired = true;
+
+		int_to_buf(height, reply, sizeof(reply));
+		snprintf(msg, sizeof(msg), "height=%s", reply);
+
+		K_RLOCK(blocks_free);
+		b_item = find_prev_blocks(height, ctx);
+		DATA_BLOCKS_NULL(blocks, b_item);
+		while (b_item && blocks->height <= height) {
+			if ((expired || CURRENT(&(blocks->expirydate))) &&
+			    blocks->height == height) {
+				int_to_buf(blocks->height, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "height:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "blockhash:%d=%s%c",
+					 rows, blocks->blockhash, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "confirmed:%d=%s%c",
+					 rows, blocks->confirmed, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				tv_to_buf(&(blocks->expirydate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 EDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				tv_to_buf(&(blocks->createdate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 CDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				tv_to_buf(&(blocks->blockcreatedate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 "block"CDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				bigint_to_buf(blocks->workinfoid, reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "workinfoid:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				rows++;
+			}
+			b_item = next_in_ktree(ctx);
+			DATA_BLOCKS_NULL(blocks, b_item);
+		}
+		K_RUNLOCK(blocks_free);
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "height,blockhash,confirmed,"EDDB"_str,"
+			 CDDB"_str,block"CDDB"_str,workinfoid", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "Blocks", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
+	} else if (strcasecmp(request, "workinfo") == 0) {
+		/* return DB information for the workinfo with wid=value
+		 * if expired= is present, it will also return expired records
+		 *  though ckdb doesn't expire workinfo records - only external
+		 *  pgsql scripts would do that to the DB, then ckdb would
+		 *  load them the next time it (re)starts */
+		K_ITEM *i_wid, *i_expired, *wi_item, *wm_item;
+		char ndiffbin[TXT_SML+1];
+		bool expired = false;
+		WORKINFO *workinfo;
+		WORKMARKERS *wm;
+		int64_t wid;
+
+		i_wid = require_name(trf_root, "wid",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_wid)
+			return strdup(reply);
+		TXT_TO_BIGINT("wid", transfer_data(i_wid), wid);
+
+		i_expired = optional_name(trf_root, "expired",
+					  0, NULL, reply, siz);
+		if (i_expired)
+			expired = true;
+
+		bigint_to_buf(wid, reply, sizeof(reply));
+		snprintf(msg, sizeof(msg), "wid=%s", reply);
+
+		/* We look for the 'next' (or last) workinfo then go backwards
+		 *  to ensure we find all expired records in case they
+		 *  were requested */
+		K_RLOCK(workinfo_free);
+		wi_item = next_workinfo(wid, ctx);
+		if (!wi_item)
+			wi_item = last_in_ktree(workinfo_root, ctx);
+		DATA_WORKINFO_NULL(workinfo, wi_item);
+		while (wi_item && workinfo->workinfoid >= wid) {
+			if ((expired || CURRENT(&(workinfo->expirydate))) &&
+			    workinfo->workinfoid == wid) {
+				bigint_to_buf(workinfo->workinfoid,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "workinfoid:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				int_to_buf(coinbase1height(workinfo->coinbase1),
+					   reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "height:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "prevhash:%d=%s%c",
+					 rows, workinfo->prevhash, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				tv_to_buf(&(workinfo->expirydate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 EDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				tv_to_buf(&(workinfo->createdate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 CDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				hex2bin(ndiffbin, workinfo->bits, 4);
+				snprintf(tmp, sizeof(tmp),
+					 "ndiff:%d=%.1f%c", rows,
+					 diff_from_nbits(ndiffbin),
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "ppsvalue:%d=%.15f%c", rows,
+					 workinfo_pps(wi_item,
+						      workinfo->workinfoid,
+						      true),
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				K_RLOCK(workmarkers_free);
+				wm_item = find_workmarkers(wid, false,
+							   MARKER_PROCESSED,
+							   NULL);
+				K_RUNLOCK(workmarkers_free);
+				if (!wm_item) {
+					snprintf(tmp, sizeof(tmp),
+						 "markerid:%d=%c", rows, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					snprintf(tmp, sizeof(tmp),
+						 "shift:%d=%c", rows, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					snprintf(tmp, sizeof(tmp),
+						 "shiftend:%d=%c", rows, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					snprintf(tmp, sizeof(tmp),
+						 "shiftstart:%d=%c", rows, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+				} else {
+					DATA_WORKMARKERS(wm, wm_item);
+					bigint_to_buf(wm->markerid,
+						      reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp),
+						 "markerid:%d=%s%c",
+						 rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					snprintf(tmp, sizeof(tmp),
+						 "shift:%d=%s%c",
+						 rows, wm->description, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					bigint_to_buf(wm->workinfoidend,
+						      reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp),
+						 "shiftend:%d=%s%c",
+						 rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+					bigint_to_buf(wm->workinfoidstart,
+						      reply, sizeof(reply));
+					snprintf(tmp, sizeof(tmp),
+						 "shiftstart:%d=%s%c",
+						 rows, reply, FLDSEP);
+					APPEND_REALLOC(buf, off, len, tmp);
+				}
+				rows++;
+			}
+			wi_item = prev_in_ktree(ctx);
+			DATA_WORKINFO_NULL(workinfo, wi_item);
+		}
+		K_RUNLOCK(workinfo_free);
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "workinfoid,height,prevhash,"EDDB"_str,"CDDB"_str,"
+			 "ndiff,ppsvalue,markerid,shift,shiftend,shiftstart",
+			 FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "Workinfo", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
+	} else if (strcasecmp(request, "range") == 0) {
+		/* Return the workinfoid range that has block height=height
+		 * WARNING! This will traverse workinfo from the end back to
+		 *  the given height, and thus since workinfo is the 2nd
+		 *  largest tree, it may access swapped data if you request
+		 *  older data */
+		K_ITEM *i_height, *wi_item;
+		WORKINFO *workinfo;
+		int32_t height, this_height;
+		int64_t idend, idstt;
+
+		i_height = require_name(trf_root, "height",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_height)
+			return strdup(reply);
+		TXT_TO_INT("height", transfer_data(i_height), height);
+
+		int_to_buf(height, reply, sizeof(reply));
+		snprintf(msg, sizeof(msg), "height=%s", reply);
+
+		idend = idstt = 0L;
+		/* Start from the last workinfo and continue until we get
+		 * below block 'height' */
+		K_RLOCK(workinfo_free);
+		wi_item = last_in_ktree(workinfo_root, ctx);
+		DATA_WORKINFO_NULL(workinfo, wi_item);
+		while (wi_item) {
+			this_height = coinbase1height(workinfo->coinbase1);
+			if (this_height < height)
+				break;
+			if (CURRENT(&(workinfo->expirydate)) &&
+			    this_height == height) {
+				if (idend == 0L)
+					idend = workinfo->workinfoid;
+				idstt = workinfo->workinfoid;
+			}
+			wi_item = prev_in_ktree(ctx);
+			DATA_WORKINFO_NULL(workinfo, wi_item);
+		}
+		K_RUNLOCK(workinfo_free);
+
+		int_to_buf(height, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "height:%d=%s%c",
+					   rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		bigint_to_buf(idend, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "workinfoidend:%d=%s%c",
+					   rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		bigint_to_buf(idstt, reply, sizeof(reply));
+		snprintf(tmp, sizeof(tmp), "workinfoidstart:%d=%s%c",
+					   rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		rows++;
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "height,workinfoidend,workinfoidstart", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "WorkinfoRange", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
+	} else if (strcasecmp(request, "diff") == 0) {
+		/* return the details of the next diff change after
+		 *  block height=height
+		 * WARNING! This will traverse workinfo from the end back to
+		 *  the given height, and thus since workinfo is the 2nd
+		 *  largest tree, it may access swapped data if you request
+		 *  older data */
+		K_ITEM *i_height, *wi_item;
+		WORKINFO *workinfo = NULL;
+		int32_t height, this_height;
+		char ndiffbin[TXT_SML+1];
+		char bits[TXT_SML+1];
+		bool got = false;
+
+		i_height = require_name(trf_root, "height",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_height)
+			return strdup(reply);
+		TXT_TO_INT("height", transfer_data(i_height), height);
+
+		int_to_buf(height, reply, sizeof(reply));
+		snprintf(msg, sizeof(msg), "height=%s", reply);
+
+		snprintf(tmp, sizeof(tmp), "height0:%d=%s%c",
+					   rows, reply, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		/* Start from the last workinfo and continue until we get
+		 * below block 'height' */
+		K_RLOCK(workinfo_free);
+		wi_item = last_in_ktree(workinfo_root, ctx);
+		DATA_WORKINFO_NULL(workinfo, wi_item);
+		while (wi_item) {
+			if (CURRENT(&(workinfo->expirydate))) {
+				this_height = coinbase1height(workinfo->coinbase1);
+				if (this_height < height)
+					break;
+			}
+			wi_item = prev_in_ktree(ctx);
+			DATA_WORKINFO_NULL(workinfo, wi_item);
+		}
+		// If we fell off the front use the first one
+		if (!wi_item)
+			wi_item = first_in_ktree(workinfo_root, ctx);
+		DATA_WORKINFO_NULL(workinfo, wi_item);
+		while (wi_item) {
+			if (CURRENT(&(workinfo->expirydate))) {
+				this_height = coinbase1height(workinfo->coinbase1);
+				if (this_height >= height)
+					break;
+			}
+			wi_item = next_in_ktree(ctx);
+			DATA_WORKINFO_NULL(workinfo, wi_item);
+		}
+		if (wi_item) {
+			DATA_WORKINFO(workinfo, wi_item);
+			this_height = coinbase1height(workinfo->coinbase1);
+			if (this_height == height) {
+				// We have our starting point
+				STRNCPY(bits, workinfo->bits);
+				got = true;
+
+				bigint_to_buf(workinfo->workinfoid,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "workinfoid0:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				hex2bin(ndiffbin, workinfo->bits, 4);
+				snprintf(tmp, sizeof(tmp),
+					 "ndiff0:%d=%.1f%c", rows,
+					 diff_from_nbits(ndiffbin),
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				while (wi_item) {
+					if (CURRENT(&(workinfo->expirydate))) {
+						if (strcmp(bits, workinfo->bits) != 0)
+							break;
+					}
+					wi_item = next_in_ktree(ctx);
+					DATA_WORKINFO_NULL(workinfo, wi_item);
+				}
+			} else
+				wi_item = NULL;
+		}
+		K_RUNLOCK(workinfo_free);
+
+		if (!got) {
+			snprintf(tmp, sizeof(tmp), "workinfoid0:%d=%c",
+						   rows, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "ndiff0:%d=%c",
+						   rows, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+
+		if (!wi_item) {
+			snprintf(tmp, sizeof(tmp), "height:%d=%c",
+						   rows, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "workinfoid:%d=%c",
+						   rows, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "ndiff:%d=%c",
+						   rows, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		} else {
+			this_height = coinbase1height(workinfo->coinbase1);
+			int_to_buf(this_height, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "height:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			bigint_to_buf(workinfo->workinfoid,
+				      reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "workinfoid:%d=%s%c",
+						   rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			hex2bin(ndiffbin, workinfo->bits, 4);
+			snprintf(tmp, sizeof(tmp), "ndiff:%d=%.1f%c",
+						   rows,
+						   diff_from_nbits(ndiffbin),
+						   FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+		}
+
+		rows++;
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "height0,workinfoid0,ndiff0,height,workinfo,ndiff",
+			 FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "WorkinfoRange", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
+	} else {
+		free(buf);
+		snprintf(reply, siz, "unknown request '%s'", request);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+
+	if (!ok) {
+		free(buf);
+		snprintf(reply, siz, "failed.%s%s%s",
+					request,
+					msg[0] ? " " : "",
+					msg[0] ? msg : "");
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+
+	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+	APPEND_REALLOC(buf, off, len, tmp);
+	LOGWARNING("%s() %s.%s%s%s", __func__, id, request,
+				     msg[0] ? " " : "",
+				     msg[0] ? msg : "");
+	return buf;
+}
+
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -6679,5 +7161,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_SHSTA,	"shsta",	true,	false,	cmd_shsta,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_USERINFO,	"userinfo",	false,	false,	cmd_userinfo,	SEQ_NONE,	ACCESS_WEB },
 	{ CMD_BTCSET,	"btcset",	false,	false,	cmd_btcset,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_QUERY,	"query",	false,	false,	cmd_query,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

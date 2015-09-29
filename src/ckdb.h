@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.334"
+#define CKDB_VERSION DB_VERSION"-1.340"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -410,6 +410,7 @@ enum cmd_values {
 	CMD_SHSTA,
 	CMD_USERINFO,
 	CMD_BTCSET,
+	CMD_QUERY,
 	CMD_END
 };
 
@@ -2332,7 +2333,7 @@ extern double _blockhash_diff(char *hash, WHERE_FFL_ARGS);
 extern void dsp_blocks(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx);
-extern K_ITEM *find_prev_blocks(int32_t height);
+extern K_ITEM *find_prev_blocks(int32_t height, K_TREE_CTX *ctx);
 extern const char *blocks_confirmed(char *confirmed);
 extern void zero_on_new_block();
 extern void set_block_share_counters();

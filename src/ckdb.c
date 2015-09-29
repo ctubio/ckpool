@@ -2909,7 +2909,7 @@ static void summarise_blocks()
 	diffacc = diffinv = shareacc = shareinv = 0;
 	elapsed = 0;
 	K_RLOCK(blocks_free);
-	b_prev = find_prev_blocks(blocks->height);
+	b_prev = find_prev_blocks(blocks->height, NULL);
 	K_RUNLOCK(blocks_free);
 	if (!b_prev) {
 		wi_start = 0;
@@ -4128,6 +4128,7 @@ static void *socketer(__maybe_unused void *arg)
 					/* Process, but reject (loading) until startup_complete
 					 * and don't test for duplicates */
 					case CMD_MARKS:
+					case CMD_QUERY:
 						if (!startup_complete) {
 							snprintf(reply, sizeof(reply),
 								 "%s.%ld.loading.%s",
@@ -4356,6 +4357,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_SHSTA:
 			case CMD_USERINFO:
 			case CMD_BTCSET:
+			case CMD_QUERY:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,

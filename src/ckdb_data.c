@@ -2702,11 +2702,14 @@ K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx)
 }
 
 // Must be R or W locked before call
-K_ITEM *find_prev_blocks(int32_t height)
+K_ITEM *find_prev_blocks(int32_t height, K_TREE_CTX *ctx)
 {
 	BLOCKS lookblocks, *blocks;
-	K_TREE_CTX ctx[1];
+	K_TREE_CTX ctx0[1];
 	K_ITEM look, *b_item;
+
+	if (ctx == NULL)
+		ctx = ctx0;
 
 	/* TODO: For self orphaned (if that ever happens)
 	 * this will find based on blockhash order if it has two,
