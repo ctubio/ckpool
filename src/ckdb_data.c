@@ -815,7 +815,7 @@ cmp_t cmp_workerstatus(K_ITEM *a, K_ITEM *b)
 /* TODO: replace a lot of the code for all data types that codes finds,
  *  each with specific functions for finding, to centralise the finds,
  *  with passed ctx's */
-K_ITEM *get_workerstatus(int64_t userid, char *workername)
+K_ITEM *get_workerstatus(bool lock, int64_t userid, char *workername)
 {
 	WORKERSTATUS workerstatus;
 	K_TREE_CTX ctx[1];
@@ -826,9 +826,11 @@ K_ITEM *get_workerstatus(int64_t userid, char *workername)
 
 	INIT_WORKERSTATUS(&look);
 	look.data = (void *)(&workerstatus);
-	K_RLOCK(workerstatus_free);
+	if (lock)
+		K_RLOCK(workerstatus_free);
 	find = find_in_ktree(workerstatus_root, &look, ctx);
-	K_RUNLOCK(workerstatus_free);
+	if (lock)
+		K_RUNLOCK(workerstatus_free);
 	return find;
 }
 
@@ -839,7 +841,7 @@ K_ITEM *get_workerstatus(int64_t userid, char *workername)
  * This has 2 sets of file/func/line to allow 2 levels of traceback
  *  to see why it happened
  */
-K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
+K_ITEM *_find_create_workerstatus(bool lock, int64_t userid, char *workername,
 				  bool create, const char *file2,
 				  const char *func2, const int line2,
 				  WHERE_FFL_ARGS)
@@ -849,7 +851,7 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 	bool ws_err = false, w_err = false;
 	tv_t now;
 
-	ws_item = get_workerstatus(userid, workername);
+	ws_item = get_workerstatus(lock, userid, workername);
 	if (!ws_item) {
 		if (!create) {
 			ws_err = true;
@@ -858,7 +860,8 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 			if (!w_item) {
 				w_err = true;
 				setnow(&now);
-				w_item = workers_add(NULL, userid, workername,
+				w_item = workers_add(NULL, lock, userid,
+						     workername,
 						     NULL, NULL, NULL,
 						     by_default,
 						     (char *)__func__,
@@ -867,7 +870,8 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 			}
 		}
 
-		K_WLOCK(workerstatus_free);
+		if (lock)
+			K_WLOCK(workerstatus_free);
 		ws_item = k_unlink_head(workerstatus_free);
 
 		DATA_WORKERSTATUS(row, ws_item);
@@ -878,7 +882,8 @@ K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
 
 		add_to_ktree(workerstatus_root, ws_item);
 		k_add_head(workerstatus_store, ws_item);
-		K_WUNLOCK(workerstatus_free);
+		if (lock)
+			K_WUNLOCK(workerstatus_free);
 
 		if (ws_err) {
 			LOGNOTICE("%s(): CREATED Missing workerstatus"
@@ -946,12 +951,10 @@ void workerstatus_ready()
 	while (ws_item) {
 		DATA_WORKERSTATUS(workerstatus, ws_item);
 
-		K_RLOCK(markersummary_free);
 		// This is the last share datestamp
 		ms_item = find_markersummary_userid(workerstatus->userid,
 						    workerstatus->workername,
 						    NULL);
-		K_RUNLOCK(markersummary_free);
 		if (ms_item) {
 			DATA_MARKERSUMMARY(markersummary, ms_item);
 			if (tv_newer(&(workerstatus->last_share),
@@ -968,10 +971,8 @@ void workerstatus_ready()
 			}
 		}
 
-		K_RLOCK(sharesummary_free);
 		ss_item = find_last_sharesummary(workerstatus->userid,
 						 workerstatus->workername);
-		K_RUNLOCK(sharesummary_free);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
 			if (tv_newer(&(workerstatus->last_share),
@@ -1001,7 +1002,7 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 	K_ITEM *item;
 
 	if (auths) {
-		item = find_workerstatus(auths->userid, auths->workername,
+		item = find_workerstatus(true, auths->userid, auths->workername,
 					 file, func, line);
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
@@ -1022,7 +1023,8 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 			pool.diffinv += shares->diff;
 			pool.shareinv++;
 		}
-		item = find_workerstatus(shares->userid, shares->workername,
+		item = find_workerstatus(true, shares->userid,
+					 shares->workername,
 					 file, func, line);
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
@@ -1090,7 +1092,8 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 	}
 
 	if (startup_complete && userstats) {
-		item = find_workerstatus(userstats->userid, userstats->workername,
+		item = find_workerstatus(true, userstats->userid,
+					 userstats->workername,
 					 file, func, line);
 		if (item) {
 			DATA_WORKERSTATUS(row, item);
@@ -1535,7 +1538,7 @@ K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *workername,
 		}
 
 		// TODO: limit how many?
-		item = workers_add(conn, userid, workername, diffdef,
+		item = workers_add(conn, true, userid, workername, diffdef,
 				   idlenotificationenabled, idlenotificationtime,
 				   by, code, inet, cd, trf_root);
 	}
@@ -2748,13 +2751,14 @@ const char *blocks_confirmed(char *confirmed)
 	return blocks_unknown;
 }
 
-void zero_on_new_block()
+void zero_on_new_block(bool lock)
 {
 	WORKERSTATUS *workerstatus;
 	K_TREE_CTX ctx[1];
 	K_ITEM *ws_item;
 
-	K_WLOCK(workerstatus_free);
+	if (lock)
+		K_WLOCK(workerstatus_free);
 	pool.diffacc = pool.diffinv = pool.shareacc =
 	pool.shareinv = pool.best_sdiff = 0;
 	ws_item = first_in_ktree(workerstatus_root, ctx);
@@ -2768,12 +2772,11 @@ void zero_on_new_block()
 		workerstatus->block_sharehi = workerstatus->block_sharerej = 0.0;
 		ws_item = next_in_ktree(ctx);
 	}
-	K_WUNLOCK(workerstatus_free);
-
+	if (lock)
+		K_WUNLOCK(workerstatus_free);
 }
 
-/* Currently only used at the end of the startup
- * Will need to add locking if it's used, later, after startup completes */
+// Currently only used at the end of the startup
 void set_block_share_counters()
 {
 	K_TREE_CTX ctx[1], ctx_ms[1];
@@ -2788,13 +2791,12 @@ void set_block_share_counters()
 	INIT_SHARESUMMARY(&ss_look);
 	INIT_MARKERSUMMARY(&ms_look);
 
-	zero_on_new_block();
+	zero_on_new_block(false);
 
 	ws_item = NULL;
 	/* From the end backwards so we can skip the workinfoid's we don't
 	 * want by jumping back to just before the current worker when the
 	 * workinfoid goes below the limit */
-	K_RLOCK(sharesummary_free);
 	ss_item = last_in_ktree(sharesummary_root, ctx);
 	while (ss_item) {
 		DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -2819,16 +2821,14 @@ void set_block_share_counters()
 			 *  since it should always exist
 			 * However, it is simplest to simply create it
 			 *  and keep going */
-			K_RUNLOCK(sharesummary_free);
-			ws_item = find_workerstatus(sharesummary->userid,
+			ws_item = find_workerstatus(false, sharesummary->userid,
 						    sharesummary->workername,
 						    __FILE__, __func__, __LINE__);
 			if (!ws_item) {
-				ws_item = find_create_workerstatus(sharesummary->userid,
+				ws_item = find_create_workerstatus(false, sharesummary->userid,
 								   sharesummary->workername,
 								   __FILE__, __func__, __LINE__);
 			}
-			K_RLOCK(sharesummary_free);
 			DATA_WORKERSTATUS(workerstatus, ws_item);
 		}
 
@@ -2857,7 +2857,6 @@ void set_block_share_counters()
 
 		ss_item = prev_in_ktree(ctx);
 	}
-	K_RUNLOCK(sharesummary_free);
 
 	LOGWARNING("%s(): Updating block markersummary counters...", __func__);
 
@@ -2905,11 +2904,11 @@ void set_block_share_counters()
 					 *  since it should always exist
 					 * However, it is simplest to simply create it
 					 *  and keep going */
-					ws_item = find_workerstatus(markersummary->userid,
+					ws_item = find_workerstatus(false, markersummary->userid,
 								    markersummary->workername,
 								    __FILE__, __func__, __LINE__);
 					if (!ws_item) {
-						ws_item = find_create_workerstatus(markersummary->userid,
+						ws_item = find_create_workerstatus(false, markersummary->userid,
 										   markersummary->workername,
 										   __FILE__, __func__, __LINE__);
 					}

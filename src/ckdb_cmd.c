@@ -1734,7 +1734,8 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	DATA_WORKERS_NULL(workers, w_item);
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
-			ws_item = get_workerstatus(users->userid, workers->workername);
+			ws_item = get_workerstatus(true, users->userid,
+						   workers->workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
 				t_diffacc += workerstatus->block_diffacc;
@@ -1996,7 +1997,8 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	rows = 0;
 	while (w_item && workers->userid == users->userid) {
 		if (CURRENT(&(workers->expirydate))) {
-			ws_item = get_workerstatus(users->userid, workers->workername);
+			ws_item = get_workerstatus(true, users->userid,
+						   workers->workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
 				K_RLOCK(workerstatus_free);

@@ -253,6 +253,8 @@ bool db_users_complete = false;
 bool db_load_complete = false;
 // Different input data handling
 bool reloading = false;
+// Start marks processing during a larger reload
+static bool reloaded_N_files = false;
 // Data load is complete
 bool startup_complete = false;
 // Set to true the first time workqueue reaches 0 after startup
@@ -1483,12 +1485,26 @@ static bool setup_data()
 	sec -= min * 60.0;
 	LOGWARNING("reload complete %.0fm %.3fs", min, sec);
 
+	// full lock access since mark processing can occur
+	ck_wlock(&process_pplns_lock);
+	K_WLOCK(workerstatus_free);
+	K_RLOCK(sharesummary_free);
+	K_RLOCK(workmarkers_free);
+	K_RLOCK(markersummary_free);
+
 	set_block_share_counters();
+
+	if (!everyone_die)
+		workerstatus_ready();
+
+	K_RUNLOCK(markersummary_free);
+	K_RUNLOCK(workmarkers_free);
+	K_RUNLOCK(sharesummary_free);
+	K_WUNLOCK(workerstatus_free);
+	ck_wunlock(&process_pplns_lock);
 
 	if (everyone_die)
 		return false;
-
-	workerstatus_ready();
 
 	workinfo_current = last_in_ktree(workinfo_height_root, ctx);
 	if (workinfo_current) {
@@ -3083,9 +3099,20 @@ static void *summariser(__maybe_unused void *arg)
 
 	rename_proc("db_summariser");
 
+	/* Don't do any summarisation until the reload queue completes coz:
+	 * 1) It locks/accesses a lot of data - workinfo/markersummary that
+	 *    can slow down the reload
+	 * 2) If you stop and restart ckdb this wont affect the restart point
+	 *    Thus it's OK to do it later
+	 * 3) It does I/O to bitcoind which is slow ...
+	 * 4) It triggers the payout generation which also accesses a lot of
+	 *    data - workinfo/markersummary - but it wont affect a later
+	 *    restart point if it hasn't been done. Thus it's OK to do it later
+	 */
 	while (!everyone_die && !reload_queue_complete)
 		cksleep_ms(42);
 
+	LOGWARNING("%s() Start processing...", __func__);
 	summariser_using_data = true;
 
 	while (!everyone_die) {
@@ -3628,7 +3655,13 @@ static void *marker(__maybe_unused void *arg)
 
 	rename_proc("db_marker");
 
-	while (!everyone_die && !reload_queue_complete)
+	/* We want this to start during the CCL reload so that if we run a
+	 *  large reload and it fails at some point, the next reload will not
+	 *  always have to go back to the same reload point as before due to
+	 *  no new workmarkers being completed/processed
+	 * However, don't start during the first N reload files so that a
+	 *  normal ckdb restart reload won't slow down */
+	while (!everyone_die && !reloaded_N_files && !reload_queue_complete)
 		cksleep_ms(42);
 
 	if (sharesummary_marks_limit) {
@@ -3637,6 +3670,7 @@ static void *marker(__maybe_unused void *arg)
 		return NULL;
 	}
 
+	LOGWARNING("%s() Start processing...", __func__);
 	marker_using_data = true;
 
 	while (!everyone_die) {
@@ -3692,6 +3726,7 @@ static void *logger(__maybe_unused void *arg)
 	snprintf(buf, sizeof(buf), "db%s_logger", dbcode);
 	rename_proc(buf);
 
+	LOGWARNING("%s() Start processing...", __func__);
 	logger_using_data = true;
 
 	setnow(&now);
@@ -3809,6 +3844,7 @@ static void *socketer(__maybe_unused void *arg)
 	while (!everyone_die && !db_users_complete)
 		cksem_mswait(&socketer_sem, 420);
 
+	LOGWARNING("%s() Start processing...", __func__);
 	socketer_using_data = true;
 
 	want_first = true;
@@ -4484,6 +4520,14 @@ static bool logopen(char **filename, FILE **fp, bool *apipe)
 	return false;
 }
 
+// How many files need to be processed before flagging reloaded_N_files
+#define RELOAD_N_FILES 2
+// optioncontrol name to override the above value
+#define RELOAD_N_FILES_STR "ReloadNFiles"
+
+// How many lines in a reload file required to count it
+#define RELOAD_N_COUNT 1000
+
 /* If the reload start file is missing and -r was specified correctly:
  *	touch the filename reported in "Failed to open 'filename'",
  *	if ckdb aborts at the beginning of the reload, then start again */
@@ -4501,10 +4545,14 @@ static bool reload_from(tv_t *start)
 	tv_t now, begin;
 	double diff;
 	FILE *fp = NULL;
+	int file_N_limit;
 
 	reload_buf = malloc(MAX_READ);
 	if (!reload_buf)
 		quithere(1, "(%d) OOM", MAX_READ);
+
+	file_N_limit = (int)sys_setting(RELOAD_N_FILES_STR, RELOAD_N_FILES,
+					&date_eot);
 
 	reloading = true;
 
@@ -4569,6 +4617,14 @@ static bool reload_from(tv_t *start)
 			LOGWARNING("%s(): confirm range complete", __func__);
 			break;
 		}
+
+		/* Used by marker() to start mark generation during a longer
+		 *  than normal reload */
+		if (count > RELOAD_N_COUNT) {
+			if (--file_N_limit < 1)
+				reloaded_N_files = true;
+		}
+
 		filename = rotating_filename(restorefrom, reload_timestamp.tv_sec);
 		ok = logopen(&filename, &fp, &apipe);
 		if (!ok) {

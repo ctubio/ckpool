@@ -1287,7 +1287,7 @@ bool useratts_fill(PGconn *conn)
 	return ok;
 }
 
-K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
+K_ITEM *workers_add(PGconn *conn, bool lock, int64_t userid, char *workername,
 			char *difficultydefault, char *idlenotificationenabled,
 			char *idlenotificationtime, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
@@ -1305,9 +1305,11 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
 
 	LOGDEBUG("%s(): add", __func__);
 
-	K_WLOCK(workers_free);
+	if (lock)
+		K_WLOCK(workers_free);
 	item = k_unlink_head(workers_free);
-	K_WUNLOCK(workers_free);
+	if (lock)
+		K_WUNLOCK(workers_free);
 
 	DATA_WORKERS(row, item);
 
@@ -1397,17 +1399,19 @@ unparam:
 unitem:
 	if (conned)
 		PQfinish(conn);
-	K_WLOCK(workers_free);
+	if (lock)
+		K_WLOCK(workers_free);
 	if (!ret)
 		k_add_head(workers_free, item);
 	else {
 		add_to_ktree(workers_root, item);
 		k_add_head(workers_store, item);
 		// Ensure there is a matching workerstatus
-		find_create_workerstatus(userid, workername,
+		find_create_workerstatus(lock, userid, workername,
 					 __FILE__, __func__, __LINE__);
 	}
-	K_WUNLOCK(workers_free);
+	if (lock)
+		K_WUNLOCK(workers_free);
 
 	return ret;
 }
@@ -1647,7 +1651,7 @@ bool workers_fill(PGconn *conn)
 		 * This is to ensure that code can use the workerstatus tree
 		 *  to reference other tables and not miss workers in the
 		 *  other tables */
-		find_create_workerstatus(row->userid, row->workername,
+		find_create_workerstatus(false, row->userid, row->workername,
 					 __FILE__, __func__, __LINE__);
 	}
 	if (!ok)
@@ -4858,7 +4862,7 @@ flail:
 				if (pool.workinfoid < row->workinfoid) {
 					pool.workinfoid = row->workinfoid;
 					pool.height = row->height;
-					zero_on_new_block();
+					zero_on_new_block(true);
 				}
 				break;
 			case BLOCKS_ORPHAN:

@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.350"
+#define CKDB_VERSION DB_VERSION"-1.400"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2212,16 +2212,16 @@ extern K_ITEM *_optional_name(K_TREE *trf_root, char *name, int len, char *patt,
 extern K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 				char *reply, size_t siz, WHERE_FFL_ARGS);
 extern cmp_t cmp_workerstatus(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *get_workerstatus(int64_t userid, char *workername);
-#define find_create_workerstatus(_u, _w, _file, _func, _line) \
-	_find_create_workerstatus(_u, _w, true, _file, _func, _line, WHERE_FFL_HERE)
-#define find_workerstatus(_u, _w, _file, _func, _line) \
-	 _find_create_workerstatus(_u, _w, false, _file, _func, _line, WHERE_FFL_HERE)
+extern K_ITEM *get_workerstatus(bool lock, int64_t userid, char *workername);
+#define find_create_workerstatus(_l, _u, _w, _file, _func, _line) \
+	_find_create_workerstatus(_l, _u, _w, true, _file, _func, _line, WHERE_FFL_HERE)
+#define find_workerstatus(_l, _u, _w, _file, _func, _line) \
+	 _find_create_workerstatus(_l, _u, _w, false, _file, _func, _line, WHERE_FFL_HERE)
 
-extern K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
-					 bool create, const char *file2,
-					 const char *func2, const int line2,
-					 WHERE_FFL_ARGS);
+extern K_ITEM *_find_create_workerstatus(bool lock, int64_t userid,
+					 char *workername, bool create,
+					 const char *file2, const char *func2,
+					 const int line2, WHERE_FFL_ARGS);
 extern void zero_all_active(tv_t *when);
 extern void workerstatus_ready();
 #define workerstatus_update(_auths, _shares, _userstats) \
@@ -2336,7 +2336,7 @@ extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx);
 extern K_ITEM *find_prev_blocks(int32_t height, K_TREE_CTX *ctx);
 extern const char *blocks_confirmed(char *confirmed);
-extern void zero_on_new_block();
+extern void zero_on_new_block(bool lock);
 extern void set_block_share_counters();
 extern bool check_update_blocks_stats(tv_t *stats);
 #define set_blockcreatedate(_h) _set_blockcreatedate(_h, WHERE_FFL_HERE)
@@ -2484,8 +2484,9 @@ extern K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 				bool begun);
 extern bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd);
 extern bool useratts_fill(PGconn *conn);
-extern K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
-			   char *difficultydefault, char *idlenotificationenabled,
+extern K_ITEM *workers_add(PGconn *conn, bool lock, int64_t userid,
+			   char *workername, char *difficultydefault,
+			   char *idlenotificationenabled,
 			   char *idlenotificationtime, char *by,
 			   char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
