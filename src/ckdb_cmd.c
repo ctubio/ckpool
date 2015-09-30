@@ -7037,6 +7037,127 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+	} else if (strcasecmp(request, "payout") == 0) {
+		/* return the details of the payouts for block height=height
+		 * if expired= is present, also return expired records */
+		K_ITEM *i_height, *i_expired, *p_item;
+		PAYOUTS *payouts = NULL;
+		bool expired = false;
+		int32_t height;
+		char *stats = NULL, *ptr;
+
+		i_height = require_name(trf_root, "height",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_height)
+			return strdup(reply);
+		TXT_TO_INT("height", transfer_data(i_height), height);
+
+		int_to_buf(height, reply, sizeof(reply));
+		snprintf(msg, sizeof(msg), "height=%s", reply);
+
+		i_expired = optional_name(trf_root, "expired",
+					  0, NULL, reply, siz);
+		if (i_expired)
+			expired = true;
+
+		K_RLOCK(payouts_free);
+		p_item = first_payouts(height, ctx);
+		DATA_PAYOUTS_NULL(payouts, p_item);
+		while (p_item && payouts->height == height) {
+			if (expired || CURRENT(&(payouts->expirydate))) {
+				int_to_buf(payouts->height,
+					   reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "height:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				bigint_to_buf(payouts->payoutid,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "payoutid:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				bigint_to_buf(payouts->minerreward,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "minerreward:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				bigint_to_buf(payouts->workinfoidstart,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "workinfoidstart:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				bigint_to_buf(payouts->workinfoidend,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "workinfoidend:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				bigint_to_buf(payouts->elapsed,
+					      reply, sizeof(reply));
+				snprintf(tmp, sizeof(tmp),
+					 "elapsed:%d=%s%c",
+					 rows, reply, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "status:%d=%s%c",
+					 rows, payouts->status, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "diffwanted:%d=%f%c",
+					 rows, payouts->diffwanted, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "diffused:%d=%f%c",
+					 rows, payouts->diffused, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				ptr = stats = strdup(payouts->stats);
+				if (!stats) {
+					quithere(1, "strdup (%"PRId64") OOM",
+						    payouts->payoutid);
+				}
+				while (*ptr) {
+					if (*ptr == FLDSEP)
+						*ptr = ' ';
+					ptr++;
+				}
+				snprintf(tmp, sizeof(tmp),
+					 "stats:%d=%s%c",
+					 rows, stats, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				FREENULL(stats);
+				tv_to_buf(&(payouts->expirydate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 EDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				tv_to_buf(&(payouts->createdate), cd_buf,
+					  sizeof(cd_buf));
+				snprintf(tmp, sizeof(tmp),
+					 CDDB"_str:%d=%s%c",
+					 rows, cd_buf, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				rows++;
+			}
+			p_item = next_in_ktree(ctx);
+			DATA_PAYOUTS_NULL(payouts, p_item);
+		}
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "height,payoutid,minerreward,workinfoidstart,"
+			 "workinfoidend,elapsed,status,diffwanted,diffused,"
+			 "stats,"EDDB"_str,"CDDB"_str",
+			 FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "Payouts", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
 	} else {
 		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);

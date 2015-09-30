@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.400"
+#define CKDB_VERSION DB_VERSION"-1.401"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2353,6 +2353,7 @@ extern cmp_t cmp_payouts(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_payouts_wid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_payouts(int32_t height, char *blockhash);
+extern K_ITEM *first_payouts(int32_t height, K_TREE_CTX *ctx);
 extern K_ITEM *find_last_payouts();
 extern K_ITEM *find_payoutid(int64_t payoutid);
 extern K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx);

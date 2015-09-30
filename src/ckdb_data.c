@@ -3405,6 +3405,25 @@ K_ITEM *find_payouts(int32_t height, char *blockhash)
 	return find_in_ktree(payouts_root, &look, ctx);
 }
 
+// The first (any state) payouts record with the given height
+K_ITEM *first_payouts(int32_t height, K_TREE_CTX *ctx)
+{
+	PAYOUTS payouts;
+	K_TREE_CTX ctx0[1];
+	K_ITEM look;
+
+	if (ctx == NULL)
+		ctx = ctx0;
+
+	payouts.height = height;
+	payouts.blockhash[0] = '\0';
+	DATE_ZERO(&(payouts.expirydate));
+
+	INIT_PAYOUTS(&look);
+	look.data = (void *)(&payouts);
+	return find_after_in_ktree(payouts_root, &look, ctx);
+}
+
 // Last block payout calculated
 K_ITEM *find_last_payouts()
 {
