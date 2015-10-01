@@ -2235,6 +2235,15 @@ bye:
 	return ok;
 }
 
+// Block height coinbase reward value
+double coinbase_reward(int32_t height)
+{
+	double value;
+
+	value = REWARD_BASE * pow(0.5, floor((double)height / REWARD_HALVE));
+
+	return(value);
+}
 
 // The PPS value of a 1diff share for the given workinfoid
 double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock)
@@ -2246,7 +2255,7 @@ double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock)
 	char ndiffbin[TXT_SML+1];
 	WORKINFO *workinfo;
 	double w_diff;
-	int w_blocknum;
+	int32_t w_blocknum;
 	size_t len;
 
 	// Allow optioncontrol override for a given workinfoid
@@ -2284,10 +2293,10 @@ double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock)
 	w_diff = diff_from_nbits(ndiffbin);
 	hex2bin(coinbase1bin, workinfo->coinbase1 + (BLOCKNUM_OFFSET * 2),
 		(len - (BLOCKNUM_OFFSET * 2)) >> 1);
-	w_blocknum = get_sernumber((uchar *)coinbase1bin);
+	w_blocknum = (int32_t)get_sernumber((uchar *)coinbase1bin);
 
-	// BASE halving to determine coinbase reward then divided by difficulty
-	return(REWARD_BASE * pow(0.5, floor((double)w_blocknum / REWARD_HALVE)) / w_diff);
+	// PPS 1diff is worth coinbase reward divided by difficulty
+	return(coinbase_reward(w_blocknum) / w_diff);
 }
 
 // order by workinfoid asc,userid asc,workername asc,createdate asc,nonce asc,expirydate desc
@@ -2965,7 +2974,7 @@ bool check_update_blocks_stats(tv_t *stats)
 	WORKINFO *workinfo;
 	BLOCKS *blocks;
 	char ndiffbin[TXT_SML+1];
-	double ok, diffacc, netsumm, diffmean, pending;
+	double ok, diffacc, netsumm, diffmean, pending, txmean, cr;
 	tv_t now;
 
 	/* Wait for startup_complete rather than db_load_complete
@@ -2994,7 +3003,7 @@ bool check_update_blocks_stats(tv_t *stats)
 			}
 			b_item = next_in_ktree(ctx);
 		}
-		ok = diffacc = netsumm = diffmean = 0.0;
+		ok = diffacc = netsumm = diffmean = 0.0, txmean = 0.0;
 		b_item = last_in_ktree(blocks_root, ctx);
 		while (b_item) {
 			DATA_BLOCKS(blocks, b_item);
@@ -3043,6 +3052,7 @@ bool check_update_blocks_stats(tv_t *stats)
 					blocks->diffmean = 0.0;
 					blocks->cdferl = 0.0;
 					blocks->luck = 0.0;
+					blocks->txmean = 0.0;
 				} else {
 					ok++;
 					diffacc += blocks->diffcalc;
@@ -3064,6 +3074,11 @@ bool check_update_blocks_stats(tv_t *stats)
 						blocks->cdferl = gsl_cdf_gamma_P(diffmean, ok, 1.0 / ok);
 						blocks->luck = 1.0 / diffmean;
 					}
+
+					cr = coinbase_reward(blocks->height);
+					txmean = ((txmean * (ok - 1)) +
+						    ((double)(blocks->reward) / cr)) / ok;
+					blocks->txmean = txmean;
 				}
 			}
 			b_item = prev_in_ktree(ctx);

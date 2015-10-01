@@ -4621,7 +4621,7 @@ static bool reload_from(tv_t *start)
 		/* Used by marker() to start mark generation during a longer
 		 *  than normal reload */
 		if (count > RELOAD_N_COUNT) {
-			if (--file_N_limit < 1)
+			if (file_N_limit-- < 1)
 				reloaded_N_files = true;
 		}
 

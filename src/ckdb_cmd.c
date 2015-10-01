@@ -1329,7 +1329,8 @@ redo:
 						 "s_diffratio:%d=%.8f%c"
 						 "s_diffmean:%d=%.8f%c"
 						 "s_cdferl:%d=%.8f%c"
-						 "s_luck:%d=%.8f%c",
+						 "s_luck:%d=%.8f%c"
+						 "s_txmean:%d=%.8f%c",
 						 srows, seq, FLDSEP,
 						 srows, desc, FLDSEP,
 						 srows, (int)(blocks->height), FLDSEP,
@@ -1338,7 +1339,8 @@ redo:
 						 srows, blocks->diffratio, FLDSEP,
 						 srows, blocks->diffmean, FLDSEP,
 						 srows, blocks->cdferl, FLDSEP,
-						 srows, blocks->luck, FLDSEP);
+						 srows, blocks->luck, FLDSEP,
+						 srows, blocks->txmean, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 					srows++;
 				}
@@ -1367,7 +1369,7 @@ redo:
 		 "s_rows=%d%cs_flds=%s%c",
 		 srows, FLDSEP,
 		 "s_seq,s_desc,s_height,s_"CDTRF",s_prev"CDTRF",s_diffratio,"
-		 "s_diffmean,s_cdferl,s_luck",
+		 "s_diffmean,s_cdferl,s_luck,s_txmean",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 

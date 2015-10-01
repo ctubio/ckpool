@@ -98,6 +98,7 @@ function doblocks($data, $user)
 		$pg .= "<td class=dr>Mean%</td>";
 		$pg .= "<td class=dr>CDF[Erl]</td>";
 		$pg .= "<td class=dr>Luck%</td>";
+		$pg .= "<td class=dr>MeanTx%</td>";
 		$pg .= "</tr>\n";
 
 		$since = $data['info']['lastblock'];
@@ -121,6 +122,7 @@ function doblocks($data, $user)
 			$bg = " bgcolor=$bg";
 
 			$luck = number_format(100 * $ans['s_luck:'.$i], 2);
+			$txm = number_format(100 * $ans['s_txmean:'.$i], 1);
 
 			$pg .= "<tr class=$row>";
 			$pg .= "<td class=dl>$desc Blocks</td>";
@@ -129,6 +131,7 @@ function doblocks($data, $user)
 			$pg .= "<td class=dr>$mean%</td>";
 			$pg .= "<td class=dr$bg>$cdferldsp</td>";
 			$pg .= "<td class=dr>$luck%</td>";
+			$pg .= "<td class=dr>$txm%</td>";
 			$pg .= "</tr>\n";
 		}
 		$pg .= "</table>\n";

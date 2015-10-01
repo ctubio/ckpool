@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.3"
-#define CKDB_VERSION DB_VERSION"-1.401"
+#define CKDB_VERSION DB_VERSION"-1.402"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1514,6 +1514,9 @@ typedef struct blocks {
 	double cdferl;
 	double luck;
 
+	// Mean reward ratio per block from last to this
+	double txmean;
+
 	// To save looking them up when needed
 	tv_t prevcreatedate; // non-DB field
 	tv_t blockcreatedate; // non-DB field
@@ -2303,6 +2306,7 @@ extern bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by,
 			 char *code, char *inet, tv_t *cd, tv_t *ss_first,
 			 tv_t *ss_last, int64_t *ss_count, int64_t *s_count,
 			 int64_t *s_diff);
+extern double coinbase_reward(int32_t height);
 extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
