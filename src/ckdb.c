@@ -3112,8 +3112,10 @@ static void *summariser(__maybe_unused void *arg)
 	while (!everyone_die && !reload_queue_complete)
 		cksleep_ms(42);
 
-	LOGWARNING("%s() Start processing...", __func__);
-	summariser_using_data = true;
+	if (!everyone_die) {
+		LOGWARNING("%s() Start processing...", __func__);
+		summariser_using_data = true;
+	}
 
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
@@ -3670,8 +3672,10 @@ static void *marker(__maybe_unused void *arg)
 		return NULL;
 	}
 
-	LOGWARNING("%s() Start processing...", __func__);
-	marker_using_data = true;
+	if (!everyone_die) {
+		LOGWARNING("%s() Start processing...", __func__);
+		marker_using_data = true;
+	}
 
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
@@ -3844,8 +3848,10 @@ static void *socketer(__maybe_unused void *arg)
 	while (!everyone_die && !db_users_complete)
 		cksem_mswait(&socketer_sem, 420);
 
-	LOGWARNING("%s() Start processing...", __func__);
-	socketer_using_data = true;
+	if (!everyone_die) {
+		LOGWARNING("%s() Start processing...", __func__);
+		socketer_using_data = true;
+	}
 
 	want_first = true;
 	while (!everyone_die) {

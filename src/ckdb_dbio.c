@@ -1723,7 +1723,9 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 
 	/* Since we are merging the changes in rather than just
 	 *  replacing the db contents, lock the data for the duration
-	 *  of the update to ensure nothing else changes it */
+	 *  of the update to ensure nothing else changes it
+	 * N.B. 'payname' isn't the start of the key
+	 *  thus 2 different addresses can have the same 'payname' */
 	K_WLOCK(paymentaddresses_free);
 	locked = true;
 
@@ -1741,7 +1743,8 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 		while (match) {
 			DATA_PAYMENTADDRESSES(pa, match);
 			if (strcmp(pa->payaddress, row->payaddress) == 0 &&
-			    pa->payratio == row->payratio) {
+			    pa->payratio == row->payratio &&
+			    strcmp(pa->payname, row->payname) == 0) {
 				pa->match = true; // Don't store it
 				matches++;
 				break;
@@ -1791,8 +1794,8 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	// Second step - add the non-matching records to the DB
 	LOGDEBUG("%s(): Step 2", __func__);
 	ins = "insert into paymentaddresses "
-		"(paymentaddressid,userid,payaddress,payratio"
-		HISTORYDATECONTROL ") values (" PQPARAM9 ")";
+		"(paymentaddressid,userid,payaddress,payratio,payname"
+		HISTORYDATECONTROL ") values (" PQPARAM10 ")";
 
 	count = 0;
 	match = pa_store->head;
@@ -1814,8 +1817,9 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
 			params[par++] = str_to_buf(row->payaddress, NULL, 0);
 			params[par++] = int_to_buf(row->payratio, NULL, 0);
+			params[par++] = str_to_buf(row->payname, NULL, 0);
 			HISTORYDATEPARAMS(params, par, row);
-			PARCHKVAL(par, 9, params); // As per PQPARAM9 above
+			PARCHKVAL(par, 10, params); // As per PQPARAM10 above
 
 			res = PQexecParams(conn, ins, par, NULL, (const char **)params,
 					   NULL, NULL, 0, CKPQ_WRITE);
@@ -1864,7 +1868,8 @@ unparam:
 			while (match) {
 				DATA_PAYMENTADDRESSES(pa, match);
 				if (strcmp(pa->payaddress, row->payaddress) == 0 &&
-				    pa->payratio == row->payratio) {
+				    pa->payratio == row->payratio &&
+				    strcmp(pa->payname, row->payname) == 0) {
 					break;
 				}
 				match = match->next;
@@ -1917,13 +1922,13 @@ bool paymentaddresses_fill(PGconn *conn)
 	int n, i;
 	char *field;
 	char *sel;
-	int fields = 4;
+	int fields = 5;
 	bool ok;
 
 	LOGDEBUG("%s(): select", __func__);
 
 	sel = "select "
-		"paymentaddressid,userid,payaddress,payratio"
+		"paymentaddressid,userid,payaddress,payratio,payname"
 		HISTORYDATECONTROL
 		" from paymentaddresses";
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -1975,6 +1980,11 @@ bool paymentaddresses_fill(PGconn *conn)
 		if (!ok)
 			break;
 		TXT_TO_INT("payratio", field, row->payratio);
+
+		PQ_GET_FLD(res, i, "payname", field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("payname", field, row->payname);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)

@@ -54,7 +54,7 @@
  */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.3"
+#define DB_VERSION "1.0.4"
 #define CKDB_VERSION DB_VERSION"-1.402"
 
 #define WHERE_FFL " - from %s %s() line %d"
@@ -1186,6 +1186,7 @@ typedef struct paymentaddresses {
 	int64_t userid;
 	char payaddress[TXT_BIG+1];
 	int32_t payratio;
+	char payname[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
 	bool match; // non-DB field
 } PAYMENTADDRESSES;

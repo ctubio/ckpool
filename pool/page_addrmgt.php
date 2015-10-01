@@ -11,6 +11,7 @@ function addrmgtuser($data, $user, $err)
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= '<tr class=title>';
  $pg .= '<td class=dl>Address</td>';
+ $pg .= '<td class=dl>ID</td>';
  $pg .= '<td class=dr>Ratio</td>';
  $pg .= '<td class=dr>%</td>';
  $pg .= '</tr>';
@@ -18,7 +19,10 @@ function addrmgtuser($data, $user, $err)
  # new row template for '+'
  $pg .= '<tr class=hid id=bs>';
  $pg .= '<td class=dl>';
- $pg .= "<input type=text size=42 name='addr:' value=''>";
+ $pg .= "<input type=text size=36 name='addr:' value=''>";
+ $pg .= '</td>';
+ $pg .= '<td class=dl>';
+ $pg .= "<input type=text size=16 name='payname:' value=''>";
  $pg .= '</td>';
  $pg .= '<td class=dr>';
  $pg .= "<input type=text size=6 name='ratio:' value='0' id=rat onchange='repc()'>";
@@ -45,7 +49,11 @@ function addrmgtuser($data, $user, $err)
 		$pg .= "<tr class=$row>";
 		$addr = $ans['addr:'.$i];
 		$pg .= '<td class=dl>';
-		$pg .= "<input type=text size=42 name='addr:$i' value='$addr'>";
+		$pg .= "<input type=text size=36 name='addr:$i' value='$addr'>";
+		$pg .= '</td>';
+		$nam = htmlspecialchars($ans['payname:'.$i]);
+		$pg .= '<td class=dl>';
+		$pg .= "<input type=text size=16 name='payname:$i' value='$nam'>";
 		$pg .= '</td>';
 		$ratio = intval($ans['ratio:'.$i]);
 		$pg .= '<td class=dr>';
@@ -63,7 +71,7 @@ function addrmgtuser($data, $user, $err)
 	else
 		$row = 'odd';
 	$pg .= "<tr class=$row id=plus>";
-	$pg .= '<td colspan=3 class=dl>';
+	$pg .= '<td colspan=4 class=dl>';
 	$pg .= "<input type=button value='+' onclick='return adrw();'>";
 	$pg .= '</td></tr>';
 
@@ -72,20 +80,21 @@ function addrmgtuser($data, $user, $err)
 	else
 		$row = 'odd';
 	$pg .= "<tr class=$row>";
-	$pg .= '<td class=dr>';
-	$pg .= 'Password: <input type=password name=pass size=20>';
-	$pg .= '</td><td colspan=2>&nbsp;</td></tr>';
+	$pg .= '<td class=dr>Password:</td>';
+	$pg .= '<td class=dl><input type=password name=pass size=20></td>';
+	$pg .= '<td colspan=2>&nbsp;</td></tr>';
 
 	if ((($offset++) % 2) == 0)
 		$row = 'even';
 	else
 		$row = 'odd';
 	$pg .= "<tr class=$row>";
-	$pg .= '<td class=dr>';
-	$pg .= '<span class=st1>*</span>2nd Authentication: <input type=password name=2fa size=10>';
-	$pg .= '</td><td colspan=2 class=dl><input type=submit name=OK value=Save></td></tr>';
+	$pg .= '<td class=dr><span class=st1>*</span>2nd Authentication:</td>';
+	$pg .= '<td class=dl><input type=password name=2fa size=10>';
+	$pg .= ' <input type=submit name=OK value=Save></td>';
+	$pg .= '<td colspan=3 class=dl>&nbsp;</td></tr>';
 
-	$pg .= "<tr><td colspan=3 class=dc><font size=-1>";
+	$pg .= "<tr><td colspan=4 class=dc><font size=-1>";
 	$pg .= "<span class=st1>*</span>Leave blank if you haven't enabled it<br>";
 	$pg .= 'You must enter your password to save changes<br>';
 	$pg .= 'A ratio of 0, will remove the address from the payouts</font></td></tr>';
@@ -97,8 +106,9 @@ function addrmgtuser($data, $user, $err)
  $pg .=  "var r=document.getElementById('rows');var c=parseInt(r.value);";
  $pg .=  "var bs=document.getElementById('bs');var n=bs.cloneNode(true);n.id='z';";
  $pg .=  "n.className='odd';var ia=n.childNodes[0].firstChild;ia.name='addr:'+c;ia.value='';";
- $pg .=  "var ir=n.childNodes[1].firstChild;ir.id='rat'+c;ir.name='ratio:'+c;ir.value='0';";
- $pg .=  "var ip=n.childNodes[2].firstChild;ip.id='per'+c;ip.innerHTML='0.00%';";
+ $pg .=  "var ipn=n.childNodes[1].firstChild;ipn.name='payname:'+c;ipn.value='';";
+ $pg .=  "var ir=n.childNodes[2].firstChild;ir.id='rat'+c;ir.name='ratio:'+c;ir.value='0';";
+ $pg .=  "var ip=n.childNodes[3].firstChild;ip.id='per'+c;ip.innerHTML='0.00%';";
  $pg .=  "p.parentNode.insertBefore(n, p);";
  $pg .=  "c++;r.value=c;return true}\n";
  $pg .= "function repc(){var c=parseInt(document.getElementById('rows').value);";
@@ -127,9 +137,12 @@ function doaddrmgt($data, $user)
 		for ($i = 0; $i < $count; $i++)
 		{
 			$addr = getparam('addr:'.$i, false);
+			$nam = getparam('payname:'.$i, false);
+			if (nuem($nam))
+				$nam = '';
 			$ratio = getparam('ratio:'.$i, false);
 			if (!nuem($addr) && !nuem($ratio))
-				$addrarr[] = array('addr' => $addr, 'ratio' => $ratio);
+				$addrarr[] = array('addr' => $addr, 'payname' => $nam, 'ratio' => $ratio);
 		}
 		$ans = userSettings($user, null, $addrarr, $pass, $twofa);
 		if ($ans['STATUS'] != 'ok')

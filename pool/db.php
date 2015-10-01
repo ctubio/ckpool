@@ -242,6 +242,7 @@ function userReg($user, $email, $pass)
 #
 function userSettings($user, $email = null, $addr = null, $pass = null, $twofa = null)
 {
+ global $fld_sep;
  $tmo = false;
  $flds = array('username' => $user);
  if ($email != null)
@@ -253,6 +254,9 @@ function userSettings($user, $email = null, $addr = null, $pass = null, $twofa =
 	foreach ($addr as $ar)
 	{
 		$flds['address:'.$i] = $ar['addr'];
+		// optional - missing = blank
+		if (isset($ar['payname']))
+			$flds['payname:'.$i] = str_replace($fld_sep, ' ', trim($ar['payname']));
 		// optional - missing = use default
 		if (isset($ar['ratio']))
 			$flds['ratio:'.$i] = $ar['ratio'];

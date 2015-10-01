@@ -75,6 +75,8 @@ CREATE TABLE paymentaddresses (
     userid bigint NOT NULL,
     payaddress character varying(256) DEFAULT ''::character varying NOT NULL,
     payratio integer DEFAULT 1000000 NOT NULL,
+    payname character varying(64) DEFAULT ''::character varying NOT NULL,
+    status char DEFAULT ' ' NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -468,4 +470,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'1.0.3');
+insert into version (vlock,version) values (1,'1.0.4');

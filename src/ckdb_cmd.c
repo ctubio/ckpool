@@ -445,8 +445,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root)
 {
 	K_ITEM *i_username, *i_passwordhash, *i_2fa, *i_rows, *i_address;
-	K_ITEM *i_ratio, *i_email, *u_item, *pa_item, *old_pa_item;
-	char *email, *address;
+	K_ITEM *i_ratio, *i_payname, *i_email, *u_item, *pa_item, *old_pa_item;
+	char *email, *address, *payname;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	char tmp[1024];
@@ -507,6 +507,9 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 					snprintf(tmp, sizeof(tmp), "ratio:%d=%d%c",
 						 rows, row->payratio, FLDSEP);
 					APPEND_REALLOC(answer, off, len, tmp);
+					snprintf(tmp, sizeof(tmp), "payname:%d=%s%c",
+						 rows, row->payname, FLDSEP);
+					APPEND_REALLOC(answer, off, len, tmp);
 					rows++;
 
 					pa_item = prev_in_ktree(ctx);
@@ -517,7 +520,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 
 			snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 				 rows, FLDSEP,
-				 "addr,ratio", FLDSEP);
+				 "addr,ratio,payname", FLDSEP);
 			APPEND_REALLOC(answer, off, len, tmp);
 			snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s",
 				 "PaymentAddresses", FLDSEP, "");
@@ -615,11 +618,20 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 							}
 							pa_item = pa_item->next;
 						}
+						snprintf(tmp, sizeof(tmp), "payname:%d", i);
+						i_payname = optional_name(trf_root, tmp,
+									  0, NULL,
+									  reply, siz);
+						if (i_payname)
+							payname = transfer_data(i_payname);
+						else
+							payname = EMPTY;
 						pa_item = k_unlink_head(paymentaddresses_free);
 						DATA_PAYMENTADDRESSES(row, pa_item);
 						bzero(row, sizeof(*row));
 						STRNCPY(row->payaddress, address);
 						row->payratio = ratio;
+						STRNCPY(row->payname, payname);
 						k_add_head(pa_store, pa_item);
 					}
 					K_WUNLOCK(paymentaddresses_free);
@@ -1808,6 +1820,10 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 					   rows, ratio * 100.0, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
+		snprintf(tmp, sizeof(tmp), "payname:%d=%s%c",
+					   rows, pa->payname, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
 		snprintf(tmp, sizeof(tmp), "p_hashrate5m:%d=%.1f%c", rows,
 					   (double)t_hashrate5m * ratio,
 					   FLDSEP);
@@ -1893,7 +1909,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "payaddress,payratio,paypercent,"
+		 "payaddress,payratio,paypercent,payname,"
 		 "p_hashrate5m,p_hashrate1hr,p_hashrate24hr,"
 		 "p_diffacc,p_diffinv,"
 		 "p_diffsta,p_diffdup,p_diffhi,p_diffrej,"
