@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.402"
+#define CKDB_VERSION DB_VERSION"-1.403"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1129,6 +1129,9 @@ extern K_STORE *useratts_store;
 
 // This att means the user uses multiple % based payout addresses
 #define USER_MULTI_PAYOUT "PayAddresses"
+// If they have multi, then: the default address limit if the useratt num < 1
+#define USER_ADDR_LIMIT 2
+
 #define USER_OLD_WORKERS "OldWorkersDays"
 #define USER_OLD_WORKERS_DEFAULT 7
 

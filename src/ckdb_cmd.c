@@ -446,6 +446,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 {
 	K_ITEM *i_username, *i_passwordhash, *i_2fa, *i_rows, *i_address;
 	K_ITEM *i_ratio, *i_payname, *i_email, *u_item, *pa_item, *old_pa_item;
+	K_ITEM *ua_item = NULL;
+	USERATTS *useratts = NULL;
 	char *email, *address, *payname;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -459,7 +461,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 	char *ret = NULL;
 	size_t len, off;
 	int32_t ratio;
-	int rows, i;
+	int rows, i, limit;
 	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -488,10 +490,26 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			goto struckout;
 		}
 
+		K_RLOCK(useratts_free);
+		ua_item = find_useratts(users->userid, USER_MULTI_PAYOUT);
+		K_RUNLOCK(useratts_free);
+		if (!ua_item)
+			limit = 1;
+		else {
+			DATA_USERATTS(useratts, ua_item);
+			if (useratts->attnum > 0)
+				limit = (int)(useratts->attnum);
+			else
+				limit = USER_ADDR_LIMIT;
+		}
+
 		if (!i_passwordhash) {
 			APPEND_REALLOC_INIT(answer, off, len);
 			snprintf(tmp, sizeof(tmp), "email=%s%c",
 				 users->emailaddress, FLDSEP);
+			APPEND_REALLOC(answer, off, len, tmp);
+
+			snprintf(tmp, sizeof(tmp), "limit=%d%c", limit, FLDSEP);
 			APPEND_REALLOC(answer, off, len, tmp);
 
 			K_RLOCK(paymentaddresses_free);
@@ -577,7 +595,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				if (rows > 0) {
 					pa_store = k_new_store(paymentaddresses_free);
 					K_WLOCK(paymentaddresses_free);
-					for (i = 0; i < rows; i++) {
+					// discard any extras above the limit
+					for (i = 0; i < rows && pa_store->count < limit; i++) {
 						snprintf(tmp, sizeof(tmp), "ratio:%d", i);
 						i_ratio = optional_name(trf_root, tmp,
 									1, (char *)intpatt,
@@ -684,8 +703,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			if (pa_store && pa_store->count > 0) {
 				ok = paymentaddresses_set(conn, users->userid,
 								pa_store, by,
-								code, inet,
-								now, trf_root);
+								code, inet, now,
+								trf_root);
 				if (!ok) {
 					reason = "address error";
 					goto struckout;

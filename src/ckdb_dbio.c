@@ -1668,6 +1668,9 @@ bool workers_fill(PGconn *conn)
 	return ok;
 }
 
+// Absolute address limit
+#define ABS_ADDR_LIMIT 999
+
 /* Whatever the current paymentaddresses are, replace them with the list
  *  in pa_store
  * Code allows for zero, one or more current payment address */
@@ -1684,14 +1687,14 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	char *upd = NULL, *ins;
 	size_t len, off;
 	bool ok = false, first, locked = false;
-	char *params[1002]; // Limit of 999 addresses per user
+	char *params[ABS_ADDR_LIMIT+3];
 	char tmp[1024];
 	int n, par = 0, count, matches;
 
 	LOGDEBUG("%s(): add", __func__);
 
 	// Quick early abort
-	if (pa_store->count > 999)
+	if (pa_store->count > ABS_ADDR_LIMIT)
 		return false;
 
 	if (conn == NULL) {
@@ -1733,9 +1736,9 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	item = find_paymentaddresses(userid, ctx);
 	DATA_PAYMENTADDRESSES_NULL(row, item);
 	while (item && CURRENT(&(row->expirydate)) && row->userid == userid) {
-		/* This is only possible if the DB was directly updated with
-		 * more than 999 records then reloaded (or a code bug) */
-		if (++count > 999)
+		/* This is only possible if the DB was directly updated with more
+		 * than ABS_ADDR_LIMIT records then reloaded (or a code bug) */
+		if (++count > ABS_ADDR_LIMIT)
 			break;
 
 		// Find the RAM record in pa_store
@@ -1766,12 +1769,12 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 	LOGDEBUG("%s(): Step 1 par=%d count=%d matches=%d first=%s", __func__,
 		 par, count, matches, first ? "true" : "false");
 	// Too many, or none need expiring = don't do the update
-	if (count > 999 || first == true) {
+	if (count > ABS_ADDR_LIMIT || first == true) {
 		for (n = 0; n < par; n++)
 			free(params[n]);
 		par = 0;
 		// Too many
-		if (count > 999)
+		if (count > ABS_ADDR_LIMIT)
 			goto rollback;
 	} else {
 		APPEND_REALLOC(upd, off, len, ")");
