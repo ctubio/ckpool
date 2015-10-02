@@ -120,8 +120,8 @@ process()
  if [ "$opt" = "-c" ] ; then
 	echo "\\echo 'count markersummary'"
 	echo "select count(*),min(markerid) as min_markerid,max(markerid) as max_markerid,"
-	echo " sum(diffacc) as sum_diffacc,min(firstshareacc) as min_firstshareacc,"
-	echo " max(lastshareacc) as max_lastshareacc"
+	echo " sum(diffacc) as sum_diffacc,min(firstshare) as min_firstshare,"
+	echo " max(lastshareacc) as max_lastshareacc,max(lastshare) as max_lastshare"
 	echo "  from markersummary where markerid in"
 	echo "   (select distinct markerid from workmarkers where workinfoidend >= $wi);"
  fi
@@ -158,12 +158,14 @@ process()
  #
  if [ "$opt" = "-c" ] ; then
 	echo "\\echo 'count blocks'"
-	echo "select count(*),min(workinfoid) as min_workinfoid,"
-	echo " max(workinfoid) as max_workinfoid"
+	echo "select count(*),min(height) as min_height,max(height) as max_height,"
+	echo " min(workinfoid) as min_workinfoid,max(workinfoid) as max_workinfoid"
 	echo "  from blocks where workinfoid >= $wi;"
 	echo "\\echo 'count workinfo'"
 	echo "select count(*),min(workinfoid) as min_workinfoid,"
-	echo " max(workinfoid) as max_workinfoid"
+	echo " max(workinfoid) as max_workinfoid,min(reward) as min_reward,"
+	echo " max(reward) as max_reward,max(length(transactiontree)) as max_tree,"
+	echo " min(createdate) as min_createdate,max(createdate) as max_createdate"
 	echo "  from workinfo where workinfoid >= $wi;"
  fi
  if [ "$opt" = "-r" ] ; then
