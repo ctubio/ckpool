@@ -94,11 +94,11 @@ function doblocks($data, $user)
 		$pg .= "<tr class=title>";
 		$pg .= "<td class=dl>Description</td>";
 		$pg .= "<td class=dr>Time</td>";
+		$pg .= "<td class=dr>MeanTx%</td>";
 		$pg .= "<td class=dr>Diff%</td>";
 		$pg .= "<td class=dr>Mean%</td>";
 		$pg .= "<td class=dr>CDF[Erl]</td>";
 		$pg .= "<td class=dr>Luck%</td>";
-		$pg .= "<td class=dr>MeanTx%</td>";
 		$pg .= "</tr>\n";
 
 		$since = $data['info']['lastblock'];
@@ -127,11 +127,11 @@ function doblocks($data, $user)
 			$pg .= "<tr class=$row>";
 			$pg .= "<td class=dl>$desc Blocks</td>";
 			$pg .= "<td class=dr>$age</td>";
+			$pg .= "<td class=dr>$txm%</td>";
 			$pg .= "<td class=dr>$diff%</td>";
 			$pg .= "<td class=dr>$mean%</td>";
 			$pg .= "<td class=dr$bg>$cdferldsp</td>";
 			$pg .= "<td class=dr>$luck%</td>";
-			$pg .= "<td class=dr>$txm%</td>";
 			$pg .= "</tr>\n";
 		}
 		$pg .= "</table>\n";
