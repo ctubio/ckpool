@@ -181,6 +181,7 @@ struct user_instance {
 
 	double best_diff; /* Best share found by this user */
 
+	int64_t shares;
 	double dsps1; /* Diff shares per second, 1 minute rolling average */
 	double dsps5; /* ... 5 minute ... */
 	double dsps60;/* etc */
@@ -204,6 +205,7 @@ struct worker_instance {
 	worker_instance_t *next;
 	worker_instance_t *prev;
 
+	int64_t shares;
 	double dsps1;
 	double dsps5;
 	double dsps60;
@@ -2154,6 +2156,7 @@ static void read_userstats(ckpool_t *ckp, user_instance_t *user)
 	user->dsps1440 = dsps_from_key(val, "hashrate1d");
 	user->dsps10080 = dsps_from_key(val, "hashrate7d");
 	json_get_int64(&user->last_update.tv_sec, val, "lastupdate");
+	json_get_int64(&user->shares, val, "shares");
 	json_get_double(&user->best_diff, val, "bestshare");
 	LOGINFO("Successfully read user %s stats %f %f %f %f %f %f", user->username,
 		user->dsps1, user->dsps5, user->dsps60, user->dsps1440,
@@ -2209,6 +2212,7 @@ static void read_workerstats(ckpool_t *ckp, worker_instance_t *worker)
 	worker->dsps10080 = dsps_from_key(val, "hashrate7d");
 	json_get_double(&worker->best_diff, val, "bestshare");
 	json_get_int64(&worker->last_update.tv_sec, val, "lastupdate");
+	json_get_int64(&worker->shares, val, "shares");
 	LOGINFO("Successfully read worker %s stats %f %f %f %f %f", worker->workername,
 		worker->dsps1, worker->dsps5, worker->dsps60, worker->dsps1440, worker->best_diff);
 	json_decref(val);
@@ -2676,7 +2680,10 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const int diff
 	mutex_unlock(&sdata->stats_lock);
 
 	/* Count only accepted and stale rejects in diff calculation. */
-	if (!valid && !submit)
+	if (valid) {
+		worker->shares += diff;
+		user->shares += diff;
+	} else if (!submit)
 		return;
 
 	tv_time(&now_t);
@@ -4168,13 +4175,14 @@ static void *statsupdate(void *arg)
 
 				copy_tv(&worker->last_update, &now);
 
-				JSON_CPACK(val, "{ss,ss,ss,ss,ss,si,sf}",
+				JSON_CPACK(val, "{ss,ss,ss,ss,ss,si,sI,sf}",
 						"hashrate1m", suffix1,
 						"hashrate5m", suffix5,
 						"hashrate1hr", suffix60,
 						"hashrate1d", suffix1440,
 						"hashrate7d", suffix10080,
 						"lastupdate", now.tv_sec,
+						"shares", worker->shares,
 						"bestshare", worker->best_diff);
 
 				ASPRINTF(&fname, "%s/workers/%s", ckp->logdir, worker->workername);
@@ -4210,7 +4218,7 @@ static void *statsupdate(void *arg)
 
 			copy_tv(&user->last_update, &now);
 
-			JSON_CPACK(val, "{ss,ss,ss,ss,ss,si,si,sf}",
+			JSON_CPACK(val, "{ss,ss,ss,ss,ss,si,si,sI,sf}",
 					"hashrate1m", suffix1,
 					"hashrate5m", suffix5,
 					"hashrate1hr", suffix60,
@@ -4218,6 +4226,7 @@ static void *statsupdate(void *arg)
 					"hashrate7d", suffix10080,
 					"lastupdate", now.tv_sec,
 					"workers", user->workers,
+					"shares", user->shares,
 					"bestshare", user->best_diff);
 
 			ASPRINTF(&fname, "%s/users/%s", ckp->logdir, user->username);
