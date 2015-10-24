@@ -29,12 +29,6 @@ function doluck($data, $user)
  else
 	$ans = getBlocks($user);
 
- $iCrap = strpos($_SERVER['HTTP_USER_AGENT'],'iP');
- if ($iCrap)
-	$vlines = false;
- else
-	$vlines = true;
-
  $pg = '<h1>Pool Avg Block Luck History</h1><br>';
 
  if ($ans['STATUS'] == 'ok' and isset($ans['rows']) and $ans['rows'] > 0)
@@ -53,9 +47,7 @@ function doluck($data, $user)
 			'tkey' => 'time key', 'tlines' => 'time lines',
 			'over' => 'key overlap', 'smooth' => 'smooth',
 			'utc' => 'utc');
-	$xon = array('skey' => 1, 'utc' => 1);
-	if ($vlines === true)
-		$xon['slines'] = 1;
+	$xon = array('skey' => 1, 'tkey' => 1, 'tlines' => 1, 'utc' => 1);
 
 	$pg .= '<div>';
 	foreach ($cbx as $nam => $txt)
