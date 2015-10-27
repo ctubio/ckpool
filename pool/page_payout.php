@@ -45,8 +45,7 @@ A shift summarises all the shares submitted to the pool for 100 work changes.<br
 However, when we find pool blocks, the current shift ends at the work in which the block was found<br>
 and a new shift starts.<br>
 A ckpool restart will also end the current shift and start a new shift.<br>
-Also, a network difficulty change will end the current shift and start a new shift.<br>
-The network difficulty changes every 2016 block or about every 2 weeks.<br>
+A network difficulty change will also end the current shift and start a new shift.<br><br>
 
 <span class=hdr>So, what's the $n value?</span><br><br>
 The current Bitcoin network value for $n1d is $nv and thus $n is <b>$nvx</b><br>
