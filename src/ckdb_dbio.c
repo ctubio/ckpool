@@ -5019,15 +5019,12 @@ flail:
 				blk = true;
 				w_item = find_workinfo(row->workinfoid, NULL);
 				if (w_item) {
-					char wdiffbin[TXT_SML+1];
-					double wdiff;
 					WORKINFO *workinfo;
 					DATA_WORKINFO(workinfo, w_item);
-					hex2bin(wdiffbin, workinfo->bits, 4);
-					wdiff = diff_from_nbits(wdiffbin);
-					if (wdiff > 0.0) {
+					if (workinfo->diff_target > 0.0) {
 						snprintf(pct, sizeof(pct), "%.2f",
-							 100.0 * pool.diffacc / wdiff);
+							 100.0 * pool.diffacc /
+							 workinfo->diff_target);
 					}
 				}
 				if (pool.diffacc >= 1000.0) {
