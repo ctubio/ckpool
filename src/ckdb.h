@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.501"
+#define CKDB_VERSION DB_VERSION"-1.502"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1401,6 +1401,17 @@ extern K_STORE *shares_early_store;
 /* Once a share is this old, it can only once more be
     check for it's workinfoid and then be discarded */
 #define EARLYSHARESLIMIT 60.0
+
+/* All shares this % less than beng a block, or higher,
+    will be reported on the console */
+#define DIFF_PERCENT_DEFAULT 5
+// OptionControl can override it, > 100 means don't do it
+#define DIFF_PERCENT_NAME "ShareDiffPercent"
+
+// int diff % -> ratio
+#define DIFF_VAL(_v) (1.0 - ((double)(_v) / 100.0))
+
+extern double diff_percent;
 
 // SHAREERRORS shareerrors.id.json={...}
 typedef struct shareerrors {

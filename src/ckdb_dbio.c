@@ -2434,6 +2434,13 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 		row->activationheight = OPTIONCONTROL_HEIGHT;
 	}
 
+	// Update if it's changed
+	if (strcmp(row->optionname, DIFF_PERCENT_NAME) == 0) {
+		diff_percent = DIFF_VAL(strtod(row->optionvalue, NULL));
+		if (errno == ERANGE)
+			diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
+	}
+
 	INIT_OPTIONCONTROL(&look);
 	look.data = (void *)row;
 	K_RLOCK(optioncontrol_free);
@@ -2671,6 +2678,14 @@ bool optioncontrol_fill(PGconn *conn)
 			switch_state = atoi(row->optionvalue);
 			LOGWARNING("%s() set switch_state to %d",
 				   __func__, switch_state);
+		}
+
+		// The last loaded CURRENT value will be used
+		if (CURRENT(&(row->expirydate)) &&
+		    strcmp(row->optionname, DIFF_PERCENT_NAME) == 0) {
+			diff_percent = DIFF_VAL(strtod(row->optionvalue, NULL));
+			if (errno == ERANGE)
+				diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
 		}
 	}
 	if (!ok) {
@@ -3058,13 +3073,57 @@ flail:
 	return ok;
 }
 
-static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
+static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
+			   K_TREE *trf_root)
 {
 	K_ITEM *w_item, *wm_item, *ss_item;
 	SHARESUMMARY *sharesummary;
+	WORKINFO *workinfo;
 	char *st = NULL;
 
 	LOGDEBUG("%s() add", __func__);
+
+	if (diff_percent >= 0.0) {
+		DATA_WORKINFO(workinfo, wi_item);
+		if (shares->sdiff >= (workinfo->diff_target * diff_percent)) {
+			bool block = (shares->sdiff >= workinfo->diff_target);
+			char *sta = NULL, pct[16] = "?", est[16] = "";
+			switch (shares->errn) {
+				case SE_NONE:
+					break;
+				case SE_STALE:
+					sta = "STALE";
+					break;
+				case SE_DUPE:
+					sta = "Dup";
+					break;
+				case SE_HIGH_DIFF:
+					sta = "HI";
+					break;
+				default:
+					sta = "UNKNOWN";
+					break;
+			}
+			if (pool.diffacc >= 1000.0) {
+				est[0] = ' ';
+				suffix_string(pool.diffacc, est+1, sizeof(est)-2, 0);
+			}
+			if (workinfo->diff_target > 0.0) {
+				snprintf(pct, sizeof(pct), " %.2f%%",
+					 100.0 * pool.diffacc /
+					 workinfo->diff_target);
+			}
+			LOGWARNING("%s %s Diff %.1f%% (%.0f/%.1f) %s "
+				   "Pool %.1f%s%s",
+				   block ? "BLOCK!" : "Share",
+				   (sta == NULL) ? "ok" : sta,
+				   100.0 * shares->sdiff / workinfo->diff_target,
+				   shares->sdiff, workinfo->diff_target,
+				   st = safe_text_nonull(shares->workername),
+				   pool.diffacc, est, pct);
+			FREENULL(st);
+		}
+	}
 
 	w_item = new_default_worker(conn, false, shares->userid,
 				    shares->workername, shares->createby,
@@ -3125,11 +3184,12 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_TREE *trf_root)
 }
 
 // If it exists and it can be processed, process the oldest early share
-static void shares_process_early(PGconn *conn, int64_t good_wid, tv_t *good_cd,
+static void shares_process_early(PGconn *conn, K_ITEM *wi, tv_t *good_cd,
 				 K_TREE *trf_root)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *es_item, *wi_item;
+	WORKINFO *workinfo;
 	SHARES *early_shares;
 	char cd_buf[DATE_BUFSIZ];
 	char *why = EMPTY;
@@ -3140,6 +3200,7 @@ static void shares_process_early(PGconn *conn, int64_t good_wid, tv_t *good_cd,
 
 	LOGDEBUG("%s() add", __func__);
 
+	DATA_WORKINFO(workinfo, wi);
 	K_WLOCK(shares_free);
 	if (shares_early_store->count == 0) {
 		K_WUNLOCK(shares_free);
@@ -3156,13 +3217,13 @@ static void shares_process_early(PGconn *conn, int64_t good_wid, tv_t *good_cd,
 		DATA_SHARES(early_shares, es_item);
 		/* If the last (oldest) is newer than the
 		 *  current workinfo, leave it til later */
-		if (early_shares->workinfoid > good_wid)
+		if (early_shares->workinfoid > workinfo->workinfoid)
 			goto redo;
 
 		/* If it matches the 'ok' share we just processed,
 		 *  we don't need to check the workinfoid */
-		if (early_shares->workinfoid == good_wid) {
-			ok = shares_process(conn, early_shares, trf_root);
+		if (early_shares->workinfoid == workinfo->workinfoid) {
+			ok = shares_process(conn, early_shares, wi, trf_root);
 			if (ok)
 				goto keep;
 			else
@@ -3186,7 +3247,8 @@ static void shares_process_early(PGconn *conn, int64_t good_wid, tv_t *good_cd,
 				early_shares->redo++;
 				goto redo;
 			} else {
-				ok = shares_process(conn, early_shares, trf_root);
+				ok = shares_process(conn, early_shares,
+						    wi_item, trf_root);
 				if (ok)
 					goto keep;
 				else
@@ -3327,15 +3389,15 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		return true;
 	}
 
-	ok = shares_process(conn, shares, trf_root);
+	ok = shares_process(conn, shares, wi_item, trf_root);
 	if (ok) {
 		K_WLOCK(shares_free);
 		add_to_ktree(shares_root, s_item);
 		k_add_head(shares_store, s_item);
 		K_WUNLOCK(shares_free);
 
-		shares_process_early(conn, shares->workinfoid,
-				     &(shares->createdate), trf_root);
+		shares_process_early(conn, wi_item, &(shares->createdate),
+				     trf_root);
 		// Call both since shareerrors may be rare
 		shareerrors_process_early(conn, shares->workinfoid,
 					  &(shares->createdate), trf_root);
@@ -3626,8 +3688,8 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 					  &(shareerrors->createdate),
 					  trf_root);
 		// Call both in case we are only getting errors on bad work
-		shares_process_early(conn, shareerrors->workinfoid,
-				     &(shareerrors->createdate), trf_root);
+		shares_process_early(conn, wi_item, &(shareerrors->createdate),
+				     trf_root);
 
 		// The original share was ok
 		return true;
@@ -4970,11 +5032,11 @@ flail:
 				}
 				if (pool.diffacc >= 1000.0) {
 					suffix_string(pool.diffacc, est, sizeof(est)-1, 0);
-					strcat(est, " ");
+					strcat(est, "% ");
 				}
 				tv_to_buf(&(row->createdate), cd_buf, sizeof(cd_buf));
 				snprintf(tmp, sizeof(tmp),
-					 " Reward: %f, Worker: %s, ShareEst: %.1f %s%s%% UTC:%s",
+					 " Reward: %f, Worker: %s, ShareEst: %.1f %s%sUTC:%s",
 					 BTC_TO_D(row->reward),
 					 st = safe_text_nonull(row->workername),
 					 pool.diffacc, est, pct, cd_buf);

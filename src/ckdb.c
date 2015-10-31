@@ -385,6 +385,8 @@ K_STORE *shares_store;
 K_TREE *shares_early_root;
 K_STORE *shares_early_store;
 
+double diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
+
 // SHAREERRORS shareerrors.id.json={...}
 K_TREE *shareerrors_root;
 K_LIST *shareerrors_free;
