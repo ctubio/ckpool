@@ -2808,8 +2808,9 @@ unparam:
 		LIST_MEM_SUB(workinfo_free, row->transactiontree);
 		FREENULL(row->transactiontree);
 
+		row->height = coinbase1height(row);
 		hex2bin(ndiffbin, row->bits, 4);
-		current_ndiff = diff_from_nbits(ndiffbin);
+		row->diff_target = current_ndiff = diff_from_nbits(ndiffbin);
 
 		add_to_ktree(workinfo_root, item);
 		k_add_head(workinfo_store, item);
@@ -2818,7 +2819,7 @@ unparam:
 		if (workinfo_current) {
 			WORKINFO *wic;
 			DATA_WORKINFO(wic, workinfo_current);
-			if (cmp_height(wic->coinbase1, row->coinbase1) != 0) {
+			if (wic->height != row->height) {
 				copy_tv(&last_bc, cd);
 				zero_active = true;
 			}
@@ -2836,6 +2837,7 @@ unparam:
 
 bool workinfo_fill(PGconn *conn)
 {
+	char ndiffbin[TXT_SML+1];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -3002,6 +3004,10 @@ bool workinfo_fill(PGconn *conn)
 			HISTORYDATEFLDS(res, i, row, ok);
 			if (!ok)
 				break;
+
+			row->height = coinbase1height(row);
+			hex2bin(ndiffbin, row->bits, 4);
+			row->diff_target = diff_from_nbits(ndiffbin);
 
 			add_to_ktree(workinfo_root, item);
 			if (!confirm_sharesummary)

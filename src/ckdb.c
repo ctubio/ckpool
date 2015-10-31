@@ -2915,7 +2915,7 @@ static void summarise_blocks()
 	if (workinfo_current) {
 		WORKINFO *wic;
 		DATA_WORKINFO(wic, workinfo_current);
-		hi = coinbase1height(wic->coinbase1);
+		hi = wic->height;
 	}
 	K_RUNLOCK(workinfo_free);
 
@@ -3202,7 +3202,6 @@ static void make_a_shift_mark()
 	MARKS *marks = NULL, *sh_marks = NULL;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
 	int64_t shiftdiffblock = SHIFT_DIFF_BLOCK;
-	int32_t height;
 	char wi_bits[TXT_SML+1];
 	bool was_block = false, ok, oc_look = true;
 	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ], cd_buf3[DATE_BUFSIZ];
@@ -3452,8 +3451,7 @@ static void make_a_shift_mark()
 				 * Stop at the last workinfo, before the diff
 				 *  changed */
 				if (strcmp(wi_bits, workinfo->bits) != 0) {
-					height = coinbase1height(workinfo->coinbase1);
-					if (height > (int32_t)shiftdiffblock) {
+					if (workinfo->height > (int32_t)shiftdiffblock) {
 						LOGDEBUG("%s() OK shift stops at diff"
 							 " change '%s->%s' %"PRId64
 							 "->%"PRId64" height %"PRId32
@@ -3461,7 +3459,7 @@ static void make_a_shift_mark()
 							 __func__, wi_bits,
 							 workinfo->bits, prev_wid,
 							 workinfo->workinfoid,
-							 height,
+							 workinfo->height,
 							 shiftdiffblock);
 						marks_wid = prev_wid;
 						break;

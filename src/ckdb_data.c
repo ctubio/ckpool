@@ -1965,20 +1965,36 @@ cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b)
 	return c;
 }
 
-int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS)
+int32_t _coinbase1height(WORKINFO *wi, WHERE_FFL_ARGS)
 {
 	int32_t height = 0;
+	char *st = NULL;
 	uchar *cb1;
+	size_t len;
 	int siz;
 
-	cb1 = ((uchar *)coinbase1) + 84;
+	len = strlen(wi->coinbase1);
+	if (len < (BLOCKNUM_OFFSET * 2 + 4) || (len & 1)) {
+		LOGERR("ERR %s(): Invalid coinbase1 len %d - "
+			"should be >= %d and even - wid %"PRId64
+			" (cb1 %.10s%s)",
+			__func__, (int)len, (BLOCKNUM_OFFSET * 2 + 4),
+			wi->workinfoid, st = safe_text_nonull(wi->coinbase1),
+			len <= 10 ? "" : "...");
+		FREENULL(st);
+		return height;
+	}
+
+	cb1 = ((uchar *)(wi->coinbase1)) + (BLOCKNUM_OFFSET * 2);
 	siz = ((hex2bin_tbl[*cb1]) << 4) + (hex2bin_tbl[*(cb1+1)]);
 
 	// limit to 4 for int32_t and since ... that should last a while :)
 	if (siz < 1 || siz > 4) {
-		LOGERR("%s(): Invalid coinbase1 block height size (%d)"
-			" require: 1..4 (cb1 %s)" WHERE_FFL,
-			__func__, siz, coinbase1, WHERE_FFL_PASS);
+		LOGERR("ERR %s(): Invalid coinbase1 block height size (%d)"
+			" require: 1..4 - wid %"PRId64" (cb1 %.10s...)"
+			WHERE_FFL,
+			__func__, siz, wi->workinfoid, wi->coinbase1,
+			WHERE_FFL_PASS);
 		return height;
 	}
 
@@ -1991,19 +2007,13 @@ int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS)
 	return height;
 }
 
-cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS)
-{
-	return CMP_INT(_coinbase1height(coinbase1a, WHERE_FFL_PASS),
-		       _coinbase1height(coinbase1b, WHERE_FFL_PASS));
-}
-
 // order by height asc,createdate asc
 cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b)
 {
 	WORKINFO *wa, *wb;
 	DATA_WORKINFO(wa, a);
 	DATA_WORKINFO(wb, b);
-	cmp_t c = cmp_height(wa->coinbase1, wb->coinbase1);
+	cmp_t c = CMP_INT(wa->height, wb->height);
 	if (c == 0)
 		c = CMP_TV(wa->createdate, wb->createdate);
 	return c;
@@ -2251,12 +2261,7 @@ double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock)
 	OPTIONCONTROL *optioncontrol;
 	K_ITEM *oc_item;
 	char oc_name[TXT_SML+1];
-	char coinbase1bin[TXT_SML+1];
-	char ndiffbin[TXT_SML+1];
 	WORKINFO *workinfo;
-	double w_diff;
-	int32_t w_blocknum;
-	size_t len;
 
 	// Allow optioncontrol override for a given workinfoid
 	snprintf(oc_name, sizeof(oc_name), PPSOVERRIDE"_%"PRId64, workinfoid);
@@ -2280,23 +2285,9 @@ double workinfo_pps(K_ITEM *w_item, int64_t workinfoid, bool lock)
 	}
 
 	DATA_WORKINFO(workinfo, w_item);
-	len = strlen(workinfo->coinbase1);
-	if (len < (BLOCKNUM_OFFSET * 2 + 4) || (len & 1)) {
-		LOGERR("%s(): Invalid coinbase1 len %d - "
-			"should be >= %d and even - for wid %"PRId64,
-			__func__, (int)len, (BLOCKNUM_OFFSET * 2 + 4),
-			workinfoid);
-		return 0.0;
-	}
-
-	hex2bin(ndiffbin, workinfo->bits, 4);
-	w_diff = diff_from_nbits(ndiffbin);
-	hex2bin(coinbase1bin, workinfo->coinbase1 + (BLOCKNUM_OFFSET * 2),
-		(len - (BLOCKNUM_OFFSET * 2)) >> 1);
-	w_blocknum = (int32_t)get_sernumber((uchar *)coinbase1bin);
 
 	// PPS 1diff is worth coinbase reward divided by difficulty
-	return(coinbase_reward(w_blocknum) / w_diff);
+	return(coinbase_reward(workinfo->height) / workinfo->diff_target);
 }
 
 // order by workinfoid asc,userid asc,workername asc,createdate asc,nonce asc,expirydate desc
@@ -2973,7 +2964,6 @@ bool check_update_blocks_stats(tv_t *stats)
 	K_ITEM *b_item, *w_item;
 	WORKINFO *workinfo;
 	BLOCKS *blocks;
-	char ndiffbin[TXT_SML+1];
 	double ok, diffacc, netsumm, diffmean, pending, txmean, cr;
 	tv_t now;
 
@@ -3028,8 +3018,7 @@ bool check_update_blocks_stats(tv_t *stats)
 						return false;
 					}
 					DATA_WORKINFO(workinfo, w_item);
-					hex2bin(ndiffbin, workinfo->bits, 4);
-					blocks->netdiff = diff_from_nbits(ndiffbin);
+					blocks->netdiff = workinfo->diff_target;
 				}
 				/* Stats for each blocks are independent of
 				 * if they are orphans or not */
@@ -3599,7 +3588,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	K_TREE *mu_root = NULL;
 	int usercount;
 	double ndiff, total_diff, diff_want, elapsed;
-	char ndiffbin[TXT_SML+1], rewardbuf[32];
+	char rewardbuf[32];
 	double diff_times, diff_add;
 	char cd_buf[CDATE_BUFSIZ];
 	tv_t end_tv = { 0L, 0L };
@@ -3699,8 +3688,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	DATA_OPTIONCONTROL(optioncontrol, oc_item);
 	diff_add = atof(optioncontrol->optionvalue);
 
-	hex2bin(ndiffbin, workinfo->bits, 4);
-	ndiff = diff_from_nbits(ndiffbin);
+	ndiff = workinfo->diff_target;
 	diff_want = ndiff * diff_times + diff_add;
 	if (diff_want < 1.0) {
 		LOGERR("%s(): invalid diff_want %.1f, block %"PRId32"/%"

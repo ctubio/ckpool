@@ -3187,11 +3187,9 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RLOCK(workinfo_free);
 		if (workinfo_current) {
 			WORKINFO *wic;
-			int32_t hi;
 			DATA_WORKINFO(wic, workinfo_current);
-			hi = coinbase1height(wic->coinbase1);
 			snprintf(tmp, sizeof(tmp), "lastheight=%d%c",
-						   hi-1, FLDSEP);
+						   wic->height-1, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 		} else {
 			snprintf(tmp, sizeof(tmp), "lastheight=?%c", FLDSEP);
@@ -4066,7 +4064,6 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	double diff_add = 0.0;
 	double diff_want;
 	bool allow_aged = false, countbacklimit;
-	char ndiffbin[TXT_SML+1];
 	size_t len, off;
 	int rows;
 
@@ -4156,8 +4153,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	DATA_WORKINFO(workinfo, w_item);
 
-	hex2bin(ndiffbin, workinfo->bits, 4);
-	ndiff = diff_from_nbits(ndiffbin);
+	ndiff = workinfo->diff_target;
 	diff_want = ndiff * diff_times + diff_add;
 	if (diff_want < 1.0) {
 		snprintf(reply, siz,
@@ -4527,8 +4523,6 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	PAYOUTS *payouts;
 	BLOCKS lookblocks, *blocks;
 	WORKINFO *bworkinfo, *workinfo;
-	char ndiffbin[TXT_SML+1];
-	double ndiff;
 	USERS *users;
 	int32_t height;
 	K_TREE_CTX b_ctx[1], mp_ctx[1], pay_ctx[1];
@@ -4759,9 +4753,8 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "%s%c", payouts->stats, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	hex2bin(ndiffbin, bworkinfo->bits, 4);
-	ndiff = diff_from_nbits(ndiffbin);
-	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c", ndiff, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "block_ndiff=%f%c",
+				   bworkinfo->diff_target, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "diff_want=%.1f%c",
 				   payouts->diffwanted, FLDSEP);
@@ -6738,7 +6731,6 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 *  pgsql scripts would do that to the DB, then ckdb would
 		 *  load them the next time it (re)starts */
 		K_ITEM *i_wid, *i_expired, *wi_item, *wm_item;
-		char ndiffbin[TXT_SML+1];
 		bool expired = false;
 		WORKINFO *workinfo;
 		WORKMARKERS *wm;
@@ -6776,7 +6768,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 "workinfoid:%d=%s%c",
 					 rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
-				int_to_buf(coinbase1height(workinfo->coinbase1),
+				int_to_buf(workinfo->height,
 					   reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp),
 					 "height:%d=%s%c",
@@ -6798,10 +6790,9 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 CDDB"_str:%d=%s%c",
 					 rows, cd_buf, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
-				hex2bin(ndiffbin, workinfo->bits, 4);
 				snprintf(tmp, sizeof(tmp),
 					 "ndiff:%d=%.1f%c", rows,
-					 diff_from_nbits(ndiffbin),
+					 workinfo->diff_target,
 					 FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(tmp, sizeof(tmp),
@@ -6899,7 +6890,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		wi_item = last_in_ktree(workinfo_root, ctx);
 		DATA_WORKINFO_NULL(workinfo, wi_item);
 		while (wi_item) {
-			this_height = coinbase1height(workinfo->coinbase1);
+			this_height = workinfo->height;
 			if (this_height < height)
 				break;
 			if (CURRENT(&(workinfo->expirydate)) &&
@@ -6946,7 +6937,6 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_ITEM *i_height, *wi_item;
 		WORKINFO *workinfo = NULL;
 		int32_t height, this_height;
-		char ndiffbin[TXT_SML+1];
 		char bits[TXT_SML+1];
 		bool got = false;
 
@@ -6971,7 +6961,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		DATA_WORKINFO_NULL(workinfo, wi_item);
 		while (wi_item) {
 			if (CURRENT(&(workinfo->expirydate))) {
-				this_height = coinbase1height(workinfo->coinbase1);
+				this_height = workinfo->height;
 				if (this_height < height)
 					break;
 			}
@@ -6984,7 +6974,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		DATA_WORKINFO_NULL(workinfo, wi_item);
 		while (wi_item) {
 			if (CURRENT(&(workinfo->expirydate))) {
-				this_height = coinbase1height(workinfo->coinbase1);
+				this_height = workinfo->height;
 				if (this_height >= height)
 					break;
 			}
@@ -6993,7 +6983,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 		if (wi_item) {
 			DATA_WORKINFO(workinfo, wi_item);
-			this_height = coinbase1height(workinfo->coinbase1);
+			this_height = workinfo->height;
 			if (this_height == height) {
 				// We have our starting point
 				STRNCPY(bits, workinfo->bits);
@@ -7005,10 +6995,9 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 "workinfoid0:%d=%s%c",
 					 rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
-				hex2bin(ndiffbin, workinfo->bits, 4);
 				snprintf(tmp, sizeof(tmp),
 					 "ndiff0:%d=%.1f%c", rows,
-					 diff_from_nbits(ndiffbin),
+					 workinfo->diff_target,
 					 FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
@@ -7045,7 +7034,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 						   rows, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 		} else {
-			this_height = coinbase1height(workinfo->coinbase1);
+			this_height = workinfo->height;
 			int_to_buf(this_height, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "height:%d=%s%c",
 						   rows, reply, FLDSEP);
@@ -7055,10 +7044,9 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 			snprintf(tmp, sizeof(tmp), "workinfoid:%d=%s%c",
 						   rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
-			hex2bin(ndiffbin, workinfo->bits, 4);
 			snprintf(tmp, sizeof(tmp), "ndiff:%d=%.1f%c",
 						   rows,
-						   diff_from_nbits(ndiffbin),
+						   workinfo->diff_target,
 						   FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 		}

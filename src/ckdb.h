@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.500"
+#define CKDB_VERSION DB_VERSION"-1.501"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1336,6 +1336,8 @@ typedef struct workinfo {
 	char bits[TXT_SML+1];
 	char ntime[TXT_SML+1];
 	int64_t reward;
+	int32_t height; // non-DB field
+	double diff_target; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } WORKINFO;
 
@@ -2299,10 +2301,8 @@ extern K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t hei
 extern int64_t user_sys_setting(int64_t userid, char *setting_name,
 				int64_t setting_default, const tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
-#define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
-extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);
-#define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
-extern cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS);
+#define coinbase1height(_wi) _coinbase1height(_wi, WHERE_FFL_HERE)
+extern int32_t _coinbase1height(WORKINFO *wi, WHERE_FFL_ARGS);
 extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
 extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
