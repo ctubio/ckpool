@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.503"
+#define CKDB_VERSION DB_VERSION"-1.504"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -97,6 +97,18 @@ extern int switch_state;
 
 extern bool genpayout_auto;
 extern bool markersummary_auto;
+
+enum free_modes {
+	FREE_MODE_ALL,
+	FREE_MODE_NONE,
+	FREE_MODE_FAST
+};
+
+#define FREE_MODE_ALL_STR "all"
+#define FREE_MODE_NONE_STR "none"
+#define FREE_MODE_FAST_STR "fast"
+
+extern enum free_modes free_mode;
 
 #define BLANK " "
 extern char *EMPTY;

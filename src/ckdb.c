@@ -128,6 +128,8 @@ static char *restorefrom;
 bool genpayout_auto;
 bool markersummary_auto;
 
+enum free_modes free_mode = FREE_MODE_FAST;
+
 int switch_state = SWITCH_STATE_ALL;
 
 // disallow: '/' WORKSEP1 WORKSEP2 and FLDSEP
@@ -1277,6 +1279,11 @@ static void dealloc_storage()
 	SHARES *shares;
 	int seq;
 
+	if (free_mode == FREE_MODE_NONE) {
+		LOGWARNING("%s() skipped", __func__);
+		return;
+	}
+
 	LOGWARNING("%s() logqueue ...", __func__);
 
 	FREE_LISTS(logqueue);
@@ -1292,15 +1299,19 @@ static void dealloc_storage()
 	FREE_STORE_DATA(workmarkers);
 	FREE_LIST_DATA(workmarkers);
 
-	LOGWARNING("%s() markersummary ...", __func__);
+	if (free_mode != FREE_MODE_ALL)
+		LOGWARNING("%s() markersummary skipped", __func__);
+	else {
+		LOGWARNING("%s() markersummary ...", __func__);
 
-	FREE_TREE(markersummary_pool);
-	k_list_transfer_to_tail(markersummary_pool_store, markersummary_store);
-	FREE_STORE(markersummary_pool);
-	FREE_TREE(markersummary_userid);
-	FREE_TREE(markersummary);
-	FREE_STORE_DATA(markersummary);
-	FREE_LIST_DATA(markersummary);
+		FREE_TREE(markersummary_pool);
+		k_list_transfer_to_tail(markersummary_pool_store, markersummary_store);
+		FREE_STORE(markersummary_pool);
+		FREE_TREE(markersummary_userid);
+		FREE_TREE(markersummary);
+		FREE_STORE_DATA(markersummary);
+		FREE_LIST_DATA(markersummary);
+	}
 
 	FREE_ALL(workerstatus);
 
@@ -1376,12 +1387,16 @@ static void dealloc_storage()
 	FREE_STORE(shares_early);
 	FREE_ALL(shares);
 
-	LOGWARNING("%s() workinfo ...", __func__);
+	if (free_mode != FREE_MODE_ALL)
+		LOGWARNING("%s() workinfo skipped", __func__);
+	else {
+		LOGWARNING("%s() workinfo ...", __func__);
 
-	FREE_TREE(workinfo_height);
-	FREE_TREE(workinfo);
-	FREE_STORE_DATA(workinfo);
-	FREE_LIST_DATA(workinfo);
+		FREE_TREE(workinfo_height);
+		FREE_TREE(workinfo);
+		FREE_STORE_DATA(workinfo);
+		FREE_LIST_DATA(workinfo);
+	}
 
 	FREE_LISTS(idcontrol);
 	FREE_ALL(accountbalance);
@@ -1409,18 +1424,22 @@ static void dealloc_storage()
 	FREE_LISTS(workqueue);
 	FREE_LISTS(msgline);
 
-	LOGWARNING("%s() seqset ...", __func__);
-	sequence_report(false);
+	if (free_mode != FREE_MODE_ALL)
+		LOGWARNING("%s() seqset skipped", __func__);
+	else {
+		LOGWARNING("%s() seqset ...", __func__);
+		sequence_report(false);
 
-	FREE_STORE_DATA(seqset);
-	FREE_LIST_DATA(seqset);
-	FREE_LISTS(seqset);
+		FREE_STORE_DATA(seqset);
+		FREE_LIST_DATA(seqset);
+		FREE_LISTS(seqset);
 
-	// Must be after seqset
-	FREE_LIST(seqtrans);
+		// Must be after seqset
+		FREE_LIST(seqtrans);
 
-	for (seq = 0; seq < SEQ_MAX; seq++)
-		FREENULL(seqnam[seq]);
+		for (seq = 0; seq < SEQ_MAX; seq++)
+			FREENULL(seqnam[seq]);
+	}
 
 	LOGWARNING("%s() finished", __func__);
 }
@@ -5501,6 +5520,7 @@ static void check_restore_dir(char *name)
 static struct option long_options[] = {
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
+	{ "free",		required_argument,	0,	'f' },
 	// generate = enable payout pplns auto generation
 	{ "generate",		no_argument,		0,	'g' },
 	{ "help",		no_argument,		0,	'h' },
@@ -5562,6 +5582,21 @@ int main(int argc, char **argv)
 				kill = optarg;
 				while (*kill)
 					*(kill++) = ' ';
+				break;
+			case 'f':
+				if (strcasecmp(optarg, FREE_MODE_ALL_STR) == 0)
+					free_mode = FREE_MODE_ALL;
+				else if (strcasecmp(optarg, FREE_MODE_NONE_STR) == 0)
+					free_mode = FREE_MODE_NONE;
+				else if (strcasecmp(optarg, FREE_MODE_FAST_STR) == 0)
+					free_mode = FREE_MODE_FAST;
+				else {
+					quit(1, "Invalid free '%s' must be: "
+						FREE_MODE_ALL_STR", "
+						FREE_MODE_NONE_STR" or "
+						FREE_MODE_FAST_STR,
+						optarg);
+				}
 				break;
 			case 'g':
 				genpayout_auto = true;
