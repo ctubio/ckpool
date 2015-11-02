@@ -5004,8 +5004,8 @@ flail:
 		char est[16] = "";
 		char diff[16] = "";
 		K_ITEM *w_item;
-		char tmp[256];
-		bool blk;
+		char tmp[256] = "";
+		bool blk = false;
 
 		suffix_string(hash_diff, diff, sizeof(diff)-1, 0);
 
@@ -5017,19 +5017,19 @@ flail:
 				break;
 			case BLOCKS_CONFIRM:
 				blk = true;
+				if (pool.diffacc >= 1000.0) {
+					suffix_string(pool.diffacc, est, sizeof(est)-2, 0);
+					strcat(est, " ");
+				}
 				w_item = find_workinfo(row->workinfoid, NULL);
 				if (w_item) {
 					WORKINFO *workinfo;
 					DATA_WORKINFO(workinfo, w_item);
 					if (workinfo->diff_target > 0.0) {
-						snprintf(pct, sizeof(pct), "%.2f",
+						snprintf(pct, sizeof(pct), "%.2f%% ",
 							 100.0 * pool.diffacc /
 							 workinfo->diff_target);
 					}
-				}
-				if (pool.diffacc >= 1000.0) {
-					suffix_string(pool.diffacc, est, sizeof(est)-1, 0);
-					strcat(est, "% ");
 				}
 				tv_to_buf(&(row->createdate), cd_buf, sizeof(cd_buf));
 				snprintf(tmp, sizeof(tmp),
@@ -5048,8 +5048,6 @@ flail:
 			case BLOCKS_REJECT:
 			case BLOCKS_42:
 			default:
-				blk = false;
-				tmp[0] = '\0';
 				break;
 		}
 
