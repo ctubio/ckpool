@@ -70,7 +70,11 @@ function doluck($data, $user)
 			$chk = '';
 		$pg .= "<span class=nb><font color=$col>";
 		$pg .= "<input type=checkbox id=lin$i$chk onclick='godrw(0)'>: ";
-		$pg .= $nams[$i-1].' Block Luck Avg</font></span>';
+		if ($nams[$i-1] == 1)
+			$avs = '';
+		else
+			$avs = ' Avg';
+		$pg .= $nams[$i-1]." Block Luck$avs</font></span>";
 
 		if ($i > 1)
 			$datacols .= ',';
