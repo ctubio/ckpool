@@ -1305,11 +1305,9 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazil
 
 	if (client->workername) {
 		if (user) {
-			if (!user->throttled) {
-				ASPRINTF(msg, "Dropped client %"PRId64" %s user %s worker %s %s",
-					 client->id, client->address, user->username,
-					 client->workername, lazily ? "lazily" : "");
-			}
+			ASPRINTF(msg, "Dropped client %"PRId64" %s %suser %s worker %s %s",
+				 client->id, client->address, user->throttled ? "throttled " : "",
+				 user->username, client->workername, lazily ? "lazily" : "");
 		} else {
 			ASPRINTF(msg, "Dropped client %"PRId64" %s no user worker %s %s",
 				 client->id, client->address, client->workername,
@@ -1328,7 +1326,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 			      const char *func, const int line)
 {
 	char_entry_t *entries = NULL;
-	char *msg = NULL;
+	char *msg;
 	int ref;
 
 	ck_wlock(&sdata->instance_lock);
@@ -1337,10 +1335,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref)) {
 		__drop_client(sdata, client, true, &msg);
-		/* Make sure there is a message as throttled users don't
-		 * generate a message */
-		if (msg)
-			add_msg_entry(&entries, &msg);
+		add_msg_entry(&entries, &msg);
 	}
 	ck_wunlock(&sdata->instance_lock);
 
