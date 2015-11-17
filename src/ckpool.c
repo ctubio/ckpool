@@ -1467,7 +1467,8 @@ static bool send_recv_path(const char *path, const char *msg)
 		ret = true;
 		LOGWARNING("Received: %s in response to %s request", response, msg);
 		dealloc(response);
-	}
+	} else
+		LOGWARNING("Received not response to %s request", msg);
 	Close(sockd);
 	return ret;
 }
