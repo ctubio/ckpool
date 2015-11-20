@@ -11,9 +11,10 @@ function worktitle($data, $user)
  $pg .= '<td class=dr>Shares</td>';
  $pg .= "<td class=dr><span class=nb><$r id=srtdiff data-sf=r4>:Diff</span></td>";
  $pg .= "<td class=dr><span class=nb><$r id=srtshrate data-sf=r5>:Share Rate</span></td>";
- $pg .= "<td class=dr><span class=nb><$r id=srtinv data-sf=r6>:Invalid</span></td>";
+ $pg .= '<td class=dr>&laquo;Elapsed</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtinv data-sf=r7>:Invalid</span></td>";
  $pg .= '<td class=dr>Block %</td>';
- $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r8>:Hash</span> Rate</td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r9>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
  return $pg;
 }
@@ -46,9 +47,10 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 	}
 	$all = array();
 	$count = $ans['rows'];
+	$now = $ans['STAMP'];
 	for ($i = 0; $i < $count; $i++)
 	{
-		$lst = $ans['STAMP'] - $ans['w_lastshare:'.$i];
+		$lst = $now - $ans['w_lastshare:'.$i];
 		if ($old !== false && $lst > $old)
 			continue;
 
@@ -59,6 +61,7 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 		$all[] = array('workername' => $ans['workername:'.$i],
 				'w_lastshare' => $ans['w_lastshare:'.$i],
+				'w_lastshareacc' => $ans['w_lastshareacc:'.$i],
 				'w_lastdiff' => $ans['w_lastdiff:'.$i],
 				'w_shareacc' => $ans['w_shareacc:'.$i],
 				'w_diffacc' => $ans['w_diffacc:'.$i],
@@ -74,9 +77,11 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 	for ($i = 0; $i < $count; $i++)
 	{
-		$lst = $ans['STAMP'] - $all[$i]['w_lastshare'];
+		$lst = $now - $all[$i]['w_lastshare'];
 		if ($old !== false && $lst > $old)
 			continue;
+
+		$lstacc = $now - $all[$i]['w_lastshareacc'];
 
 		if ((($offset) % 2) == 0)
 			$row = 'even';
@@ -91,7 +96,7 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 			$ld = '&nbsp;';
 		$pg .= "<td class=dr>$ld</td>";
 
-		$pg .= "<td class=dr data-srt=$lst>".howlongago($lst).'</td>';
+		$pg .= "<td class=dr data-srt=$lstacc>".howlongago($lstacc).'</td>';
 
 		$shareacc = number_format($all[$i]['w_shareacc'], 0);
 		$totshare += $all[$i]['w_shareacc'];
@@ -105,9 +110,12 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 		$acthr = '0';
 		$acthrv = 0;
 		$actstt = $all[$i]['w_active_start'];
-		if ($actstt > 0)
+		if ($actstt <= 0 || ($now - $actstt) < 0)
+			$actsin = '&nbsp;';
+		else
 		{
-			$elapsed = $ans['STAMP'] - $actstt;
+			$actsin = howmanyhrs($now - $actstt);
+			$elapsed = $now - $actstt;
 			if ($elapsed > 0)
 			{
 				$acthrv = $all[$i]['w_active_diffacc'] *
@@ -117,6 +125,7 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 			}
 		}
 		$pg .= "<td class=dr data-srt=$acthrv>$acthr</td>";
+		$pg .= "<td class=dr>$actsin</td>";
 
 		$dinv = $all[$i]['w_diffinv'];
 		$dtot = $dacc + $dinv;
@@ -178,7 +187,7 @@ function worktotal($offset, $totshare, $totdiff, $totshrate, $totinvalid,
  $pg .= "<td class=dr>$shareacc</td>";
  $diffacc = number_format($totdiff, 0);
  $pg .= "<td class=dr>$diffacc</td>";
- $pg .= "<td class=dr>$totshrate</td>";
+ $pg .= "<td class=dr>$totshrate</td><td>&nbsp;</td>";
  $dtot = $totdiff + $totinvalid;
  if ($dtot > 0)
 	$rej = number_format(100.0 * $totinvalid / $dtot, 3);

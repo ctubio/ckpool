@@ -86,7 +86,8 @@ function check()
 		'Stats' => 'stats',
 		'Blocks' => 'blocks',
 		'Graph' => 'psperf',
-		'Acclaim' => 'userinfo'
+		'Acclaim' => 'userinfo',
+		'Luck' => 'luck'
 	),
 	'Admin' => NULL,
 	'gap' => array( # options not shown

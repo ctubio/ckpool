@@ -75,6 +75,8 @@ CREATE TABLE paymentaddresses (
     userid bigint NOT NULL,
     payaddress character varying(256) DEFAULT ''::character varying NOT NULL,
     payratio integer DEFAULT 1000000 NOT NULL,
+    payname character varying(64) DEFAULT ''::character varying NOT NULL,
+    status char DEFAULT ' ' NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -247,6 +249,8 @@ CREATE TABLE sharesummary ( -- per workinfo for each user+worker
     errorcount bigint NOT NULL,
     firstshare timestamp with time zone NOT NULL,
     lastshare timestamp with time zone NOT NULL,
+    firstshareacc timestamp with time zone NOT NULL,
+    lastshareacc timestamp with time zone NOT NULL,
     lastdiffacc float NOT NULL,
     complete char NOT NULL,
     createdate timestamp with time zone NOT NULL,
@@ -311,6 +315,8 @@ CREATE TABLE markersummary ( -- sum of sharesummary for a workinfo range
     errorcount bigint NOT NULL,
     firstshare timestamp with time zone NOT NULL,
     lastshare timestamp with time zone NOT NULL,
+    firstshareacc timestamp with time zone NOT NULL,
+    lastshareacc timestamp with time zone NOT NULL,
     lastdiffacc float NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) NOT NULL,
@@ -464,4 +470,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'1.0.2');
+insert into version (vlock,version) values (1,'1.0.4');

@@ -2,9 +2,10 @@
 #
 function dopayout($data, $user)
 {
- $t = '<span class=nn>5</span>';
- $ot = '<span class=nn>1/5</span>';
- $n = '<span class=nn>5Nd</span>';
+ $N = 5;
+ $t = "<span class=nn>$N</span>";
+ $ot = "<span class=nn>1/$N</span>";
+ $n = "<span class=nn>${N}Nd</span>";
  $n1 = '<span class=nn>N</span>';
  $n1d = '<span class=nn>Nd</span>';
  $bc = '+101 Confirms';
@@ -13,7 +14,7 @@ function dopayout($data, $user)
  if (isset($data['info']['currndiff']))
   $nd = $data['info']['currndiff'];
  $nv = number_format($nd, 1);
- $nv5 = number_format(5.0*$nd, 1);
+ $nvx = number_format($N*$nd, 1);
 
  $pg = "<h1>Payouts</h1>
 <table width=75% cellpadding=0 cellspacing=0 border=0><tr><td>
@@ -41,11 +42,13 @@ Shifts are ~50min or less in length.<br>
 Aproximately every 30s, the pool generates new work and sends that to all the miners.<br>
 The pool also sends new work every time a block is found on the Bitcoin network.<br>
 A shift summarises all the shares submitted to the pool for 100 work changes.<br>
-However, when we find pool blocks, the current shift ends at the work in which the block was found.<br>
-A ckpool restart will also end the current shift and start a new one.<br><br>
+However, when we find pool blocks, the current shift ends at the work in which the block was found<br>
+and a new shift starts.<br>
+A ckpool restart will also end the current shift and start a new shift.<br>
+A network difficulty change will also end the current shift and start a new shift.<br><br>
 
 <span class=hdr>So, what's the $n value?</span><br><br>
-The current Bitcoin network value for $n1d is $nv and thus $n is <b>$nv5</b><br>
+The current Bitcoin network value for $n1d is $nv and thus $n is <b>$nvx</b><br>
 Bitcoin adjusts the $n1d value every 2016 blocks, which is about every 2 weeks.<br><br>
 When a block is found, the reward process counts back shifts until the total share difficulty included is $n.<br>
 Since shares are summarised into shifts, it will include the full shift at the end of the range counting backwards,<br>
