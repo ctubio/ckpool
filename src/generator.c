@@ -1978,8 +1978,8 @@ static void *proxy_recv(void *arg)
 	alive = proxi->alive;
 
 	while (42) {
-		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
+		share_msg_t *share, *tmpshare;
 		float timeout;
 		time_t now;
 		int ret;
