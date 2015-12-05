@@ -2993,7 +2993,7 @@ static void summarise_blocks()
 	double diffacc, diffinv, shareacc, shareinv;
 	tv_t now, elapsed_start, elapsed_finish;
 	int64_t elapsed, wi_start, wi_finish;
-	BLOCKS *blocks, *prev_blocks;
+	BLOCKS *blocks = NULL, *prev_blocks;
 	WORKINFO *prev_workinfo;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKMARKERS lookworkmarkers, *workmarkers;
