@@ -45,7 +45,8 @@ struct client_instance {
 	client_instance_t *next;
 	client_instance_t *prev;
 
-	struct sockaddr address;
+	struct sockaddr_storage address_storage;
+	struct sockaddr *address;
 	char address_name[INET6_ADDRSTRLEN];
 
 	/* Which serverurl is this instance connected to */
@@ -57,6 +58,9 @@ struct client_instance {
 	/* Are we currently sending a blocked message from this client */
 	sender_send_t *sending;
 	bool passthrough;
+
+	/* Time this client started blocking, 0 when not blocked */
+	time_t blocked_time;
 };
 
 struct sender_send {
@@ -192,8 +196,9 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	sockd = cdata->serverfd[server];
 	client = recruit_client(cdata);
 	client->server = server;
-	address_len = sizeof(client->address);
-	fd = accept(sockd, &client->address, &address_len);
+	client->address = (struct sockaddr *)&client->address_storage;
+	address_len = sizeof(client->address_storage);
+	fd = accept(sockd, client->address, &address_len);
 	if (unlikely(fd < 0)) {
 		/* Handle these errors gracefully should we ever share this
 		 * socket */
@@ -206,17 +211,17 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 		return -1;
 	}
 
-	switch (client->address.sa_family) {
+	switch (client->address->sa_family) {
 		const struct sockaddr_in *inet4_in;
 		const struct sockaddr_in6 *inet6_in;
 
 		case AF_INET:
-			inet4_in = (struct sockaddr_in *)&client->address;
+			inet4_in = (struct sockaddr_in *)client->address;
 			inet_ntop(AF_INET, &inet4_in->sin_addr, client->address_name, INET6_ADDRSTRLEN);
 			port = htons(inet4_in->sin_port);
 			break;
 		case AF_INET6:
-			inet6_in = (struct sockaddr_in6 *)&client->address;
+			inet6_in = (struct sockaddr_in6 *)client->address;
 			inet_ntop(AF_INET6, &inet6_in->sin6_addr, client->address_name, INET6_ADDRSTRLEN);
 			port = htons(inet6_in->sin6_port);
 			break;
@@ -556,6 +561,7 @@ out:
 static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sender_send)
 {
 	client_instance_t *client = sender_send->client;
+	time_t now_t;
 
 	if (unlikely(client->invalid))
 		goto out_true;
@@ -563,14 +569,26 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 	/* Make sure we only send one message at a time to each client */
 	if (unlikely(client->sending && client->sending != sender_send))
 		return false;
+
 	client->sending = sender_send;
+	now_t = time(NULL);
 
 	while (sender_send->len) {
 		int ret = write(client->fd, sender_send->buf + sender_send->ofs, sender_send->len);
 
 		if (unlikely(ret < 1)) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK || !ret)
+			/* Invalidate clients that block for more than 60 seconds */
+			if (unlikely(client->blocked_time && now_t - client->blocked_time >= 60)) {
+				LOGNOTICE("Client id %"PRId64" fd %d blocked for >60 seconds, disconnecting",
+					  client->id, client->fd);
+				invalidate_client(ckp, cdata, client);
+				goto out_true;
+			}
+			if (errno == EAGAIN || errno == EWOULDBLOCK || !ret) {
+				if (!client->blocked_time)
+					client->blocked_time = now_t;
 				return false;
+			}
 			LOGINFO("Client id %"PRId64" fd %d disconnected with write errno %d:%s",
 				client->id, client->fd, errno, strerror(errno));
 			invalidate_client(ckp, cdata, client);
@@ -578,6 +596,7 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 		}
 		sender_send->ofs += ret;
 		sender_send->len -= ret;
+		client->blocked_time = 0;
 	}
 out_true:
 	client->sending = NULL;
