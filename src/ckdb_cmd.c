@@ -3595,7 +3595,7 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 		goto bats;
 	} else {
 		DATA_USERS(users, u_item);
-		t_item = first_in_ktree(trf_root, ctx);
+		t_item = first_in_ktree_nolock(trf_root, ctx);
 		while (t_item) {
 			DATA_TRANSFER(transfer, t_item);
 			if (strncmp(transfer->name, "ua_", 3) == 0) {
@@ -3907,7 +3907,7 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	t_item = first_in_ktree(trf_root, ctx);
+	t_item = first_in_ktree_nolock(trf_root, ctx);
 	while (t_item) {
 		DATA_TRANSFER(transfer, t_item);
 		if (strncmp(transfer->name, "oc_", 3) == 0) {
