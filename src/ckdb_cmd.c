@@ -667,7 +667,9 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				while (pa_item) {
 					DATA_PAYMENTADDRESSES(row, pa_item);
 					// Only EVER validate addresses once ... for now
+					K_RLOCK(paymentaddresses_free);
 					old_pa_item = find_any_payaddress(row->payaddress);
+					K_RUNLOCK(paymentaddresses_free);
 					if (old_pa_item) {
 						/* This test effectively means that
 						 * two users can never add the same
