@@ -635,10 +635,8 @@ void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		ret = true;
 	Close(sockd);
 out:
-	if (unlikely(!ret)) {
+	if (unlikely(!ret))
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
-		childsighandler(15);
-	}
 }
 
 /* Send a single message to a process instance and retrieve the response, then
