@@ -2783,14 +2783,13 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				while (*end && *end != JSON_ARRAY_END)
 					end++;
 				if (end < next+1) {
-					LOGERR("JSON '%s' zero length value "
-						"was:%.32s... buf=%.32s...",
+					LOGWARNING("JSON '%s' zero length array"
+						" was:%.32s... buf=%.32s...",
 						transfer->name,
 						st = safe_text(was),
 						st2 = safe_text(buf));
 					FREENULL(st);
 					FREENULL(st2);
-					goto nogood;
 				}
 				siz = end - next;
 				end++;
@@ -2812,14 +2811,13 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 					goto nogood;
 				}
 				if (next == end) {
-					LOGERR("JSON '%s' zero length value "
-						"was:%.32s... buf=%.32s...",
+					LOGWARNING("JSON '%s' zero length value"
+						" was:%.32s... buf=%.32s...",
 						transfer->name,
 						st = safe_text(was),
 						st2 = safe_text(buf));
 					FREENULL(st);
 					FREENULL(st2);
-					goto nogood;
 				}
 				siz = end - next;
 			}
