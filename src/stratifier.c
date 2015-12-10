@@ -2955,8 +2955,8 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	uchar swap[32];
 	ts_t ts_now;
 
-	/* Submit anything over 99% of the diff in case of rounding errors */
-	if (diff < sdata->current_workbase->network_diff * 0.99)
+	/* Submit anything over 99.9% of the diff in case of rounding errors */
+	if (diff < sdata->current_workbase->network_diff * 0.999)
 		return;
 
 	LOGWARNING("Possible block solve diff %f !", diff);
