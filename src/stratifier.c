@@ -380,6 +380,11 @@ struct stratifier_data {
 	workbase_t *current_workbase;
 	int workbases_generated;
 
+	/* Semaphore to serialise calls to add_base */
+	sem_t update_sem;
+	/* Time we last sent out a stratum update */
+	time_t update_time;
+
 	int64_t workbase_id;
 	int64_t blockchange_id;
 	int session_id;
@@ -909,6 +914,7 @@ static void *do_update(void *arg)
 	int prio = ur->prio;
 	bool ret = false;
 	workbase_t *wb;
+	time_t now_t;
 	json_t *val;
 	char *buf;
 
@@ -963,7 +969,16 @@ static void *do_update(void *arg)
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
+	/* Serialise access to add_base to avoid out of order new block notifies */
+	cksem_wait(&sdata->update_sem);
 	add_base(ckp, wb, &new_block);
+	/* Reset the update time to avoid stacked low priority notifies. Bring
+	 * forward the next notify in case of a new block. */
+	now_t = time(NULL);
+	if (new_block)
+		now_t -= ckp->update_interval / 2;
+	sdata->update_time = now_t;
+	cksem_post(&sdata->update_sem);
 
 	stratum_broadcast_update(sdata, new_block);
 	ret = true;
@@ -1878,7 +1893,6 @@ static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	sdata_t *sdata = ckp->data;
 	unix_msg_t *umsg = NULL;
-	tv_t start_tv = {0, 0};
 	int ret = 0;
 	char *buf;
 
@@ -1889,13 +1903,11 @@ retry:
 	}
 
 	do {
-		double tdiff;
-		tv_t end_tv;
+		time_t end_t;
 
-		tv_time(&end_tv);
-		tdiff = tvdiff(&end_tv, &start_tv);
-		if (tdiff > ckp->update_interval) {
-			copy_tv(&start_tv, &end_tv);
+		end_t = time(NULL);
+		if (end_t - sdata->update_time >= ckp->update_interval) {
+			sdata->update_time = end_t;
 			if (!ckp->proxy) {
 				LOGDEBUG("%ds elapsed in strat_loop, updating gbt base",
 					 ckp->update_interval);
@@ -4679,6 +4691,8 @@ int stratifier(proc_instance_t *pi)
 		ckp->serverurls = 1;
 	}
 	cklock_init(&sdata->instance_lock);
+	cksem_init(&sdata->update_sem);
+	cksem_post(&sdata->update_sem);
 
 	mutex_init(&sdata->ckdb_lock);
 	mutex_init(&sdata->ckdb_msg_lock);
