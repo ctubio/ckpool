@@ -85,6 +85,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 				tm.tm_min,
 				tm.tm_sec, ms);
 		if (loglevel <= LOG_WARNING) {
+			fprintf(stderr, "\33[2K\r");
 			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(stderr, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
 			else
@@ -656,10 +657,8 @@ void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 		ret = true;
 	Close(sockd);
 out:
-	if (unlikely(!ret)) {
+	if (unlikely(!ret))
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
-		childsighandler(15);
-	}
 }
 
 /* Send a single message to a process instance and retrieve the response, then
