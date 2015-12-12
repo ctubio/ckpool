@@ -3636,9 +3636,9 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 					}
 				}
 				if (!ua_item) {
-					K_RLOCK(useratts_free);
+					K_WLOCK(useratts_free);
 					ua_item = k_unlink_head(useratts_free);
-					K_RUNLOCK(useratts_free);
+					K_WUNLOCK(useratts_free);
 					DATA_USERATTS(useratts, ua_item);
 					bzero(useratts, sizeof(*useratts));
 					useratts->userid = users->userid;
