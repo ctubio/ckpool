@@ -435,8 +435,10 @@ static bool send_json_msg(connsock_t *cs, const json_t *json_msg)
 
 static bool connect_proxy(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxy)
 {
-	if (cs->fd > 0)
+	if (cs->fd > 0) {
+		epoll_ctl(proxy->epfd, EPOLL_CTL_DEL, cs->fd, NULL);
 		Close(cs->fd);
+	}
 	cs->fd = connect_socket(cs->url, cs->port);
 	if (cs->fd < 0) {
 		LOGINFO("Failed to connect socket to %s:%s in connect_proxy",
