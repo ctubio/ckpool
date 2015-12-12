@@ -1400,6 +1400,14 @@ static void stratifier_reconnect_client(ckpool_t *ckp, const int64_t id)
 	send_proc(ckp->stratifier, buf);
 }
 
+static void stratifier_reconnect_user(ckpool_t *ckp, const int userid)
+{
+	char buf[256];
+
+	sprintf(buf, "reconnuser=%d", userid);
+	send_proc(ckp->stratifier, buf);
+}
+
 /* Add a share to the gdata share hashlist. Returns the share id */
 static int add_share(gdata_t *gdata, const int64_t client_id, const double diff)
 {
@@ -1809,6 +1817,8 @@ out:
 			Close(cs->fd);
 	}
 	proxi->alive = ret;
+	if (ckp->userproxy && ret && !proxi->global)
+		stratifier_reconnect_user(ckp, proxi->userid);
 	return ret;
 }
 
