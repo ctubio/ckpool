@@ -1323,8 +1323,7 @@ out:
 				break;
 			parse_method(ckp, proxi, buf);
 		};
-	}
-	if (!proxi->global) {
+	} else if (!proxi->global) {
 		LOGNOTICE("Disabling userproxy %d:%d %s that failed authorisation as %s",
 			  proxi->id, proxi->subid, proxi->url, proxi->auth);
 		proxi->disabled = true;
@@ -1402,14 +1401,6 @@ static void stratifier_reconnect_client(ckpool_t *ckp, const int64_t id)
 	char buf[256];
 
 	sprintf(buf, "reconnclient=%"PRId64, id);
-	send_proc(ckp->stratifier, buf);
-}
-
-static void stratifier_reconnect_user(ckpool_t *ckp, const int userid)
-{
-	char buf[256];
-
-	sprintf(buf, "reconnuser=%d", userid);
 	send_proc(ckp->stratifier, buf);
 }
 
@@ -1822,8 +1813,6 @@ out:
 			Close(cs->fd);
 	}
 	proxi->alive = ret;
-	if (ckp->userproxy && ret && !proxi->global)
-		stratifier_reconnect_user(ckp, proxi->userid);
 	return ret;
 }
 

@@ -2611,22 +2611,6 @@ static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
 	dec_instance_ref(sdata, client);
 }
 
-/* Reconnect all clients with a particular userid */
-static void reconnect_user_id(sdata_t *sdata, int userid)
-{
-	stratum_instance_t *client, *tmp;
-
-	LOGWARNING("Dropping user id %d", userid);
-
-	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->user_id != userid)
-			continue;
-		reconnect_client(sdata, client);
-	}
-	ck_runlock(&sdata->instance_lock);
-}
-
 /* API commands */
 
 static user_instance_t *get_user(sdata_t *sdata, const char *username);
@@ -3280,14 +3264,6 @@ retry:
 			LOGWARNING("Stratifier failed to parse reconnclient command: %s", buf);
 		else
 			reconnect_client_id(sdata, client_id);
-	} else if (cmdmatch(buf, "reconnuser")) {
-		int userid;
-
-		ret = sscanf(buf, "reconnuser=%d", &userid);
-		if (ret < 0)
-			LOGWARNING("Stratifier failed to parse reconnuser command: %s", buf);
-		else
-			reconnect_user_id(sdata, userid);
 	} else if (cmdmatch(buf, "dropall")) {
 		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
