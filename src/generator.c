@@ -116,6 +116,7 @@ struct proxy_instance {
 	bool reconnecting; /* Testing of parent in progress */
 	int64_t recruit; /* No of recruiting requests in progress */
 	bool alive;
+	bool authorised;
 
 	 /* Are we in the middle of a blocked write of this message? */
 	cs_msg_t *sending;
@@ -1812,7 +1813,7 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 		}
 		goto out;
 	}
-	ret = true;
+	proxi->authorised = ret = true;
 out:
 	if (!ret) {
 		send_stratifier_deadproxy(ckp, proxi->id, proxi->subid);
@@ -2129,6 +2130,11 @@ static void *userproxy_recv(void *arg)
 			break;
 		}
 		proxy = event.data.ptr;
+		/* Make sure we haven't popped this off before we've finished
+		 * subscribe/auth */
+		if (unlikely(!proxy->authorised))
+			continue;
+
 		cs = &proxy->cs;
 		if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
 			LOGNOTICE("Proxy %d:%d %s hung up in epoll_wait", proxy->id,
