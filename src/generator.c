@@ -1164,6 +1164,8 @@ static bool parse_method(ckpool_t *ckp, proxy_instance_t *proxi, const char *msg
 	bool ret = false;
 	const char *buf;
 
+	if (!msg)
+		goto out;
 	memset(&err, 0, sizeof(err));
 	val = json_loads(msg, 0, &err);
 	if (!val) {
