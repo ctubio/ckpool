@@ -1517,6 +1517,7 @@ static struct option long_options[] = {
 	{"redirector",	no_argument,		0,	'R'},
 	{"ckdb-sockdir",required_argument,	0,	'S'},
 	{"sockdir",	required_argument,	0,	's'},
+	{"userproxy",	no_argument,		0,	'u'},
 	{0, 0, 0, 0}
 };
 #else
@@ -1534,6 +1535,7 @@ static struct option long_options[] = {
 	{"proxy",	no_argument,		0,	'p'},
 	{"redirector",	no_argument,		0,	'R'},
 	{"sockdir",	required_argument,	0,	's'},
+	{"userproxy",	no_argument,		0,	'u'},
 	{0, 0, 0, 0}
 };
 #endif
@@ -1577,7 +1579,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpRS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpRS:s:u", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1632,18 +1634,18 @@ int main(int argc, char **argv)
 				ckp.name = optarg;
 				break;
 			case 'P':
-				if (ckp.proxy || ckp.redirector)
-					quit(1, "Cannot set both proxy or redirector and passthrough mode");
+				if (ckp.proxy || ckp.redirector || ckp.userproxy)
+					quit(1, "Cannot set another proxy type or redirector and passthrough mode");
 				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
-				if (ckp.passthrough || ckp.redirector)
-					quit(1, "Cannot set both passthrough or redirector and proxy mode");
+				if (ckp.passthrough || ckp.redirector || ckp.userproxy)
+					quit(1, "Cannot set another proxy type or redirector and proxy mode");
 				ckp.proxy = true;
 				break;
 			case 'R':
-				if (ckp.proxy || ckp.passthrough)
-					quit(1, "Cannot set both proxy or passthrough and redirector modes");
+				if (ckp.proxy || ckp.passthrough || ckp.userproxy)
+					quit(1, "Cannot set a proxy type or passthrough and redirector modes");
 				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.redirector = true;
 				break;
 			case 'S':
@@ -1651,6 +1653,11 @@ int main(int argc, char **argv)
 				break;
 			case 's':
 				ckp.socket_dir = strdup(optarg);
+				break;
+			case 'u':
+				if (ckp.proxy || ckp.redirector || ckp.passthrough)
+					quit(1, "Cannot set both userproxy and another proxy type or redirector");
+				ckp.userproxy = ckp.proxy = true;
 				break;
 		}
 	}

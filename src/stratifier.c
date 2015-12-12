@@ -282,6 +282,7 @@ struct stratum_instance {
 
 	char *useragent;
 	char *workername;
+	char *password;
 	int user_id;
 	int server; /* Which server is this instance bound to */
 
@@ -1078,6 +1079,7 @@ static void __kill_instance(sdata_t *sdata, stratum_instance_t *client)
 		client->proxy->parent->combined_clients--;
 	}
 	free(client->workername);
+	free(client->password);
 	free(client->useragent);
 	memset(client, 0, sizeof(stratum_instance_t));
 	DL_APPEND(sdata->recycled_instances, client);
@@ -4071,14 +4073,26 @@ static void queue_delayed_auth(stratum_instance_t *client)
 	ckdbq_add(ckp, ID_AUTH, val);
 }
 
+static void check_global_user(ckpool_t *ckp, user_instance_t *user, stratum_instance_t *client)
+{
+	sdata_t *sdata = ckp->data;
+	proxy_t *proxy = best_proxy(sdata);
+	int proxyid = proxy->id;
+	char buf[256];
+
+	sprintf(buf, "globaluser=%d:%d:%"PRId64":%s,%s", proxyid, user->id, client->id,
+		user->username, client->password);
+	send_generator(ckp, buf, GEN_LAX);
+}
+
 /* Needs to be entered with client holding a ref count. */
 static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val,
 			       json_t **err_val, int *errnum)
 {
 	user_instance_t *user;
 	ckpool_t *ckp = client->ckp;
+	const char *buf, *pass;
 	bool ret = false;
-	const char *buf;
 	int arr_size;
 	ts_t now;
 
@@ -4112,6 +4126,7 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		*err_val = json_string("Invalid character in username");
 		goto out;
 	}
+	pass = json_string_value(json_array_get(params_val, 1));
 	user = generate_user(ckp, client, buf);
 	client->user_id = user->id;
 	ts_realtime(&now);
@@ -4119,6 +4134,10 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	/* NOTE workername is NULL prior to this so should not be used in code
 	 * till after this point */
 	client->workername = strdup(buf);
+	if (pass)
+		client->password = strndup(pass, 64);
+	else
+		client->password = strdup("");
 	if (user->failed_authtime) {
 		time_t now_t = time(NULL);
 
@@ -4161,6 +4180,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		if (ckp->proxy) {
 			LOGNOTICE("Authorised client %"PRId64" to proxy %d:%d, worker %s as user %s",
 				  client->id, client->proxyid, client->subproxyid, buf, user->username);
+			if (ckp->userproxy)
+				check_global_user(ckp, user, client);
 		} else {
 			LOGNOTICE("Authorised client %"PRId64" worker %s as user %s",
 				  client->id, buf, user->username);

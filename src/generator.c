@@ -1012,11 +1012,11 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 		epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, subproxy->cs.fd, NULL);
 		Close(subproxy->cs.fd);
 	}
+	subproxy->disabled = true;
 	if (parent_proxy(subproxy))
 		return;
 
 	mutex_lock(&proxi->proxy_lock);
-	subproxy->disabled = true;
 	/* Make sure subproxy is still in the list */
 	subproxy = __subproxy_by_id(proxi, subproxy->subid);
 	if (likely(subproxy))
@@ -1167,7 +1167,7 @@ static bool parse_method(ckpool_t *ckp, proxy_instance_t *proxi, const char *msg
 	memset(&err, 0, sizeof(err));
 	val = json_loads(msg, 0, &err);
 	if (!val) {
-		LOGWARNING("JSON decode failed(%d): %s", err.line, err.text);
+		LOGWARNING("JSON decode of msg %s failed(%d): %s", msg, err.line, err.text);
 		goto out;
 	}
 
@@ -1278,8 +1278,13 @@ static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 
 	val = json_msg_result(buf, &res_val, &err_val);
 	if (!val) {
-		LOGWARNING("Proxy %d:%d %s failed to get a json result in auth_stratum, got: %s",
-			   proxi->id, proxi->subid, proxi->url, buf);
+		if (proxi->global) {
+			LOGWARNING("Proxy %d:%d %s failed to get a json result in auth_stratum, got: %s",
+				   proxi->id, proxi->subid, proxi->url, buf);
+		} else {
+			LOGNOTICE("Proxy %d:%d %s failed to get a json result in auth_stratum, got: %s",
+				  proxi->id, proxi->subid, proxi->url, buf);
+		}
 		goto out;
 	}
 
@@ -1313,6 +1318,12 @@ out:
 				break;
 			parse_method(ckp, proxi, buf);
 		};
+	}
+	if (!proxi->global) {
+		LOGNOTICE("Disabling userproxy %d:%d %s that failed authorisation as %s",
+			  proxi->id, proxi->subid, proxi->url, proxi->auth);
+		proxi->disabled = true;
+		disable_subproxy(ckp->data, proxi->parent, proxi);
 	}
 	return ret;
 }
@@ -2133,7 +2144,8 @@ static void *userproxy_recv(void *arg)
 		}
 		mutex_unlock(&gdata->share_lock);
 
-		do {
+		timeout = 0;
+		while ((ret = read_socket_line(cs, &timeout)) > 0) {
 			/* proxy may have been recycled here if it is not a
 			 * parent and reconnect was issued */
 			if (parse_method(ckp, proxy, cs->buf))
@@ -2144,7 +2156,7 @@ static void *userproxy_recv(void *arg)
 					  proxy->id, proxy->subid, cs->buf);
 			}
 			timeout = 0;
-		} while ((ret = read_socket_line(cs, &timeout)) > 0);
+		}
 	}
 	return NULL;
 }
@@ -2280,6 +2292,24 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 	proxy->ckp = proxy->cs.ckp = ckp;
 	HASH_ADD_INT(gdata->proxies, id, proxy);
 	return proxy;
+}
+
+static void add_userproxy(ckpool_t *ckp, gdata_t *gdata, const int userid,
+			  const char *url, const char *auth, const char *pass)
+{
+	proxy_instance_t *proxy;
+	char *newurl = strdup(url);
+	char *newauth = strdup(auth);
+	char *newpass = strdup(pass);
+	int id;
+
+	mutex_lock(&gdata->lock);
+	id = ckp->proxies++;
+	proxy = __add_userproxy(ckp, gdata, id, userid, newurl, newauth, newpass);
+	mutex_unlock(&gdata->lock);
+
+	LOGWARNING("Adding non global user %s, %d proxy %d:%s", auth, userid, id, url);
+	prepare_proxy(proxy);
 }
 
 static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
@@ -2555,6 +2585,48 @@ out:
 	send_api_response(val, sockd);
 }
 
+static void parse_globaluser(ckpool_t *ckp, gdata_t *gdata, const char *buf)
+{
+	char *url, *username, *pass = strdupa(buf);
+	int userid = -1, proxyid = -1;
+	proxy_instance_t *proxy, *tmp;
+	int64_t clientid = -1;
+	bool found = false;
+
+	sscanf(buf, "%d:%d:%"PRId64":%s", &proxyid, &userid, &clientid, pass);
+	if (unlikely(clientid < 0 || userid < 0 || proxyid < 0)) {
+		LOGWARNING("Failed to parse_globaluser ids from command %s", buf);
+		return;
+	}
+	username = strsep(&pass, ",");
+	if (unlikely(!username)) {
+		LOGWARNING("Failed to parse_globaluser username from command %s", buf);
+		return;
+	}
+
+	LOGDEBUG("Checking userproxy proxy %d user %d:%"PRId64" worker %s pass %s",
+		 proxyid, userid, clientid, username, pass);
+
+	if (unlikely(proxyid >= ckp->proxies)) {
+		LOGWARNING("Trying to find non-existent proxy id %d in parse_globaluser", proxyid);
+		return;
+	}
+
+	mutex_lock(&gdata->lock);
+	url = ckp->proxyurl[proxyid];
+	HASH_ITER(hh, gdata->proxies, proxy, tmp) {
+		if (!strcmp(proxy->auth, username)) {
+			found = true;
+			break;
+		}
+	}
+	mutex_unlock(&gdata->lock);
+
+	if (found)
+		return;
+	add_userproxy(ckp, gdata, userid, url, username, pass);
+}
+
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
@@ -2617,6 +2689,8 @@ retry:
 		parse_ableproxy(gdata, umsg->sockd, buf + 13, true);
 	} else if (cmdmatch(buf, "proxystats")) {
 		parse_proxystats(gdata, umsg->sockd, buf + 11);
+	} else if (cmdmatch(buf, "globaluser")) {
+		parse_globaluser(ckp, gdata, buf + 11);
 	} else if (cmdmatch(buf, "shutdown")) {
 		ret = 0;
 		goto out;
