@@ -539,6 +539,7 @@ rewait:
 	}
 	tv_time(&now);
 	diff = tvdiff(&now, &start);
+	copy_tv(&start, &now);
 	*timeout -= diff;
 	while (42) {
 		char readbuf[PAGESIZE] = {};
