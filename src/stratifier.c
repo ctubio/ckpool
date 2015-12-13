@@ -3579,7 +3579,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			 * which matches a recently disconnected session. */
 			if (session_id)
 				userid = userid_from_sessionid(ckp_sdata, session_id);
-			else
+			if (userid == -1)
 				userid = userid_from_sessionip(ckp_sdata, client->address);
 			if (userid != -1) {
 				sdata_t *user_sdata = select_sdata(ckp, ckp_sdata, userid);
