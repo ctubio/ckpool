@@ -1737,10 +1737,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 		LOGINFO("No valid proxy %d:%d subscription to update notify yet", id, subid);
 		goto out;
 	}
-	if (!subid)
-		LOGNOTICE("Got updated notify for proxy %d", id);
-	else
-		LOGINFO("Got updated notify for proxy %d:%d", id, subid);
+	LOGINFO("Got updated notify for proxy %d:%d", id, subid);
 
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
