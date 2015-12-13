@@ -1746,7 +1746,7 @@ static void trans_process(SEQSET *seqset, tv_t *now, K_STORE *store)
 				seqtrans->seq = seq;
 				seqtrans->seqnum = u;
 				memcpy(&(seqtrans->entry), seqentry, sizeof(SEQENTRY));
-				k_add_head(store, st_item);
+				k_add_head_nolock(store, st_item);
 			}
 			u++;
 			seqentry++;
@@ -1772,7 +1772,7 @@ static void trans_process(SEQSET *seqset, tv_t *now, K_STORE *store)
 				seqtrans->seq = seq;
 				seqtrans->seqnum = u;
 				memcpy(&(seqtrans->entry), seqentry, sizeof(SEQENTRY));
-				k_add_head(store, st_item);
+				k_add_head_nolock(store, st_item);
 			}
 			u++;
 			seqentry++;
@@ -2143,7 +2143,7 @@ gotseqset:
 						sizeof(SEQENTRY));
 					if (!lost)
 						lost = k_new_store(seqtrans_free);
-					k_add_tail(lost, st_item);
+					k_add_tail_nolock(lost, st_item);
 					seqdata->lost++;
 					seqset->lost++;
 					if (ENTRYISTRANS(u_entry)) {
@@ -2173,7 +2173,7 @@ gotseqset:
 							seqdata->reload_lost = k_new_store(seqtrans_free);
 							seqdata_reload_lost = true;
 						}
-						k_add_tail(seqdata->reload_lost, stl_item);
+						k_add_tail_nolock(seqdata->reload_lost, stl_item);
 					}
 				} else {
 					// (u-size) wasn't missing
@@ -2254,8 +2254,7 @@ gotseqset:
 		}
 		if (st_item) {
 			// recovered a lost entry
-			k_unlink_item(seqtrans_free, st_item);
-			// N.B. lock inside lock
+			k_unlink_item_nolock(seqdata->reload_lost, st_item);
 			K_WLOCK(seqtrans_free);
 			k_add_head(seqtrans_free, st_item);
 			K_WUNLOCK(seqtrans_free);

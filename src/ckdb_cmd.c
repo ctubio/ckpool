@@ -3636,9 +3636,9 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 					}
 				}
 				if (!ua_item) {
-					K_RLOCK(useratts_free);
+					K_WLOCK(useratts_free);
 					ua_item = k_unlink_head(useratts_free);
-					K_RUNLOCK(useratts_free);
+					K_WUNLOCK(useratts_free);
 					DATA_USERATTS(useratts, ua_item);
 					bzero(useratts, sizeof(*useratts));
 					useratts->userid = users->userid;
@@ -5796,7 +5796,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	char description[TXT_BIG+1] = { '\0' };
 	char extra[TXT_BIG+1] = { '\0' };
 	char status[TXT_FLAG+1] = { MARK_READY, '\0' };
-	bool ok;
+	bool ok = false, pps;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -6236,6 +6236,39 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 					   " now %s",
 					   old ? "On" : "Off",
 					   markersummary_auto ? "On" : "Off");
+		ok = true;
+	} else if (strcasecmp(action, "pps") == 0) {
+		/* Recalculate a shift's rewards/rewarded
+		 * Require markerid */
+		i_markerid = require_name(trf_root, "markerid", 1,
+					  (char *)intpatt, reply, siz);
+		if (!i_markerid)
+			return strdup(reply);
+		TXT_TO_BIGINT("markerid", transfer_data(i_markerid), markerid);
+
+		K_RLOCK(workmarkers_free);
+		wm_item = find_workmarkerid(markerid, false, MARKER_PROCESSED);
+		K_RUNLOCK(workmarkers_free);
+		if (!wm_item) {
+			snprintf(reply, siz, "no markerid %"PRId64, markerid);
+			return strdup(reply);
+		}
+		DATA_WORKMARKERS(workmarkers, wm_item);
+		pps = shift_rewards(wm_item);
+		if (pps) {
+			snprintf(msg, sizeof(msg),
+				 "shift '%s' markerid %"PRId64" rewards %d "
+				 "rewarded %.3e pps %.3e",
+				 workmarkers->description,
+				 workmarkers->markerid, workmarkers->rewards,
+				 workmarkers->rewarded, workmarkers->pps_value);
+		} else {
+			snprintf(msg, sizeof(msg),
+				 "shift '%s' markerid %"PRId64" no rewards yet"
+				 " pps %.3e",
+				 workmarkers->description,
+				 workmarkers->markerid, workmarkers->pps_value);
+		}
 		ok = true;
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
