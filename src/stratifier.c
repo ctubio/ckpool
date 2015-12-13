@@ -3525,6 +3525,7 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 {
 	ckpool_t *ckp = client->ckp;
 	sdata_t *sdata, *ckp_sdata = ckp->data;
+	int session_id = 0, userid = -1;
 	bool old_match = false;
 	char sessionid[12];
 	int arr_size;
@@ -3547,7 +3548,6 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	/* NOTE useragent is NULL prior to this so should not be used in code
 	 * till after this point */
 	if (arr_size > 0) {
-		int session_id = 0;
 		const char *buf;
 
 		buf = json_string_value(json_array_get(params_val, 0));
@@ -3571,25 +3571,25 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 				__fill_enonce1data(sdata->current_workbase, client);
 				ck_runlock(&ckp_sdata->workbase_lock);
 			}
-		} else if (ckp->proxy) {
-			int userid;
-
-			/* Use the session_id to tell us which user this was.
-			 * If it's not available, see if there's an IP address
-			 * which matches a recently disconnected session. */
-			if (session_id)
-				userid = userid_from_sessionid(ckp_sdata, session_id);
-			if (userid == -1)
-				userid = userid_from_sessionip(ckp_sdata, client->address);
-			if (userid != -1) {
-				sdata_t *user_sdata = select_sdata(ckp, ckp_sdata, userid);
-
-				if (user_sdata)
-					sdata = user_sdata;
-			}
 		}
 	} else
 		client->useragent = ckzalloc(1);
+
+	if (ckp->proxy) {
+		/* Use the session_id to tell us which user this was.
+			* If it's not available, see if there's an IP address
+			* which matches a recently disconnected session. */
+		if (session_id)
+			userid = userid_from_sessionid(ckp_sdata, session_id);
+		if (userid == -1)
+			userid = userid_from_sessionip(ckp_sdata, client->address);
+		if (userid != -1) {
+			sdata_t *user_sdata = select_sdata(ckp, ckp_sdata, userid);
+
+			if (user_sdata)
+				sdata = user_sdata;
+		}
+	}
 
 	client->sdata = sdata;
 	if (ckp->proxy) {
