@@ -137,6 +137,7 @@ ckpool supports the following options:
 -R | --redirector
 -S CKDB-SOCKDIR | --ckdb-sockdir CKDB-SOCKDIR
 -s SOCKDIR | --sockdir SOCKDIR
+-u | --userproxy
 
 
 -A Standalone mode tells ckpool not to try to communicate with ckdb or log any
@@ -198,6 +199,12 @@ This option does not exist when built without ckdb support.
 
 -s <SOCKDIR> tells ckpool which directory to place its own communication
 sockets (/tmp by default)
+
+-u Userproxy mode will start ckpool in proxy mode as per the -p option above,
+but in addition it will accept username/passwords from the stratum connects
+and try to open additional connections with those credentials to the upstream
+pool specified in the configuration file and then reconnect miners to mine with
+their chosen username/password to the upstream pool.
 
 
 ckdb takes the following options:
