@@ -361,6 +361,7 @@ struct session {
 	int64_t client_id;
 	int userid;
 	time_t added;
+	char address[INET6_ADDRSTRLEN];
 };
 
 #define ID_AUTH 0
@@ -1126,6 +1127,7 @@ static void __disconnect_session(sdata_t *sdata, const stratum_instance_t *clien
 	session->client_id = client->id;
 	session->userid = client->user_id;
 	session->added = now_t;
+	strcpy(session->address, client->address);
 	HASH_ADD_INT(sdata->disconnected_sessions, session_id, session);
 	sdata->stats.disconnected++;
 	sdata->disconnected_generated++;
@@ -3468,7 +3470,7 @@ out:
 static int userid_from_sessionid(sdata_t *sdata, const int session_id)
 {
 	session_t *session;
-	int ret = 0;
+	int ret = -1;
 
 	ck_wlock(&sdata->instance_lock);
 	HASH_FIND_INT(sdata->disconnected_sessions, &session_id, session);
@@ -3481,6 +3483,33 @@ static int userid_from_sessionid(sdata_t *sdata, const int session_id)
 out_unlock:
 	ck_wunlock(&sdata->instance_lock);
 
+	if (ret != -1)
+		LOGINFO("Found old session id %d for userid %d", session_id, ret);
+	return ret;
+}
+
+static int userid_from_sessionip(sdata_t *sdata, const char *address)
+{
+	session_t *session, *tmp;
+	int ret = -1;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->disconnected_sessions, session, tmp) {
+		if (!strcmp(session->address, address)) {
+			ret = session->userid;
+			break;
+		}
+	}
+	if (ret == -1)
+		goto out_unlock;
+	HASH_DEL(sdata->disconnected_sessions, session);
+	sdata->stats.disconnected--;
+	dealloc(session);
+out_unlock:
+	ck_wunlock(&sdata->instance_lock);
+
+	if (ret != -1)
+		LOGINFO("Found old session address %s for userid %d", address, ret);
 	return ret;
 }
 
@@ -3542,12 +3571,17 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 				__fill_enonce1data(sdata->current_workbase, client);
 				ck_runlock(&ckp_sdata->workbase_lock);
 			}
-		} else if (ckp->proxy && session_id) {
+		} else if (ckp->proxy) {
 			int userid;
 
-			/* Use the session_id to tell us which user this was */
-			userid = userid_from_sessionid(ckp_sdata, session_id);
-			if (userid) {
+			/* Use the session_id to tell us which user this was.
+			 * If it's not available, see if there's an IP address
+			 * which matches a recently disconnected session. */
+			if (session_id)
+				userid = userid_from_sessionid(ckp_sdata, session_id);
+			else
+				userid = userid_from_sessionip(ckp_sdata, client->address);
+			if (userid != -1) {
 				sdata_t *user_sdata = select_sdata(ckp, ckp_sdata, userid);
 
 				if (user_sdata)
