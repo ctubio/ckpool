@@ -831,10 +831,10 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 out_empty:
 	empty_socket(cs->fd);
 	empty_buffer(cs);
-	if (!val) {
+	if (!val && cs->fd > 0) {
 		/* Assume that a failed request means the socket will be closed
 		 * and reopen it */
-		LOGWARNING("Reopening socket to %s:%s", cs->url, cs->port);
+		LOGWARNING("Attempting to reopen socket to %s:%s", cs->url, cs->port);
 		Close(cs->fd);
 		cs->fd = connect_socket(cs->url, cs->port);
 	}
