@@ -3513,7 +3513,7 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 	int64_t sdiff;
 
 	if (unlikely(!client_active(client))) {
-		LOGWARNING("Attempted to suggest diff on unauthorised client %"PRId64, client->id);
+		LOGNOTICE("Attempted to suggest diff on unauthorised client %"PRId64, client->id);
 		return;
 	}
 	if (arr_val && json_is_integer(arr_val))
