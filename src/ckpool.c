@@ -500,13 +500,13 @@ void empty_buffer(connsock_t *cs)
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, float *timeout)
 {
-	int fd = cs->fd, ret = -1;
 	char *eom = NULL;
 	tv_t start, now;
 	size_t buflen;
+	int ret = -1;
 	float diff;
 
-	if (unlikely(fd < 0))
+	if (unlikely(cs->fd < 0))
 		goto out;
 
 	if (unlikely(!cs->buf))
@@ -527,7 +527,7 @@ rewait:
 		ret = 0;
 		goto out;
 	}
-	ret = wait_read_select(fd, eom ? 0 : *timeout);
+	ret = wait_read_select(cs->fd, eom ? 0 : *timeout);
 	if (ret < 1) {
 		if (!ret) {
 			if (eom)
@@ -546,7 +546,7 @@ rewait:
 		int backoff = 1;
 		char *newbuf;
 
-		ret = recv(fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
+		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
 			/* No more to read or closed socket after valid message */
 			if (eom)
