@@ -1698,6 +1698,8 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
 		si->notify = ckp->btcdnotify[i];
+		cksem_init(&si->cs.sem);
+		cksem_post(&si->cs.sem);
 	}
 
 	ret = gen_loop(pi);
