@@ -745,6 +745,8 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 	double elapsed;
 	int len, ret;
 
+	/* Serialise all calls in case we use cs from multiple threads */
+	cksem_wait(&cs->sem);
 	if (unlikely(cs->fd < 0)) {
 		LOGWARNING("FD %d invalid in %s", cs->fd, __func__);
 		goto out;
@@ -839,6 +841,7 @@ out_empty:
 out:
 	free(http_req);
 	dealloc(cs->buf);
+	cksem_post(&cs->sem);
 	return val;
 }
 
