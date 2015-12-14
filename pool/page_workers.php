@@ -25,9 +25,9 @@ function worktitle($data, $user)
  $pg .= '<td class=dr>&laquo;Elapsed</td>';
  $pg .= "<td class=dr><span class=nb><$r id=srtinv data-sf=r7>:Invalid</span></td>";
  $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtstale data-sf=r8>:Stale</span></td>";
- $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtdup data-sf=r9>:Duplicate</span></td>";
- $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srthi data-sf=r10>:High</span></td>";
- $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtreject data-sf=r11>:Reject</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtdup data-sf=r9>:Dup</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srthi data-sf=r10>:Hi</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtreject data-sf=r11>:Rej</span></td>";
  $pg .= '<td class=dr>Block&nbsp;%</td>';
  $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r13>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
