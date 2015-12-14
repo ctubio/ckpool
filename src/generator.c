@@ -147,6 +147,7 @@ static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 	/* Has this server already been reconnected? */
 	if (cs->fd > 0)
 		return true;
+	si->alive = false;
 	if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
 		LOGWARNING("Failed to extract address from %s", si->url);
 		return ret;
@@ -189,6 +190,7 @@ out:
 		/* Close and invalidate the file handle */
 		Close(cs->fd);
 	} else {
+		si->alive = true;
 		LOGNOTICE("Server alive: %s:%s", cs->url, cs->port);
 		keep_sockalive(cs->fd);
 	}
@@ -207,19 +209,31 @@ retry:
 	if (!ping_main(ckp))
 		goto out;
 
+	/* First find a server that is already flagged alive if possible
+	 * without blocking on server_alive() */
+	for (i = 0; i < ckp->btcds; i++) {
+		server_instance_t *si = ckp->servers[i];
+		cs = &si->cs;
+
+		if (si->alive && cs->fd > 0) {
+			alive = si;
+			goto living;
+		}
+	}
+
+	/* No servers flagged alive, try to connect to them blocking */
 	for (i = 0; i < ckp->btcds; i++) {
 		server_instance_t *si = ckp->servers[i];
 
 		if (server_alive(ckp, si, false)) {
 			alive = si;
-			break;
+			goto living;
 		}
 	}
-	if (!alive) {
-		LOGWARNING("CRITICAL: No bitcoinds active!");
-		sleep(5);
-		goto retry;
-	}
+	LOGWARNING("CRITICAL: No bitcoinds active!");
+	sleep(5);
+	goto retry;
+living:
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 out:
@@ -276,7 +290,7 @@ retry:
 	ckmsgq_add(gdata->srvchk, si);
 
 	do {
-		selret = wait_read_select(us->sockd, 5);
+		selret = wait_recv_select(us->sockd, 5);
 		if (!selret && !ping_main(ckp)) {
 			LOGEMERG("Generator failed to ping main process, exiting");
 			ret = 1;
@@ -1618,7 +1632,7 @@ retry:
 	ckmsgq_add(gdata->srvchk, proxi->si);
 
 	do {
-		selret = wait_read_select(us->sockd, 5);
+		selret = wait_recv_select(us->sockd, 5);
 		if (!selret && !ping_main(ckp)) {
 			LOGEMERG("Generator failed to ping main process, exiting");
 			ret = 1;
