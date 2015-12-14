@@ -285,7 +285,7 @@ reconnect:
 	gbt = si->data;
 	cs = &si->cs;
 	if (!old_si)
-		LOGWARNING("Connected to bitoind: %s:%s", cs->url, cs->port);
+		LOGWARNING("Connected to bitcoind: %s:%s", cs->url, cs->port);
 	else if (si != old_si)
 		LOGWARNING("Failed over to bitcoind: %s:%s", cs->url, cs->port);
 
