@@ -4877,10 +4877,14 @@ static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, const
 /* For sending a single stratum template update */
 static void stratum_send_update(sdata_t *sdata, const int64_t client_id, const bool clean)
 {
+	ckpool_t *ckp = sdata->ckp;
 	json_t *json_msg;
 
 	if (unlikely(!sdata->current_workbase)) {
-		LOGWARNING("No current workbase to send stratum update");
+		if (!ckp->proxy)
+			LOGWARNING("No current workbase to send stratum update");
+		else
+			LOGDEBUG("No current workbase to send stratum update for client %"PRId64, client_id);
 		return;
 	}
 
