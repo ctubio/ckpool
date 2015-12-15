@@ -146,7 +146,7 @@ struct generator_data {
 	int subproxies_generated;
 
 	int proxy_notify_id;	// Globally increasing notify id
-	ckmsgq_t *srvchk;	// Server check message queue
+	server_instance_t *si;	/* Current server instance */
 	pthread_t pth_uprecv;	// User proxy receive thread
 	pthread_t pth_psend;	// Combined proxy send thread
 
@@ -177,6 +177,7 @@ static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 	/* Has this server already been reconnected? */
 	if (cs->fd > 0)
 		return true;
+	si->alive = false;
 	if (!extract_sockaddr(si->url, &cs->url, &cs->port)) {
 		LOGWARNING("Failed to extract address from %s", si->url);
 		return ret;
@@ -218,8 +219,11 @@ out:
 	if (!ret) {
 		/* Close and invalidate the file handle */
 		Close(cs->fd);
-	} else
+	} else {
+		si->alive = true;
+		LOGNOTICE("Server alive: %s:%s", cs->url, cs->port);
 		keep_sockalive(cs->fd);
+	}
 	return ret;
 }
 
@@ -235,19 +239,31 @@ retry:
 	if (!ping_main(ckp))
 		goto out;
 
+	/* First find a server that is already flagged alive if possible
+	 * without blocking on server_alive() */
+	for (i = 0; i < ckp->btcds; i++) {
+		server_instance_t *si = ckp->servers[i];
+		cs = &si->cs;
+
+		if (si->alive && cs->fd > 0) {
+			alive = si;
+			goto living;
+		}
+	}
+
+	/* No servers flagged alive, try to connect to them blocking */
 	for (i = 0; i < ckp->btcds; i++) {
 		server_instance_t *si = ckp->servers[i];
 
 		if (server_alive(ckp, si, false)) {
 			alive = si;
-			break;
+			goto living;
 		}
 	}
-	if (!alive) {
-		LOGWARNING("CRITICAL: No bitcoinds active!");
-		sleep(5);
-		goto retry;
-	}
+	LOGWARNING("CRITICAL: No bitcoinds active!");
+	sleep(5);
+	goto retry;
+living:
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 out:
@@ -284,11 +300,9 @@ static void clear_unix_msg(unix_msg_t **umsg)
 
 static int gen_loop(proc_instance_t *pi)
 {
-	server_instance_t *si = NULL;
-	bool reconnecting = false;
+	server_instance_t *si = NULL, *old_si;
 	unix_msg_t *umsg = NULL;
 	ckpool_t *ckp = pi->ckp;
-	gdata_t *gdata = ckp->data;
 	bool started = false;
 	char *buf = NULL;
 	connsock_t *cs;
@@ -298,24 +312,24 @@ static int gen_loop(proc_instance_t *pi)
 
 reconnect:
 	clear_unix_msg(&umsg);
-	if (si) {
-		kill_server(si);
-		reconnecting = true;
-	}
+	old_si = si;
 	si = live_server(ckp);
 	if (!si)
 		goto out;
+	if (unlikely(!started)) {
+		started = true;
+		LOGWARNING("%s generator ready", ckp->name);
+	}
 
 	gbt = si->data;
 	cs = &si->cs;
-	if (reconnecting) {
+	if (!old_si)
+		LOGWARNING("Connected to bitcoind: %s:%s", cs->url, cs->port);
+	else if (si != old_si)
 		LOGWARNING("Failed over to bitcoind: %s:%s", cs->url, cs->port);
-		reconnecting = false;
-	}
 
 retry:
 	clear_unix_msg(&umsg);
-	ckmsgq_add(gdata->srvchk, si);
 
 	do {
 		umsg = get_unix_msg(pi);
@@ -327,7 +341,7 @@ retry:
 	} while (!umsg);
 
 	if (unlikely(cs->fd < 0)) {
-		LOGWARNING("Bitcoind socket invalidated, will attempt failover");
+		LOGWARNING("%s:%s Bitcoind socket invalidated, will attempt failover", cs->url, cs->port);
 		goto reconnect;
 	}
 
@@ -358,10 +372,6 @@ retry:
 				cs->url, cs->port);
 			send_unix_msg(umsg->sockd, "failed");
 		} else {
-			if (unlikely(!started)) {
-				started = true;
-				LOGWARNING("%s generator ready", ckp->name);
-			}
 			send_unix_msg(umsg->sockd, hash);
 		}
 	} else if (cmdmatch(buf, "getlast")) {
@@ -378,11 +388,6 @@ retry:
 				send_unix_msg(umsg->sockd, "failed");
 				goto reconnect;
 			} else {
-				if (unlikely(!started)) {
-					started = true;
-					LOGWARNING("%s generator ready", ckp->name);
-				}
-
 				send_unix_msg(umsg->sockd, hash);
 				LOGDEBUG("Hash: %s", hash);
 			}
@@ -2724,8 +2729,38 @@ out:
 	return ret;
 }
 
+/* Check which servers are alive, maintaining a connection with them and
+ * reconnect if a higher priority one is available. */
+static void *server_watchdog(void *arg)
+{
+	ckpool_t *ckp = (ckpool_t *)arg;
+	gdata_t *gdata = ckp->data;
+
+	while (42) {
+		server_instance_t *best = NULL;
+		ts_t timer_t;
+		int i;
+
+		cksleep_prepare_r(&timer_t);
+		for (i = 0; i < ckp->btcds; i++) {
+			server_instance_t *si  = ckp->servers[i];
+
+			/* Have we reached the current server? */
+			if (server_alive(ckp, si, true) && !best)
+				best = si;
+		}
+		if (best && best != gdata->si) {
+			gdata->si = best;
+			send_proc(ckp->generator, "reconnect");
+		}
+		cksleep_ms_r(&timer_t, 5000);
+	}
+	return NULL;
+}
+
 static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
+	pthread_t pth_watchdog;
 	server_instance_t *si;
 	int i, ret;
 
@@ -2737,8 +2772,12 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 		si->auth = ckp->btcdauth[i];
 		si->pass = ckp->btcdpass[i];
 		si->notify = ckp->btcdnotify[i];
+		si->id = i;
+		cksem_init(&si->cs.sem);
+		cksem_post(&si->cs.sem);
 	}
 
+	create_pthread(&pth_watchdog, server_watchdog, ckp);
 	ret = gen_loop(pi);
 
 	for (i = 0; i < ckp->btcds; i++) {
@@ -2798,41 +2837,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	return ret;
 }
 
-/* Tell the watchdog what the current server instance is and decide if we
- * should check to see if the higher priority servers are alive and fallback */
-static void server_watchdog(ckpool_t *ckp, server_instance_t *cursi)
-{
-	static time_t last_t = 0;
-	bool alive = false;
-	time_t now_t;
-	int i;
-
-	/* Rate limit to checking only once every 5 seconds */
-	now_t = time(NULL);
-	if (now_t <= last_t + 5)
-		return;
-
-	last_t = now_t;
-
-	/* Is this the highest priority server already? */
-	if (!cursi->id)
-		return;
-
-	for (i = 0; i < ckp->btcds; i++) {
-		server_instance_t *si  = ckp->servers[i];
-
-		/* Have we reached the current server? */
-		if (si == cursi)
-			return;
-
-		alive = server_alive(ckp, si, true);
-		if (alive)
-			break;
-	}
-	if (alive)
-		reconnect_generator(ckp);
-}
-
 int generator(proc_instance_t *pi)
 {
 	ckpool_t *ckp = pi->ckp;
@@ -2859,10 +2863,8 @@ int generator(proc_instance_t *pi)
 		} while (!buf);
 		dealloc(buf);
 		ret = proxy_mode(ckp, pi);
-	} else {
-		gdata->srvchk = create_ckmsgq(ckp, "srvchk", &server_watchdog);
+	} else
 		ret = server_mode(ckp, pi);
-	}
 out:
 	dealloc(ckp->data);
 	return process_exit(ckp, pi, ret);

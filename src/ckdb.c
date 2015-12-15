@@ -483,6 +483,9 @@ K_STORE *markersummary_store;
 K_TREE *markersummary_pool_root;
 K_STORE *markersummary_pool_store;
 
+// The markerid load start for markersummary
+char *mark_start = NULL;
+
 // WORKMARKERS
 K_TREE *workmarkers_root;
 K_TREE *workmarkers_workinfoid_root;
@@ -1746,7 +1749,7 @@ static void trans_process(SEQSET *seqset, tv_t *now, K_STORE *store)
 				seqtrans->seq = seq;
 				seqtrans->seqnum = u;
 				memcpy(&(seqtrans->entry), seqentry, sizeof(SEQENTRY));
-				k_add_head(store, st_item);
+				k_add_head_nolock(store, st_item);
 			}
 			u++;
 			seqentry++;
@@ -1772,7 +1775,7 @@ static void trans_process(SEQSET *seqset, tv_t *now, K_STORE *store)
 				seqtrans->seq = seq;
 				seqtrans->seqnum = u;
 				memcpy(&(seqtrans->entry), seqentry, sizeof(SEQENTRY));
-				k_add_head(store, st_item);
+				k_add_head_nolock(store, st_item);
 			}
 			u++;
 			seqentry++;
@@ -2143,7 +2146,7 @@ gotseqset:
 						sizeof(SEQENTRY));
 					if (!lost)
 						lost = k_new_store(seqtrans_free);
-					k_add_tail(lost, st_item);
+					k_add_tail_nolock(lost, st_item);
 					seqdata->lost++;
 					seqset->lost++;
 					if (ENTRYISTRANS(u_entry)) {
@@ -2173,7 +2176,7 @@ gotseqset:
 							seqdata->reload_lost = k_new_store(seqtrans_free);
 							seqdata_reload_lost = true;
 						}
-						k_add_tail(seqdata->reload_lost, stl_item);
+						k_add_tail_nolock(seqdata->reload_lost, stl_item);
 					}
 				} else {
 					// (u-size) wasn't missing
@@ -2254,8 +2257,7 @@ gotseqset:
 		}
 		if (st_item) {
 			// recovered a lost entry
-			k_unlink_item(seqtrans_free, st_item);
-			// N.B. lock inside lock
+			k_unlink_item_nolock(seqdata->reload_lost, st_item);
 			K_WLOCK(seqtrans_free);
 			k_add_head(seqtrans_free, st_item);
 			K_WUNLOCK(seqtrans_free);
@@ -5640,6 +5642,7 @@ static struct option long_options[] = {
 	{ "loglevel",		required_argument,	0,	'l' },
 	// marker = enable mark/workmarker/markersummary auto generation
 	{ "marker",		no_argument,		0,	'm' },
+	{ "markstart",		required_argument,	0,	'M' },
 	{ "name",		required_argument,	0,	'n' },
 	{ "dbpass",		required_argument,	0,	'p' },
 	{ "btc-pass",		required_argument,	0,	'P' },
@@ -5684,7 +5687,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:ghkl:mn:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:ghkl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
@@ -5742,6 +5745,9 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				markersummary_auto = true;
+				break;
+			case 'M':
+				mark_start = strdup(optarg);
 				break;
 			case 'n':
 				ckp.name = strdup(optarg);

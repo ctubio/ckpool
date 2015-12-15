@@ -80,6 +80,8 @@ struct connsock {
 	int bufofs;
 	int buflen;
 	ckpool_t *ckp;
+	/* Semaphore used to serialise request/responses */
+	sem_t sem;
 };
 
 typedef struct connsock connsock_t;
@@ -110,6 +112,7 @@ struct server_instance {
 	char *auth;
 	char *pass;
 	bool notify;
+	bool alive;
 	connsock_t cs;
 
 	void *data; // Private data

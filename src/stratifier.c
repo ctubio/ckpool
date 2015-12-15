@@ -970,10 +970,10 @@ static void broadcast_ping(sdata_t *sdata);
 static void *do_update(void *arg)
 {
 	struct update_req *ur = (struct update_req *)arg;
+	int prio = ur->prio, retries = 0;
 	ckpool_t *ckp = ur->ckp;
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
-	int prio = ur->prio;
 	bool ret = false;
 	workbase_t *wb;
 	time_t now_t;
@@ -983,15 +983,20 @@ static void *do_update(void *arg)
 	pthread_detach(pthread_self());
 	rename_proc("updater");
 
+retry:
 	buf = send_recv_generator(ckp, "getbase", prio);
 	if (unlikely(!buf)) {
 		LOGNOTICE("Get base in update_base delayed due to higher priority request");
 		goto out;
 	}
 	if (unlikely(cmdmatch(buf, "failed"))) {
-		LOGWARNING("Generator returned failure in update_base");
-		goto out;
+		if (retries++ < 5 || prio == GEN_PRIORITY) {
+			LOGWARNING("Generator returned failure in update_base, retry #%d", retries);
+			goto retry;
+		}
 	}
+	if (unlikely(retries))
+		LOGWARNING("Generator succeeded in update_base after retrying");
 
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
@@ -4968,7 +4973,7 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 	int64_t sdiff;
 
 	if (unlikely(!client_active(client))) {
-		LOGWARNING("Attempted to suggest diff on unauthorised client %"PRId64, client->id);
+		LOGNOTICE("Attempted to suggest diff on unauthorised client %"PRId64, client->id);
 		return;
 	}
 	if (arr_val && json_is_integer(arr_val))
@@ -4987,6 +4992,13 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 	else
 		client->diff = sdiff;
 	stratum_send_diff(sdata, client);
+}
+
+/* Send diff first when sending the first stratum template after subscribing */
+static void init_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id)
+{
+	stratum_send_diff(sdata, client);
+	stratum_send_update(sdata, client_id, true);
 }
 
 /* Enter with client holding ref count */
@@ -5027,7 +5039,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		json_object_set_new_nocheck(val, "error", json_null());
 		stratum_add_send(sdata, val, client_id);
 		if (likely(client->subscribed))
-			update_client(client, client_id);
+			init_client(sdata, client, client_id);
 		return;
 	}
 

@@ -515,13 +515,14 @@ void empty_buffer(connsock_t *cs)
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, float *timeout)
 {
-	int fd = cs->fd, ret = -1;
 	char *eom = NULL;
 	tv_t start, now;
 	size_t buflen;
+	int ret = -1;
+	bool polled;
 	float diff;
 
-	if (unlikely(fd < 0))
+	if (unlikely(cs->fd < 0))
 		goto out;
 
 	if (unlikely(!cs->buf))
@@ -542,7 +543,8 @@ rewait:
 		ret = 0;
 		goto out;
 	}
-	ret = wait_read_select(fd, eom ? 0 : *timeout);
+	ret = wait_recv_select(cs->fd, eom ? 0 : *timeout);
+	polled = true;
 	if (ret < 1) {
 		if (!ret) {
 			if (eom)
@@ -558,19 +560,23 @@ rewait:
 	}
 	tv_time(&now);
 	diff = tvdiff(&now, &start);
+	copy_tv(&start, &now);
 	*timeout -= diff;
 	while (42) {
 		char readbuf[PAGESIZE] = {};
 		int backoff = 1;
 		char *newbuf;
 
-		ret = recv(fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
+		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
 			/* No more to read or closed socket after valid message */
 			if (eom)
 				break;
-			/* Have we used up all the timeout yet? */
-			if (*timeout >= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
+			/* Have we used up all the timeout yet? If polled is
+			 * set that means poll has said there should be
+			 * something to read and if we get nothing it means the
+			 * socket is closed. */
+			if (!polled && *timeout >= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 				goto rewait;
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
@@ -578,6 +584,7 @@ rewait:
 				LOGERR("Failed to recv in read_socket_line");
 			goto out;
 		}
+		polled = false;
 		buflen = cs->bufofs + ret + 1;
 		while (42) {
 			newbuf = realloc(cs->buf, buflen);
@@ -766,6 +773,8 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 	double elapsed;
 	int len, ret;
 
+	/* Serialise all calls in case we use cs from multiple threads */
+	cksem_wait(&cs->sem);
 	if (unlikely(cs->fd < 0)) {
 		LOGWARNING("FD %d invalid in %s", cs->fd, __func__);
 		goto out;
@@ -853,13 +862,20 @@ out_empty:
 	if (!val) {
 		/* Assume that a failed request means the socket will be closed
 		 * and reopen it */
-		LOGWARNING("Reopening socket to %s:%s", cs->url, cs->port);
 		Close(cs->fd);
-		cs->fd = connect_socket(cs->url, cs->port);
 	}
 out:
+	if (cs->fd < 0) {
+		/* Attempt to reopen a socket that has been closed due to a
+		 * failed request or if the socket was closed while trying to
+		 * read/write to it. */
+		cs->fd = connect_socket(cs->url, cs->port);
+		LOGWARNING("Attempt to reopen socket to %s:%s %ssuccessful",
+			   cs->url, cs->port, cs->fd > 0 ? "" : "un");
+	}
 	free(http_req);
 	dealloc(cs->buf);
+	cksem_post(&cs->sem);
 	return val;
 }
 

@@ -620,13 +620,17 @@ void block_socket(int fd)
 
 void _close(int *fd, const char *file, const char *func, const int line)
 {
+	int sockd;
+
 	if (*fd < 0)
 		return;
-	LOGDEBUG("Closing file handle %d", *fd);
-	if (unlikely(close(*fd)))
-		LOGWARNING("Close of fd %d failed with errno %d:%s from %s %s:%d",
-			   *fd, errno, strerror(errno), file, func, line);
+	sockd = *fd;
+	LOGDEBUG("Closing file handle %d", sockd);
 	*fd = -1;
+	if (unlikely(close(sockd))) {
+		LOGWARNING("Close of fd %d failed with errno %d:%s from %s %s:%d",
+			   sockd, errno, strerror(errno), file, func, line);
+	}
 }
 
 int bind_socket(char *url, char *port)
@@ -754,17 +758,15 @@ out:
 
 void empty_socket(int fd)
 {
+	char buf[PAGESIZE];
 	int ret;
 
 	if (fd < 1)
 		return;
 
 	do {
-		char buf[PAGESIZE];
-
-		ret = wait_read_select(fd, 0);
+		ret = recv(fd, buf, PAGESIZE - 1, MSG_DONTWAIT);
 		if (ret > 0) {
-			ret = recv(fd, buf, PAGESIZE - 1, 0);
 			buf[ret] = 0;
 			LOGDEBUG("Discarding: %s", buf);
 		}
@@ -903,21 +905,45 @@ int wait_close(int sockd, int timeout)
 	return sfd.revents & (POLLHUP | POLLRDHUP | POLLERR);
 }
 
-/* Emulate a select read wait for high fds that select doesn't support */
-int wait_read_select(int sockd, float timeout)
+/* Emulate a select read wait for high fds that select doesn't support.
+ * wait_read_select is for unix sockets and _wait_recv_select for regular
+ * sockets. */
+int _wait_read_select(int *sockd, float timeout)
 {
 	struct pollfd sfd;
 	int ret = -1;
 
-	if (unlikely(sockd < 0))
+	if (unlikely(*sockd < 0))
 		goto out;
-	sfd.fd = sockd;
+	sfd.fd = *sockd;
 	sfd.events = POLLIN | POLLRDHUP;
-	sfd.revents = 0;
 	timeout *= 1000;
 	ret = poll(&sfd, 1, timeout);
-	if (ret && !(sfd.revents & POLLIN))
+	if (ret > 0 && sfd.revents & (POLLERR)) {
 		ret = -1;
+		_Close(sockd);
+	}
+out:
+	return ret;
+}
+
+int _wait_recv_select(int *sockd, float timeout)
+{
+	struct pollfd sfd;
+	int ret = -1;
+
+	if (unlikely(*sockd < 0))
+		goto out;
+	sfd.fd = *sockd;
+	sfd.events = POLLIN | POLLRDHUP;
+	timeout *= 1000;
+	ret = poll(&sfd, 1, timeout);
+	/* If POLLRDHUP occurs, we may still have data to read so let recv()
+	 * after this determine if the socket can still be used. */
+	if (ret > 0 && sfd.revents & (POLLHUP | POLLERR)) {
+		ret = -1;
+		_Close(sockd);
+	}
 out:
 	return ret;
 }
@@ -1978,6 +2004,8 @@ double diff_from_nbits(char *nbits)
 
 	pow = nbits[0];
 	powdiff = (8 * (0x1d - 3)) - (8 * (pow - 3));
+	if (powdiff < 8)
+		powdiff = 8;
 	diff32 = be32toh(*((uint32_t *)nbits)) & 0x00FFFFFF;
 	if (likely(powdiff > 0))
 		numerator = 0xFFFFULL << powdiff;
