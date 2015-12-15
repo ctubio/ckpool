@@ -302,7 +302,7 @@ retry:
 	} while (selret < 1);
 
 	if (unlikely(cs->fd < 0)) {
-		LOGWARNING("Bitcoind socket invalidated, will attempt failover");
+		LOGWARNING("%s:%s Bitcoind socket invalidated, will attempt failover", cs->url, cs->port);
 		goto reconnect;
 	}
 
