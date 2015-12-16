@@ -123,10 +123,10 @@ function howmanyhrs($tot, $days = false, $dh = false)
 				if ($min >= 30)
 				{
 					$hr++;
-					if ($hr == 24)
+					if ($hr > 23)
 					{
-						$days++;
-						$hr = 0;
+						$dy++;
+						$hr -= 24;
 					}
 				}
 				$ds = '';
