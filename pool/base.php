@@ -121,14 +121,26 @@ function howmanyhrs($tot, $days = false, $dh = false)
 			if ($dh == true)
 			{
 				if ($min >= 30)
+				{
 					$hr++;
+					if ($hr == 24)
+					{
+						$days++;
+						$hr = 0;
+					}
+				}
 				$ds = '';
 				if ($dy != 1)
 					$ds = 's';
-				$hs = '';
-				if ($hr != 1)
-					$hs = 's';
-				$des = "${dy}day$ds ${hr}hr$hs";
+				if ($hr == 0)
+					$des = "${dy}day$ds";
+				else
+				{
+					$hs = '';
+					if ($hr != 1)
+						$hs = 's';
+					$des = "${dy}day$ds ${hr}hr$hs";
+				}
 			}
 			else
 				$des = $dy.'d '.$hr.'hr '.$min.'m '.$sec.'s';

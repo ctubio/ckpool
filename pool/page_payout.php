@@ -15,14 +15,14 @@ function dopayout($data, $user)
   $nd = $data['info']['currndiff'];
  $nv = number_format($nd, 1);
  $nvx = '<b>'.number_format($N*$nd, 1).'</b>';
- $phr = $data['info']['p_hashrate24hr'];
+ $pd = $data['info']['p_hashrate24hr'];
  $hr = 'is <b>?</b>';
  $hrt = '<b>?</b>';
- if ($phr != '?' && $phr != '' && $phr > 0)
+ if ($pd != '?' && $pd != '' && $pd > 0)
  {
-	$hr = 'for the last day is <b>'.dsprate($phr).'</b>';
+	$hr = 'for the last day is roughly <b>'.siprefmt($pd,2).'Hs</b>';
 	if ($nd > 0)
-	 $hrt = '<b>'.howmanyhrs($nd / ($phr / pow(2,32)), true, true).'</b>';
+	 $hrt = '<b>'.howmanyhrs($nd * $N / ($pd / pow(2,32)), true, true).'</b>';
  }
 
  $pg = "<h1>Payouts</h1>
