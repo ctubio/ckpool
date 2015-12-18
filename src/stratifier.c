@@ -983,6 +983,8 @@ static void *do_update(void *arg)
 	pthread_detach(pthread_self());
 	rename_proc("updater");
 
+	/* Serialise access to getbase to avoid out of order new block notifies */
+	cksem_wait(&sdata->update_sem);
 retry:
 	buf = send_recv_generator(ckp, "getbase", prio);
 	if (unlikely(!buf)) {
@@ -994,6 +996,8 @@ retry:
 			LOGWARNING("Generator returned failure in update_base, retry #%d", retries);
 			goto retry;
 		}
+		LOGWARNING("Generator failed in update_base after retrying");
+		goto out;
 	}
 	if (unlikely(retries))
 		LOGWARNING("Generator succeeded in update_base after retrying");
@@ -1036,8 +1040,6 @@ retry:
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
-	/* Serialise access to add_base to avoid out of order new block notifies */
-	cksem_wait(&sdata->update_sem);
 	add_base(ckp, sdata, wb, &new_block);
 	/* Reset the update time to avoid stacked low priority notifies. Bring
 	 * forward the next notify in case of a new block. */
@@ -1045,7 +1047,6 @@ retry:
 	if (new_block)
 		now_t -= ckp->update_interval / 2;
 	sdata->update_time = now_t;
-	cksem_post(&sdata->update_sem);
 
 	if (new_block)
 		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
@@ -1053,6 +1054,8 @@ retry:
 	ret = true;
 	LOGINFO("Broadcast updated stratum base");
 out:
+	cksem_post(&sdata->update_sem);
+
 	/* Send a ping to miners if we fail to get a base to keep them
 	 * connected while bitcoind recovers(?) */
 	if (unlikely(!ret)) {
@@ -1206,6 +1209,8 @@ static sdata_t *duplicate_sdata(const sdata_t *sdata)
 
 	/* Give the sbuproxy its own workbase list and lock */
 	cklock_init(&dsdata->workbase_lock);
+	cksem_init(&dsdata->update_sem);
+	cksem_post(&dsdata->update_sem);
 	return dsdata;
 }
 

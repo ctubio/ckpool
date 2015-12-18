@@ -543,7 +543,7 @@ rewait:
 		ret = 0;
 		goto out;
 	}
-	ret = wait_recv_select(cs->fd, eom ? 0 : *timeout);
+	ret = wait_read_select(cs->fd, eom ? 0 : *timeout);
 	polled = true;
 	if (ret < 1) {
 		if (!ret) {
@@ -616,7 +616,6 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
-		Close(cs->fd);
 	}
 	return ret;
 }
@@ -763,6 +762,8 @@ static const char *rpc_method(const char *rpc_req)
 	return rpc_req;
 }
 
+/* All of these calls are made to bitcoind which prefers open/close instead
+ * of persistent connections so cs->fd is always invalid. */
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
 	float timeout = RPC_TIMEOUT;
@@ -775,8 +776,9 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 
 	/* Serialise all calls in case we use cs from multiple threads */
 	cksem_wait(&cs->sem);
+	cs->fd = connect_socket(cs->url, cs->port);
 	if (unlikely(cs->fd < 0)) {
-		LOGWARNING("FD %d invalid in %s", cs->fd, __func__);
+		LOGWARNING("Unable to connect socket to %s:%s in %s", cs->url, cs->port, __func__);
 		goto out;
 	}
 	if (unlikely(!cs->url)) {
@@ -859,20 +861,8 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 out_empty:
 	empty_socket(cs->fd);
 	empty_buffer(cs);
-	if (!val) {
-		/* Assume that a failed request means the socket will be closed
-		 * and reopen it */
-		Close(cs->fd);
-	}
 out:
-	if (cs->fd < 0) {
-		/* Attempt to reopen a socket that has been closed due to a
-		 * failed request or if the socket was closed while trying to
-		 * read/write to it. */
-		cs->fd = connect_socket(cs->url, cs->port);
-		LOGWARNING("Attempt to reopen socket to %s:%s %ssuccessful",
-			   cs->url, cs->port, cs->fd > 0 ? "" : "un");
-	}
+	Close(cs->fd);
 	free(http_req);
 	dealloc(cs->buf);
 	cksem_post(&cs->sem);
