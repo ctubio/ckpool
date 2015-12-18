@@ -1932,12 +1932,14 @@ static void *passthrough_recv(void *arg)
 		}
 		if (!alive) {
 			reconnect_generator(ckp);
+			LOGWARNING("Passthrough %d:%s recovered", proxi->id, proxi->url);
 			alive = true;
 		}
 
 		/* Make sure we receive a line within 90 seconds */
 		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
+			reconnect_generator(ckp);
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in passthrough_recv, attempting reconnect",
 				   proxi->id, proxi->url);
 			alive = proxi->alive = false;
@@ -2009,6 +2011,7 @@ static void *proxy_recv(void *arg)
 			while (!subproxies_alive(proxi)) {
 				reconnect_proxy(proxi);
 				if (alive) {
+					reconnect_generator(ckp);
 					LOGWARNING("Proxy %d:%s failed, attempting reconnect",
 						   proxi->id, proxi->url);
 					alive = false;
@@ -2017,6 +2020,7 @@ static void *proxy_recv(void *arg)
 			}
 		}
 		if (!alive) {
+			reconnect_generator(ckp);
 			LOGWARNING("Proxy %d:%s recovered", proxi->id, proxi->url);
 			alive = true;
 		}
