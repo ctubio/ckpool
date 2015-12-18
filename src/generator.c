@@ -1015,7 +1015,8 @@ static void send_stratifier_deadproxy(ckpool_t *ckp, const int id, const int sub
 
 /* Remove the subproxy from the proxi list and put it on the dead list.
  * Further use of the subproxy pointer may point to a new proxy but will not
- * dereference */
+ * dereference. This will only disable subproxies so parent proxies need to
+ * have their disabled bool set manually. */
 static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_instance_t *subproxy)
 {
 	subproxy->alive = false;
@@ -1024,9 +1025,10 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 		epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, subproxy->cs.fd, NULL);
 		Close(subproxy->cs.fd);
 	}
-	subproxy->disabled = true;
 	if (parent_proxy(subproxy))
 		return;
+
+	subproxy->disabled = true;
 
 	mutex_lock(&proxi->proxy_lock);
 	/* Make sure subproxy is still in the list */
@@ -2488,9 +2490,11 @@ static void parse_ableproxy(gdata_t *gdata, const int sockd, const char *buf, bo
 		proxy->disabled = disable;
 		LOGNOTICE("%sabling proxy %d:%s", disable ? "Dis" : "En", id, proxy->url);
 	}
-	if (disable)
+	if (disable) {
+		/* Set disabled bool here in case this is a parent proxy */
+		proxy->disabled = true;
 		disable_subproxy(gdata, proxy, proxy);
-	else
+	} else
 		reconnect_proxy(proxy);
 out:
 	send_api_response(val, sockd);
