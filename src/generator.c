@@ -2800,7 +2800,10 @@ static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int id
 	proxy->id = id;
 	proxy->url = strdup(ckp->proxyurl[id]);
 	proxy->auth = strdup(ckp->proxyauth[id]);
-	proxy->pass = strdup(ckp->proxypass[id]);
+	if (proxy->pass)
+		proxy->pass = strdup(ckp->proxypass[id]);
+	else
+		proxy->pass = strdup("");
 	proxy->ckp = proxy->cs.ckp = ckp;
 	HASH_ADD_INT(gdata->proxies, id, proxy);
 	proxy->global = true;
