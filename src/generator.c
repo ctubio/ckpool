@@ -973,6 +973,8 @@ static proxy_instance_t *create_subproxy(ckpool_t *ckp, gdata_t *gdata, proxy_in
 	subproxy->pass = strdup(proxi->pass);
 	subproxy->parent = proxi;
 	subproxy->epfd = proxi->epfd;
+	cksem_init(&subproxy->cs.sem);
+	cksem_post(&subproxy->cs.sem);
 	return subproxy;
 }
 
