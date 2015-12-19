@@ -1776,13 +1776,18 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 	bool ret = false;
 
 	/* Has this proxy already been reconnected? */
-	if (cs->fd > 0)
+	if (proxi->alive)
 		return true;
 	if (proxi->disabled)
 		return false;
 
 	/* Serialise all send/recvs here with the cs semaphore */
 	cksem_wait(&cs->sem);
+	/* Check again after grabbing semaphore */
+	if (unlikely(proxi->alive)) {
+		ret = true;
+		goto out;
+	}
 	if (!extract_sockaddr(proxi->url, &cs->url, &cs->port)) {
 		LOGWARNING("Failed to extract address from %s", proxi->url);
 		goto out;
@@ -1822,8 +1827,6 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 	}
 	proxi->authorised = ret = true;
 out:
-	cksem_post(&cs->sem);
-
 	if (!ret) {
 		send_stratifier_deadproxy(ckp, proxi->id, proxi->subid);
 		/* Close and invalidate the file handle */
@@ -1831,6 +1834,8 @@ out:
 			Close(cs->fd);
 	}
 	proxi->alive = ret;
+	cksem_post(&cs->sem);
+
 	return ret;
 }
 
@@ -2072,6 +2077,8 @@ static void *proxy_recv(void *arg)
 		if (likely(ret > 0)) {
 			subproxy = event.data.ptr;
 			cs = &subproxy->cs;
+			if (!subproxy->alive)
+				continue;
 
 			/* Serialise messages from here once we have a cs by
 			 * holding the semaphore. */
@@ -2184,6 +2191,9 @@ static void *userproxy_recv(void *arg)
 
 		timeout = 0;
 		cs = &proxy->cs;
+
+		if (!proxy->alive)
+			continue;
 
 		cksem_wait(&cs->sem);
 		while ((ret = read_socket_line(cs, &timeout)) > 0) {
@@ -2332,6 +2342,8 @@ static proxy_instance_t *__add_userproxy(ckpool_t *ckp, gdata_t *gdata, const in
 	proxy->auth = auth;
 	proxy->pass = pass;
 	proxy->ckp = proxy->cs.ckp = ckp;
+	cksem_init(&proxy->cs.sem);
+	cksem_post(&proxy->cs.sem);
 	HASH_ADD_INT(gdata->proxies, id, proxy);
 	return proxy;
 }
