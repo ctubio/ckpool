@@ -2877,7 +2877,9 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 			if (find_in_ktree_nolock(msgline->trf_root, t_item, ctx)) {
 				if (transfer->mvalue != transfer->svalue)
 					FREENULL(transfer->mvalue);
+				K_WLOCK(transfer_free);
 				k_add_head(transfer_free, t_item);
+				K_WUNLOCK(transfer_free);
 			} else {
 				add_to_ktree_nolock(msgline->trf_root, t_item);
 				k_add_head_nolock(msgline->trf_store, t_item);
