@@ -1573,7 +1573,9 @@ int main(int argc, char **argv)
 	}
 
 	if (!ckp.name) {
-		if (ckp.proxy)
+		if (ckp.passthrough)
+			ckp.name = "ckpassthrough";
+		else if (ckp.proxy)
 			ckp.name = "ckproxy";
 		else
 			ckp.name = "ckpool";
