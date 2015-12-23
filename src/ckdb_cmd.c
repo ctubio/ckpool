@@ -3304,7 +3304,10 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	// Don't bother with locking - it's just an FYI web stat
-	snprintf(tmp, sizeof(tmp), "sync=%d%c", workqueue_store->count, FLDSEP);
+	int sync = pool_workqueue_store->count;
+	sync += cmd_workqueue_store->count;
+	sync += btc_workqueue_store->count;
+	snprintf(tmp, sizeof(tmp), "sync=%d%c", sync, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	u_item = NULL;
@@ -4558,7 +4561,6 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	b_item = find_after_in_ktree(blocks_root, &b_look, b_ctx);
 	K_RUNLOCK(blocks_free);
 	if (!b_item) {
-		K_RUNLOCK(blocks_free);
 		snprintf(reply, siz, "ERR.no block height >= %"PRId32, height);
 		return strdup(reply);
 	}
@@ -5684,7 +5686,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USEINFO(workerstatus, 1, 1);
 	USEINFO(userinfo, 1, 1);
 	USEINFO(msgline, 1, 0);
-	USEINFO(workqueue, 1, 0);
+	USEINFO(workqueue, 3, 0);
 	USEINFO(transfer, 0, 0);
 	USEINFO(heartbeatqueue, 1, 0);
 	USEINFO(logqueue, 1, 0);
@@ -6603,7 +6605,7 @@ static char *cmd_userinfo(__maybe_unused PGconn *conn, char *cmd, char *id,
  * You must supply the btcserver to change anything
  * The format for userpass is username:password
  * If you don't supply the btcserver it will simply report the current server
- * If supply btcserver but not the userpass it will use the current userpass
+ * If you supply btcserver but not the userpass it will use the current userpass
  * The reply will ONLY contain the URL, not the user/pass */
 static char *cmd_btcset(__maybe_unused PGconn *conn, char *cmd, char *id,
 			__maybe_unused tv_t *now, __maybe_unused char *by,
