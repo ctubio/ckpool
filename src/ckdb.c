@@ -3960,9 +3960,9 @@ static void process_sockd(PGconn *conn, K_ITEM *wq_item)
 		 msgline->id,
 		 msgline->now.tv_sec, ans);
 	send_unix_msg(msgline->sockd, rep);
+	close(msgline->sockd);
 	FREENULL(ans);
 	FREENULL(rep);
-	close(msgline->sockd);
 
 	free_msgline_data(ml_item, true, true);
 	K_WLOCK(msgline_free);
@@ -4270,33 +4270,6 @@ static void *socketer(__maybe_unused void *arg)
 				case CMD_PSHIFT:
 				case CMD_DSP:
 				case CMD_BLOCKSTATUS:
-					if (!startup_complete) {
-						snprintf(reply, sizeof(reply),
-							 "%s.%ld.loading.%s",
-							 msgline->id,
-							 now.tv_sec,
-							 msgline->cmd);
-						send_unix_msg(sockd, reply);
-					} else {
-						msgline->sockd = sockd;
-						sockd = -1;
-						K_WLOCK(workqueue_free);
-						wq_item = k_unlink_head(workqueue_free);
-						DATA_WORKQUEUE(workqueue, wq_item);
-						workqueue->msgline_item = ml_item;
-						workqueue->by = by_default;
-						workqueue->code =  (char *)__func__;
-						workqueue->inet = inet_default;
-						if (btc)
-							k_add_tail(btc_workqueue_store, wq_item);
-						else
-							k_add_tail(cmd_workqueue_store, wq_item);
-						K_WUNLOCK(workqueue_free);
-						wq_item = ml_item = NULL;
-					}
-					break;
-				/* Process, but reject (loading) until
-				 *  startup_complete */
 				case CMD_MARKS:
 				case CMD_QUERY:
 					if (!startup_complete) {
@@ -4398,7 +4371,7 @@ static void *socketer(__maybe_unused void *arg)
 						k_add_head(workqueue_free, wq2_item);
 					}
 					K_WUNLOCK(workqueue_free);
-					ml_item = NULL;
+					wq_item = ml_item = NULL;
 					mutex_lock(&wq_waitlock);
 					pthread_cond_signal(&wq_waitcond);
 					mutex_unlock(&wq_waitlock);
