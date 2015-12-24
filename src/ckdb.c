@@ -4006,9 +4006,8 @@ static void *clistener(__maybe_unused void *arg)
 		if (wq_item) {
 			process_sockd(conn, wq_item);
 			tick();
-		}
-
-		cksleep_ms(42);
+		} else
+			cksleep_ms(42);
 	}
 
 	clistener_using_data = false;
@@ -4048,9 +4047,8 @@ static void *blistener(__maybe_unused void *arg)
 		if (wq_item) {
 			process_sockd(conn, wq_item);
 			tick();
-		}
-
-		cksleep_ms(142);
+		} else 
+			cksleep_ms(142);
 	}
 
 	blistener_using_data = false;
