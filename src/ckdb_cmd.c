@@ -3304,10 +3304,13 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	// Don't bother with locking - it's just an FYI web stat
-	int sync = pool_workqueue_store->count;
-	sync += cmd_workqueue_store->count;
-	sync += btc_workqueue_store->count;
-	snprintf(tmp, sizeof(tmp), "sync=%d%c", sync, FLDSEP);
+	int psync = pool_workqueue_store->count;
+	int csync = cmd_workqueue_store->count;
+	int bsync = btc_workqueue_store->count;
+	snprintf(tmp, sizeof(tmp), "psync=%d%c", psync, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "csync=%d%c", csync, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "bsync=%d%c", bsync, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "sync=%d%c", psync + csync + bsync, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	u_item = NULL;
