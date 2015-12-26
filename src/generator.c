@@ -708,6 +708,7 @@ out:
 	return ret;
 }
 
+/* cs semaphore must be held */
 static bool subscribe_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 {
 	bool ret = false;
@@ -762,6 +763,7 @@ out:
 	return ret;
 }
 
+/* cs semaphore must be held */
 static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
@@ -772,8 +774,6 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 			"method", "mining.passthrough",
 			"params", PACKAGE"/"VERSION);
 
-	/* Serialise all send/recvs */
-	cksem_wait(&cs->sem);
 	ret = send_json_msg(cs, req);
 	json_decref(req);
 	if (!ret) {
@@ -799,8 +799,6 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	}
 	proxi->passthrough = true;
 out:
-	cksem_post(&cs->sem);
-
 	if (val)
 		json_decref(val);
 	if (!ret)
@@ -1258,6 +1256,7 @@ out:
 	return ret;
 }
 
+/* cs semaphore must be held */
 static bool auth_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *val = NULL, *res_val, *req, *err_val;
