@@ -66,6 +66,9 @@ struct client_instance {
 	/* Linked list of shares in redirector mode.*/
 	share_t *shares;
 
+	/* Has this client already been told to redirect */
+	bool redirected;
+
 	/* Time this client started blocking, 0 when not blocked */
 	time_t blocked_time;
 };
@@ -771,6 +774,9 @@ static void redirect_client(ckpool_t *ckp, client_instance_t *client)
 	char *buf;
 	int num;
 
+	/* Set the redirected boool to only try redirecting them once */
+	client->redirected = true;
+
 	num = add_redirect(ckp, cdata, client);
 	JSON_CPACK(val, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
 		   "params", ckp->redirecturl[num], ckp->redirectport[num], 0);
@@ -889,7 +895,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			free(buf);
 			return;
 		}
-		if (ckp->redirector)
+		if (ckp->redirector && !client->redirected)
 			test_redirector_shares(ckp, client, buf);
 	}
 
