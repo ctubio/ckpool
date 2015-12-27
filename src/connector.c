@@ -391,9 +391,7 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 static void send_client(cdata_t *cdata, int64_t id, char *buf);
 
 /* Look for shares being submitted via a redirector and add them to a linked
- * list for looking up the responses. Theoretically this could leak shares but
- * we should only ever store one share before redirecting active clients unless
- * they don't support redirection. */
+ * list for looking up the responses. */
 static void parse_redirector_share(client_instance_t *client, const char *msg, const json_t *val)
 {
 	share_t *share, *tmp;
@@ -494,7 +492,7 @@ reparse:
 			passthrough_id = (client->id << 32) | passthrough_id;
 			json_object_set_new_nocheck(val, "client_id", json_integer(passthrough_id));
 		} else {
-			if (ckp->redirector && strstr(msg, "mining.submit"))
+			if (ckp->redirector && !client->redirected && strstr(msg, "mining.submit"))
 				parse_redirector_share(client, msg, val);
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
@@ -840,6 +838,12 @@ static void test_redirector_shares(ckpool_t *ckp, client_instance_t *client, con
 		LOGNOTICE("Found accepted share for client %"PRId64" - redirecting",
 			   client->id);
 		redirect_client(ckp, client);
+
+		/* Clear the list now since we don't need it any more */
+		DL_FOREACH_SAFE(client->shares, share, found) {
+			DL_DELETE(client->shares, share);
+			dealloc(share);
+		}
 	}
 out:
 	json_decref(val);
