@@ -69,6 +69,7 @@ struct stratum_msg {
 typedef struct stratum_msg stratum_msg_t;
 
 struct pass_msg {
+	proxy_instance_t *proxy;
 	connsock_t *cs;
 	char *msg;
 };
@@ -1754,19 +1755,21 @@ static void passthrough_send(ckpool_t *ckp, pass_msg_t *pm)
 		LOGWARNING("Failed to passthrough %d bytes of message %s, attempting reconnect",
 			   len, pm->msg);
 		Close(cs->fd);
+		pm->proxy->alive = false;
 		reconnect_generator(ckp);
 	}
 	free(pm->msg);
 	free(pm);
 }
 
-static void passthrough_add_send(proxy_instance_t *proxi, const char *msg)
+static void passthrough_add_send(proxy_instance_t *proxy, const char *msg)
 {
 	pass_msg_t *pm = ckzalloc(sizeof(pass_msg_t));
 
-	pm->cs = &proxi->cs;
+	pm->proxy = proxy;
+	pm->cs = &proxy->cs;
 	ASPRINTF(&pm->msg, "%s\n", msg);
-	ckmsgq_add(proxi->passsends, pm);
+	ckmsgq_add(proxy->passsends, pm);
 }
 
 static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
