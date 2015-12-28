@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.620"
+#define CKDB_VERSION DB_VERSION"-1.704"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -765,6 +765,7 @@ typedef struct msgline {
 	char *code;
 	K_TREE *trf_root;
 	K_STORE *trf_store;
+	int sockd;
 } MSGLINE;
 
 #define ALLOC_MSGLINE 8192
@@ -792,7 +793,9 @@ typedef struct workqueue {
 #define DATA_WORKQUEUE(_var, _item) DATA_GENERIC(_var, _item, workqueue, true)
 
 extern K_LIST *workqueue_free;
-extern K_STORE *workqueue_store;
+extern K_STORE *pool_workqueue_store;
+extern K_STORE *cmd_workqueue_store;
+extern K_STORE *btc_workqueue_store;
 extern mutex_t wq_waitlock;
 extern pthread_cond_t wq_waitcond;
 

@@ -768,16 +768,15 @@ out:
 static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
+	bool res, ret = false;
 	float timeout = 10;
-	bool ret = false;
 
 	JSON_CPACK(req, "{s:s,s:[s]}",
 			"method", "mining.passthrough",
 			"params", PACKAGE"/"VERSION);
-
-	ret = send_json_msg(cs, req);
+	res = send_json_msg(cs, req);
 	json_decref(req);
-	if (!ret) {
+	if (!res) {
 		LOGWARNING("Failed to send message in passthrough_stratum");
 		goto out;
 	}

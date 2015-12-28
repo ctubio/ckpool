@@ -638,6 +638,7 @@ K_ITEM *_find_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, bool chklock
 	}
 }
 
+// First item after data
 K_ITEM *_find_after_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
 	K_NODE *knode, *old = NULL;
@@ -690,6 +691,7 @@ K_ITEM *_find_after_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, LOCK_M
 	}
 }
 
+// Last item before data
 K_ITEM *_find_before_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
 	K_NODE *knode, *old = NULL;
