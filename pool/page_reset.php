@@ -88,9 +88,9 @@ function dbreset()
  if ($emailinfo['STATUS'] != 'ok')
 	syserror();
 
- $ans = resetPass($user, $pass);
+ $ans = resetPass($user, $pass, $twofa);
  if ($ans['STATUS'] != 'ok')
-	syserror();
+	return resetfail();
 
  unset($_SESSION['reset_user']);
  unset($_SESSION['reset_hash']);

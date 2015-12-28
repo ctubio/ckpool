@@ -3455,7 +3455,7 @@ K_ITEM *find_payoutid(int64_t payoutid)
 	return find_in_ktree(payouts_id_root, &look, ctx);
 }
 
-// First payouts workinfoidend equal or before workinfoidend
+// First payouts workinfoidend equal or after workinfoidend
 K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx)
 {
 	PAYOUTS payouts;
@@ -3465,12 +3465,13 @@ K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx)
 	if (ctx == NULL)
 		ctx = ctx0;
 
-	payouts.workinfoidend = workinfoidend+1;
-	DATE_ZERO(&(payouts.expirydate));
+	payouts.workinfoidend = workinfoidend-1;
+	payouts.expirydate.tv_sec = default_expiry.tv_sec;
+	payouts.expirydate.tv_usec = default_expiry.tv_usec;
 
 	INIT_PAYOUTS(&look);
 	look.data = (void *)(&payouts);
-	return find_before_in_ktree(payouts_wid_root, &look, ctx);
+	return find_after_in_ktree(payouts_wid_root, &look, ctx);
 }
 
 /* Values from payout stats, returns -1 if statname isn't found
@@ -4921,23 +4922,25 @@ bool shift_rewards(K_ITEM *wm_item)
 	DATA_WORKMARKERS(wm, wm_item);
 
 	K_RLOCK(payouts_free);
+	K_WLOCK(workmarkers_free);
 	p_item = find_payouts_wid(wm->workinfoidend, ctx);
 	DATA_PAYOUTS_NULL(payouts, p_item);
 	// a workmarker should not cross a payout boundary
 	while (p_item && payouts->workinfoidstart <= wm->workinfoidstart &&
 	       wm->workinfoidend <= payouts->workinfoidend) {
-		if (CURRENT(&(payouts->expirydate))) {
+		if (CURRENT(&(payouts->expirydate)) &&
+		    PAYGENERATED(payouts->status)) {
 			rewards++;
 			pps += (double)(payouts->minerreward) /
 				payouts->diffused;
 		}
-		p_item = prev_in_ktree(ctx);
+		p_item = next_in_ktree(ctx);
 		DATA_PAYOUTS_NULL(payouts, p_item);
 	}
-	K_RUNLOCK(payouts_free);
-
 	wm->rewards = rewards;
 	wm->rewarded = pps;
+	K_WUNLOCK(workmarkers_free);
+	K_RUNLOCK(payouts_free);
 
 	return (rewards > 0);
 }
