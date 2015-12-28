@@ -180,6 +180,9 @@ struct ckpool_instance {
 	pthread_t pth_listener;
 	pthread_t pth_watchdog;
 
+	/* Are we running in node proxy mode */
+	bool node;
+
 	/* Are we running in passthrough mode */
 	bool passthrough;
 

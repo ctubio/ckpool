@@ -1518,6 +1518,7 @@ static struct option long_options[] = {
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
 	{"redirector",	no_argument,		0,	'R'},
@@ -1537,6 +1538,7 @@ static struct option long_options[] = {
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
 	{"redirector",	no_argument,		0,	'R'},
@@ -1585,7 +1587,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpRS:s:u", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:Nn:PpRS:s:u", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1636,21 +1638,26 @@ int main(int argc, char **argv)
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
 				break;
+			case 'N':
+				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.passthrough)
+					quit(1, "Cannot set another proxy type or redirector and node mode");
+				ckp.standalone = ckp.proxy = ckp.node = true;
+				break;
 			case 'n':
 				ckp.name = optarg;
 				break;
 			case 'P':
-				if (ckp.proxy || ckp.redirector || ckp.userproxy)
+				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.node)
 					quit(1, "Cannot set another proxy type or redirector and passthrough mode");
 				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
-				if (ckp.passthrough || ckp.redirector || ckp.userproxy)
+				if (ckp.passthrough || ckp.redirector || ckp.userproxy || ckp.node)
 					quit(1, "Cannot set another proxy type or redirector and proxy mode");
 				ckp.proxy = true;
 				break;
 			case 'R':
-				if (ckp.proxy || ckp.passthrough || ckp.userproxy)
+				if (ckp.proxy || ckp.passthrough || ckp.userproxy || ckp.node)
 					quit(1, "Cannot set a proxy type or passthrough and redirector modes");
 				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.redirector = true;
 				break;
@@ -1661,7 +1668,7 @@ int main(int argc, char **argv)
 				ckp.socket_dir = strdup(optarg);
 				break;
 			case 'u':
-				if (ckp.proxy || ckp.redirector || ckp.passthrough)
+				if (ckp.proxy || ckp.redirector || ckp.passthrough || ckp.node)
 					quit(1, "Cannot set both userproxy and another proxy type or redirector");
 				ckp.userproxy = ckp.proxy = true;
 				break;
@@ -1669,7 +1676,9 @@ int main(int argc, char **argv)
 	}
 
 	if (!ckp.name) {
-		if (ckp.redirector)
+		if (ckp.node)
+			ckp.name = "cknode";
+		else if (ckp.redirector)
 			ckp.name = "ckredirector";
 		else if (ckp.passthrough)
 			ckp.name = "ckpassthrough";
