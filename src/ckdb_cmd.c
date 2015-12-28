@@ -3959,9 +3959,9 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 				}
 			}
 			if (!oc_item) {
-				K_RLOCK(optioncontrol_free);
+				K_WLOCK(optioncontrol_free);
 				oc_item = k_unlink_head(optioncontrol_free);
-				K_RUNLOCK(optioncontrol_free);
+				K_WUNLOCK(optioncontrol_free);
 				DATA_OPTIONCONTROL(optioncontrol, oc_item);
 				bzero(optioncontrol, sizeof(*optioncontrol));
 				STRNCPY(optioncontrol->optionname, optionname);
