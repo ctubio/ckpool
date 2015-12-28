@@ -87,6 +87,7 @@ struct proxy_instance {
 	ckpool_t *ckp;
 	connsock_t cs;
 	bool passthrough;
+	bool node;
 	int id; /* Proxy server id*/
 	int subid; /* Subproxy id */
 	int userid; /* User id if this proxy is bound to a user */
@@ -799,6 +800,49 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		goto out;
 	}
 	proxi->passthrough = true;
+out:
+	if (val)
+		json_decref(val);
+	if (!ret)
+		Close(cs->fd);
+	return ret;
+}
+
+/* cs semaphore must be held */
+static bool node_stratum(connsock_t *cs, proxy_instance_t *proxi)
+{
+	json_t *req, *val = NULL, *res_val, *err_val;
+	bool res, ret = false;
+	float timeout = 10;
+
+	JSON_CPACK(req, "{s:s,s:[s]}",
+			"method", "mining.node",
+			"params", PACKAGE"/"VERSION);
+
+	res = send_json_msg(cs, req);
+	json_decref(req);
+	if (!res) {
+		LOGWARNING("Failed to send message in node_stratum");
+		goto out;
+	}
+	if (read_socket_line(cs, &timeout) < 1) {
+		LOGWARNING("Failed to receive line in node_stratum");
+		goto out;
+	}
+	/* Ignore err_val here since we should always get a result from an
+	 * upstream server */
+	val = json_msg_result(cs->buf, &res_val, &err_val);
+	if (!val || !res_val) {
+		LOGWARNING("Failed to get a json result in node_stratum, got: %s",
+			   cs->buf);
+		goto out;
+	}
+	ret = json_is_true(res_val);
+	if (!ret) {
+		LOGWARNING("Denied node setup for stratum");
+		goto out;
+	}
+	proxi->node = true;
 out:
 	if (val)
 		json_decref(val);
@@ -1801,6 +1845,15 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 		}
 		goto out;
 	}
+	if (ckp->node) {
+		if (!node_stratum(cs, proxi)) {
+			LOGWARNING("Failed initial node setup to %s:%s !",
+				   cs->url, cs->port);
+			goto out;
+		}
+		ret = true;
+		goto out;
+	}
 	if (ckp->passthrough) {
 		if (!passthrough_stratum(cs, proxi)) {
 			LOGWARNING("Failed initial passthrough to %s:%s !",
@@ -2701,10 +2754,15 @@ reconnect:
 	cproxy = wait_best_proxy(ckp, gdata);
 	if (!cproxy)
 		goto out;
-	if (proxi != cproxy || ckp->passthrough) {
+	if (proxi != cproxy) {
 		proxi = cproxy;
-		LOGWARNING("Successfully connected to proxy %d %s as proxy%s",
-			   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
+		if (ckp->node) {
+			LOGWARNING("Successfully connected to pool %d %s as proxy node",
+				   proxi->id, proxi->url);
+		} else {
+			LOGWARNING("Successfully connected to pool %d %s as proxy%s",
+				   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
+		}
 	}
 retry:
 	clear_unix_msg(&umsg);

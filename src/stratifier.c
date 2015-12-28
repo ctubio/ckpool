@@ -5052,6 +5052,18 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		return;
 	}
 
+	if (unlikely(cmdmatch(method, "mining.node"))) {
+		char buf[256];
+
+		/* Add this client as a passthrough in the connector and
+		 * add it to the list of mining nodes in the stratifier */
+		LOGNOTICE("Adding mining client %"PRId64" %s", client_id, client->address);
+		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+		send_proc(ckp->connector, buf);
+		drop_client(ckp, sdata, client_id);
+		return;
+	}
+
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
 		char buf[256];
 
