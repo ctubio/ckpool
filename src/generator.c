@@ -1053,6 +1053,8 @@ static void send_stratifier_deadproxy(ckpool_t *ckp, const int id, const int sub
 {
 	char buf[256];
 
+	if (ckp->passthrough)
+		return;
 	sprintf(buf, "deadproxy=%d:%d", id, subid);
 	send_proc(ckp->stratifier, buf);
 }
