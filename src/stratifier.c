@@ -1479,7 +1479,7 @@ static void reconnect_clients(sdata_t *sdata)
 			continue;
 		if (!client->authorised)
 			continue;
-		/* Is this client boudn to a dead proxy? */
+		/* Is this client bound to a dead proxy? */
 		if (!client->reconnect) {
 			/* This client is bound to a user proxy */
 			if (client->proxy->userid)
@@ -2192,6 +2192,10 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 			connector_test_client(ckp, client->id);
 			continue;
 		}
+
+		if (client->node)
+			continue;
+
 		/* Test for clients that haven't authed in over a minute and drop them */
 		if (!client->authorised) {
 			if (now_t > client->start_time + 60) {
