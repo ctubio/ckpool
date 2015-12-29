@@ -5151,17 +5151,18 @@ static int node_msg_type(json_t *val)
 	for (i = 0; i < SM_NONE; i++) {
 		if (!strcmp(method, stratum_msgs[i])) {
 			ret = i;
-			LOGWARNING("Got node method %d:%s", i, method);
 			break;
 		}
 	}
 	json_object_del(val, "node.method");
 out:
 	if (ret < 0 && json_get_string(&method, val, "method")) {
-		if (!safecmp(method, "mining.subscribe"))
-			ret = SM_SUBSCRIBE;
-		else if (!safecmp(method, "mining.submit"))
+		if (!safecmp(method, "mining.submit"))
 			ret = SM_SHARE;
+		else if (!safecmp(method, "mining.notify"))
+			ret = SM_UPDATE;
+		else if (!safecmp(method, "mining.subscribe"))
+			ret = SM_SUBSCRIBE;
 		else if (cmdmatch(method, "mining.auth"))
 			ret = SM_AUTH;
 		else if (cmdmatch(method, "mining.get"))
@@ -5176,9 +5177,9 @@ static void parse_node_msg(json_t *val, const char *buf, stratum_instance_t *cli
 	int msg_type = node_msg_type(val);
 
 	if (msg_type > -1)
-		LOGWARNING("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
+		LOGWARNING("Got client %"PRId64" node method %d:%s", client->id, msg_type, stratum_msgs[msg_type]);
 	else
-		LOGWARNING("Missing node method from %s", buf);
+		LOGWARNING("Missing client %"PRId64" node method from %s", client->id, buf);
 }
 
 /* Entered with client holding ref count */
