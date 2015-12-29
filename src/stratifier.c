@@ -819,6 +819,7 @@ static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 	if (sdata->node_instances) {
 		json_t *wb_val = json_object();
 
+		json_set_int(wb_val, "jobid", wb->id);
 		json_set_string(wb_val, "target", wb->target);
 		json_set_double(wb_val, "diff", wb->diff);
 		json_set_int(wb_val, "version", wb->version);
@@ -1138,8 +1139,10 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
 	char header[228];
+	int i;
 
 	wb->ckp = ckp;
+	json_int64cpy(&wb->id, val, "jobid");
 	json_strcpy(wb->target, val, "target");
 	json_dblcpy(&wb->diff, val, "diff");
 	json_uintcpy(&wb->version, val, "version");
@@ -1156,17 +1159,10 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	if (wb->transactions)
 		json_strdup(&wb->txn_data, val, "txn_data");
 	json_intcpy(&wb->merkles, val, "merkles");
-	wb->merkle_array = json_array();
-	if (wb->merkles) {
-		json_t *arr;
-		int i;
-
-		arr = json_object_get(val, "merklehash");
-		for (i = 0; i < wb->merkles; i++) {
-			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(arr, i)));
-			hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
-			json_array_append_new(wb->merkle_array, json_string(&wb->merklehash[i][0]));
-		}
+	wb->merkle_array = json_object_dup(val, "merklehash");
+	for (i = 0; i < wb->merkles; i++) {
+		strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(wb->merkle_array, i)));
+		hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
 	}
 	json_strdup(&wb->coinb1, val, "coinb1");
 	json_intcpy(&wb->coinb1len, val, "coinb1len");
@@ -1178,6 +1174,7 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	hex2bin(wb->coinb2bin, wb->coinb2, wb->coinb2len);
 	json_intcpy(&wb->enonce1varlen, val, "enonce1varlen");
 	json_intcpy(&wb->enonce2varlen, val, "enonce2varlen");
+	ts_realtime(&wb->gentime);
 
 	snprintf(header, 225, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
@@ -1190,7 +1187,7 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 
 	add_base(ckp, sdata, wb, &new_block);
 	if (new_block)
-		LOGWARNING("Block hash changed to %s", sdata->lastswaphash);
+		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 }
 
 static void update_base(ckpool_t *ckp, const int prio)
@@ -4380,7 +4377,6 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	/* We can set this outside of lock safely */
 	client->authorising = false;
 out:
-	LOGWARNING("Parsed %d", ret);
 	return json_boolean(ret);
 }
 
@@ -4438,6 +4434,9 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const int diff
 		worker->shares += diff;
 		user->shares += diff;
 	} else if (!submit)
+		return;
+
+	if (ckp->node)
 		return;
 
 	tv_time(&now_t);
@@ -4809,8 +4808,11 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_I64(sdata->workbases, &id, wb);
 	if (unlikely(!wb)) {
-		if (!sdata->current_workbase)
+		if (!sdata->current_workbase) {
+			ck_runlock(&sdata->workbase_lock);
+
 			return json_boolean(false);
+		}
 		id = sdata->current_workbase->id;
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
@@ -4895,7 +4897,7 @@ out_unlock:
 			submit = false;
 		}
 	}  else
-		LOGINFO("Rejected client %"PRId64" invalid share", client->id);
+		LOGINFO("Rejected client %"PRId64" invalid share %s", client->id, SHARE_ERR(err));
 
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
@@ -5296,7 +5298,7 @@ static void parse_diff(stratum_instance_t *client, json_t *val)
 static void parse_subscribe_result(stratum_instance_t *client, json_t *val)
 {
 	strncpy(client->enonce1, json_string_value(json_array_get(val, 1)), 16);
-	LOGDEBUG("Client %"PRId64" got enonce1 %s", client->id, client->enonce1);
+	LOGINFO("Client %"PRId64" got enonce1 %s", client->id, client->enonce1);
 	sprintf(client->enonce1, "%016lx", client->enonce1_64);
 }
 
@@ -5351,7 +5353,7 @@ static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum
 		LOGERR("Missing client %"PRId64" node method from %s", client->id, buf);
 		return;
 	}
-	LOGWARNING("Got client %"PRId64" node method %d:%s", client->id, msg_type, stratum_msgs[msg_type]);
+	LOGDEBUG("Got client %"PRId64" node method %d:%s", client->id, msg_type, stratum_msgs[msg_type]);
 	id_val = json_object_get(val, "id");
 	method = json_object_get(val, "method");
 	params = json_object_get(val, "params");
@@ -5589,7 +5591,10 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	steal_json_id(json_msg, jp);
-	stratum_add_send(sdata, json_msg, client_id, SM_SHARERESULT);
+	if (ckp->node)
+		json_decref(json_msg);
+	else
+		stratum_add_send(sdata, json_msg, client_id, SM_SHARERESULT);
 out_decref:
 	dec_instance_ref(sdata, client);
 out:
