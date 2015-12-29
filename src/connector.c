@@ -870,7 +870,8 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 	}
 
 	if (unlikely(ckp->node && !id)) {
-		LOGWARNING("Message for node: %s", buf);
+		LOGDEBUG("Message for node: %s", buf);
+		send_proc(ckp->stratifier, buf);
 		free(buf);
 		return;
 	}
