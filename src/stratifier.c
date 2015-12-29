@@ -2333,6 +2333,8 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 	ckpool_t *ckp = sdata->ckp;
 
 	if (ckp->node) {
+		/* Node shouldn't be sending any messages as it only uses the
+		 * stratifier for monitoring activity. */
 		json_decref(val);
 		return;
 	}
