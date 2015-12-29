@@ -256,7 +256,8 @@ enum stratum_msgtype {
 	SM_AUTH,
 	SM_AUTHRESULT,
 	SM_TXNS,
-	SM_TXNSRESULT
+	SM_TXNSRESULT,
+	SM_NONE
 };
 
 static const char __maybe_unused *stratum_msgs[] = {
@@ -272,7 +273,8 @@ static const char __maybe_unused *stratum_msgs[] = {
 	"auth",
 	"auth.result",
 	"txns",
-	"txns.result"
+	"txns.result",
+	""
 };
 
 #ifdef USE_CKDB

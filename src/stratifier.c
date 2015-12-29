@@ -6240,10 +6240,14 @@ int stratifier(proc_instance_t *pi)
 	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
 	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
 	/* Create 1/4 as many stratum processing threads as there are CPUs */
-	threads = threads / 2 ? : 1;
+	if (ckp->node)
+		threads = 1;
+	else {
+		threads = threads / 2 ? : 1;
+		sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
+		sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
+	}
 	sdata->srecvs = create_ckmsgqs(ckp, "sreceiver", &srecv_process, threads);
-	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
-	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
 	if (!CKP_STANDALONE(ckp)) {
 		sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
