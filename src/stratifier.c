@@ -789,31 +789,10 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
 			     const int msg_type);
 
-static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
+static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 {
 	stratum_instance_t *client;
 	ckmsg_t *bulk_send = NULL;
-	char cdfield[64];
-	json_t *val;
-
-	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
-
-	JSON_CPACK(val, "{sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
-			"workinfoid", wb->id,
-			"poolinstance", ckp->name,
-			"transactiontree", wb->txn_hashes,
-			"prevhash", wb->prevhash,
-			"coinbase1", wb->coinb1,
-			"coinbase2", wb->coinb2,
-			"version", wb->bbversion,
-			"ntime", wb->ntime,
-			"bits", wb->nbit,
-			"reward", wb->coinbasevalue,
-			"merklehash", json_deep_copy(wb->merkle_array),
-			"createdate", cdfield,
-			"createby", "code",
-			"createcode", __func__,
-			"createinet", ckp->serverurl[0]);
 
 	ck_rlock(&sdata->instance_lock);
 	if (sdata->node_instances) {
@@ -871,7 +850,33 @@ static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 		pthread_cond_signal(ssends->cond);
 		mutex_unlock(ssends->lock);
 	}
+}
+
+static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
+{
+	char cdfield[64];
+	json_t *val;
+
+	sprintf(cdfield, "%lu,%lu", wb->gentime.tv_sec, wb->gentime.tv_nsec);
+
+	JSON_CPACK(val, "{sI,ss,ss,ss,ss,ss,ss,ss,ss,sI,so,ss,ss,ss,ss}",
+			"workinfoid", wb->id,
+			"poolinstance", ckp->name,
+			"transactiontree", wb->txn_hashes,
+			"prevhash", wb->prevhash,
+			"coinbase1", wb->coinb1,
+			"coinbase2", wb->coinb2,
+			"version", wb->bbversion,
+			"ntime", wb->ntime,
+			"bits", wb->nbit,
+			"reward", wb->coinbasevalue,
+			"merklehash", json_deep_copy(wb->merkle_array),
+			"createdate", cdfield,
+			"createby", "code",
+			"createcode", __func__,
+			"createinet", ckp->serverurl[0]);
 	ckdbq_add(ckp, ID_WORKINFO, val);
+	send_node_workinfo(sdata, wb);
 }
 
 static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
