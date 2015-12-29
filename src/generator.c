@@ -2740,14 +2740,31 @@ static void parse_globaluser(ckpool_t *ckp, gdata_t *gdata, const char *buf)
 static int proxy_loop(proc_instance_t *pi)
 {
 	proxy_instance_t *proxi = NULL, *cproxy;
+	server_instance_t *si = NULL, *old_si;
 	ckpool_t *ckp = pi->ckp;
 	gdata_t *gdata = ckp->data;
 	unix_msg_t *umsg = NULL;
+	bool started = false;
 	char *buf = NULL;
 	int ret = 0;
 
 reconnect:
 	clear_unix_msg(&umsg);
+
+	if (ckp->node) {
+		connsock_t *cs;
+
+		old_si = si;
+		si = live_server(ckp);
+		if (!si)
+			goto out;
+		cs = &si->cs;
+		if (!old_si)
+			LOGWARNING("Connected to bitcoind: %s:%s", cs->url, cs->port);
+		else if (si != old_si)
+			LOGWARNING("Failed over to bitcoind: %s:%s", cs->url, cs->port);
+	}
+
 	/* This does not necessarily mean we reconnect, but a change has
 	 * occurred and we need to reexamine the proxies. */
 	cproxy = wait_best_proxy(ckp, gdata);
@@ -2755,13 +2772,13 @@ reconnect:
 		goto out;
 	if (proxi != cproxy) {
 		proxi = cproxy;
-		if (ckp->node) {
-			LOGWARNING("Successfully connected to pool %d %s as proxy node",
-				   proxi->id, proxi->url);
-		} else {
-			LOGWARNING("Successfully connected to pool %d %s as proxy%s",
-				   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
-		}
+		LOGWARNING("Successfully connected to pool %d %s as proxy%s",
+			   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
+	}
+
+	if (unlikely(!started)) {
+		started = true;
+		LOGWARNING("%s generator ready", ckp->name);
 	}
 retry:
 	clear_unix_msg(&umsg);
@@ -2859,14 +2876,14 @@ static void *server_watchdog(void *arg)
 	return NULL;
 }
 
-static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
+static void setup_servers(ckpool_t *ckp)
 {
 	pthread_t pth_watchdog;
-	server_instance_t *si;
-	int i, ret;
+	int i;
 
 	ckp->servers = ckalloc(sizeof(server_instance_t *) * ckp->btcds);
 	for (i = 0; i < ckp->btcds; i++) {
+		server_instance_t *si;
 		connsock_t *cs;
 
 		ckp->servers[i] = ckzalloc(sizeof(server_instance_t));
@@ -2882,10 +2899,19 @@ static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
 	}
 
 	create_pthread(&pth_watchdog, server_watchdog, ckp);
+}
+
+static int server_mode(ckpool_t *ckp, proc_instance_t *pi)
+{
+	int i, ret;
+
+	setup_servers(ckp);
+
 	ret = gen_loop(pi);
 
 	for (i = 0; i < ckp->btcds; i++) {
-		si = ckp->servers[i];
+		server_instance_t *si = ckp->servers[i];
+
 		kill_server(si);
 		dealloc(si);
 	}
@@ -2924,6 +2950,9 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 	mutex_init(&gdata->notify_lock);
 	mutex_init(&gdata->share_lock);
 
+	if (ckp->node)
+		setup_servers(ckp);
+
 	/* Create all our proxy structures and pointers */
 	for (i = 0; i < ckp->proxies; i++) {
 		proxy = __add_proxy(ckp, gdata, i);
@@ -2938,8 +2967,6 @@ static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 			create_pthread(&gdata->pth_psend, proxy_send, ckp);
 		}
 	}
-
-	LOGWARNING("%s generator ready", ckp->name);
 
 	ret = proxy_loop(pi);
 

@@ -1736,7 +1736,7 @@ int main(int argc, char **argv)
 
 	parse_config(&ckp);
 	/* Set defaults if not found in config file */
-	if (!ckp.btcds && !ckp.proxy) {
+	if (!ckp.btcds) {
 		ckp.btcds = 1;
 		ckp.btcdurl = ckzalloc(sizeof(char *));
 		ckp.btcdauth = ckzalloc(sizeof(char *));
