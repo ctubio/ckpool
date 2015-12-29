@@ -5310,9 +5310,13 @@ static void parse_diff(stratum_instance_t *client, json_t *val)
 
 static void parse_subscribe_result(stratum_instance_t *client, json_t *val)
 {
+	int len;
+
 	strncpy(client->enonce1, json_string_value(json_array_get(val, 1)), 16);
-	LOGINFO("Client %"PRId64" got enonce1 %s", client->id, client->enonce1);
-	sprintf(client->enonce1, "%016lx", client->enonce1_64);
+	len = strlen(client->enonce1) / 2;
+	hex2bin(client->enonce1bin, client->enonce1, len);
+	memcpy(&client->enonce1_64, client->enonce1bin, 8);
+	LOGINFO("Client %"PRId64" got enonce1 %lx string %s", client->id, client->enonce1_64, client->enonce1);
 }
 
 static void parse_authorise_result(stratum_instance_t *client, json_t *val)
