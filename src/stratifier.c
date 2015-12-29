@@ -5142,22 +5142,43 @@ static void free_smsg(smsg_t *msg)
 static int node_msg_type(json_t *val)
 {
 	int i, ret = -1;
-	char *node_msg;
+	char *method;
 
 	if (!val)
 		goto out;
-	if (!json_get_string(&node_msg, val, "node.method"))
+	if (!json_get_string(&method, val, "node.method"))
 		goto out;
 	for (i = 0; i < SM_NONE; i++) {
-		if (!strcmp(node_msg, stratum_msgs[i])) {
+		if (!strcmp(method, stratum_msgs[i])) {
 			ret = i;
-			LOGWARNING("Got node method %d:%s", i, node_msg);
+			LOGWARNING("Got node method %d:%s", i, method);
 			break;
 		}
 	}
 	json_object_del(val, "node.method");
 out:
+	if (ret < 0 && json_get_string(&method, val, "method")) {
+		if (!safecmp(method, "mining.subscribe"))
+			ret = SM_SUBSCRIBE;
+		else if (!safecmp(method, "mining.submit"))
+			ret = SM_SHARE;
+		else if (cmdmatch(method, "mining.auth"))
+			ret = SM_AUTH;
+		else if (cmdmatch(method, "mining.get"))
+			ret = SM_TXNS;
+	}
 	return ret;
+}
+
+/* Entered with client holding ref count */
+static void parse_node_msg(json_t *val, const char *buf, stratum_instance_t *client)
+{
+	int msg_type = node_msg_type(val);
+
+	if (msg_type > -1)
+		LOGWARNING("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
+	else
+		LOGWARNING("Missing node method from %s", buf);
 }
 
 /* Entered with client holding ref count */
@@ -5203,15 +5224,7 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 		send_json_err(sdata, client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	if (ckp->node) {
-		int msg_type = node_msg_type(val);
-
-		if (msg_type > -1)
-			LOGWARNING("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
-		else
-			LOGWARNING("Missing node method");
-	} else
-		parse_method(ckp, sdata, client, client_id, id_val, method, params);
+	parse_method(ckp, sdata, client, client_id, id_val, method, params);
 out:
 	free_smsg(msg);
 }
@@ -5288,7 +5301,10 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	if (unlikely(noid))
 		LOGINFO("Stratifier added instance %"PRId64" server %d", client->id, server);
 
-	parse_instance_msg(ckp, sdata, msg, client);
+	if (ckp->node)
+		parse_node_msg(msg->json_msg, buf, client);
+	else
+		parse_instance_msg(ckp, sdata, msg, client);
 	dec_instance_ref(sdata, client);
 out:
 	free(buf);

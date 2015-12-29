@@ -504,10 +504,10 @@ reparse:
 		 * do this unlocked as the occasional false negative can be
 		 * filtered by the stratifier. */
 		if (likely(!client->invalid)) {
+			if (!ckp->passthrough || ckp->node)
+				send_proc(ckp->stratifier, s);
 			if (ckp->passthrough)
 				send_proc(ckp->generator, s);
-			else
-				send_proc(ckp->stratifier, s);
 		}
 
 		free(s);
