@@ -816,18 +816,39 @@ static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 			"createinet", ckp->serverurl[0]);
 
 	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(sdata->node_instances, client) {
-		ckmsg_t *client_msg;
-		smsg_t *msg;
-		json_t *json_msg = json_deep_copy(val);
+	if (sdata->node_instances) {
+		json_t *wb_val = json_object();
 
-		json_set_string(json_msg, "node.method", stratum_msgs[SM_WORKINFO]);
-		client_msg = ckalloc(sizeof(ckmsg_t));
-		msg = ckzalloc(sizeof(smsg_t));
-		msg->json_msg = json_msg;
-		msg->client_id = client->id;
-		client_msg->data = msg;
-		DL_APPEND(bulk_send, client_msg);
+		json_set_string(wb_val, "target", wb->target);
+		json_set_double(wb_val, "diff", wb->diff);
+		json_set_int(wb_val, "version", wb->version);
+		json_set_int(wb_val, "curtime", wb->curtime);
+		json_set_string(wb_val, "prevhash", wb->prevhash);
+		json_set_string(wb_val, "ntime", wb->ntime);
+		json_set_string(wb_val, "bbversion", wb->bbversion);
+		json_set_string(wb_val, "nbit", wb->nbit);
+		json_set_int(wb_val, "coinbasevalue", wb->coinbasevalue);
+		json_set_int(wb_val, "height", wb->height);
+		json_set_int(wb_val, "transactions", wb->transactions);
+		json_set_string(wb_val, "txn_data", wb->txn_data);
+		/* We don't need txn_hashes */
+		json_set_int(wb_val, "merkles", wb->merkles);
+		json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
+
+		DL_FOREACH(sdata->node_instances, client) {
+			ckmsg_t *client_msg;
+			smsg_t *msg;
+			json_t *json_msg = json_deep_copy(wb_val);
+
+			json_set_string(json_msg, "node.method", stratum_msgs[SM_WORKINFO]);
+			client_msg = ckalloc(sizeof(ckmsg_t));
+			msg = ckzalloc(sizeof(smsg_t));
+			msg->json_msg = json_msg;
+			msg->client_id = client->id;
+			client_msg->data = msg;
+			DL_APPEND(bulk_send, client_msg);
+		}
+		json_decref(wb_val);
 	}
 	ck_runlock(&sdata->instance_lock);
 
