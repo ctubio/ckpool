@@ -869,6 +869,12 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 		return;
 	}
 
+	if (unlikely(ckp->node && !id)) {
+		LOGWARNING("Message for node: %s", buf);
+		free(buf);
+		return;
+	}
+
 	/* Grab a reference to this client until the sender_send has
 	 * completed processing. Is this a passthrough subclient ? */
 	if (id > 0xffffffffll) {
