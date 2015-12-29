@@ -2329,12 +2329,18 @@ static inline bool passthrough_subclient(const int64_t client_id)
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
 			     const int msg_type)
 {
-	smsg_t *msg = ckzalloc(sizeof(smsg_t));
+	smsg_t *msg;
 	ckpool_t *ckp = sdata->ckp;
 
-	if (ckp->node || passthrough_subclient(client_id))
+	if (ckp->node) {
+		json_decref(val);
+		return;
+	}
+
+	if (passthrough_subclient(client_id))
 		json_set_string(val, "node.method", stratum_msgs[msg_type]);
 	LOGDEBUG("Sending stratum message %s", stratum_msgs[msg_type]);
+	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	msg->client_id = client_id;
 	ckmsgq_add(sdata->ssends, msg);
@@ -5591,10 +5597,7 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	steal_json_id(json_msg, jp);
-	if (ckp->node)
-		json_decref(json_msg);
-	else
-		stratum_add_send(sdata, json_msg, client_id, SM_SHARERESULT);
+	stratum_add_send(sdata, json_msg, client_id, SM_SHARERESULT);
 out_decref:
 	dec_instance_ref(sdata, client);
 out:
@@ -6503,7 +6506,6 @@ int stratifier(proc_instance_t *pi)
 
 	mutex_init(&sdata->ckdb_lock);
 	mutex_init(&sdata->ckdb_msg_lock);
-	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	/* Create half as many share processing threads as there are CPUs */
 	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
 	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
@@ -6511,6 +6513,7 @@ int stratifier(proc_instance_t *pi)
 	if (ckp->node)
 		threads = 1;
 	else {
+		sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 		threads = threads / 2 ? : 1;
 		sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 		sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
