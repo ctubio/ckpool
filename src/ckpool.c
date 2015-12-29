@@ -1641,7 +1641,7 @@ int main(int argc, char **argv)
 			case 'N':
 				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.passthrough)
 					quit(1, "Cannot set another proxy type or redirector and node mode");
-				ckp.standalone = ckp.proxy = ckp.node = true;
+				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.node = true;
 				break;
 			case 'n':
 				ckp.name = optarg;

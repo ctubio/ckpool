@@ -2192,11 +2192,21 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 	mutex_unlock(ssends->lock);
 }
 
-static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id)
+/* passthrough subclients have client_ids in the high bits */
+static inline bool passthrough_subclient(const int64_t client_id)
 {
-	smsg_t *msg;
+	return (client_id > 0xffffffffll);
+}
 
-	msg = ckzalloc(sizeof(smsg_t));
+static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
+			     const int msg_type)
+{
+	smsg_t *msg = ckzalloc(sizeof(smsg_t));
+	ckpool_t *ckp = sdata->ckp;
+
+	if (ckp->node || passthrough_subclient(client_id))
+		json_set_string(val, "node.method", stratum_msgs[msg_type]);
+	LOGDEBUG("Sending stratum message %s", stratum_msgs[msg_type]);
 	msg->json_msg = val;
 	msg->client_id = client_id;
 	ckmsgq_add(sdata->ssends, msg);
@@ -2595,7 +2605,7 @@ static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 	client->reconnect_request = time(NULL);
 	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
-	stratum_add_send(sdata, json_msg, client->id);
+	stratum_add_send(sdata, json_msg, client->id, SM_RECONNECT);
 }
 
 static void dead_proxy(sdata_t *sdata, const char *buf)
@@ -3520,12 +3530,6 @@ out_unlock:
 	return ret;
 }
 
-/* passthrough subclients have client_ids in the high bits */
-static inline bool passthrough_subclient(const int64_t client_id)
-{
-	return (client_id > 0xffffffffll);
-}
-
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
@@ -4251,7 +4255,7 @@ static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client)
 
 	JSON_CPACK(json_msg, "{s[I]soss}", "params", client->diff, "id", json_null(),
 			     "method", "mining.set_difficulty");
-	stratum_add_send(sdata, json_msg, client->id);
+	stratum_add_send(sdata, json_msg, client->id, SM_DIFF);
 }
 
 /* Needs to be entered with client holding a ref count. */
@@ -4261,7 +4265,7 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
 
 	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
-	stratum_add_send(sdata, json_msg, client->id);
+	stratum_add_send(sdata, json_msg, client->id, SM_MSG);
 }
 
 static double time_bias(const double tdiff, const double period)
@@ -4897,7 +4901,7 @@ static void stratum_send_update(sdata_t *sdata, const int64_t client_id, const b
 	json_msg = __stratum_notify(sdata->current_workbase, clean);
 	ck_runlock(&sdata->workbase_lock);
 
-	stratum_add_send(sdata, json_msg, client_id);
+	stratum_add_send(sdata, json_msg, client_id, SM_UPDATE);
 }
 
 static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_val, const char *err_msg)
@@ -4905,7 +4909,7 @@ static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_va
 	json_t *val;
 
 	JSON_CPACK(val, "{soss}", "id", json_deep_copy(id_val), "error", err_msg);
-	stratum_add_send(sdata, val, client_id);
+	stratum_add_send(sdata, val, client_id, SM_ERROR);
 }
 
 /* Needs to be entered with client holding a ref count. */
@@ -5028,6 +5032,15 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		return;
 	}
 
+	if (cmdmatch(method, "mining.term")) {
+		LOGDEBUG("Mining terminate requested from %"PRId64" %s", client_id, client->address);
+		drop_client(ckp, sdata, client_id);
+		return;
+	}
+
+	if (ckp->node)
+		return;
+
 	if (cmdmatch(method, "mining.subscribe")) {
 		json_t *val, *result_val;
 
@@ -5046,7 +5059,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		json_object_set_new_nocheck(val, "result", result_val);
 		json_object_set_nocheck(val, "id", id_val);
 		json_object_set_new_nocheck(val, "error", json_null());
-		stratum_add_send(sdata, val, client_id);
+		stratum_add_send(sdata, val, client_id, SM_SUBSCRIBERESULT);
 		if (likely(client->subscribed))
 			init_client(sdata, client, client_id);
 		return;
@@ -5115,12 +5128,6 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val);
 
 		ckmsgq_add(sdata->stxnq, jp);
-		return;
-	}
-
-	if (cmdmatch(method, "mining.term")) {
-		LOGDEBUG("Mining terminate requested from %"PRId64" %s", client_id, client->address);
-		drop_client(ckp, sdata, client_id);
 		return;
 	}
 
@@ -5319,7 +5326,7 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	steal_json_id(json_msg, jp);
-	stratum_add_send(sdata, json_msg, client_id);
+	stratum_add_send(sdata, json_msg, client_id, SM_SHARERESULT);
 out_decref:
 	dec_instance_ref(sdata, client);
 out:
@@ -5381,7 +5388,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	steal_json_id(json_msg, jp);
-	stratum_add_send(sdata, json_msg, client_id);
+	stratum_add_send(sdata, json_msg, client_id, SM_AUTHRESULT);
 
 	if (!json_is_true(result_val) || !client->suggest_diff)
 		goto out;
@@ -5596,7 +5603,7 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 	} else
 		json_set_string(val, "error", "Invalid job_id");
 out_send:
-	stratum_add_send(sdata, val, jp->client_id);
+	stratum_add_send(sdata, val, jp->client_id, SM_TXNSRESULT);
 out:
 	if (client)
 		dec_instance_ref(sdata, client);

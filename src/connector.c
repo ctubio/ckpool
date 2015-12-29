@@ -504,10 +504,10 @@ reparse:
 		 * do this unlocked as the occasional false negative can be
 		 * filtered by the stratifier. */
 		if (likely(!client->invalid)) {
+			if (ckp->node || !ckp->passthrough)
+				send_proc(ckp->stratifier, s);
 			if (ckp->passthrough)
 				send_proc(ckp->generator, s);
-			else
-				send_proc(ckp->stratifier, s);
 		}
 
 		free(s);
@@ -936,11 +936,11 @@ static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 	send_client(cdata, client->id, buf);
 }
 
-static void process_client_msg(cdata_t *cdata, const char *buf)
+static void process_client_msg(ckpool_t *ckp, cdata_t *cdata, const char *buf)
 {
+	char *msg, *node_msg;
 	int64_t client_id;
 	json_t *json_msg;
-	char *msg;
 
 	json_msg = json_loads(buf, 0, NULL);
 	if (unlikely(!json_msg)) {
@@ -953,8 +953,12 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 	json_object_del(json_msg, "client_id");
 	/* Put client_id back in for a passthrough subclient, passing its
 	 * upstream client_id instead of the passthrough's. */
-	if (client_id > 0xffffffffll)
+	if (ckp->node || client_id > 0xffffffffll) {
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
+		if (json_get_string(&node_msg, json_msg, "node.method"))
+			LOGDEBUG("Got node method %s", node_msg);
+	}
+
 	msg = json_dumps(json_msg, JSON_EOL);
 	send_client(cdata, client_id, msg);
 	json_decref(json_msg);
@@ -1055,7 +1059,7 @@ retry:
 	/* The bulk of the messages will be json messages to send to clients
 	 * so look for them first. */
 	if (likely(buf[0] == '{')) {
-		process_client_msg(cdata, buf);
+		process_client_msg(ckp, cdata, buf);
 	} else if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
 

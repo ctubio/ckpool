@@ -243,6 +243,38 @@ struct ckpool_instance {
 	void *data;
 };
 
+enum stratum_msgtype {
+	SM_RECONNECT = 0,
+	SM_DIFF,
+	SM_MSG,
+	SM_UPDATE,
+	SM_ERROR,
+	SM_SUBSCRIBE,
+	SM_SUBSCRIBERESULT,
+	SM_SHARE,
+	SM_SHARERESULT,
+	SM_AUTH,
+	SM_AUTHRESULT,
+	SM_TXNS,
+	SM_TXNSRESULT
+};
+
+static const char __maybe_unused *stratum_msgs[] = {
+	"reconnect",
+	"diff",
+	"message",
+	"update",
+	"error",
+	"subscribe",
+	"subscribe.result",
+	"share",
+	"share.result",
+	"auth",
+	"auth.result",
+	"txns",
+	"txns.result"
+};
+
 #ifdef USE_CKDB
 #define CKP_STANDALONE(CKP) ((CKP)->standalone == true)
 #else
