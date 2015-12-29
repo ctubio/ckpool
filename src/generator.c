@@ -212,7 +212,7 @@ static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 		goto out;
 	}
 	clear_gbtbase(gbt);
-	if (!validate_address(cs, ckp->btcaddress)) {
+	if (!ckp->node && !validate_address(cs, ckp->btcaddress)) {
 		LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
 		goto out;
 	}
