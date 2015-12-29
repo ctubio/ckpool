@@ -71,7 +71,7 @@ function pctcolour($pct)
 #
 function doblocks($data, $user)
 {
- $blink = '<a href=https://blockchain.info/block-height/';
+ $blink = '<a href=https://www.blocktrail.com/BTC/block/';
 
  $pg = '';
 
