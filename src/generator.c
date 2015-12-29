@@ -1980,27 +1980,6 @@ static void reconnect_proxy(proxy_instance_t *proxi)
 	create_pthread(&pth, proxy_reconnect, proxi);
 }
 
-static int node_msg_type(json_t *val)
-{
-	int i, ret = -1;
-	char *node_msg;
-
-	if (!val)
-		goto out;
-	if (!json_get_string(&node_msg, val, "node.method"))
-		goto out;
-	for (i = 0; i < SM_NONE; i++) {
-		if (!strcmp(node_msg, stratum_msgs[i])) {
-			ret = i;
-			LOGWARNING("Got node method %d:%s", i, node_msg);
-			break;
-		}
-	}
-	json_object_del(val, "node.method");
-out:
-	return ret;
-}
-
 /* For receiving messages from an upstream pool to pass downstream. Responsible
  * for setting up the connection and testing pool is live. */
 static void *passthrough_recv(void *arg)
@@ -2042,10 +2021,6 @@ static void *passthrough_recv(void *arg)
 			alive = proxi->alive = false;
 			Close(cs->fd);
 			continue;
-		}
-		if (ckp->node) {
-			json_t *val = json_loads(cs->buf, 0, NULL);
-			int msg_type = node_msg_type(val);
 		}
 		/* Simply forward the message on, as is, to the connector to
 		 * process. Possibly parse parameters sent by upstream pool

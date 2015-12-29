@@ -899,6 +899,18 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			free(buf);
 			return;
 		}
+		if (ckp->node) {
+			json_t *val = json_loads(buf, 0, NULL);
+			char *msg;
+
+			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
+			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
+			json_object_set_new_nocheck(val, "server", json_integer(client->server));
+			msg = json_dumps(val, 0);
+			json_decref(val);
+			send_proc(ckp->stratifier, msg);
+			free(msg);
+		}
 		if (ckp->redirector && !client->redirected)
 			test_redirector_shares(ckp, client, buf);
 	}
@@ -936,7 +948,7 @@ static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 	send_client(cdata, client->id, buf);
 }
 
-static void process_client_msg(ckpool_t *ckp, cdata_t *cdata, const char *buf)
+static void process_client_msg(cdata_t *cdata, const char *buf)
 {
 	int64_t client_id;
 	json_t *json_msg;
@@ -1056,7 +1068,7 @@ retry:
 	/* The bulk of the messages will be json messages to send to clients
 	 * so look for them first. */
 	if (likely(buf[0] == '{')) {
-		process_client_msg(ckp, cdata, buf);
+		process_client_msg(cdata, buf);
 	} else if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
 

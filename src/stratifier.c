@@ -5038,9 +5038,6 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		return;
 	}
 
-	if (ckp->node)
-		return;
-
 	if (cmdmatch(method, "mining.subscribe")) {
 		json_t *val, *result_val;
 
@@ -5142,6 +5139,27 @@ static void free_smsg(smsg_t *msg)
 	free(msg);
 }
 
+static int node_msg_type(json_t *val)
+{
+	int i, ret = -1;
+	char *node_msg;
+
+	if (!val)
+		goto out;
+	if (!json_get_string(&node_msg, val, "node.method"))
+		goto out;
+	for (i = 0; i < SM_NONE; i++) {
+		if (!strcmp(node_msg, stratum_msgs[i])) {
+			ret = i;
+			LOGWARNING("Got node method %d:%s", i, node_msg);
+			break;
+		}
+	}
+	json_object_del(val, "node.method");
+out:
+	return ret;
+}
+
 /* Entered with client holding ref count */
 static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, stratum_instance_t *client)
 {
@@ -5185,7 +5203,15 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 		send_json_err(sdata, client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	parse_method(ckp, sdata, client, client_id, id_val, method, params);
+	if (ckp->node) {
+		int msg_type = node_msg_type(val);
+
+		if (msg_type > -1)
+			LOGWARNING("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
+		else
+			LOGWARNING("Missing node method");
+	} else
+		parse_method(ckp, sdata, client, client_id, id_val, method, params);
 out:
 	free_smsg(msg);
 }
