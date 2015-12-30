@@ -298,25 +298,34 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	return 1;
 }
 
+static int __drop_client(cdata_t *cdata, client_instance_t *client)
+{
+	int ret = -1;
+
+	if (client->invalid)
+		goto out;
+	client->invalid = true;
+	ret = client->fd;
+	Close(client->fd);
+	epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, ret, NULL);
+	HASH_DEL(cdata->clients, client);
+	DL_APPEND(cdata->dead_clients, client);
+	/* This is the reference to this client's presence in the
+		* epoll list. */
+	__dec_instance_ref(client);
+	cdata->dead_generated++;
+out:
+	return ret;
+}
+
 /* Client must hold a reference count */
 static int drop_client(cdata_t *cdata, client_instance_t *client)
 {
-	int64_t client_id = 0;
+	int64_t client_id = client->id;
 	int fd = -1;
 
 	ck_wlock(&cdata->lock);
-	if (!client->invalid) {
-		client->invalid = true;
-		client_id = client->id;
-		fd = client->fd;
-		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, fd, NULL);
-		HASH_DEL(cdata->clients, client);
-		DL_APPEND(cdata->dead_clients, client);
-		/* This is the reference to this client's presence in the
-		 * epoll list. */
-		__dec_instance_ref(client);
-		cdata->dead_generated++;
-	}
+	fd = __drop_client(cdata, client);
 	ck_wunlock(&cdata->lock);
 
 	if (fd > -1)
@@ -386,6 +395,17 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	ck_wunlock(&cdata->lock);
 
 	return ret;
+}
+
+static void drop_all_clients(cdata_t *cdata)
+{
+	client_instance_t *client, *tmp;
+
+	ck_wlock(&cdata->lock);
+	HASH_ITER(hh, cdata->clients, client, tmp) {
+		__drop_client(cdata, client);
+	}
+	ck_wunlock(&cdata->lock);
 }
 
 static void send_client(cdata_t *cdata, int64_t id, char *buf);
@@ -1116,7 +1136,8 @@ retry:
 	} else if (cmdmatch(buf, "reject")) {
 		LOGDEBUG("Connector received reject signal");
 		cdata->accept = false;
-		send_proc(ckp->stratifier, "dropall");
+		if (ckp->passthrough)
+			drop_all_clients(cdata);
 	} else if (cmdmatch(buf, "stats")) {
 		char *msg;
 

@@ -2302,7 +2302,7 @@ static proxy_instance_t *wait_best_proxy(ckpool_t *ckp, gdata_t *gdata)
 			break;
 		/* Send reject message if we are unable to find an active
 		 * proxy for more than 5 seconds */
-		if (!((++retries) % 5))
+		if (!((retries++) % 5))
 			send_proc(ckp->connector, "reject");
 		sleep(1);
 	}
