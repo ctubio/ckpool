@@ -257,6 +257,7 @@ enum stratum_msgtype {
 	SM_AUTHRESULT,
 	SM_TXNS,
 	SM_TXNSRESULT,
+	SM_PING,
 	SM_WORKINFO,
 	SM_NONE
 };
@@ -275,6 +276,7 @@ static const char __maybe_unused *stratum_msgs[] = {
 	"auth.result",
 	"txns",
 	"txns.result",
+	"ping",
 	"workinfo",
 	""
 };

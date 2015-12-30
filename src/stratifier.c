@@ -2253,10 +2253,16 @@ static void connector_test_client(ckpool_t *ckp, const int64_t id)
 	send_proc(ckp->connector, buf);
 }
 
+/* passthrough subclients have client_ids in the high bits */
+static inline bool passthrough_subclient(const int64_t client_id)
+{
+	return (client_id > 0xffffffffll);
+}
+
 /* For creating a list of sends without locking that can then be concatenated
  * to the stratum_sends list. Minimises locking and avoids taking recursive
  * locks. Sends only to sdata bound clients (everyone in ckpool) */
-static void stratum_broadcast(sdata_t *sdata, json_t *val)
+static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 {
 	ckpool_t *ckp = sdata->ckp;
 	sdata_t *ckp_sdata = ckp->data;
@@ -2307,6 +2313,8 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 			continue;
 		client_msg = ckalloc(sizeof(ckmsg_t));
 		msg = ckzalloc(sizeof(smsg_t));
+		if (passthrough_subclient(client->id))
+			json_set_string(val, "node.method", stratum_msgs[msg_type]);
 		msg->json_msg = json_deep_copy(val);
 		msg->client_id = client->id;
 		client_msg->data = msg;
@@ -2328,12 +2336,6 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		ssends->msgs = bulk_send;
 	pthread_cond_signal(ssends->cond);
 	mutex_unlock(ssends->lock);
-}
-
-/* passthrough subclients have client_ids in the high bits */
-static inline bool passthrough_subclient(const int64_t client_id)
-{
-	return (client_id > 0xffffffffll);
 }
 
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
@@ -2390,7 +2392,7 @@ static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
 
 	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_MSG);
 }
 
 /* Send a generic reconnect to all clients without parameters to make them
@@ -2410,7 +2412,7 @@ static void request_reconnect(sdata_t *sdata, const char *cmd)
 	} else
 		JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_RECONNECT);
 
 	/* Tag all existing clients as dropped now so they can be removed
 	 * lazily */
@@ -2655,7 +2657,7 @@ static void broadcast_ping(sdata_t *sdata)
 		   "id", 42,
 		   "method", "mining.ping");
 
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_PING);
 }
 
 static void ckmsgq_stats(ckmsgq_t *ckmsgq, const int size, json_t **val)
@@ -5037,7 +5039,7 @@ static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, const
 	json_msg = __stratum_notify(wb, clean);
 	ck_runlock(&sdata->workbase_lock);
 
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_UPDATE);
 }
 
 /* For sending a single stratum template update */
