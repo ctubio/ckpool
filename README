@@ -172,9 +172,14 @@ and then workbase.
 -l <LOGLEVEL will change the log level to that specified. Default is 5 and
 maximum debug is level 7.
 
+-N will start ckpool in passthrough node mode where it behaves like a
+passthrough but requires a locally running bitcoind and can submit blocks
+itself in addition to passing the shares back to the upstream pool. It also
+monitors hashrate and requires more resources than a simple passthrough.
+
 -n <NAME> will change the ckpool process name to that specified, allowing
 multiple different named instances to be running. By default the variant
-names are used: ckpool, ckproxy, ckpassthrough, ckredirector.
+names are used: ckpool, ckproxy, ckpassthrough, ckredirector, cknode.
 
 -P will start ckpool in passthrough proxy mode where it collates all incoming
 connections and streams all information on a single connection to an upstream
