@@ -2270,6 +2270,11 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		return;
 	}
 
+	if (ckp->node) {
+		json_decref(val);
+		return;
+	}
+
 	/* Use this locking as an opportunity to test other clients. */
 	ck_rlock(&ckp_sdata->instance_lock);
 	HASH_ITER(hh, ckp_sdata->stratum_instances, client, tmp) {
@@ -2523,7 +2528,8 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 	ts_t ts_now;
 	json_t *val;
 
-	update_base(ckp, GEN_PRIORITY);
+	if (!ckp->node)
+		update_base(ckp, GEN_PRIORITY);
 
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
@@ -4569,7 +4575,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 
 	LOGWARNING("Possible block solve diff %f !", diff);
 	/* Can't submit a block in proxy mode without the transactions */
-	if (wb->proxy && wb->merkles)
+	if (!ckp->node && wb->proxy)
 		return;
 
 	ts_realtime(&ts_now);

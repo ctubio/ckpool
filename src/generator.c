@@ -2746,6 +2746,7 @@ static int proxy_loop(proc_instance_t *pi)
 	ckpool_t *ckp = pi->ckp;
 	gdata_t *gdata = ckp->data;
 	unix_msg_t *umsg = NULL;
+	connsock_t *cs = NULL;
 	bool started = false;
 	char *buf = NULL;
 	int ret = 0;
@@ -2754,8 +2755,6 @@ reconnect:
 	clear_unix_msg(&umsg);
 
 	if (ckp->node) {
-		connsock_t *cs;
-
 		old_si = si;
 		si = live_server(ckp);
 		if (!si)
@@ -2831,7 +2830,14 @@ retry:
 	} else if (cmdmatch(buf, "reconnect")) {
 		goto reconnect;
 	} else if (cmdmatch(buf, "submitblock:")) {
+		char blockmsg[80];
+		bool ret;
+
 		LOGNOTICE("Submitting likely block solve share to upstream pool");
+		ret = submit_block(cs, buf + 12 + 64 + 1);
+		memset(buf + 12 + 64, 0, 1);
+		sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
+		send_proc(ckp->stratifier, blockmsg);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ping")) {
