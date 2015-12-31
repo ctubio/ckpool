@@ -10,6 +10,8 @@
 
 #include "klist.h"
 
+const char *tree_node_list_name = "TreeNodes";
+
 #if LOCK_CHECK
 bool check_locks = true;
 const char *thread_noname = "UNSET";
@@ -145,7 +147,8 @@ K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
 }
 
 K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
-		    bool do_tail, bool lock_only, KLIST_FFL_ARGS)
+		    bool do_tail, bool lock_only, bool without_lock,
+		    bool local_list, const char *name2, KLIST_FFL_ARGS)
 {
 	K_LIST *list;
 
@@ -162,14 +165,20 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 	list->master = list;
 	list->is_store = false;
 	list->is_lock_only = lock_only;
+	list->local_list = local_list;
 
-	list->lock = calloc(1, sizeof(*(list->lock)));
-	if (!(list->lock))
-		quithere(1, "Failed to calloc lock for list %s", name);
+	if (without_lock)
+		list->lock = NULL;
+	else {
+		list->lock = calloc(1, sizeof(*(list->lock)));
+		if (!(list->lock))
+			quithere(1, "Failed to calloc lock for list %s", name);
 
-	cklock_init(list->lock);
+		cklock_init(list->lock);
+	}
 
 	list->name = name;
+	list->name2 = name2;
 	list->siz = siz;
 	list->allocate = allocate;
 	list->limit = limit;
@@ -179,24 +188,28 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 		k_alloc_items(list, KLIST_FFL_PASS);
 
 #if LOCK_CHECK
-	K_LISTS *klists;
+	/* Don't want to keep track of short lived (tree) lists
+	 * since they wont use locking anyway */
+	if (!list->local_list) {
+		K_LISTS *klists;
 
-	// not locked :P
-	if (!lock_check_init) {
-		quitfrom(1, file, func, line,
-			 "in %s(), lock_check_lock has not been initialised!",
-			 __func__);
+		// not locked :P
+		if (!lock_check_init) {
+			quitfrom(1, file, func, line,
+				 "in %s(), lock_check_lock has not been initialised!",
+				 __func__);
+		}
+
+		klists = calloc(1, sizeof(*klists));
+		if (!klists)
+			quithere(1, "Failed to calloc klists %s", name);
+
+		klists->klist = list;
+		ck_wlock(&lock_check_lock);
+		klists->next = all_klists;
+		all_klists = klists;
+		ck_wunlock(&lock_check_lock);
 	}
-
-	klists = calloc(1, sizeof(*klists));
-	if (!klists)
-		quithere(1, "Failed to calloc klists %s", name);
-
-	klists->klist = list;
-	ck_wlock(&lock_check_lock);
-	klists->next = all_klists;
-	all_klists = klists;
-	ck_wunlock(&lock_check_lock);
 #endif
 
 	return list;
@@ -522,38 +535,43 @@ K_LIST *_k_free_list(K_LIST *list, KLIST_FFL_ARGS)
 		free(list->data_memory[i]);
 	free(list->data_memory);
 
-	cklock_destroy(list->lock);
+	if (list->lock) {
+		cklock_destroy(list->lock);
 
-	free(list->lock);
+		free(list->lock);
+	}
 
 #if LOCK_CHECK
-	K_LISTS *klists, *klists_prev = NULL;
+	// local_list lists are not stored in all_klists
+	if (!list->local_list) {
+		K_LISTS *klists, *klists_prev = NULL;
 
-	// not locked :P
-	if (!lock_check_init) {
-		quitfrom(1, file, func, line,
-			 "in %s(), lock_check_lock has not been initialised!",
-			 __func__);
-	}
+		// not locked :P
+		if (!lock_check_init) {
+			quitfrom(1, file, func, line,
+				 "in %s(), lock_check_lock has not been initialised!",
+				 __func__);
+		}
 
-	ck_wlock(&lock_check_lock);
-	klists = all_klists;
-	while (klists && klists->klist != list) {
-		klists_prev = klists;
-		klists = klists->next;
+		ck_wlock(&lock_check_lock);
+		klists = all_klists;
+		while (klists && klists->klist != list) {
+			klists_prev = klists;
+			klists = klists->next;
+		}
+		if (!klists) {
+			quitfrom(1, file, func, line,
+				 "in %s(), list %s not in klists",
+				 __func__, list->name);
+		} else {
+			if (klists_prev)
+				klists_prev->next = klists->next;
+			else
+				all_klists = klists->next;
+			free(klists);
+		}
+		ck_wunlock(&lock_check_lock);
 	}
-	if (!klists) {
-		quitfrom(1, file, func, line,
-			 "in %s(), list %s not in klists",
-			 __func__, list->name);
-	} else {
-		if (klists_prev)
-			klists_prev->next = klists->next;
-		else
-			all_klists = klists->next;
-		free(klists);
-	}
-	ck_wunlock(&lock_check_lock);
 #endif
 
 	free(list);

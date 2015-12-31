@@ -4189,7 +4189,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	ss_count = wm_count = ms_count = 0;
 
 	mu_store = k_new_store(miningpayouts_free);
-	mu_root = new_ktree(cmp_mu, miningpayouts_free);
+	mu_root = new_ktree_auto("OldMPU", cmp_mu, miningpayouts_free);
 
 	looksharesummary.workinfoid = block_workinfoid;
 	looksharesummary.userid = MAXID;

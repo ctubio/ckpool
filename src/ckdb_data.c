@@ -3705,7 +3705,10 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	ss_count = wm_count = ms_count = 0;
 
 	mu_store = k_new_store(miningpayouts_free);
-	mu_root = new_ktree(cmp_mu, miningpayouts_free);
+
+	/* Use the master size for this local tree since
+	 *  it's large and doesn't get created often */
+	mu_root = new_ktree_local("PPLNSMPU", cmp_mu, miningpayouts_free);
 
 	looksharesummary.workinfoid = blocks->workinfoid;
 	looksharesummary.userid = MAXID;
