@@ -3308,8 +3308,11 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int csync = cmd_workqueue_store->count;
 	int bsync = btc_workqueue_store->count;
 	snprintf(tmp, sizeof(tmp), "psync=%d%c", psync, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "csync=%d%c", csync, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "bsync=%d%c", bsync, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "sync=%d%c", psync + csync + bsync, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
