@@ -31,7 +31,7 @@ function dockp($data, $user)
  $pg .= '<td class=dl>Name</td>';
  $pg .= '<td class=dr>Initial</td>';
  $pg .= '<td class=dr>Allocated</td>';
- $pg .= '<td class=dr>Store</td>';
+ $pg .= '<td class=dr>In&nbsp;Store</td>';
  $pg .= '<td class=dr>RAM</td>';
  $pg .= '<td class=dr>RAM2</td>';
  $pg .= '<td class=dr>Cull</td>';
@@ -50,7 +50,7 @@ function dockp($data, $user)
 		$pg .= '<td class=dl>'.$ans['name:'.$i].'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['initial:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['allocated:'.$i]).'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['store:'.$i]).'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['instore:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['ram:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['ram2:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['cull:'.$i]).'</td>';

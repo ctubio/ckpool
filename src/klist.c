@@ -16,8 +16,6 @@ const char *tree_node_list_name = "TreeNodes";
 bool check_locks = true;
 const char *thread_noname = "UNSET";
 int next_thread_id = 0;
-bool lock_check_init = false;
-cklock_t lock_check_lock;
 __thread int my_thread_id = -1;
 __thread char *my_thread_name = NULL;
 __thread bool my_check_locks = true;
@@ -32,8 +30,11 @@ __thread const char *my_locks_f[MAX_LOCKDEPTH];
 __thread int my_locks_l[MAX_LOCKDEPTH];
 __thread int my_lock_level = 0;
 __thread bool my_check_deadlocks = true;
-K_LISTS *all_klists;
 #endif
+// Required for cmd_stats
+bool lock_check_init = false;
+cklock_t lock_check_lock;
+K_LISTS *all_klists;
 
 #define _CHKLIST(_list, _name) do {\
 		if (!_list) { \
@@ -61,6 +62,7 @@ K_LISTS *all_klists;
 static void k_alloc_items(K_LIST *list, KLIST_FFL_ARGS)
 {
 	K_ITEM *item;
+	void *data;
 	int allocate, i;
 
 	CHKLIST(list);
@@ -90,10 +92,6 @@ static void k_alloc_items(K_LIST *list, KLIST_FFL_ARGS)
 	}
 	list->item_memory[list->item_mem_count - 1] = (void *)item;
 
-	list->total += allocate;
-	list->count = allocate;
-	list->count_up = allocate;
-
 	item[0].name = list->name;
 	item[0].prev = NULL;
 	item[0].next = &(item[1]);
@@ -110,21 +108,29 @@ static void k_alloc_items(K_LIST *list, KLIST_FFL_ARGS)
 	if (list->do_tail)
 		list->tail = &(item[allocate-1]);
 
+	list->data_mem_count++;
+	if (!(list->data_memory = realloc(list->data_memory,
+					  list->data_mem_count * sizeof(*(list->data_memory))))) {
+		quithere(1, "List %s data_memory failed to realloc count=%d",
+				list->name, list->data_mem_count);
+	}
+	data = calloc(allocate, list->siz);
+	if (!data) {
+		quithere(1, "List %s failed to calloc %d new data - total was %d, limit was %d",
+				list->name, allocate, list->total, list->limit);
+	}
+	list->data_memory[list->data_mem_count - 1] = data;
+
 	item = list->head;
 	while (item) {
-		list->data_mem_count++;
-		if (!(list->data_memory = realloc(list->data_memory,
-						  list->data_mem_count *
-						  sizeof(*(list->data_memory))))) {
-			quithere(1, "List %s data_memory failed to realloc count=%d",
-					list->name, list->data_mem_count);
-		}
-		item->data = calloc(1, list->siz);
-		if (!(item->data))
-			quithere(1, "List %s failed to calloc item data", list->name);
-		list->data_memory[list->data_mem_count - 1] = (void *)(item->data);
+		item->data = data;
+		data += list->siz;
 		item = item->next;
 	}
+
+	list->total += allocate;
+	list->count = allocate;
+	list->count_up = allocate;
 }
 
 K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
@@ -142,6 +148,7 @@ K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
 	store->lock = list->lock;
 	store->name = list->name;
 	store->do_tail = list->do_tail;
+	list->stores++;
 
 	return store;
 }
@@ -187,7 +194,6 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 	if (!(list->is_lock_only))
 		k_alloc_items(list, KLIST_FFL_PASS);
 
-#if LOCK_CHECK
 	/* Don't want to keep track of short lived (tree) lists
 	 * since they wont use locking anyway */
 	if (!list->local_list) {
@@ -210,7 +216,6 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 		all_klists = klists;
 		ck_wunlock(&lock_check_lock);
 	}
-#endif
 
 	return list;
 }
@@ -541,7 +546,6 @@ K_LIST *_k_free_list(K_LIST *list, KLIST_FFL_ARGS)
 		free(list->lock);
 	}
 
-#if LOCK_CHECK
 	// local_list lists are not stored in all_klists
 	if (!list->local_list) {
 		K_LISTS *klists, *klists_prev = NULL;
@@ -572,7 +576,6 @@ K_LIST *_k_free_list(K_LIST *list, KLIST_FFL_ARGS)
 		}
 		ck_wunlock(&lock_check_lock);
 	}
-#endif
 
 	free(list);
 
@@ -587,6 +590,8 @@ K_STORE *_k_free_store(K_STORE *store, KLIST_FFL_ARGS)
 		quithere(1, "Store %s can't %s() the list" KLIST_FFL,
 				store->name, __func__, KLIST_FFL_PASS);
 	}
+
+	store->master->stores--;
 
 	free(store);
 

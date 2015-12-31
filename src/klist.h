@@ -87,8 +87,6 @@ extern bool check_locks;
 #define MAX_THREADS 128
 extern const char *thread_noname;
 extern int next_thread_id;
-extern bool lock_check_init;
-extern cklock_t lock_check_lock;
 extern __thread int my_thread_id;
 extern __thread char *my_thread_name;
 extern __thread bool my_check_locks;
@@ -152,6 +150,7 @@ typedef struct k_list {
 	void (*dsp_func)(K_ITEM *, FILE *); // optional data display to a file
 	int cull_count;
 	int ram;		// ram allocated for data pointers - code must manage it
+	int stores;		// how many stores it currently has
 #if LOCK_CHECK
 	// Since each thread has it's own k_lock no locking is required on this
 	K_LOCK k_lock[MAX_THREADS];
@@ -160,13 +159,14 @@ typedef struct k_list {
 #endif
 } K_LIST;
 
-#if LOCK_CHECK
+// Required for cmd_stats
+extern bool lock_check_init;
+extern cklock_t lock_check_lock;
 typedef struct k_lists {
 	K_LIST *klist;
 	struct k_lists *next;
 } K_LISTS;
 extern K_LISTS *all_klists;
-#endif
 
 /*
  * K_STORE is for a list of items taken from a K_LIST
@@ -526,7 +526,14 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 #else
 #define LOCK_MAYBE __maybe_unused
 #define LOCK_INIT(_name)
-#define FIRST_LOCK_INIT(_name)
+#define FIRST_LOCK_INIT(_ignore) do { \
+		if (lock_check_init) { \
+			quithere(1, "lock_check_lock has already been " \
+				 "initialised!"); \
+		} \
+		cklock_init(&lock_check_lock); \
+		lock_check_init = true; \
+	} while (0)
 #define CHECK_WLOCK(_list) ck_wlock((_list)->lock)
 #define CHECK_WUNLOCK(_list) ck_wunlock((_list)->lock)
 #define CHECK_RLOCK(_list) ck_rlock((_list)->lock)
