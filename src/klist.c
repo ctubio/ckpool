@@ -145,7 +145,7 @@ K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
 
 	store->master = list;
 	store->is_store = true;
-	store->lock = list->lock;
+	store->lock = NULL;
 	store->name = list->name;
 	store->do_tail = list->do_tail;
 	list->stores++;
