@@ -23,7 +23,7 @@ function doallwork($data, $user)
  if ($ans['STATUS'] == 'ok')
  {
 	$count = $ans['rows'];
-    $title = NULL;
+	$title = NULL;
 	for ($i = 0; $i < $count; $i++)
 	{
 		$pg .= workuser($data, $ans['username:'.$i],
