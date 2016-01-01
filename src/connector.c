@@ -499,8 +499,6 @@ compressed:
 		LOGDEBUG("Received client message compressed %d from %d",
 			 client->compsize, client->decompsize);
 		msg[ret] = '\0';
-		/* Flag this client as able to receive lz4 compressed data now */
-		client->lz4 = true;
 		client->bufofs -= client->compsize;
 		if (client->bufofs)
 			memmove(client->buf, client->buf + buflen, client->bufofs);
@@ -1000,8 +998,9 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			test_redirector_shares(ckp, client, buf);
 	}
 
-	/* Does this client accept compressed data? */
-	if (client->lz4) {
+	/* Does this client accept compressed data? Only compress if it's
+	 * larger than one MTU. */
+	if (client->lz4 && len > 1492) {
 		char *dest = ckalloc(len + 12);
 		uint32_t msglen;
 		int compsize;
@@ -1009,11 +1008,6 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 		compsize = LZ4_compress(buf, dest + 12, len);
 		if (unlikely(!compsize)) {
 			LOGWARNING("Failed to LZ4 compress in send_client, sending uncompressed");
-			free(dest);
-			goto out;
-		}
-		if (compsize + 12 >= len) {
-			/* Only end it compressed if it's smaller */
 			free(dest);
 			goto out;
 		}
@@ -1237,10 +1231,15 @@ retry:
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "shutdown")) {
 		goto out;
-	} else if (cmdmatch(buf, "passthrough")) {
+	} else if (cmdmatch(buf, "pass")) {
 		client_instance_t *client;
+		bool lz4 = false;
 
-		ret = sscanf(buf, "passthrough=%"PRId64, &client_id);
+		if (strstr(buf, "lz4")) {
+			lz4 = true;
+			ret = sscanf(buf, "passlz4=%"PRId64, &client_id);
+		} else
+			ret = sscanf(buf, "passthrough=%"PRId64, &client_id);
 		if (ret < 0) {
 			LOGDEBUG("Connector failed to parse passthrough command: %s", buf);
 			goto retry;
@@ -1250,6 +1249,7 @@ retry:
 			LOGINFO("Connector failed to find client id %"PRId64" to pass through", client_id);
 			goto retry;
 		}
+		client->lz4 = lz4;
 		passthrough_client(cdata, client);
 		dec_instance_ref(cdata, client);
 	} else if (cmdmatch(buf, "getxfd")) {

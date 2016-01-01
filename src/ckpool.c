@@ -732,7 +732,7 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 	int ret = -1;
 
 	/* Connsock doesn't expect lz4 compressed messages */
-	if (!cs->lz4) {
+	if (!cs->lz4 || len <= 1492) {
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
@@ -741,12 +741,6 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 	compsize = LZ4_compress(buf, dest + 12, len);
 	if (!compsize) {
 		LOGWARNING("Failed to LZ4 compress in write_cs, writing uncompressed");
-		ret = write_socket(cs->fd, buf, len);
-		goto out;
-	}
-	if (compsize + 12 >= len) {
-		/* Selectively send compressed packets only when they're
-		 * smaller. */
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
