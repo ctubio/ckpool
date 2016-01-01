@@ -555,7 +555,7 @@ static int read_cs_length(connsock_t *cs, float *timeout, int len)
 	int ret = len;
 
 	while (cs->buflen < len) {
-		char readbuf[PAGESIZE] = {};
+		char readbuf[PAGESIZE];
 
 		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1)
@@ -629,7 +629,7 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 	buflen = cs->buflen;
 	cs->buf = dest;
 	dest = NULL;
-	ret = cs->buflen = decompsize - 1;
+	ret = cs->buflen = decompsize;
 	if (buflen)
 		add_bufline(cs, buf, buflen);
 out:
@@ -732,23 +732,20 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 	unsigned long compsize, decompsize = len;
 	char *dest = NULL;
 	uint32_t msglen;
-	int ret = -1;
+	int ret;
 
 	/* Connsock doesn't expect gz compressed messages */
-	if (!cs->gz || len <= 1492) {
-		ret = write_socket(cs->fd, buf, len);
-		goto out;
-	}
-	dest = ckalloc(len + 12);
+	if (!cs->gz || len <= 1492)
+		return write_socket(cs->fd, buf, len);
+	compsize = round_up_page(len + 12);
+	dest = alloca(compsize);
 	/* Do compression here */
-	compsize = len;
+	compsize -= 12;
 	ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
 	if (ret != Z_OK) {
 		LOGINFO("Failed to gz compress in write_cs, writing uncompressed");
-		ret = write_socket(cs->fd, buf, len);
-		goto out;
+		return write_socket(cs->fd, buf, len);
 	}
-	LOGDEBUG("Writing connsock message compressed %lu from %lu", compsize, decompsize);
 	/* Copy gz magic header */
 	sprintf(dest, gzip_magic);
 	/* Copy compressed message length */
@@ -758,13 +755,12 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 	msglen = htole32(decompsize);
 	memcpy(dest + 8, &msglen, 4);
 	len = compsize + 12;
+	LOGDEBUG("Writing connsock message compressed %d from %lu", len, decompsize);
 	ret = write_socket(cs->fd, dest, len);
 	if (ret == len)
 		ret = decompsize;
 	else
 		ret = -1;
-out:
-	free(dest);
 	return ret;
 }
 
