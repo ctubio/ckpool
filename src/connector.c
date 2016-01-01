@@ -1003,29 +1003,27 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 
 	/* Does this client accept compressed data? Only compress if it's
 	 * larger than one MTU. */
-	if (client->gz && len > 1492) {
-		unsigned long compsize;
+	if (client->gz) {
+		unsigned long compsize, decompsize = len;
+		char *dest = ckalloc(len + 12);
 		uint32_t msglen;
-		char *dest;
 		int ret;
 
-		compsize = round_up_page(len + 12);
-		dest = ckalloc(compsize);
-		compsize -= 12;
+		compsize = len;
 		ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
 		if (unlikely(ret != Z_OK)) {
-			LOGWARNING("Failed to gz compress in send_client, got %d sending uncompressed", ret);
+			LOGINFO("Failed to gz compress in send_client, got %d sending uncompressed", ret);
 			free(dest);
 			goto out;
 		}
-		LOGDEBUG("Sending client message compressed %lu from %d", compsize, len);
+		LOGDEBUG("Sending client message compressed %lu from %lu", compsize, decompsize);
 		/* Copy gz magic header */
 		sprintf(dest, gzip_magic);
 		/* Copy compressed message length */
 		msglen = htole32(compsize);
 		memcpy(dest + 4, &msglen, 4);
 		/* Copy decompressed message length */
-		msglen = htole32(len);
+		msglen = htole32(decompsize);
 		memcpy(dest + 8, &msglen, 4);
 		len = compsize + 12;
 		free(buf);

@@ -739,13 +739,12 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
-	compsize = round_up_page(len + 12);
-	dest = ckalloc(compsize);
-	compsize -= 12;
+	dest = ckalloc(len + 12);
 	/* Do compression here */
+	compsize = len;
 	ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
 	if (ret != Z_OK) {
-		LOGWARNING("Failed to gz compress in write_cs, writing uncompressed");
+		LOGINFO("Failed to gz compress in write_cs, writing uncompressed");
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
