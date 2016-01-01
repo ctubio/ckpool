@@ -10,12 +10,12 @@
 #include "config.h"
 
 #include <arpa/inet.h>
-#include <lz4.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <string.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -56,7 +56,7 @@ struct client_instance {
 	int server;
 
 	char buf[PAGESIZE];
-	int bufofs;
+	unsigned long bufofs;
 
 	/* Are we currently sending a blocked message from this client */
 	sender_send_t *sending;
@@ -64,11 +64,11 @@ struct client_instance {
 	/* Is this the parent passthrough client */
 	bool passthrough;
 
-	/* Does this client expect lz4 compression? */
-	bool lz4;
+	/* Does this client expect gz compression? */
+	bool gz;
 	bool compressed; /* Currently receiving a compressed message */
-	int compsize; /* Expected compressed data size */
-	int decompsize; /* Expected decompressed data size */
+	unsigned long compsize; /* Expected compressed data size */
+	unsigned long decompsize; /* Expected decompressed data size */
 
 	/* Linked list of shares in redirector mode.*/
 	share_t *shares;
@@ -479,7 +479,7 @@ retry:
 	if (ret < 1) {
 		if (likely(errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 			return;
-		LOGINFO("Client id %"PRId64" fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
+		LOGINFO("Client id %"PRId64" fd %d disconnected - recv fail with bufofs %lu ret %d errno %d %s",
 			client->id, client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
 		return;
@@ -487,18 +487,21 @@ retry:
 	client->bufofs += ret;
 compressed:
 	if (client->compressed) {
+		unsigned long res;
+
 		if (client->bufofs < client->compsize)
 			goto retry;
-		ret = LZ4_decompress_safe(client->buf, msg, client->compsize, client->decompsize);
-		if (ret != client->decompsize) {
-			LOGNOTICE("Failed to decompress %d from %d bytes in parse_client_msg, got %d",
+		res = client->decompsize;
+		ret = uncompress((Bytef *)msg, &res, (Bytef *)client->buf, client->compsize);
+		if (ret != Z_OK || res != client->decompsize) {
+			LOGNOTICE("Failed to decompress %lu from %lu bytes in parse_client_msg, got %d",
 				  client->decompsize, client->compsize, ret);
 			invalidate_client(ckp, cdata, client);
 			return;
 		}
-		LOGDEBUG("Received client message compressed %d from %d",
+		LOGDEBUG("Received client message compressed %lu from %lu",
 			 client->compsize, client->decompsize);
-		msg[ret] = '\0';
+		msg[res] = '\0';
 		client->bufofs -= client->compsize;
 		if (client->bufofs)
 			memmove(client->buf, client->buf + buflen, client->bufofs);
@@ -519,7 +522,7 @@ reparse:
 	}
 
 	/* Look for a compression header */
-	if (!strncmp(client->buf, "lz4", 3)) {
+	if (!strncmp(client->buf, gzip_magic, 3)) {
 		uint32_t msglen;
 
 		/* Do we have the whole header? If not, keep reading */
@@ -531,7 +534,7 @@ reparse:
 		client->decompsize = le32toh(msglen);
 		if (unlikely(!client->compsize || !client->decompsize ||
 		    client->compsize > MAX_MSGSIZE || client->decompsize > MAX_MSGSIZE)) {
-			LOGNOTICE("Client id %"PRId64" invalid compressed message size %d/%d, disconnecting",
+			LOGNOTICE("Client id %"PRId64" invalid compressed message size %lu/%lu, disconnecting",
 				  client->id, client->compsize, client->decompsize);
 			invalidate_client(ckp, cdata, client);
 			return;
@@ -1000,20 +1003,24 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 
 	/* Does this client accept compressed data? Only compress if it's
 	 * larger than one MTU. */
-	if (client->lz4 && len > 1492) {
-		char *dest = ckalloc(len + 12);
+	if (client->gz && len > 1492) {
+		unsigned long compsize;
 		uint32_t msglen;
-		int compsize;
+		char *dest;
+		int ret;
 
-		compsize = LZ4_compress(buf, dest + 12, len);
-		if (unlikely(!compsize)) {
-			LOGWARNING("Failed to LZ4 compress in send_client, sending uncompressed");
+		compsize = round_up_page(len + 12);
+		dest = ckalloc(compsize);
+		compsize -= 12;
+		ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
+		if (unlikely(ret != Z_OK)) {
+			LOGWARNING("Failed to gz compress in send_client, got %d sending uncompressed", ret);
 			free(dest);
 			goto out;
 		}
-		LOGDEBUG("Sending client message compressed %d from %d", compsize, len);
-		/* Copy lz4 magic header */
-		sprintf(dest, "lz4\n");
+		LOGDEBUG("Sending client message compressed %lu from %d", compsize, len);
+		/* Copy gz magic header */
+		sprintf(dest, gzip_magic);
 		/* Copy compressed message length */
 		msglen = htole32(compsize);
 		memcpy(dest + 4, &msglen, 4);
@@ -1054,7 +1061,7 @@ static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 
 	LOGINFO("Connector adding passthrough client %"PRId64, client->id);
 	client->passthrough = true;
-	ASPRINTF(&buf, "{\"result\": true, \"lz4\": true}\n");
+	ASPRINTF(&buf, "{\"result\": true, \"gz\": true}\n");
 	send_client(cdata, client->id, buf);
 }
 
@@ -1233,11 +1240,11 @@ retry:
 		goto out;
 	} else if (cmdmatch(buf, "pass")) {
 		client_instance_t *client;
-		bool lz4 = false;
+		bool gz = false;
 
-		if (strstr(buf, "lz4")) {
-			lz4 = true;
-			ret = sscanf(buf, "passlz4=%"PRId64, &client_id);
+		if (strstr(buf, "gz")) {
+			gz = true;
+			ret = sscanf(buf, "passgz=%"PRId64, &client_id);
 		} else
 			ret = sscanf(buf, "passthrough=%"PRId64, &client_id);
 		if (ret < 0) {
@@ -1249,7 +1256,7 @@ retry:
 			LOGINFO("Connector failed to find client id %"PRId64" to pass through", client_id);
 			goto retry;
 		}
-		client->lz4 = lz4;
+		client->gz = gz;
 		passthrough_client(cdata, client);
 		dec_instance_ref(cdata, client);
 	} else if (cmdmatch(buf, "getxfd")) {

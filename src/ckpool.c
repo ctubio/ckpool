@@ -20,7 +20,7 @@
 #include <getopt.h>
 #include <grp.h>
 #include <jansson.h>
-#include <lz4.h>
+#include <zlib.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +35,8 @@
 #include "api.h"
 
 ckpool_t *global_ckp;
+
+const char gzip_magic[] = "\x1f\xd5\x01\n";
 
 static void proclog(ckpool_t *ckp, char *msg)
 {
@@ -567,13 +569,14 @@ out:
 	return ret;
 }
 
-static int read_lz4_line(connsock_t *cs, float *timeout)
+static int read_gz_line(connsock_t *cs, float *timeout)
 {
-	int compsize, decompsize, ret, buflen;
+	unsigned long compsize, res, decompsize;
 	char *buf, *dest = NULL, *eom;
+	int ret,  buflen;
 	uint32_t msglen;
 
-	/* Remove lz4 header */
+	/* Remove gz header */
 	clear_bufline(cs);
 
 	/* Get data sizes */
@@ -588,35 +591,35 @@ static int read_lz4_line(connsock_t *cs, float *timeout)
 	decompsize = le32toh(msglen);
 	cs->bufofs = 8;
 	clear_bufline(cs);
-	LOGWARNING("Trying to read lz4 %d/%d", compsize, decompsize);
 
-	if (unlikely(compsize < 1 || compsize > (int)0x80000000 ||
-		decompsize < 1 || decompsize > (int)0x80000000)) {
-		LOGWARNING("Invalid message length comp %d decomp %d sent to read_lz4_line", compsize, decompsize);
+	if (unlikely(compsize < 1 || compsize > 0x80000000 ||
+		decompsize < 1 || decompsize > 0x80000000)) {
+		LOGWARNING("Invalid message length comp %lu decomp %lu sent to read_gz_line", compsize, decompsize);
 		ret = -1;
 		goto out;
 	}
 
 	/* Get compressed data */
 	ret = read_cs_length(cs, timeout, compsize);
-	if (ret != compsize) {
-		LOGWARNING("Failed to read %d compressed bytes in read_lz4_line, got %d", compsize, ret);
+	if (ret != (int)compsize) {
+		LOGWARNING("Failed to read %lu compressed bytes in read_gz_line, got %d", compsize, ret);
 		ret = -1;
 		goto out;
 	}
 	/* Do decompresion and buffer reconstruction here */
 	dest = ckalloc(decompsize);
-	ret = LZ4_decompress_safe(cs->buf, dest, compsize, decompsize);
+	res = decompsize;
+	ret = uncompress((Bytef *)dest, &res, (Bytef *)cs->buf, compsize);
 	/* Clear out all the compressed data */
 	clear_bufline(cs);
-	if (ret != decompsize) {
-		LOGWARNING("Failed to decompress %d bytes in read_lz4_line, got %d", decompsize, ret);
+	if (ret != Z_OK || res != decompsize) {
+		LOGWARNING("Failed to decompress %lu bytes in read_gz_line, got %d", decompsize, ret);
 		ret = -1;
 		goto out;
 	}
 	eom = dest + decompsize - 1;
 	if (memcmp(eom, "\n", 1)) {
-		LOGWARNING("Failed to find EOM in decompressed data in read_lz4_line");
+		LOGWARNING("Failed to find EOM in decompressed data in read_gz_line");
 		ret = -1;
 		goto out;
 	}
@@ -714,39 +717,41 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
-	} else if (cs->buflen && !strncmp(cs->buf, "lz4", 3))
-		ret = read_lz4_line(cs, timeout);
+	} else if (cs->buflen && !strncmp(cs->buf, gzip_magic, 3))
+		ret = read_gz_line(cs, timeout);
 	return ret;
 }
 
-/* Lz4 compressed block structure:
- * - 4 byte magic header LZ4\n
+/* gzip compressed block structure:
+ * - 4 byte magic header gzip_magic "\x1f\xd5\x01\n"
  * - 4 byte LE encoded compressed size
  * - 4 byte LE encoded decompressed size
  */
 int write_cs(connsock_t *cs, const char *buf, int len)
 {
-	int compsize, decompsize = len;
+	unsigned long compsize, decompsize = len;
 	char *dest = NULL;
 	uint32_t msglen;
 	int ret = -1;
 
-	/* Connsock doesn't expect lz4 compressed messages */
-	if (!cs->lz4 || len <= 1492) {
+	/* Connsock doesn't expect gz compressed messages */
+	if (!cs->gz || len <= 1492) {
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
-	dest = ckalloc(len + 12);
+	compsize = round_up_page(len + 12);
+	dest = ckalloc(compsize);
+	compsize -= 12;
 	/* Do compression here */
-	compsize = LZ4_compress(buf, dest + 12, len);
-	if (!compsize) {
-		LOGWARNING("Failed to LZ4 compress in write_cs, writing uncompressed");
+	ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
+	if (ret != Z_OK) {
+		LOGWARNING("Failed to gz compress in write_cs, writing uncompressed");
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
-	LOGDEBUG("Writing connsock message compressed %d from %d", compsize, decompsize);
-	/* Copy lz4 magic header */
-	sprintf(dest, "lz4\n");
+	LOGDEBUG("Writing connsock message compressed %lu from %lu", compsize, decompsize);
+	/* Copy gz magic header */
+	sprintf(dest, gzip_magic);
 	/* Copy compressed message length */
 	msglen = htole32(compsize);
 	memcpy(dest + 4, &msglen, 4);

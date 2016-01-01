@@ -774,7 +774,7 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 
 	JSON_CPACK(req, "{ss,sb,s[s]}",
 			"method", "mining.passthrough",
-			"lz4", json_true(),
+			"gz", json_true(),
 			"params", PACKAGE"/"VERSION);
 	res = send_json_msg(cs, req);
 	json_decref(req);
@@ -799,9 +799,9 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Denied passthrough for stratum");
 		goto out;
 	}
-	json_get_bool(&cs->lz4, val, "lz4");
-	if (cs->lz4)
-		LOGNOTICE("Negotiated lz4 compression with pool");
+	json_get_bool(&cs->gz, val, "gz");
+	if (cs->gz)
+		LOGNOTICE("Negotiated gz compression with pool");
 	proxi->passthrough = true;
 out:
 	if (val)
@@ -820,7 +820,7 @@ static bool node_stratum(connsock_t *cs, proxy_instance_t *proxi)
 
 	JSON_CPACK(req, "{ss,sb,s[s]}",
 			"method", "mining.node",
-			"lz4", json_true(),
+			"gz", json_true(),
 			"params", PACKAGE"/"VERSION);
 
 	res = send_json_msg(cs, req);
@@ -846,9 +846,9 @@ static bool node_stratum(connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Denied node setup for stratum");
 		goto out;
 	}
-	json_get_bool(&cs->lz4, val, "lz4");
-	if (cs->lz4)
-		LOGNOTICE("Negotiated lz4 compression with pool");
+	json_get_bool(&cs->gz, val, "gz");
+	if (cs->gz)
+		LOGNOTICE("Negotiated gz compression with pool");
 	proxi->node = true;
 out:
 	if (val)

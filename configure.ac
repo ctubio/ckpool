@@ -40,7 +40,7 @@ AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h getopt.h)
 AC_CHECK_HEADERS(sys/epoll.h libpq-fe.h postgresql/libpq-fe.h grp.h)
 AC_CHECK_HEADERS(gsl/gsl_math.h gsl/gsl_cdf.h)
 AC_CHECK_HEADERS(openssl/x509.h openssl/hmac.h)
-AC_CHECK_HEADERS(lz4.h)
+AC_CHECK_HEADERS(zlib.h)
 
 AC_CONFIG_SUBDIRS([src/jansson-2.6])
 JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
@@ -54,7 +54,7 @@ AC_ARG_WITH([ckdb],
 
 #AC_SEARCH_LIBS(whatgoeshere?, rt, , echo "Error: Required library realtime not found." && exit 1)
 AC_SEARCH_LIBS(exp, m, , echo "Error: Required library math not found." && exit 1)
-AC_SEARCH_LIBS(LZ4_compress, lz4, , echo "Error: Required library liblz4-dev not found." && exit 1)
+AC_SEARCH_LIBS(compress, z , , echo "Error: Required library zlib1g-dev not found." && exit 1)
 AC_SEARCH_LIBS(pthread_mutex_trylock, pthread, , "Error: Required library pthreads not found." && exit 1)
 
 if test "x$ckdb" != "xno"; then

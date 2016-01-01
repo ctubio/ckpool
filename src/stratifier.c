@@ -5238,10 +5238,10 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 
 		/* Add this client as a passthrough in the connector and
 		 * add it to the list of mining nodes in the stratifier */
-		json_get_bool(&var, val, "lz4");
+		json_get_bool(&var, val, "gz");
 		add_mining_node(sdata, client);
 		if (var)
-			snprintf(buf, 255, "passlz4=%"PRId64, client_id);
+			snprintf(buf, 255, "passgz=%"PRId64, client_id);
 		else
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 		send_proc(ckp->connector, buf);
@@ -5255,10 +5255,10 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		 * is a passthrough and to manage its messages accordingly. No
 		 * data from this client id should ever come back to this
 		 * stratifier after this so drop the client in the stratifier. */
-		json_get_bool(&var, val, "lz4");
+		json_get_bool(&var, val, "gz");
 		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		if (var)
-			snprintf(buf, 255, "passlz4=%"PRId64, client_id);
+			snprintf(buf, 255, "passgz=%"PRId64, client_id);
 		else
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 		send_proc(ckp->connector, buf);

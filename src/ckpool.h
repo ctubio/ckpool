@@ -83,8 +83,8 @@ struct connsock {
 	/* Semaphore used to serialise request/responses */
 	sem_t sem;
 
-	/* Has the other end acknowledged it can receive lz4 compressed data */
-	bool lz4;
+	/* Has the other end acknowledged it can receive gz compressed data */
+	bool gz;
 };
 
 typedef struct connsock connsock_t;
@@ -283,6 +283,8 @@ static const char __maybe_unused *stratum_msgs[] = {
 	"workinfo",
 	""
 };
+
+extern const char gzip_magic[];
 
 #ifdef USE_CKDB
 #define CKP_STANDALONE(CKP) ((CKP)->standalone == true)
