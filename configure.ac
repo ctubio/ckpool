@@ -55,7 +55,7 @@ AC_ARG_WITH([ckdb],
 #AC_SEARCH_LIBS(whatgoeshere?, rt, , echo "Error: Required library realtime not found." && exit 1)
 AC_SEARCH_LIBS(exp, m, , echo "Error: Required library math not found." && exit 1)
 AC_SEARCH_LIBS(LZ4_compress, lz4, , echo "Error: Required library liblz4-dev not found." && exit 1)
-AC_SEARCH_LIBS(pthread_create, pthread, , "Error: Required library pthreads not found." && exit 1)
+AC_SEARCH_LIBS(pthread_mutex_trylock, pthread, , "Error: Required library pthreads not found." && exit 1)
 
 if test "x$ckdb" != "xno"; then
 	AC_CHECK_LIB([pq], [main],[PQ=-lpq],echo "Error: Required library libpq-dev

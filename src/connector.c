@@ -1000,6 +1000,37 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			test_redirector_shares(ckp, client, buf);
 	}
 
+	/* Does this client accept compressed data? */
+	if (client->lz4) {
+		char *dest = ckalloc(len + 12);
+		uint32_t msglen;
+		int compsize;
+
+		compsize = LZ4_compress(buf, dest + 12, len);
+		if (unlikely(!compsize)) {
+			LOGWARNING("Failed to LZ4 compress in send_client, sending uncompressed");
+			free(dest);
+			goto out;
+		}
+		if (compsize + 12 >= len) {
+			/* Only end it compressed if it's smaller */
+			free(dest);
+			goto out;
+		}
+		LOGDEBUG("Sending client message compressed %d from %d", compsize, len);
+		/* Copy lz4 magic header */
+		sprintf(dest, "lz4\n");
+		/* Copy compressed message length */
+		msglen = htole32(compsize);
+		memcpy(dest + 4, &msglen, 4);
+		/* Copy decompressed message length */
+		msglen = htole32(len);
+		memcpy(dest + 8, &msglen, 4);
+		len = compsize + 12;
+		free(buf);
+		buf = dest;
+	}
+out:
 	sender_send = ckzalloc(sizeof(sender_send_t));
 	sender_send->client = client;
 	sender_send->buf = buf;
