@@ -744,6 +744,12 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 		ret = write_socket(cs->fd, buf, len);
 		goto out;
 	}
+	if (compsize + 12 >= len) {
+		/* Selectively send compressed packets only when they're
+		 * smaller. */
+		ret = write_socket(cs->fd, buf, len);
+		goto out;
+	}
 	LOGDEBUG("Writing connsock message compressed %d from %d", compsize, decompsize);
 	/* Copy lz4 magic header */
 	sprintf(dest, "lz4\n");
