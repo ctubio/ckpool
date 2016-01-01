@@ -20,6 +20,7 @@
 #include <getopt.h>
 #include <grp.h>
 #include <jansson.h>
+#include <lz4.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -510,21 +511,8 @@ void empty_buffer(connsock_t *cs)
 	cs->buflen = cs->bufofs = 0;
 }
 
-/* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
- * and storing how much extra data we've received, to be moved to the beginning
- * of the buffer for use on the next receive. */
-int read_socket_line(connsock_t *cs, float *timeout)
+static void clear_bufline(connsock_t *cs)
 {
-	char *eom = NULL;
-	tv_t start, now;
-	size_t buflen;
-	int ret = -1;
-	bool polled;
-	float diff;
-
-	if (unlikely(cs->fd < 0))
-		goto out;
-
 	if (unlikely(!cs->buf))
 		cs->buf = ckzalloc(PAGESIZE);
 	else if (cs->buflen) {
@@ -533,8 +521,135 @@ int read_socket_line(connsock_t *cs, float *timeout)
 		cs->bufofs = cs->buflen;
 		cs->buflen = 0;
 		cs->buf[cs->bufofs] = '\0';
-		eom = strchr(cs->buf, '\n');
 	}
+}
+
+static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
+{
+	int backoff = 1;
+	size_t buflen;
+	char *newbuf;
+
+	buflen = cs->bufofs + len + 1;
+	while (42) {
+		newbuf = realloc(cs->buf, buflen);
+		if (likely(newbuf))
+			break;
+		if (backoff == 1)
+			fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
+		cksleep_ms(backoff);
+		backoff <<= 1;
+	}
+	cs->buf = newbuf;
+	if (unlikely(!cs->buf))
+		quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
+	memcpy(cs->buf + cs->bufofs, readbuf, len);
+	cs->bufofs += len;
+	cs->buf[cs->bufofs] = '\0';
+}
+
+static int read_cs_length(connsock_t *cs, float *timeout, int len)
+{
+	int ret = len;
+
+	while (cs->buflen < len) {
+		char readbuf[PAGESIZE] = {};
+
+		ret = wait_read_select(cs->fd, *timeout);
+		if (ret < 1)
+			goto out;
+		ret = recv(cs->fd, readbuf, len - cs->buflen, MSG_DONTWAIT);
+		if (ret < 1)
+			goto out;
+		add_bufline(cs, readbuf, ret);
+	}
+out:
+	return ret;
+}
+
+static int read_lz4_line(connsock_t *cs, float *timeout)
+{
+	int compsize, decompsize, ret, buflen;
+	char *buf, *dest = NULL, *eom;
+	uint32_t msglen;
+
+	/* Remove lz4 header */
+	clear_bufline(cs);
+
+	/* Get data sizes */
+	ret = read_cs_length(cs, timeout, 8);
+	if (ret != 8) {
+		ret = -1;
+		goto out;
+	}
+	memcpy(&msglen, cs->buf, 4);
+	compsize = le32toh(msglen);
+	memcpy(&msglen, cs->buf + 4, 4);
+	decompsize = le32toh(msglen);
+	cs->bufofs = 8;
+	clear_bufline(cs);
+	LOGWARNING("Trying to read lz4 %d/%d", compsize, decompsize);
+
+	if (unlikely(compsize < 1 || compsize > (int)0x80000000 ||
+		decompsize < 1 || decompsize > (int)0x80000000)) {
+		LOGWARNING("Invalid message length comp %d decomp %d sent to read_lz4_line", compsize, decompsize);
+		ret = -1;
+		goto out;
+	}
+
+	/* Get compressed data */
+	ret = read_cs_length(cs, timeout, compsize);
+	if (ret != compsize) {
+		LOGWARNING("Failed to read %d compressed bytes in read_lz4_line, got %d", compsize, ret);
+		ret = -1;
+		goto out;
+	}
+	/* Do decompresion and buffer reconstruction here */
+	dest = ckalloc(decompsize);
+	ret = LZ4_decompress_safe(cs->buf, dest, compsize, decompsize);
+	/* Clear out all the compressed data */
+	clear_bufline(cs);
+	if (ret != decompsize) {
+		LOGWARNING("Failed to decompress %d bytes in read_lz4_line, got %d", decompsize, ret);
+		ret = -1;
+		goto out;
+	}
+	eom = dest + decompsize - 1;
+	if (memcmp(eom, "\n", 1)) {
+		LOGWARNING("Failed to find EOM in decompressed data in read_lz4_line");
+		ret = -1;
+		goto out;
+	}
+	*eom = '\0';
+	/* Wedge the decompressed buffer back to the start of cs->buf */
+	buf = cs->buf;
+	buflen = cs->buflen;
+	cs->buf = dest;
+	dest = NULL;
+	ret = cs->buflen = decompsize - 1;
+	if (buflen)
+		add_bufline(cs, buf, buflen);
+out:
+	free(dest);
+	return ret;
+}
+
+/* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
+ * and storing how much extra data we've received, to be moved to the beginning
+ * of the buffer for use on the next receive. */
+int read_socket_line(connsock_t *cs, float *timeout)
+{
+	char *eom = NULL;
+	tv_t start, now;
+	int ret = -1;
+	bool polled;
+	float diff;
+
+	if (unlikely(cs->fd < 0))
+		goto out;
+
+	clear_bufline(cs);
+	eom = strchr(cs->buf, '\n');
 
 	tv_time(&start);
 rewait:
@@ -564,8 +679,6 @@ rewait:
 	*timeout -= diff;
 	while (42) {
 		char readbuf[PAGESIZE] = {};
-		int backoff = 1;
-		char *newbuf;
 
 		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
@@ -585,22 +698,7 @@ rewait:
 			goto out;
 		}
 		polled = false;
-		buflen = cs->bufofs + ret + 1;
-		while (42) {
-			newbuf = realloc(cs->buf, buflen);
-			if (likely(newbuf))
-				break;
-			if (backoff == 1)
-				fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
-			cksleep_ms(backoff);
-			backoff <<= 1;
-		}
-		cs->buf = newbuf;
-		if (unlikely(!cs->buf))
-			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		memcpy(cs->buf + cs->bufofs, readbuf, ret);
-		cs->bufofs += ret;
-		cs->buf[cs->bufofs] = '\0';
+		add_bufline(cs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
 	}
 parse:
@@ -616,7 +714,53 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
+	} else if (cs->buflen && !strncmp(cs->buf, "lz4", 3))
+		ret = read_lz4_line(cs, timeout);
+	return ret;
+}
+
+/* Lz4 compressed block structure:
+ * - 4 byte magic header LZ4\n
+ * - 4 byte LE encoded compressed size
+ * - 4 byte LE encoded decompressed size
+ */
+int write_cs(connsock_t *cs, const char *buf, int len)
+{
+	int compsize, decompsize = len;
+	char *dest = NULL;
+	uint32_t msglen;
+	int ret = -1;
+
+	/* Connsock doesn't expect lz4 compressed messages */
+	if (!cs->lz4) {
+		ret = write_socket(cs->fd, buf, len);
+		goto out;
 	}
+	dest = ckalloc(len + 12);
+	/* Do compression here */
+	compsize = LZ4_compress(buf, dest + 12, len);
+	if (!compsize) {
+		LOGWARNING("Failed to LZ4 compress in write_cs, writing uncompressed");
+		ret = write_socket(cs->fd, buf, len);
+		goto out;
+	}
+	LOGDEBUG("Writing connsock message compressed %d from %d", compsize, decompsize);
+	/* Copy lz4 magic header */
+	sprintf(dest, "lz4\n");
+	/* Copy compressed message length */
+	msglen = htole32(compsize);
+	memcpy(dest + 4, &msglen, 4);
+	/* Copy decompressed message length */
+	msglen = htole32(decompsize);
+	memcpy(dest + 8, &msglen, 4);
+	len = compsize + 12;
+	ret = write_socket(cs->fd, dest, len);
+	if (ret == len)
+		ret = decompsize;
+	else
+		ret = -1;
+out:
+	free(dest);
 	return ret;
 }
 

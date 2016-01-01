@@ -82,6 +82,9 @@ struct connsock {
 	ckpool_t *ckp;
 	/* Semaphore used to serialise request/responses */
 	sem_t sem;
+
+	/* Has the other end acknowledged it can receive lz4 compressed data */
+	bool lz4;
 };
 
 typedef struct connsock connsock_t;
@@ -301,6 +304,7 @@ ckpool_t *global_ckp;
 bool ping_main(ckpool_t *ckp);
 void empty_buffer(connsock_t *cs);
 int read_socket_line(connsock_t *cs, float *timeout);
+int write_cs(connsock_t *cs, const char *buf, int len);
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_proc(proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,

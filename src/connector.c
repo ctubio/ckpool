@@ -10,6 +10,7 @@
 #include "config.h"
 
 #include <arpa/inet.h>
+#include <lz4.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -62,6 +63,12 @@ struct client_instance {
 
 	/* Is this the parent passthrough client */
 	bool passthrough;
+
+	/* Does this client expect lz4 compression? */
+	bool lz4;
+	bool compressed; /* Currently receiving a compressed message */
+	int compsize; /* Expected compressed data size */
+	int decompsize; /* Expected decompressed data size */
 
 	/* Linked list of shares in redirector mode.*/
 	share_t *shares;
@@ -478,6 +485,28 @@ retry:
 		return;
 	}
 	client->bufofs += ret;
+compressed:
+	if (client->compressed) {
+		if (client->bufofs < client->compsize)
+			goto retry;
+		ret = LZ4_decompress_safe(client->buf, msg, client->compsize, client->decompsize);
+		if (ret != client->decompsize) {
+			LOGNOTICE("Failed to decompress %d from %d bytes in parse_client_msg, got %d",
+				  client->decompsize, client->compsize, ret);
+			invalidate_client(ckp, cdata, client);
+			return;
+		}
+		LOGDEBUG("Received client message compressed %d from %d",
+			 client->compsize, client->decompsize);
+		msg[ret] = '\0';
+		/* Flag this client as able to receive lz4 compressed data now */
+		client->lz4 = true;
+		client->bufofs -= client->compsize;
+		if (client->bufofs)
+			memmove(client->buf, client->buf + buflen, client->bufofs);
+		client->compressed = false;
+		goto parse;
+	}
 reparse:
 	eol = memchr(client->buf, '\n', client->bufofs);
 	if (!eol)
@@ -490,11 +519,40 @@ reparse:
 		invalidate_client(ckp, cdata, client);
 		return;
 	}
+
+	/* Look for a compression header */
+	if (!strncmp(client->buf, "lz4", 3)) {
+		uint32_t msglen;
+
+		/* Do we have the whole header? If not, keep reading */
+		if (client->bufofs < 12)
+			goto retry;
+		memcpy(&msglen, client->buf + 4, 4);
+		client->compsize = le32toh(msglen);
+		memcpy(&msglen, client->buf + 8, 4);
+		client->decompsize = le32toh(msglen);
+		if (unlikely(!client->compsize || !client->decompsize ||
+		    client->compsize > MAX_MSGSIZE || client->decompsize > MAX_MSGSIZE)) {
+			LOGNOTICE("Client id %"PRId64" invalid compressed message size %d/%d, disconnecting",
+				  client->id, client->compsize, client->decompsize);
+			invalidate_client(ckp, cdata, client);
+			return;
+		}
+		client->bufofs -= 12;
+		if (client->bufofs > 0)
+			memmove(client->buf, client->buf + 12, client->bufofs);
+		client->compressed = true;
+		if (client->bufofs >= client->compsize)
+			goto compressed;
+		goto retry;
+	}
+
 	memcpy(msg, client->buf, buflen);
 	msg[buflen] = '\0';
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
 	client->buf[client->bufofs] = '\0';
+parse:
 	if (!(val = json_loads(msg, 0, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
@@ -971,7 +1029,7 @@ static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 
 	LOGINFO("Connector adding passthrough client %"PRId64, client->id);
 	client->passthrough = true;
-	ASPRINTF(&buf, "{\"result\": true}\n");
+	ASPRINTF(&buf, "{\"result\": true, \"lz4\": true}\n");
 	send_client(cdata, client->id, buf);
 }
 
