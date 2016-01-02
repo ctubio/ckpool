@@ -1003,7 +1003,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 
 	/* Does this client accept compressed data? Only compress if it's
 	 * larger than one MTU. */
-	if (client->gz) {
+	if (client->gz && len > 1492) {
 		unsigned long compsize, decompsize = len;
 		uint32_t msglen;
 		char *dest;
