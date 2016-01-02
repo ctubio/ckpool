@@ -510,6 +510,8 @@ bool ping_main(ckpool_t *ckp)
 
 void empty_buffer(connsock_t *cs)
 {
+	if (cs->buf)
+		cs->buf[0] = '\0';
 	cs->buflen = cs->bufofs = 0;
 }
 
@@ -557,11 +559,15 @@ static int read_cs_length(connsock_t *cs, float *timeout, int len)
 
 	while (cs->bufofs < len) {
 		char readbuf[PAGESIZE];
+		int readlen;
 
 		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1)
 			goto out;
-		ret = recv(cs->fd, readbuf, len - cs->buflen, MSG_DONTWAIT);
+		readlen = len - cs->buflen;
+		if (readlen >= PAGESIZE)
+			readlen = PAGESIZE - 4;
+		ret = recv(cs->fd, readbuf, readlen, MSG_DONTWAIT);
 		if (ret < 1)
 			goto out;
 		add_bufline(cs, readbuf, ret);
@@ -617,8 +623,8 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 	clear_bufline(cs);
 
 	/* Do decompresion and buffer reconstruction here */
-	dest = ckalloc(decompsize);
-	res = decompsize;
+	res = round_up_page(decompsize);
+	dest = ckalloc(res);
 	ret = uncompress((Bytef *)dest, &res, (Bytef *)cs->buf, compsize);
 
 	if (ret != Z_OK || res != decompsize) {
@@ -736,7 +742,7 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
-	} else if (cs->buflen && !strncmp(cs->buf, gzip_magic, 3))
+	} else if (ret == 3 && !strncmp(cs->buf, gzip_magic, 3))
 		ret = read_gz_line(cs, timeout);
 	return ret;
 }

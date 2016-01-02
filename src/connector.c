@@ -491,7 +491,12 @@ compressed:
 
 		if (client->bufofs < client->compsize)
 			goto retry;
-		res = client->decompsize;
+		res = PAGESIZE - 4;
+		if (unlikely(client->decompsize > res)) {
+			LOGNOTICE("Client attempting to send oversize compressed message, disconnecting");
+			invalidate_client(ckp, cdata, client);
+			return;
+		}
 		ret = uncompress((Bytef *)msg, &res, (Bytef *)client->buf, client->compsize);
 		if (ret != Z_OK || res != client->decompsize) {
 			LOGNOTICE("Failed to decompress %lu from %lu bytes in parse_client_msg, got %d",
@@ -1003,7 +1008,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 
 	/* Does this client accept compressed data? Only compress if it's
 	 * larger than one MTU. */
-	if (client->gz && len > 1492) {
+	if (client->gz) {
 		unsigned long compsize, decompsize = len;
 		uint32_t msglen;
 		char *dest;
