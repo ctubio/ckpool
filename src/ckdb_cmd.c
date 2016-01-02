@@ -19,13 +19,13 @@ static K_ITEM *adminuser(K_TREE *trf_root, char *reply, size_t siz)
 	K_ITEM *i_username, *i_admin;
 	char reply2[1024] = "";
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
-				  reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return NULL;
 
-	i_admin = optional_name(trf_root, "admin", 3, (char *)userpatt,
-				reply2, sizeof(reply2));
+	i_admin = optional_name(trf_root, "admin", MIN_USERNAME,
+				(char *)userpatt, reply2, sizeof(reply2));
 	if (i_admin)
 		return i_admin;
 
@@ -42,7 +42,8 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -94,8 +95,8 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
-				  reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -166,7 +167,8 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -218,8 +220,8 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
-				  reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -464,7 +466,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		// For web this message is detailed enough
 		reason = "System error";
@@ -760,7 +763,8 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		// For web this message is detailed enough
 		reason = "System error";
@@ -3428,7 +3432,8 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		reason = "Missing username";
 		goto nuts;
@@ -3591,7 +3596,8 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		reason = "Missing user";
 		goto bats;
@@ -3752,7 +3758,8 @@ static char *cmd_expatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		reason = "Missing username";
 		goto rats;
@@ -5728,7 +5735,8 @@ static char *cmd_userstatus(PGconn *conn, char *cmd, char *id, tv_t *now, char *
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = optional_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = optional_name(trf_root, "username", MIN_USERNAME,
+				   (char *)userpatt, reply, siz);
 	i_userid = optional_name(trf_root, "userid", 1, (char *)intpatt, reply, siz);
 	// Either username or userid
 	if (!i_username && !i_userid) {
