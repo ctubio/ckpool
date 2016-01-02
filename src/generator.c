@@ -2022,20 +2022,20 @@ static void *passthrough_recv(void *arg)
 		/* Make sure we receive a line within 90 seconds */
 		cksem_wait(&cs->sem);
 		ret = read_socket_line(cs, &timeout);
-		cksem_post(&cs->sem);
-
 		if (ret < 1) {
-			reconnect_generator(ckp);
 			LOGWARNING("Proxy %d:%s failed to read_socket_line in passthrough_recv, attempting reconnect",
 				   proxi->id, proxi->url);
 			alive = proxi->alive = false;
 			Close(cs->fd);
+			reconnect_generator(ckp);
+			cksem_post(&cs->sem);
 			continue;
 		}
 		/* Simply forward the message on, as is, to the connector to
 		 * process. Possibly parse parameters sent by upstream pool
 		 * here */
 		send_proc(ckp->connector, cs->buf);
+		cksem_post(&cs->sem);
 	}
 	return NULL;
 }
