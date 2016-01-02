@@ -535,7 +535,7 @@ static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
 	size_t buflen;
 	char *newbuf;
 
-	buflen = cs->bufofs + len + 1;
+	buflen = round_up_page(cs->bufofs + len + 1);
 	while (42) {
 		newbuf = realloc(cs->buf, buflen);
 		if (likely(newbuf))
@@ -564,7 +564,7 @@ static int read_cs_length(connsock_t *cs, float *timeout, int len)
 		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1)
 			goto out;
-		readlen = len - cs->buflen;
+		readlen = len - cs->bufofs;
 		if (readlen >= PAGESIZE)
 			readlen = PAGESIZE - 4;
 		ret = recv(cs->fd, readbuf, readlen, MSG_DONTWAIT);
@@ -617,6 +617,7 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 		ret = -1;
 		goto out;
 	}
+
 	/* Clear out all the compressed data */
 	cs->buflen = cs->bufofs - compsize;
 	cs->bufofs = compsize;
@@ -626,9 +627,9 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 	res = round_up_page(decompsize);
 	dest = ckalloc(res);
 	ret = uncompress((Bytef *)dest, &res, (Bytef *)cs->buf, compsize);
-
 	if (ret != Z_OK || res != decompsize) {
-		LOGWARNING("Failed to decompress %lu bytes in read_gz_line, got %d", decompsize, ret);
+		LOGWARNING("Failed to decompress %lu bytes in read_gz_line, result %d got %lu",
+			   decompsize, ret, res);
 		ret = -1;
 		goto out;
 	}
@@ -649,7 +650,6 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 	dest = NULL;
 	cs->bufofs = decompsize;
 	if (buflen) {
-		LOGWARNING("Remainder %s", buf);
 		add_bufline(cs, buf, buflen);
 		cs->buflen = buflen;
 		cs->bufofs = decompsize;
