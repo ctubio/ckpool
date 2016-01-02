@@ -651,6 +651,8 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 		cs->buflen = cs->bufofs = 0;
 out:
 	free(dest);
+	if (ret < 1)
+		empty_buffer(cs);
 	return ret;
 }
 
