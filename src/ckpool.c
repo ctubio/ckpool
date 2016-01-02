@@ -670,7 +670,6 @@ int read_socket_line(connsock_t *cs, float *timeout)
 	char *eom = NULL;
 	tv_t start, now;
 	int ret = -1;
-	bool polled;
 	float diff;
 
 	if (unlikely(cs->fd < 0))
@@ -680,56 +679,44 @@ int read_socket_line(connsock_t *cs, float *timeout)
 	eom = strchr(cs->buf, '\n');
 
 	tv_time(&start);
-rewait:
-	if (*timeout < 0) {
-		LOGDEBUG("Timed out in read_socket_line");
-		ret = 0;
-		goto out;
-	}
-	ret = wait_read_select(cs->fd, eom ? 0 : *timeout);
-	polled = true;
-	if (ret < 1) {
-		if (!ret) {
-			if (eom)
-				goto parse;
-			LOGDEBUG("Select timed out in read_socket_line");
-		} else {
+
+	while (!eom) {
+		char readbuf[PAGESIZE];
+
+		if (*timeout < 0) {
+			if (cs->ckp->proxy)
+				LOGINFO("Timed out in read_socket_line");
+			else
+				LOGERR("Timed out in read_socket_line");
+			ret = 0;
+			goto out;
+		}
+		ret = wait_read_select(cs->fd, *timeout);
+		if (ret < 0) {
 			if (cs->ckp->proxy)
 				LOGINFO("Select failed in read_socket_line");
 			else
 				LOGERR("Select failed in read_socket_line");
+			goto out;
 		}
-		goto out;
-	}
-	tv_time(&now);
-	diff = tvdiff(&now, &start);
-	copy_tv(&start, &now);
-	*timeout -= diff;
-	while (42) {
-		char readbuf[PAGESIZE] = {};
-
 		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
-			/* No more to read or closed socket after valid message */
-			if (eom)
-				break;
-			/* Have we used up all the timeout yet? If polled is
-			 * set that means poll has said there should be
+			/* If we have done wait_read_select there should be
 			 * something to read and if we get nothing it means the
 			 * socket is closed. */
-			if (!polled && *timeout >= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
-				goto rewait;
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
 			else
 				LOGERR("Failed to recv in read_socket_line");
 			goto out;
 		}
-		polled = false;
 		add_bufline(cs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
 	}
-parse:
 	ret = eom - cs->buf;
 
 	cs->buflen = cs->buf + cs->bufofs - eom - 1;
