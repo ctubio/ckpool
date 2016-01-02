@@ -555,24 +555,36 @@ static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
 
 static int read_cs_length(connsock_t *cs, float *timeout, int len)
 {
+	tv_t start, now;
 	int ret = len;
+	float diff;
+
+	tv_time(&start);
 
 	while (cs->bufofs < len) {
 		char readbuf[PAGESIZE];
 		int readlen;
 
+		if (*timeout < 0) {
+			LOGDEBUG("Timed out in read_cs_length");
+			ret = 0;
+			break;
+		}
 		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1)
-			goto out;
+			break;
 		readlen = len - cs->bufofs;
 		if (readlen >= PAGESIZE)
 			readlen = PAGESIZE - 4;
 		ret = recv(cs->fd, readbuf, readlen, MSG_DONTWAIT);
 		if (ret < 1)
-			goto out;
+			break;
 		add_bufline(cs, readbuf, ret);
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
 	}
-out:
 	return ret;
 }
 
