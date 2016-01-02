@@ -523,7 +523,8 @@ static void clear_bufline(connsock_t *cs)
 		cs->bufofs = cs->buflen;
 		cs->buflen = 0;
 		cs->buf[cs->bufofs] = '\0';
-	}
+	} else
+		cs->bufofs = 0;
 }
 
 static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
@@ -554,7 +555,7 @@ static int read_cs_length(connsock_t *cs, float *timeout, int len)
 {
 	int ret = len;
 
-	while (cs->buflen < len) {
+	while (cs->bufofs < len) {
 		char readbuf[PAGESIZE];
 
 		ret = wait_read_select(cs->fd, *timeout);
@@ -585,10 +586,14 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 		ret = -1;
 		goto out;
 	}
+
 	memcpy(&msglen, cs->buf, 4);
 	compsize = le32toh(msglen);
 	memcpy(&msglen, cs->buf + 4, 4);
 	decompsize = le32toh(msglen);
+
+	/* Remove the gz variables */
+	cs->buflen = cs->bufofs - 8;
 	cs->bufofs = 8;
 	clear_bufline(cs);
 
@@ -606,32 +611,44 @@ static int read_gz_line(connsock_t *cs, float *timeout)
 		ret = -1;
 		goto out;
 	}
+	/* Clear out all the compressed data */
+	cs->buflen = cs->bufofs - compsize;
+	cs->bufofs = compsize;
+	clear_bufline(cs);
+
 	/* Do decompresion and buffer reconstruction here */
 	dest = ckalloc(decompsize);
 	res = decompsize;
 	ret = uncompress((Bytef *)dest, &res, (Bytef *)cs->buf, compsize);
-	/* Clear out all the compressed data */
-	clear_bufline(cs);
+
 	if (ret != Z_OK || res != decompsize) {
 		LOGWARNING("Failed to decompress %lu bytes in read_gz_line, got %d", decompsize, ret);
 		ret = -1;
 		goto out;
 	}
+
 	eom = dest + decompsize - 1;
 	if (memcmp(eom, "\n", 1)) {
 		LOGWARNING("Failed to find EOM in decompressed data in read_gz_line");
 		ret = -1;
 		goto out;
 	}
+
 	*eom = '\0';
+	ret = decompsize - 1;
 	/* Wedge the decompressed buffer back to the start of cs->buf */
 	buf = cs->buf;
-	buflen = cs->buflen;
+	buflen = cs->bufofs;
 	cs->buf = dest;
 	dest = NULL;
-	ret = cs->buflen = decompsize;
-	if (buflen)
+	cs->bufofs = decompsize;
+	if (buflen) {
+		LOGWARNING("Remainder %s", buf);
 		add_bufline(cs, buf, buflen);
+		cs->buflen = buflen;
+		cs->bufofs = decompsize;
+	} else
+		cs->buflen = cs->bufofs = 0;
 out:
 	free(dest);
 	return ret;
