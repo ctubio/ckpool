@@ -1804,7 +1804,7 @@ static void passthrough_send(ckpool_t *ckp, pass_msg_t *pm)
 	LOGDEBUG("Sending upstream json msg: %s", pm->msg);
 	len = strlen(pm->msg);
 	sent = write_cs(cs, pm->msg, len);
-	if (unlikely(sent != len)) {
+	if (unlikely(sent != len && cs->fd)) {
 		LOGWARNING("Failed to passthrough %d bytes of message %s, attempting reconnect",
 			   len, pm->msg);
 		Close(cs->fd);
@@ -1894,8 +1894,7 @@ out:
 	if (!ret) {
 		send_stratifier_deadproxy(ckp, proxi->id, proxi->subid);
 		/* Close and invalidate the file handle */
-		if (cs->fd > 0)
-			Close(cs->fd);
+		Close(cs->fd);
 	}
 	proxi->alive = ret;
 	cksem_post(&cs->sem);
@@ -2022,19 +2021,21 @@ static void *passthrough_recv(void *arg)
 		/* Make sure we receive a line within 90 seconds */
 		cksem_wait(&cs->sem);
 		ret = read_socket_line(cs, &timeout);
-		if (ret < 1) {
-			LOGWARNING("Proxy %d:%s failed to read_socket_line in passthrough_recv, attempting reconnect",
+		/* Simply forward the message on, as is, to the connector to
+		 * process. Possibly parse parameters sent by upstream pool
+		 * here */
+		if (likely(ret > 0)) {
+			LOGDEBUG("Received upstream msg: %s", cs->buf);
+			send_proc(ckp->connector, cs->buf);
+		} else if (ret < 0) {
+			/* Read failure */
+			LOGWARNING("Passthrough %d:%s failed to read_socket_line in passthrough_recv, attempting reconnect",
 				   proxi->id, proxi->url);
 			alive = proxi->alive = false;
 			Close(cs->fd);
 			reconnect_generator(ckp);
-			cksem_post(&cs->sem);
-			continue;
-		}
-		/* Simply forward the message on, as is, to the connector to
-		 * process. Possibly parse parameters sent by upstream pool
-		 * here */
-		send_proc(ckp->connector, cs->buf);
+		} else /* Idle, likely no clients */
+			LOGDEBUG("Passthrough %d:%s no messages received", proxi->id, proxi->url);
 		cksem_post(&cs->sem);
 	}
 	return NULL;
