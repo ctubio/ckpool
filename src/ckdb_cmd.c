@@ -19,13 +19,13 @@ static K_ITEM *adminuser(K_TREE *trf_root, char *reply, size_t siz)
 	K_ITEM *i_username, *i_admin;
 	char reply2[1024] = "";
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
-				  reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return NULL;
 
-	i_admin = optional_name(trf_root, "admin", 3, (char *)userpatt,
-				reply2, sizeof(reply2));
+	i_admin = optional_name(trf_root, "admin", MIN_USERNAME,
+				(char *)userpatt, reply2, sizeof(reply2));
 	if (i_admin)
 		return i_admin;
 
@@ -42,7 +42,8 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -94,8 +95,8 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
-				  reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -166,7 +167,8 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -218,8 +220,8 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt,
-				  reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username)
 		return strdup(reply);
 
@@ -464,7 +466,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		// For web this message is detailed enough
 		reason = "System error";
@@ -760,7 +763,8 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		// For web this message is detailed enough
 		reason = "System error";
@@ -3308,8 +3312,11 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int csync = cmd_workqueue_store->count;
 	int bsync = btc_workqueue_store->count;
 	snprintf(tmp, sizeof(tmp), "psync=%d%c", psync, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "csync=%d%c", csync, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "bsync=%d%c", bsync, FLDSEP);
+	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "sync=%d%c", psync + csync + bsync, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
@@ -3425,7 +3432,8 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		reason = "Missing username";
 		goto nuts;
@@ -3588,7 +3596,8 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		reason = "Missing user";
 		goto bats;
@@ -3749,7 +3758,8 @@ static char *cmd_expatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = require_name(trf_root, "username", MIN_USERNAME,
+				  (char *)userpatt, reply, siz);
 	if (!i_username) {
 		reason = "Missing username";
 		goto rats;
@@ -4189,7 +4199,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	ss_count = wm_count = ms_count = 0;
 
 	mu_store = k_new_store(miningpayouts_free);
-	mu_root = new_ktree(cmp_mu, miningpayouts_free);
+	mu_root = new_ktree_auto("OldMPU", cmp_mu, miningpayouts_free);
 
 	looksharesummary.workinfoid = block_workinfoid;
 	looksharesummary.userid = MAXID;
@@ -5628,73 +5638,71 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 			__maybe_unused tv_t *notcd, __maybe_unused K_TREE *trf_root)
 {
 	char tmp[1024], *buf;
+	const char *name;
 	size_t len, off;
 	uint64_t ram, ram2, tot = 0;
 	K_LIST *klist;
+	K_LISTS *klists;
 	int rows = 0;
+	bool istree;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
 	APPEND_REALLOC_INIT(buf, off, len);
 	APPEND_REALLOC(buf, off, len, "ok.");
 
-// FYI average transactiontree length of the ~119k I have is ~28k (>3.3GB)
-#define USEINFO(_obj, _stores, _trees) \
-	klist = _obj ## _free; \
-	ram = sizeof(K_LIST) + _stores * sizeof(K_STORE) + \
-		klist->allocate * klist->item_mem_count * klist->siz + \
-		sizeof(K_TREE) * (klist->total - klist->count) * _trees; \
-	ram2 = klist->ram; \
-	snprintf(tmp, sizeof(tmp), \
-		 "name:%d=" #_obj "%cinitial:%d=%d%callocated:%d=%d%c" \
-		 "store:%d=%d%ctrees:%d=%d%cram:%d=%"PRIu64"%c" \
-		 "ram2:%d=%"PRIu64"%ccull:%d=%d%c", \
-		 rows, FLDSEP, \
-		 rows, klist->allocate, FLDSEP, \
-		 rows, klist->total, FLDSEP, \
-		 rows, klist->total - klist->count, FLDSEP, \
-		 rows, _trees, FLDSEP, \
-		 rows, ram, FLDSEP, \
-		 rows, ram2, FLDSEP, \
-		 rows, klist->cull_count, FLDSEP); \
-	APPEND_REALLOC(buf, off, len, tmp); \
-	tot += ram + ram2; \
-	rows++;
+	/* All but temporary lists are in klist_all
+	 * All trees are there also since all trees have a node klist */
+	ck_wlock(&lock_check_lock);
+	klists = all_klists;
+	while (klists) {
+		klist = klists->klist;
 
-	USEINFO(users, 1, 2);
-	USEINFO(useratts, 1, 1);
-	USEINFO(workers, 1, 1);
-	USEINFO(paymentaddresses, 1, 2);
-	USEINFO(payments, 1, 1);
-	USEINFO(accountbalance, 1, 1);
-	USEINFO(idcontrol, 1, 0);
-	USEINFO(optioncontrol, 1, 1);
-	USEINFO(workinfo, 1, 1);
-	// Trees don't share items so count as 1 tree
-	USEINFO(shares, 2, 1);
-	// Trees don't share items so count as 1 tree
-	USEINFO(shareerrors, 2, 1);
-	// _pool doesn't share items so is included
-	USEINFO(sharesummary, 1, 2);
-	USEINFO(workmarkers, 1, 2);
-	// _pool doesn't share items so is included
-	USEINFO(markersummary, 1, 2);
-	USEINFO(marks, 1, 1);
-	USEINFO(blocks, 1, 1);
-	USEINFO(miningpayouts, 1, 1);
-	USEINFO(payouts, 1, 3);
-	USEINFO(auths, 1, 1);
-	USEINFO(poolstats, 1, 1);
-	USEINFO(userstats, 2, 1);
-	USEINFO(workerstatus, 1, 1);
-	USEINFO(userinfo, 1, 1);
-	USEINFO(msgline, 1, 0);
-	USEINFO(workqueue, 3, 0);
-	USEINFO(transfer, 0, 0);
-	USEINFO(heartbeatqueue, 1, 0);
-	USEINFO(logqueue, 1, 0);
-	USEINFO(seqset, 1, 0);
-	USEINFO(seqtrans, 0, 0);
+		ram = sizeof(*klist);
+		if (klist->name == tree_node_list_name) {
+			ram += sizeof(K_TREE);
+			istree = true;
+			name = klist->name2;
+		} else {
+			istree = false;
+			name = klist->name;
+		}
+		if (klist->lock)
+			ram += sizeof(*(klist->lock));
+		// List of item lists
+		ram += klist->item_mem_count * sizeof(*(klist->item_memory));
+		// items
+		ram += klist->total * sizeof(K_ITEM);
+		// List of data lists
+		ram += klist->data_mem_count * sizeof(*(klist->data_memory));
+		// data
+		ram += klist->total * klist->siz;
+
+		// stores
+		ram += klist->stores * sizeof(K_STORE);
+
+		ram2 = klist->ram;
+
+		snprintf(tmp, sizeof(tmp),
+			 "name:%d=%s%s%s%cinitial:%d=%d%callocated:%d=%d%c"
+			 "instore:%d=%d%cram:%d=%"PRIu64"%c"
+			 "ram2:%d=%"PRIu64"%ccull:%d=%d%c",
+			 rows, name, istree ? " (tree)" : "",
+			 klist->is_lock_only ? " (lock)" : "", FLDSEP,
+			 rows, klist->allocate, FLDSEP,
+			 rows, klist->total, FLDSEP,
+			 rows, klist->total - klist->count, FLDSEP,
+			 rows, ram, FLDSEP,
+			 rows, ram2, FLDSEP,
+			 rows, klist->cull_count, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		tot += ram + ram2;
+		rows++;
+
+		klists = klists->next;
+	}
+	ck_wunlock(&lock_check_lock);
 
 	snprintf(tmp, sizeof(tmp), "totalram=%"PRIu64"%c", tot, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
@@ -5702,7 +5710,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "name,initial,allocated,store,trees,ram,cull", FLDSEP);
+		 "name,initial,allocated,instore,ram,cull", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Stats", FLDSEP, "");
@@ -5727,7 +5735,8 @@ static char *cmd_userstatus(PGconn *conn, char *cmd, char *id, tv_t *now, char *
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = optional_name(trf_root, "username", 3, (char *)userpatt, reply, siz);
+	i_username = optional_name(trf_root, "username", MIN_USERNAME,
+				   (char *)userpatt, reply, siz);
 	i_userid = optional_name(trf_root, "userid", 1, (char *)intpatt, reply, siz);
 	// Either username or userid
 	if (!i_username && !i_userid) {

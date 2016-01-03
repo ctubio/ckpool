@@ -12,12 +12,14 @@ function dopayments($data, $user)
  $addr1 = '1KzFJddTvK9TQWsmWFKYJ9fRx9QeSATyrT';
  $addr2 = '16dRhawxuR3BmdmkzdzUdgEfGAQszgmtbc';
  $addr3 = '1N6LrEDiHuFwSyJYj2GedZM2FGk7kkLjn';
+ $addr4 = '1CVVn6sC46aZdokEnU1LThmi8WsMV4qzgh';
 
  $pg = '<h1>Payments</h1>';
  $pg .= "The payment transactions on $btcn are here:";
  $pg .= " <a href='$btc$addr1' target=_blank>BTCa</a>,";
- $pg .= " <a href='$btc$addr2' target=_blank>BTCb</a> and";
- $pg .= " <a href='$btc$addr3' target=_blank>BTCc</a><br>";
+ $pg .= " <a href='$btc$addr2' target=_blank>BTCb</a>,";
+ $pg .= " <a href='$btc$addr3' target=_blank>BTCc</a> and";
+ $pg .= " <a href='$btc$addr4' target=_blank>BTCd</a><br>";
  $pg .= "The payments below don't yet show when they have been sent.<br>";
  $pg .= "Dust payments below 0.00010000 BTC are not sent out yet.<br><br>";
 

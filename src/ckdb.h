@@ -46,16 +46,12 @@
 #include "klist.h"
 #include "ktree.h"
 
-/* TODO: any tree/list accessed in new threads needs
- *  to ensure all code using those trees/lists use locks
- * This code's lock implementation is equivalent to table level locking
- * Consider adding row level locking (a per kitem usage count) if needed
- * TODO: verify all tables with multithread access are locked
- */
+/* This code's lock implementation is equivalent to table level locking
+ * Consider adding row level locking (a per kitem usage count) if needed */
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.704"
+#define CKDB_VERSION DB_VERSION"-1.910"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1080,6 +1076,8 @@ typedef struct users {
 #define INIT_USERS(_item) INIT_GENERIC(_item, users)
 #define DATA_USERS(_var, _item) DATA_GENERIC(_var, _item, users, true)
 #define DATA_USERS_NULL(_var, _item) DATA_GENERIC(_var, _item, users, false)
+
+#define MIN_USERNAME 3
 
 #define SHA256SIZHEX	64
 #define SHA256SIZBIN	32

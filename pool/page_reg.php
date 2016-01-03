@@ -111,6 +111,8 @@ function doreg2($data)
 #
 function try_reg($info, $page, $menu, $name, $u)
 {
+ $disallow = array('/kano/i', '/pool/i', '/kolivas/i');
+
  $user = getparam('user', false);
  $mail = trim(getparam('mail', false));
  $pass = getparam('pass', false);
@@ -158,6 +160,17 @@ function try_reg($info, $page, $menu, $name, $u)
 		$data['error'] = "Username cannot include '.', '_', '/' or Tab";
 		$data['user'] = $user;
 	}
+ }
+
+ if ($ok === true)
+ {
+	foreach ($disallow as $patt)
+		if (preg_match($patt, $user) === 1)
+		{
+			$ok = false;
+			$data['error'] = 'Disallowed username';
+			break;
+		}
  }
 
  if ($ok === true)

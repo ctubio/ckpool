@@ -25,6 +25,8 @@
 			__maybe_unused const char *func, \
 			__maybe_unused const int line
 
+extern const char *tree_node_list_name;
+
 /* Code to check the state of locks being requested and also check
  *  the state of locks when accessing the klist or ktree
  * You can disable it with ckpmsg 'locks.ID.locks' so you can compare
@@ -85,8 +87,6 @@ extern bool check_locks;
 #define MAX_THREADS 128
 extern const char *thread_noname;
 extern int next_thread_id;
-extern bool lock_check_init;
-extern cklock_t lock_check_lock;
 extern __thread int my_thread_id;
 extern __thread char *my_thread_name;
 extern __thread bool my_check_locks;
@@ -128,10 +128,12 @@ typedef struct k_lock {
 
 typedef struct k_list {
 	const char *name;
+	const char *name2;	// name of the tree if it's a tree node list
 	struct k_list *master;
 	bool is_store;
 	bool is_lock_only;	// a lock emulating a list for lock checking
-	cklock_t *lock;
+	bool local_list;	// local (tree) lists doesn't need lock checking at all
+	cklock_t *lock;		// NULL for tree lists
 	struct k_item *head;
 	struct k_item *tail;
 	size_t siz;		// item data size
@@ -148,6 +150,7 @@ typedef struct k_list {
 	void (*dsp_func)(K_ITEM *, FILE *); // optional data display to a file
 	int cull_count;
 	int ram;		// ram allocated for data pointers - code must manage it
+	int stores;		// how many stores it currently has
 #if LOCK_CHECK
 	// Since each thread has it's own k_lock no locking is required on this
 	K_LOCK k_lock[MAX_THREADS];
@@ -156,13 +159,14 @@ typedef struct k_list {
 #endif
 } K_LIST;
 
-#if LOCK_CHECK
+// Required for cmd_stats
+extern bool lock_check_init;
+extern cklock_t lock_check_lock;
 typedef struct k_lists {
 	K_LIST *klist;
 	struct k_lists *next;
 } K_LISTS;
 extern K_LISTS *all_klists;
-#endif
 
 /*
  * K_STORE is for a list of items taken from a K_LIST
@@ -522,7 +526,14 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 #else
 #define LOCK_MAYBE __maybe_unused
 #define LOCK_INIT(_name)
-#define FIRST_LOCK_INIT(_name)
+#define FIRST_LOCK_INIT(_ignore) do { \
+		if (lock_check_init) { \
+			quithere(1, "lock_check_lock has already been " \
+				 "initialised!"); \
+		} \
+		cklock_init(&lock_check_lock); \
+		lock_check_init = true; \
+	} while (0)
 #define CHECK_WLOCK(_list) ck_wlock((_list)->lock)
 #define CHECK_WUNLOCK(_list) ck_wunlock((_list)->lock)
 #define CHECK_RLOCK(_list) ck_rlock((_list)->lock)
@@ -540,10 +551,30 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 #define LIST_HEAD_NOLOCK(_list) (_list)->head
 #define LIST_TAIL_NOLOCK(_list) (_list)->tail
 
-#define K_WLOCK(_list) CHECK_WLOCK(_list)
-#define K_WUNLOCK(_list) CHECK_WUNLOCK(_list)
-#define K_RLOCK(_list) CHECK_RLOCK(_list)
-#define K_RUNLOCK(_list) CHECK_RUNLOCK(_list)
+#define CHECK_lock(_list) do { \
+		if ((_list)->lock == NULL) { \
+			quithere(1, "Attempt to lock list '%s' master '%s' " \
+				 " that has no lock", \
+				 (_list)->name, (_list)->master->name); \
+		} \
+	} while (0)
+
+#define K_WLOCK(_list) do { \
+		CHECK_lock(_list); \
+		CHECK_WLOCK(_list); \
+	} while (0)
+#define K_WUNLOCK(_list) do { \
+		CHECK_lock(_list); \
+		CHECK_WUNLOCK(_list); \
+	} while (0)
+#define K_RLOCK(_list) do { \
+		CHECK_lock(_list); \
+		CHECK_RLOCK(_list); \
+	} while (0)
+#define K_RUNLOCK(_list) do { \
+		CHECK_lock(_list); \
+		CHECK_RUNLOCK(_list); \
+	} while (0)
 
 #define STORE_WHEAD(_s) LIST_WHEAD(_s)
 #define STORE_RHEAD(_s) LIST_RHEAD(_s)
@@ -558,11 +589,14 @@ extern K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS);
 #define k_new_store(_list) _k_new_store(_list, KLIST_FFL_HERE)
 extern K_LIST *_k_new_list(const char *name, size_t siz, int allocate,
 			   int limit, bool do_tail, bool lock_only,
-			   KLIST_FFL_ARGS);
+			   bool without_lock, bool local_list,
+			   const char *name2, KLIST_FFL_ARGS);
 #define k_new_list(_name, _siz, _allocate, _limit, _do_tail) \
-	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, KLIST_FFL_HERE)
+	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, false, false, NULL, KLIST_FFL_HERE)
 #define k_lock_only_list(_name) \
-	_k_new_list(_name, 1, 1, 1, true, true, KLIST_FFL_HERE)
+	_k_new_list(_name, 1, 1, 1, true, true, false, false, NULL, KLIST_FFL_HERE)
+#define k_new_tree_list(_name, _siz, _allocate, _limit, _do_tail, _local_tree, _name2) \
+	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, true, _local_tree, _name2, KLIST_FFL_HERE)
 extern K_ITEM *_k_unlink_head(K_LIST *list, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS);
 #define k_unlink_head(_list) _k_unlink_head(_list, true, KLIST_FFL_HERE)
 #define k_unlink_head_nolock(_list) _k_unlink_head(_list, false, KLIST_FFL_HERE)

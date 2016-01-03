@@ -15,7 +15,7 @@ static const int dbg = 0;
 #define FAIL(fmt, ...) do \
 	{ \
 		quithere(1, fmt KTREE_FFL, ##__VA_ARGS__, KTREE_FFL_PASS); \
-	} while (0);
+	} while (0)
 
 #define RED_RED         true
 #define RED_BLACK       false
@@ -23,34 +23,59 @@ static const int dbg = 0;
 #define Yo true
 #define No false
 
-static K_NODE nil[1] = { { Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 } };
+static K_NODE nil[1] = { { NULL, Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 } };
 
-static K_NODE *_new_knode(KTREE_FFL_ARGS)
+static K_NODE *_new_knode(K_TREE *tree, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
-	K_NODE *node = (K_NODE *)malloc(sizeof(*node));
+	K_ITEM *kitem;
+	K_NODE *knode;
 
-	if (node == NULL)
-		FAIL("%s", "node OOM");
+	// master protects the tree's node list
+	_TREE_WRITE(tree, chklock, file, func, line);
+	kitem = k_unlink_head_nolock(tree->node_free);
+	if (!kitem)
+		FAIL("%s", "node list OOM");
+	k_add_head_nolock(tree->node_store, kitem);
+	knode = (K_NODE *)(kitem->data);
 
-	node->isNil = Yo;
-	node->red = RED_BLACK;
-	node->parent = nil;
-	node->left = nil;
-	node->right = nil;
-	node->data = NULL;
-	node->test = 0;
+	knode->kitem = kitem;
+	knode->isNil = Yo;
+	knode->red = RED_BLACK;
+	knode->parent = nil;
+	knode->left = nil;
+	knode->right = nil;
+	knode->data = NULL;
+	knode->test = 0;
 
-	return node;
+	return knode;
 }
 
-K_TREE *_new_ktree(cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_LIST *master, KTREE_FFL_ARGS)
+K_TREE *_new_ktree(const char *name, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *),
+		   K_LIST *master, int alloc, int limit, bool local_tree,
+		   KTREE_FFL_ARGS)
 {
 	K_TREE *tree = (K_TREE *)malloc(sizeof(*tree));
 
 	if (tree == NULL)
 		FAIL("%s", "tree OOM");
 
-	tree->root = _new_knode(KTREE_FFL_PASS);
+	if (name == NULL)
+		tree->name = master->name;
+	else
+		tree->name = name;
+
+	/* A unique "name" isn't needed since it can't use the wrong list
+	 *  and thus we can also identify all tree node lists */
+	tree->node_free = k_new_tree_list(tree_node_list_name, sizeof(K_NODE),
+					  alloc, limit, true, local_tree,
+					  tree->name);
+#if LOCK_CHECK
+	DLPRIO(tree->node, PRIO_TERMINAL);
+#endif
+	tree->node_store = k_new_store(tree->node_free);
+
+	// A new tree's list doesn't need to be locked during creation
+	tree->root = _new_knode(tree, false, KTREE_FFL_PASS);
 
 	tree->cmp_funct = cmp_funct;
 
@@ -59,13 +84,20 @@ K_TREE *_new_ktree(cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_LIST *master, KTREE
 	return tree;
 }
 
-static K_NODE *new_data(K_ITEM *data, KTREE_FFL_ARGS)
+static K_NODE *new_data(K_TREE *tree, K_ITEM *data, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
-	K_NODE *knode = (K_NODE *)malloc(sizeof(*knode));
+	K_ITEM *kitem;
+	K_NODE *knode;
 
-	if (knode == NULL)
-		FAIL("%s", "OOM");
+	// master protects the tree's node list
+	_TREE_WRITE(tree, chklock, file, func, line);
+	kitem = k_unlink_head_nolock(tree->node_free);
+	if (!kitem)
+		FAIL("%s", "node list OOM");
+	k_add_head_nolock(tree->node_store, kitem);
+	knode = (K_NODE *)(kitem->data);
 
+	knode->kitem = kitem;
 	knode->isNil = No;
 	knode->red = RED_RED;
 	knode->parent = nil;
@@ -514,13 +546,17 @@ void _add_to_ktree(K_TREE *tree, K_ITEM *data, LOCK_MAYBE bool chklock, KTREE_FF
 
 	_TREE_WRITE(tree, chklock, file, func, line);
 
-	knode = new_data(data, KTREE_FFL_PASS);
+	// chklock is false since we've already tested it
+	knode = new_data(tree, data, false, KTREE_FFL_PASS);
 
 	if (tree->root->isNil == Yo)
 	{
 		if (tree->root != nil)
-			free(tree->root);
-
+		{
+			// _nolock since we've already tested it if necessary
+			k_unlink_item_nolock(tree->node_store, tree->root->kitem);
+			k_add_head_nolock(tree->node_free, tree->root->kitem);
+		}
 		tree->root = knode;
 	}
 	else
@@ -609,7 +645,8 @@ K_ITEM *_find_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, bool chklock
 	if (tree->root == NULL)
 		FAIL("%s", "FINDNULL find tree->root is NULL");
 
-	if (chklock) {
+	if (chklock)
+	{
 		_TREE_READ(tree, true, file, func, line);
 	}
 
@@ -825,7 +862,7 @@ static K_NODE *removeFixup(K_NODE *root, K_NODE *fix)
 
 // Does this work OK when you remove the last element in the tree?
 // It should return the root as 'nil'
-void _remove_from_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+void _remove_from_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX tmpctx[1];
 	K_NODE *found;
@@ -842,7 +879,7 @@ void _remove_from_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, KTREE_FFL_A
 	if (tree->root == NULL)
 		FAIL("%s", "REMNULL remove tree->root is NULL");
 
-	_TREE_WRITE(tree, true, file, func, line);
+	_TREE_WRITE(tree, chklock, file, func, line);
 
 	if (tree->root->isNil == Yo)
 	{
@@ -889,7 +926,8 @@ void _remove_from_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, KTREE_FFL_A
 		nil2 = NULL;
 	else
 	{
-		nil2 = _new_knode(KTREE_FFL_PASS);
+		// chklock is false since we've already tested it
+		nil2 = _new_knode(tree, false, KTREE_FFL_PASS);
 		x = nil2;
 	}
 
@@ -983,7 +1021,9 @@ DBG("@remove found nil2 in ktree(right) %d!!!\n", (int)cmp);
  }
 }
 */
-		free(nil2);
+		// _nolock since we've already tested it if necessary
+		k_unlink_item_nolock(tree->node_store, nil2->kitem);
+		k_add_head_nolock(tree->node_free, nil2->kitem);
 	}
 
 /*
@@ -1013,14 +1053,21 @@ DBG("@remove after balance=%d :(\n", (int)cmp);
 	return;
 }
 
-void _remove_from_ktree_free(K_TREE *root, K_ITEM *data, KTREE_FFL_ARGS)
+void _remove_from_ktree_free(K_TREE *tree, K_ITEM *data, bool chklock, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX ctx[1];
+	K_NODE *knode;
+	K_ITEM *kitem;
 
-	_remove_from_ktree(root, data, ctx, KTREE_FFL_PASS);
+	_remove_from_ktree(tree, data, ctx, chklock, KTREE_FFL_PASS);
 
-	if (*ctx)
-		free(*ctx);
+	if (ctx[0]) {
+		knode = (K_NODE *)(ctx[0]);
+		kitem = knode->kitem;
+		// _nolock since _remove_from_ktree() already tested it
+		k_unlink_item_nolock(tree->node_store, kitem);
+		k_add_head_nolock(tree->node_free, kitem);
+	}
 }
 
 static void free_ktree_sub(K_NODE *knode, void (*free_funct)(void *))
@@ -1032,11 +1079,11 @@ static void free_ktree_sub(K_NODE *knode, void (*free_funct)(void *))
 
 		free_ktree_sub(knode->left, free_funct);
 		free_ktree_sub(knode->right, free_funct);
-
-		free(knode);
 	}
 }
 
+/* TODO: remove free_funct, it's not the tree's job to free the item data
+ *	 that should be done when freeing the data list itself */
 void _free_ktree(K_TREE *tree, void (*free_funct)(void *), KTREE_FFL_ARGS)
 {
 	if (tree == NULL)
@@ -1045,5 +1092,9 @@ void _free_ktree(K_TREE *tree, void (*free_funct)(void *), KTREE_FFL_ARGS)
 	if (tree->root->parent != NULL && tree->root->parent != nil)
 		FAIL("%s", "FREENOTROOT free tree->root not root");
 
-	free_ktree_sub(tree->root, free_funct);
+	if (free_funct)
+		free_ktree_sub(tree->root, free_funct);
+
+	tree->node_store = k_free_store(tree->node_store);
+	tree->node_free = k_free_list(tree->node_free);
 }

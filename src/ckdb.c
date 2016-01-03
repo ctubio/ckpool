@@ -1032,47 +1032,48 @@ static void alloc_storage()
 	users_free = k_new_list("Users", sizeof(USERS),
 					ALLOC_USERS, LIMIT_USERS, true);
 	users_store = k_new_store(users_free);
-	users_root = new_ktree(cmp_users, users_free);
-	userid_root = new_ktree(cmp_userid, users_free);
+	users_root = new_ktree(NULL, cmp_users, users_free);
+	userid_root = new_ktree("UsersId", cmp_userid, users_free);
 
 	useratts_free = k_new_list("Useratts", sizeof(USERATTS),
 					ALLOC_USERATTS, LIMIT_USERATTS, true);
 	useratts_store = k_new_store(useratts_free);
-	useratts_root = new_ktree(cmp_useratts, useratts_free);
+	useratts_root = new_ktree(NULL, cmp_useratts, useratts_free);
 
 	optioncontrol_free = k_new_list("OptionControl", sizeof(OPTIONCONTROL),
 					ALLOC_OPTIONCONTROL,
 					LIMIT_OPTIONCONTROL, true);
 	optioncontrol_store = k_new_store(optioncontrol_free);
-	optioncontrol_root = new_ktree(cmp_optioncontrol, optioncontrol_free);
+	optioncontrol_root = new_ktree(NULL, cmp_optioncontrol,
+					optioncontrol_free);
 
 	workers_free = k_new_list("Workers", sizeof(WORKERS),
 					ALLOC_WORKERS, LIMIT_WORKERS, true);
 	workers_store = k_new_store(workers_free);
-	workers_root = new_ktree(cmp_workers, workers_free);
+	workers_root = new_ktree(NULL, cmp_workers, workers_free);
 
-	paymentaddresses_free = k_new_list("PaymentAddresses",
-					   sizeof(PAYMENTADDRESSES),
+	paymentaddresses_free = k_new_list("PayAddr", sizeof(PAYMENTADDRESSES),
 					   ALLOC_PAYMENTADDRESSES,
 					   LIMIT_PAYMENTADDRESSES, true);
 	paymentaddresses_store = k_new_store(paymentaddresses_free);
-	paymentaddresses_root = new_ktree(cmp_paymentaddresses,
+	paymentaddresses_root = new_ktree(NULL, cmp_paymentaddresses,
 					  paymentaddresses_free);
-	paymentaddresses_create_root = new_ktree(cmp_payaddr_create,
+	paymentaddresses_create_root = new_ktree("PayAddrCreate",
+						 cmp_payaddr_create,
 						 paymentaddresses_free);
 	paymentaddresses_free->dsp_func = dsp_paymentaddresses;
 
 	payments_free = k_new_list("Payments", sizeof(PAYMENTS),
 					ALLOC_PAYMENTS, LIMIT_PAYMENTS, true);
 	payments_store = k_new_store(payments_free);
-	payments_root = new_ktree(cmp_payments, payments_free);
+	payments_root = new_ktree(NULL, cmp_payments, payments_free);
 
 	accountbalance_free = k_new_list("AccountBalance",
 					 sizeof(ACCOUNTBALANCE),
 					 ALLOC_ACCOUNTBALANCE,
 					 LIMIT_ACCOUNTBALANCE, true);
 	accountbalance_store = k_new_store(accountbalance_free);
-	accountbalance_root = new_ktree(cmp_accountbalance,
+	accountbalance_root = new_ktree(NULL, cmp_accountbalance,
 					accountbalance_free);
 
 	idcontrol_free = k_new_list("IDControl", sizeof(IDCONTROL),
@@ -1082,9 +1083,10 @@ static void alloc_storage()
 	workinfo_free = k_new_list("WorkInfo", sizeof(WORKINFO),
 					ALLOC_WORKINFO, LIMIT_WORKINFO, true);
 	workinfo_store = k_new_store(workinfo_free);
-	workinfo_root = new_ktree(cmp_workinfo, workinfo_free);
+	workinfo_root = new_ktree(NULL, cmp_workinfo, workinfo_free);
 	if (!confirm_sharesummary) {
-		workinfo_height_root = new_ktree(cmp_workinfo_height,
+		workinfo_height_root = new_ktree("WorkInfoHeight",
+						 cmp_workinfo_height,
 						 workinfo_free);
 	}
 
@@ -1092,94 +1094,109 @@ static void alloc_storage()
 					ALLOC_SHARES, LIMIT_SHARES, true);
 	shares_store = k_new_store(shares_free);
 	shares_early_store = k_new_store(shares_free);
-	shares_root = new_ktree(cmp_shares, shares_free);
-	shares_early_root = new_ktree(cmp_shares, shares_free);
+	shares_root = new_ktree(NULL, cmp_shares, shares_free);
+	shares_early_root = new_ktree("SharesEarly", cmp_shares, shares_free);
 
 	shareerrors_free = k_new_list("ShareErrors", sizeof(SHAREERRORS),
-					ALLOC_SHAREERRORS, LIMIT_SHAREERRORS, true);
+					ALLOC_SHAREERRORS, LIMIT_SHAREERRORS,
+					true);
 	shareerrors_store = k_new_store(shareerrors_free);
 	shareerrors_early_store = k_new_store(shareerrors_free);
-	shareerrors_root = new_ktree(cmp_shareerrors, shareerrors_free);
-	shareerrors_early_root = new_ktree(cmp_shareerrors, shareerrors_free);
+	shareerrors_root = new_ktree(NULL, cmp_shareerrors, shareerrors_free);
+	shareerrors_early_root = new_ktree("ShareErrorsEarly", cmp_shareerrors,
+					   shareerrors_free);
 
 	sharesummary_free = k_new_list("ShareSummary", sizeof(SHARESUMMARY),
-					ALLOC_SHARESUMMARY, LIMIT_SHARESUMMARY, true);
+					ALLOC_SHARESUMMARY, LIMIT_SHARESUMMARY,
+					true);
 	sharesummary_store = k_new_store(sharesummary_free);
-	sharesummary_root = new_ktree(cmp_sharesummary, sharesummary_free);
-	sharesummary_workinfoid_root = new_ktree(cmp_sharesummary_workinfoid,
+	sharesummary_root = new_ktree(NULL, cmp_sharesummary,
+					sharesummary_free);
+	sharesummary_workinfoid_root = new_ktree("ShareSummaryWId",
+						 cmp_sharesummary_workinfoid,
 						 sharesummary_free);
 	sharesummary_free->dsp_func = dsp_sharesummary;
 	sharesummary_pool_store = k_new_store(sharesummary_free);
-	sharesummary_pool_root = new_ktree(cmp_sharesummary, sharesummary_free);
+	sharesummary_pool_root = new_ktree("ShareSummaryPool",
+					   cmp_sharesummary, sharesummary_free);
 
 	blocks_free = k_new_list("Blocks", sizeof(BLOCKS),
 					ALLOC_BLOCKS, LIMIT_BLOCKS, true);
 	blocks_store = k_new_store(blocks_free);
-	blocks_root = new_ktree(cmp_blocks, blocks_free);
+	blocks_root = new_ktree(NULL, cmp_blocks, blocks_free);
 	blocks_free->dsp_func = dsp_blocks;
 
 	miningpayouts_free = k_new_list("MiningPayouts", sizeof(MININGPAYOUTS),
-					ALLOC_MININGPAYOUTS, LIMIT_MININGPAYOUTS, true);
+					ALLOC_MININGPAYOUTS, LIMIT_MININGPAYOUTS,
+					true);
 	miningpayouts_store = k_new_store(miningpayouts_free);
-	miningpayouts_root = new_ktree(cmp_miningpayouts, miningpayouts_free);
+	miningpayouts_root = new_ktree(NULL, cmp_miningpayouts,
+					miningpayouts_free);
 
 	payouts_free = k_new_list("Payouts", sizeof(PAYOUTS),
 					ALLOC_PAYOUTS, LIMIT_PAYOUTS, true);
 	payouts_store = k_new_store(payouts_free);
-	payouts_root = new_ktree(cmp_payouts, payouts_free);
-	payouts_id_root = new_ktree(cmp_payouts_id, payouts_free);
-	payouts_wid_root = new_ktree(cmp_payouts_wid, payouts_free);
+	payouts_root = new_ktree(NULL, cmp_payouts, payouts_free);
+	payouts_id_root = new_ktree("PayoutsId", cmp_payouts_id, payouts_free);
+	payouts_wid_root = new_ktree("PayoutsWId", cmp_payouts_wid,
+					payouts_free);
 
 	auths_free = k_new_list("Auths", sizeof(AUTHS),
 					ALLOC_AUTHS, LIMIT_AUTHS, true);
 	auths_store = k_new_store(auths_free);
-	auths_root = new_ktree(cmp_auths, auths_free);
+	auths_root = new_ktree(NULL, cmp_auths, auths_free);
 
 	poolstats_free = k_new_list("PoolStats", sizeof(POOLSTATS),
 					ALLOC_POOLSTATS, LIMIT_POOLSTATS, true);
 	poolstats_store = k_new_store(poolstats_free);
-	poolstats_root = new_ktree(cmp_poolstats, poolstats_free);
+	poolstats_root = new_ktree(NULL, cmp_poolstats, poolstats_free);
 
 	userstats_free = k_new_list("UserStats", sizeof(USERSTATS),
 					ALLOC_USERSTATS, LIMIT_USERSTATS, true);
 	userstats_store = k_new_store(userstats_free);
 	userstats_eos_store = k_new_store(userstats_free);
-	userstats_root = new_ktree(cmp_userstats, userstats_free);
+	userstats_root = new_ktree(NULL, cmp_userstats, userstats_free);
 	userstats_free->dsp_func = dsp_userstats;
 
 	workerstatus_free = k_new_list("WorkerStatus", sizeof(WORKERSTATUS),
-					ALLOC_WORKERSTATUS, LIMIT_WORKERSTATUS, true);
+					ALLOC_WORKERSTATUS, LIMIT_WORKERSTATUS,
+					true);
 	workerstatus_store = k_new_store(workerstatus_free);
-	workerstatus_root = new_ktree(cmp_workerstatus, workerstatus_free);
+	workerstatus_root = new_ktree(NULL, cmp_workerstatus, workerstatus_free);
 
 	markersummary_free = k_new_list("MarkerSummary", sizeof(MARKERSUMMARY),
-					ALLOC_MARKERSUMMARY, LIMIT_MARKERSUMMARY, true);
+					ALLOC_MARKERSUMMARY, LIMIT_MARKERSUMMARY,
+					true);
 	markersummary_store = k_new_store(markersummary_free);
-	markersummary_root = new_ktree(cmp_markersummary, markersummary_free);
-	markersummary_userid_root = new_ktree(cmp_markersummary_userid,
+	markersummary_root = new_ktree(NULL, cmp_markersummary,
+					markersummary_free);
+	markersummary_userid_root = new_ktree("MarkerSummaryUserId",
+					      cmp_markersummary_userid,
 					      markersummary_free);
 	markersummary_free->dsp_func = dsp_markersummary;
 	markersummary_pool_store = k_new_store(markersummary_free);
-	markersummary_pool_root = new_ktree(cmp_markersummary,
+	markersummary_pool_root = new_ktree("MarkerSummaryPool",
+					    cmp_markersummary,
 					    markersummary_free);
 
 	workmarkers_free = k_new_list("WorkMarkers", sizeof(WORKMARKERS),
 					ALLOC_WORKMARKERS, LIMIT_WORKMARKERS, true);
 	workmarkers_store = k_new_store(workmarkers_free);
-	workmarkers_root = new_ktree(cmp_workmarkers, workmarkers_free);
-	workmarkers_workinfoid_root = new_ktree(cmp_workmarkers_workinfoid,
+	workmarkers_root = new_ktree(NULL, cmp_workmarkers, workmarkers_free);
+	workmarkers_workinfoid_root = new_ktree("WorkMarkersWId",
+						cmp_workmarkers_workinfoid,
 						workmarkers_free);
 	workmarkers_free->dsp_func = dsp_workmarkers;
 
 	marks_free = k_new_list("Marks", sizeof(MARKS),
 				ALLOC_MARKS, LIMIT_MARKS, true);
 	marks_store = k_new_store(marks_free);
-	marks_root = new_ktree(cmp_marks, marks_free);
+	marks_root = new_ktree(NULL, cmp_marks, marks_free);
 
 	userinfo_free = k_new_list("UserInfo", sizeof(USERINFO),
 					ALLOC_USERINFO, LIMIT_USERINFO, true);
 	userinfo_store = k_new_store(userinfo_free);
-	userinfo_root = new_ktree(cmp_userinfo, userinfo_free);
+	userinfo_root = new_ktree(NULL, cmp_userinfo, userinfo_free);
 
 #if LOCK_CHECK
 	DLPRIO(seqset, 91);
@@ -2689,7 +2706,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	}
 
 	// N.B. these aren't shared so they use _nolock, below
-	msgline->trf_root = new_ktree(cmp_transfer, transfer_free);
+	msgline->trf_root = new_ktree_auto("MsgTrf", cmp_transfer, transfer_free);
 	msgline->trf_store = k_new_store(transfer_free);
 	next = data;
 	if (next && strncmp(next, JSON_TRANSFER, JSON_TRANSFER_LEN) == 0) {

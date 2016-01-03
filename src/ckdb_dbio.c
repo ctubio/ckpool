@@ -3813,7 +3813,11 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 	K_STORE *old_sharesummary_store = k_new_store(sharesummary_free);
 	K_STORE *new_markersummary_store = k_new_store(markersummary_free);
-	K_TREE *ms_root = new_ktree(cmp_markersummary, markersummary_free);
+
+	/* Use the master size for this local tree since
+	 *  it's large and doesn't get created often */
+	K_TREE *ms_root = new_ktree_local(shortname, cmp_markersummary,
+					  markersummary_free);
 
 	if (!CURRENT(&(workmarkers->expirydate))) {
 		reason = "unexpired";
