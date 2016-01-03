@@ -32,7 +32,8 @@ function show_api($info, $page, $menu, $name, $user)
 	$info = homeInfo($u);
 	if ($info === false)
 		no_api($jfu);
-	$rep = fldEncode($info, 'lastbc', true);
+	$rep = fldEncode($info, 'STAMP', true);
+	$rep .= fldEncode($info, 'lastbc', false);
 	$rep .= fldEncode($info, 'lastheight', false);
 	$rep .= fldEncode($info, 'currndiff', false);
 	$rep .= fldEncode($info, 'lastblock', false);
@@ -66,7 +67,8 @@ function show_api($info, $page, $menu, $name, $user)
 	if ($ans === false)
 		no_api($jfu);
 
-	$rep = fldEncode($ans, 'rows', true);
+	$rep = fldEncode($ans, 'STAMP', true);
+	$rep .= fldEncode($ans, 'rows', false);
 	$rows = $ans['rows'];
 	$flds = explode(',', $ans['flds']);
 	$zeflds = '';
