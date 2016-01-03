@@ -192,6 +192,9 @@ struct ckpool_instance {
 	/* Are we a redirecting passthrough */
 	bool redirector;
 
+	/* Should we compress large packets in passthrough modes */
+	bool compress;
+
 	/* Are we running as a proxy */
 	bool proxy;
 

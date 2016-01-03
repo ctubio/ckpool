@@ -1539,6 +1539,7 @@ static void parse_config(ckpool_t *ckp)
 		ckp->btcsig[38] = '\0';
 	}
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
+	json_get_bool(&ckp->compress, json_conf, "compress");
 	json_get_int(&ckp->nonce1length, json_conf, "nonce1length");
 	json_get_int(&ckp->nonce2length, json_conf, "nonce2length");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
@@ -1906,6 +1907,9 @@ int main(int argc, char **argv)
 	ret = mkdir(ckp.socket_dir, 0750);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
+
+	/* Set default on */
+	ckp.compress = true;
 
 	parse_config(&ckp);
 	/* Set defaults if not found in config file */
