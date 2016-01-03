@@ -556,8 +556,8 @@ static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
 static int read_cs_length(connsock_t *cs, float *timeout, int len)
 {
 	tv_t start, now;
-	int ret = len;
 	float diff;
+	int ret;
 
 	tv_time(&start);
 
@@ -568,23 +568,25 @@ static int read_cs_length(connsock_t *cs, float *timeout, int len)
 		if (*timeout < 0) {
 			LOGDEBUG("Timed out in read_cs_length");
 			ret = 0;
-			break;
+			goto out;
 		}
 		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1)
-			break;
+			goto out;
 		readlen = len - cs->bufofs;
 		if (readlen >= PAGESIZE)
 			readlen = PAGESIZE - 4;
 		ret = recv(cs->fd, readbuf, readlen, MSG_DONTWAIT);
 		if (ret < 1)
-			break;
+			goto out;
 		add_bufline(cs, readbuf, ret);
 		tv_time(&now);
 		diff = tvdiff(&now, &start);
 		copy_tv(&start, &now);
 		*timeout -= diff;
 	}
+	ret = len;
+out:
 	return ret;
 }
 
@@ -741,7 +743,7 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
-	} else if (ret == 3 && !strncmp(cs->buf, gzip_magic, 3))
+	} else if (ret == 3 && !memcmp(cs->buf, gzip_magic, 3))
 		ret = read_gz_line(cs, timeout);
 	return ret;
 }
@@ -758,7 +760,8 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 	uint32_t msglen;
 	int ret;
 
-	/* Connsock doesn't expect gz compressed messages */
+	/* Connsock doesn't expect gz compressed messages. Only compress if it's
+	 * larger than one MTU. */
 	if (!cs->gz || len <= 1492)
 		return write_socket(cs->fd, buf, len);
 	compsize = round_up_page(len + 12);
@@ -770,8 +773,10 @@ int write_cs(connsock_t *cs, const char *buf, int len)
 		LOGINFO("Failed to gz compress in write_cs, writing uncompressed");
 		return write_socket(cs->fd, buf, len);
 	}
+	if (unlikely(compsize + 12 >= decompsize))
+		return write_socket(cs->fd, buf, len);
 	/* Copy gz magic header */
-	sprintf(dest, gzip_magic);
+	memcpy(dest, gzip_magic, 4);
 	/* Copy compressed message length */
 	msglen = htole32(compsize);
 	memcpy(dest + 4, &msglen, 4);
