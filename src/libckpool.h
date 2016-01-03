@@ -531,6 +531,8 @@ void trail_slash(char **buf);
 void *_ckalloc(size_t len, const char *file, const char *func, const int line);
 void *json_ckalloc(size_t size);
 void *_ckzalloc(size_t len, const char *file, const char *func, const int line);
+size_t round_up_page(size_t len);
+
 extern const int hex2bin_tbl[];
 void __bin2hex(void *vs, const void *vp, size_t len);
 void *bin2hex(const void *vp, size_t len);

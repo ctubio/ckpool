@@ -5186,10 +5186,11 @@ static void add_mining_node(sdata_t *sdata, stratum_instance_t *client)
 
 /* Enter with client holding ref count */
 static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client,
-			 const int64_t client_id, json_t *id_val, json_t *method_val,
+			 const int64_t client_id, json_t *val, json_t *id_val, json_t *method_val,
 			 json_t *params_val)
 {
 	const char *method;
+	bool var;
 
 	/* Random broken clients send something not an integer as the id so we
 	 * copy the json item for id_val as is for the response. By far the
@@ -5237,8 +5238,12 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 
 		/* Add this client as a passthrough in the connector and
 		 * add it to the list of mining nodes in the stratifier */
+		json_get_bool(&var, val, "gz");
 		add_mining_node(sdata, client);
-		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+		if (var)
+			snprintf(buf, 255, "passgz=%"PRId64, client_id);
+		else
+			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 		send_proc(ckp->connector, buf);
 		return;
 	}
@@ -5250,8 +5255,12 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 		 * is a passthrough and to manage its messages accordingly. No
 		 * data from this client id should ever come back to this
 		 * stratifier after this so drop the client in the stratifier. */
+		json_get_bool(&var, val, "gz");
 		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
-		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+		if (var)
+			snprintf(buf, 255, "passgz=%"PRId64, client_id);
+		else
+			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 		send_proc(ckp->connector, buf);
 		drop_client(ckp, sdata, client_id);
 		return;
@@ -5469,7 +5478,7 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 		send_json_err(sdata, client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	parse_method(ckp, sdata, client, client_id, id_val, method, params);
+	parse_method(ckp, sdata, client, client_id, val, id_val, method, params);
 out:
 	free_smsg(msg);
 }

@@ -20,6 +20,7 @@
 #include <getopt.h>
 #include <grp.h>
 #include <jansson.h>
+#include <zlib.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,8 @@
 #include "api.h"
 
 ckpool_t *global_ckp;
+
+const char gzip_magic[] = "\x1f\xd5\x01\n";
 
 static void proclog(ckpool_t *ckp, char *msg)
 {
@@ -507,7 +510,170 @@ bool ping_main(ckpool_t *ckp)
 
 void empty_buffer(connsock_t *cs)
 {
+	if (cs->buf)
+		cs->buf[0] = '\0';
 	cs->buflen = cs->bufofs = 0;
+}
+
+static void clear_bufline(connsock_t *cs)
+{
+	if (unlikely(!cs->buf))
+		cs->buf = ckzalloc(PAGESIZE);
+	else if (cs->buflen) {
+		memmove(cs->buf, cs->buf + cs->bufofs, cs->buflen);
+		memset(cs->buf + cs->buflen, 0, cs->bufofs);
+		cs->bufofs = cs->buflen;
+		cs->buflen = 0;
+		cs->buf[cs->bufofs] = '\0';
+	} else
+		cs->bufofs = 0;
+}
+
+static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
+{
+	int backoff = 1;
+	size_t buflen;
+	char *newbuf;
+
+	buflen = round_up_page(cs->bufofs + len + 1);
+	while (42) {
+		newbuf = realloc(cs->buf, buflen);
+		if (likely(newbuf))
+			break;
+		if (backoff == 1)
+			fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
+		cksleep_ms(backoff);
+		backoff <<= 1;
+	}
+	cs->buf = newbuf;
+	if (unlikely(!cs->buf))
+		quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
+	memcpy(cs->buf + cs->bufofs, readbuf, len);
+	cs->bufofs += len;
+	cs->buf[cs->bufofs] = '\0';
+}
+
+static int read_cs_length(connsock_t *cs, float *timeout, int len)
+{
+	tv_t start, now;
+	float diff;
+	int ret;
+
+	tv_time(&start);
+
+	while (cs->bufofs < len) {
+		char readbuf[PAGESIZE];
+		int readlen;
+
+		if (*timeout < 0) {
+			LOGDEBUG("Timed out in read_cs_length");
+			ret = 0;
+			goto out;
+		}
+		ret = wait_read_select(cs->fd, *timeout);
+		if (ret < 1)
+			goto out;
+		readlen = len - cs->bufofs;
+		if (readlen >= PAGESIZE)
+			readlen = PAGESIZE - 4;
+		ret = recv(cs->fd, readbuf, readlen, MSG_DONTWAIT);
+		if (ret < 1)
+			goto out;
+		add_bufline(cs, readbuf, ret);
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
+	}
+	ret = len;
+out:
+	return ret;
+}
+
+static int read_gz_line(connsock_t *cs, float *timeout)
+{
+	unsigned long compsize, res, decompsize;
+	char *buf, *dest = NULL, *eom;
+	int ret,  buflen;
+	uint32_t msglen;
+
+	/* Remove gz header */
+	clear_bufline(cs);
+
+	/* Get data sizes */
+	ret = read_cs_length(cs, timeout, 8);
+	if (ret != 8) {
+		ret = -1;
+		goto out;
+	}
+
+	memcpy(&msglen, cs->buf, 4);
+	compsize = le32toh(msglen);
+	memcpy(&msglen, cs->buf + 4, 4);
+	decompsize = le32toh(msglen);
+
+	/* Remove the gz variables */
+	cs->buflen = cs->bufofs - 8;
+	cs->bufofs = 8;
+	clear_bufline(cs);
+
+	if (unlikely(compsize < 1 || compsize > 0x80000000 ||
+		decompsize < 1 || decompsize > 0x80000000)) {
+		LOGWARNING("Invalid message length comp %lu decomp %lu sent to read_gz_line", compsize, decompsize);
+		ret = -1;
+		goto out;
+	}
+
+	/* Get compressed data */
+	ret = read_cs_length(cs, timeout, compsize);
+	if (ret != (int)compsize) {
+		LOGWARNING("Failed to read %lu compressed bytes in read_gz_line, got %d", compsize, ret);
+		ret = -1;
+		goto out;
+	}
+
+	/* Clear out all the compressed data */
+	cs->buflen = cs->bufofs - compsize;
+	cs->bufofs = compsize;
+	clear_bufline(cs);
+
+	/* Do decompresion and buffer reconstruction here */
+	res = round_up_page(decompsize);
+	dest = ckalloc(res);
+	ret = uncompress((Bytef *)dest, &res, (Bytef *)cs->buf, compsize);
+	if (ret != Z_OK || res != decompsize) {
+		LOGWARNING("Failed to decompress %lu bytes in read_gz_line, result %d got %lu",
+			   decompsize, ret, res);
+		ret = -1;
+		goto out;
+	}
+
+	eom = dest + decompsize - 1;
+	if (memcmp(eom, "\n", 1)) {
+		LOGWARNING("Failed to find EOM in decompressed data in read_gz_line");
+		ret = -1;
+		goto out;
+	}
+
+	*eom = '\0';
+	ret = decompsize - 1;
+	/* Wedge the decompressed buffer back to the start of cs->buf */
+	buf = cs->buf;
+	buflen = cs->bufofs;
+	cs->buf = dest;
+	dest = NULL;
+	cs->bufofs = decompsize;
+	if (buflen) {
+		add_bufline(cs, buf, buflen);
+		cs->buflen = buflen;
+		cs->bufofs = decompsize;
+	} else
+		cs->buflen = cs->bufofs = 0;
+out:
+	free(dest);
+	if (ret < 1)
+		empty_buffer(cs);
+	return ret;
 }
 
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
@@ -517,93 +683,54 @@ int read_socket_line(connsock_t *cs, float *timeout)
 {
 	char *eom = NULL;
 	tv_t start, now;
-	size_t buflen;
 	int ret = -1;
-	bool polled;
 	float diff;
 
 	if (unlikely(cs->fd < 0))
 		goto out;
 
-	if (unlikely(!cs->buf))
-		cs->buf = ckzalloc(PAGESIZE);
-	else if (cs->buflen) {
-		memmove(cs->buf, cs->buf + cs->bufofs, cs->buflen);
-		memset(cs->buf + cs->buflen, 0, cs->bufofs);
-		cs->bufofs = cs->buflen;
-		cs->buflen = 0;
-		cs->buf[cs->bufofs] = '\0';
-		eom = strchr(cs->buf, '\n');
-	}
+	clear_bufline(cs);
+	eom = strchr(cs->buf, '\n');
 
 	tv_time(&start);
-rewait:
-	if (*timeout < 0) {
-		LOGDEBUG("Timed out in read_socket_line");
-		ret = 0;
-		goto out;
-	}
-	ret = wait_read_select(cs->fd, eom ? 0 : *timeout);
-	polled = true;
-	if (ret < 1) {
-		if (!ret) {
-			if (eom)
-				goto parse;
-			LOGDEBUG("Select timed out in read_socket_line");
-		} else {
+
+	while (!eom) {
+		char readbuf[PAGESIZE];
+
+		if (*timeout < 0) {
+			if (cs->ckp->proxy)
+				LOGINFO("Timed out in read_socket_line");
+			else
+				LOGERR("Timed out in read_socket_line");
+			ret = 0;
+			goto out;
+		}
+		ret = wait_read_select(cs->fd, *timeout);
+		if (ret < 0) {
 			if (cs->ckp->proxy)
 				LOGINFO("Select failed in read_socket_line");
 			else
 				LOGERR("Select failed in read_socket_line");
+			goto out;
 		}
-		goto out;
-	}
-	tv_time(&now);
-	diff = tvdiff(&now, &start);
-	copy_tv(&start, &now);
-	*timeout -= diff;
-	while (42) {
-		char readbuf[PAGESIZE] = {};
-		int backoff = 1;
-		char *newbuf;
-
 		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret < 1) {
-			/* No more to read or closed socket after valid message */
-			if (eom)
-				break;
-			/* Have we used up all the timeout yet? If polled is
-			 * set that means poll has said there should be
+			/* If we have done wait_read_select there should be
 			 * something to read and if we get nothing it means the
 			 * socket is closed. */
-			if (!polled && *timeout >= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
-				goto rewait;
 			if (cs->ckp->proxy)
 				LOGINFO("Failed to recv in read_socket_line");
 			else
 				LOGERR("Failed to recv in read_socket_line");
 			goto out;
 		}
-		polled = false;
-		buflen = cs->bufofs + ret + 1;
-		while (42) {
-			newbuf = realloc(cs->buf, buflen);
-			if (likely(newbuf))
-				break;
-			if (backoff == 1)
-				fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
-			cksleep_ms(backoff);
-			backoff <<= 1;
-		}
-		cs->buf = newbuf;
-		if (unlikely(!cs->buf))
-			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		memcpy(cs->buf + cs->bufofs, readbuf, ret);
-		cs->bufofs += ret;
-		cs->buf[cs->bufofs] = '\0';
+		add_bufline(cs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
 	}
-parse:
 	ret = eom - cs->buf;
 
 	cs->buflen = cs->buf + cs->bufofs - eom - 1;
@@ -616,7 +743,53 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
+	} else if (ret == 3 && !memcmp(cs->buf, gzip_magic, 3))
+		ret = read_gz_line(cs, timeout);
+	return ret;
+}
+
+/* gzip compressed block structure:
+ * - 4 byte magic header gzip_magic "\x1f\xd5\x01\n"
+ * - 4 byte LE encoded compressed size
+ * - 4 byte LE encoded decompressed size
+ */
+int write_cs(connsock_t *cs, const char *buf, int len)
+{
+	unsigned long compsize, decompsize = len;
+	char *dest = NULL;
+	uint32_t msglen;
+	int ret;
+
+	/* Connsock doesn't expect gz compressed messages. Only compress if it's
+	 * larger than one MTU. */
+	if (!cs->gz || len <= 1492)
+		return write_socket(cs->fd, buf, len);
+	compsize = round_up_page(len + 12);
+	dest = alloca(compsize);
+	/* Do compression here */
+	compsize -= 12;
+	ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
+	if (ret != Z_OK) {
+		LOGINFO("Failed to gz compress in write_cs, writing uncompressed");
+		return write_socket(cs->fd, buf, len);
 	}
+	if (unlikely(compsize + 12 >= decompsize))
+		return write_socket(cs->fd, buf, len);
+	/* Copy gz magic header */
+	memcpy(dest, gzip_magic, 4);
+	/* Copy compressed message length */
+	msglen = htole32(compsize);
+	memcpy(dest + 4, &msglen, 4);
+	/* Copy decompressed message length */
+	msglen = htole32(decompsize);
+	memcpy(dest + 8, &msglen, 4);
+	len = compsize + 12;
+	LOGDEBUG("Writing connsock message compressed %d from %lu", len, decompsize);
+	ret = write_socket(cs->fd, dest, len);
+	if (ret == len)
+		ret = decompsize;
+	else
+		ret = -1;
 	return ret;
 }
 

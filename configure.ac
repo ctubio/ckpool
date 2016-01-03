@@ -40,23 +40,22 @@ AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h getopt.h)
 AC_CHECK_HEADERS(sys/epoll.h libpq-fe.h postgresql/libpq-fe.h grp.h)
 AC_CHECK_HEADERS(gsl/gsl_math.h gsl/gsl_cdf.h)
 AC_CHECK_HEADERS(openssl/x509.h openssl/hmac.h)
-
-PTHREAD_LIBS="-lpthread"
-MATH_LIBS="-lm"
-RT_LIBS="-lrt"
+AC_CHECK_HEADERS(zlib.h)
 
 AC_CONFIG_SUBDIRS([src/jansson-2.6])
 JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
 
-AC_SUBST(PTHREAD_LIBS)
-AC_SUBST(MATH_LIBS)
-AC_SUBST(RT_LIBS)
 AC_SUBST(JANSSON_LIBS)
 
 AC_ARG_WITH([ckdb],
 	[AC_HELP_STRING([--without-ckdb],[Compile ckpool without postgresql database support (default enabled)])],
 	[ckdb=$withval]
 	)
+
+#AC_SEARCH_LIBS(whatgoeshere?, rt, , echo "Error: Required library realtime not found." && exit 1)
+AC_SEARCH_LIBS(exp, m, , echo "Error: Required library math not found." && exit 1)
+AC_SEARCH_LIBS(compress, z , , echo "Error: Required library zlib1g-dev not found." && exit 1)
+AC_SEARCH_LIBS(pthread_mutex_trylock, pthread, , "Error: Required library pthreads not found." && exit 1)
 
 if test "x$ckdb" != "xno"; then
 	AC_CHECK_LIB([pq], [main],[PQ=-lpq],echo "Error: Required library libpq-dev
@@ -84,8 +83,10 @@ echo "Compilation............: make (or gmake)"
 echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS"
-echo "  LDADD................: $PTHREAD_LIBS $MATH_LIBS $RT_LIBS $JANSSON_LIBS"
-echo "  db LDADD.............: $DB_LIBS"
+echo "  LDADD................: $LIBS $JANSSON_LIBS"
+if test "x$ckdb" != "xno"; then
+	echo "  db LDADD.............: $LIBS $DB_LIBS $JANSSON_LIBS"
+fi
 echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"
