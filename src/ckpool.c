@@ -706,11 +706,11 @@ int read_socket_line(connsock_t *cs, float *timeout)
 			goto out;
 		}
 		ret = wait_read_select(cs->fd, *timeout);
-		if (ret < 0) {
+		if (ret < 1) {
 			if (cs->ckp->proxy)
-				LOGINFO("Select failed in read_socket_line");
+				LOGINFO("Select %s in read_socket_line", !ret ? "timed out" : "failed");
 			else
-				LOGERR("Select failed in read_socket_line");
+				LOGERR("Select %s in read_socket_line", !ret ? "timed out" : "failed");
 			goto out;
 		}
 		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
