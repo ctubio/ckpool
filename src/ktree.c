@@ -1053,11 +1053,21 @@ DBG("@remove after balance=%d :(\n", (int)cmp);
 	return;
 }
 
-void _remove_from_ktree_free(K_TREE *root, K_ITEM *data, bool chklock, KTREE_FFL_ARGS)
+void _remove_from_ktree_free(K_TREE *tree, K_ITEM *data, bool chklock, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX ctx[1];
+	K_NODE *knode;
+	K_ITEM *kitem;
 
-	_remove_from_ktree(root, data, ctx, chklock, KTREE_FFL_PASS);
+	_remove_from_ktree(tree, data, ctx, chklock, KTREE_FFL_PASS);
+
+	if (ctx[0]) {
+		knode = (K_NODE *)(ctx[0]);
+		kitem = knode->kitem;
+		// _nolock since _remove_from_ktree() already tested it
+		k_unlink_item_nolock(tree->node_store, kitem);
+		k_add_head_nolock(tree->node_free, kitem);
+	}
 }
 
 static void free_ktree_sub(K_NODE *knode, void (*free_funct)(void *))
