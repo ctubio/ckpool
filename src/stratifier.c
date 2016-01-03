@@ -6561,7 +6561,7 @@ int stratifier(proc_instance_t *pi)
 	}
 
 	mutex_init(&sdata->stats_lock);
-	if (!ckp->passthrough)
+	if (!ckp->passthrough || ckp->node)
 		create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	mutex_init(&sdata->share_lock);
