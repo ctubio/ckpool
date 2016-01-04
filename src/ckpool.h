@@ -79,6 +79,7 @@ struct connsock {
 	char *buf;
 	int bufofs;
 	int buflen;
+	ckpool_t *ckp;
 	/* Semaphore used to serialise request/responses */
 	sem_t sem;
 };
@@ -160,6 +161,9 @@ struct ckpool_instance {
 	/* How many clients maximum to accept before rejecting further */
 	int maxclients;
 
+	/* API message queue */
+	ckmsgq_t *ckpapi;
+
 	/* Logger message queue NOTE: Unique per process */
 	ckmsgq_t *logger;
 	/* Process instance data of parent/child processes */
@@ -176,17 +180,23 @@ struct ckpool_instance {
 	pthread_t pth_listener;
 	pthread_t pth_watchdog;
 
+	/* Are we running in node proxy mode */
+	bool node;
+
 	/* Are we running in passthrough mode */
 	bool passthrough;
+
+	/* Are we a redirecting passthrough */
+	bool redirector;
 
 	/* Are we running as a proxy */
 	bool proxy;
 
-	/* Do we prefer more proxy clients over support for >5TH clients */
-	bool clientsvspeed;
-
 	/* Are we running without ckdb */
 	bool standalone;
+
+	/* Are we running in userproxy mode */
+	bool userproxy;
 
 	/* Should we daemonise the ckpool process */
 	bool daemon;
@@ -224,8 +234,51 @@ struct ckpool_instance {
 	char **proxyauth;
 	char **proxypass;
 
+	/* Passthrough redirect options */
+	int redirecturls;
+	char **redirecturl;
+	char **redirectport;
+
 	/* Private data for each process */
 	void *data;
+};
+
+enum stratum_msgtype {
+	SM_RECONNECT = 0,
+	SM_DIFF,
+	SM_MSG,
+	SM_UPDATE,
+	SM_ERROR,
+	SM_SUBSCRIBE,
+	SM_SUBSCRIBERESULT,
+	SM_SHARE,
+	SM_SHARERESULT,
+	SM_AUTH,
+	SM_AUTHRESULT,
+	SM_TXNS,
+	SM_TXNSRESULT,
+	SM_PING,
+	SM_WORKINFO,
+	SM_NONE
+};
+
+static const char __maybe_unused *stratum_msgs[] = {
+	"reconnect",
+	"diff",
+	"message",
+	"update",
+	"error",
+	"subscribe",
+	"subscribe.result",
+	"share",
+	"share.result",
+	"auth",
+	"auth.result",
+	"txns",
+	"txns.result",
+	"ping",
+	"workinfo",
+	""
 };
 
 #ifdef USE_CKDB
@@ -267,5 +320,22 @@ bool json_get_string(char **store, const json_t *val, const char *res);
 bool json_get_int64(int64_t *store, const json_t *val, const char *res);
 bool json_get_int(int *store, const json_t *val, const char *res);
 bool json_get_double(double *store, const json_t *val, const char *res);
+bool json_get_bool(bool *store, const json_t *val, const char *res);
+bool json_getdel_int(int *store, json_t *val, const char *res);
+bool json_getdel_int64(int64_t *store, json_t *val, const char *res);
+
+
+/* API Placeholders for future API implementation */
+typedef struct apimsg apimsg_t;
+
+struct apimsg {
+	char *buf;
+	int sockd;
+};
+
+static inline void ckpool_api(ckpool_t __maybe_unused *ckp, apimsg_t __maybe_unused *apimsg) {};
+static inline json_t *json_encode_errormsg(json_error_t __maybe_unused *err_val) { return NULL; };
+static inline json_t *json_errormsg(const char __maybe_unused *fmt, ...) { return NULL; };
+static inline void send_api_response(json_t __maybe_unused *val, const int __maybe_unused sockd) {};
 
 #endif /* CKPOOL_H */

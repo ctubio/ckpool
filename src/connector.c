@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <string.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #include "ckpool.h"
 #include "libckpool.h"
@@ -25,6 +26,8 @@
 
 typedef struct client_instance client_instance_t;
 typedef struct sender_send sender_send_t;
+typedef struct share share_t;
+typedef struct redirect redirect_t;
 
 struct client_instance {
 	/* For clients hashtable */
@@ -53,11 +56,19 @@ struct client_instance {
 	int server;
 
 	char buf[PAGESIZE];
-	int bufofs;
+	unsigned long bufofs;
 
 	/* Are we currently sending a blocked message from this client */
 	sender_send_t *sending;
+
+	/* Is this the parent passthrough client */
 	bool passthrough;
+
+	/* Linked list of shares in redirector mode.*/
+	share_t *shares;
+
+	/* Has this client already been told to redirect */
+	bool redirected;
 
 	/* Time this client started blocking, 0 when not blocked */
 	time_t blocked_time;
@@ -71,6 +82,21 @@ struct sender_send {
 	char *buf;
 	int len;
 	int ofs;
+};
+
+struct share {
+	share_t *next;
+	share_t *prev;
+
+	time_t submitted;
+	int64_t id;
+};
+
+struct redirect {
+	UT_hash_handle hh;
+	char address_name[INET6_ADDRSTRLEN];
+	int id;
+	int redirect_no;
 };
 
 /* Private data for the connector */
@@ -115,6 +141,11 @@ struct connector_data {
 	/* For protecting the pending sends list */
 	mutex_t sender_lock;
 	pthread_cond_t sender_cond;
+
+	/* Hash list of all redirected IP address in redirector mode */
+	redirect_t *redirects;
+	/* What redirect we're currently up to */
+	int redirect;
 };
 
 typedef struct connector_data cdata_t;
@@ -123,6 +154,13 @@ typedef struct connector_data cdata_t;
 static void __inc_instance_ref(client_instance_t *client)
 {
 	client->ref++;
+}
+
+static void inc_instance_ref(cdata_t *cdata, client_instance_t *client)
+{
+	ck_wlock(&cdata->lock);
+	__inc_instance_ref(client);
+	ck_wunlock(&cdata->lock);
 }
 
 /* Increase the reference count of instance */
@@ -261,25 +299,34 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	return 1;
 }
 
+static int __drop_client(cdata_t *cdata, client_instance_t *client)
+{
+	int ret = -1;
+
+	if (client->invalid)
+		goto out;
+	client->invalid = true;
+	ret = client->fd;
+	Close(client->fd);
+	epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, ret, NULL);
+	HASH_DEL(cdata->clients, client);
+	DL_APPEND(cdata->dead_clients, client);
+	/* This is the reference to this client's presence in the
+		* epoll list. */
+	__dec_instance_ref(client);
+	cdata->dead_generated++;
+out:
+	return ret;
+}
+
 /* Client must hold a reference count */
 static int drop_client(cdata_t *cdata, client_instance_t *client)
 {
-	int64_t client_id = 0;
+	int64_t client_id = client->id;
 	int fd = -1;
 
 	ck_wlock(&cdata->lock);
-	if (!client->invalid) {
-		client->invalid = true;
-		client_id = client->id;
-		fd = client->fd;
-		epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, fd, NULL);
-		HASH_DEL(cdata->clients, client);
-		DL_APPEND(cdata->dead_clients, client);
-		/* This is the reference to this client's presence in the
-		 * epoll list. */
-		__dec_instance_ref(client);
-		cdata->dead_generated++;
-	}
+	fd = __drop_client(cdata, client);
 	ck_wunlock(&cdata->lock);
 
 	if (fd > -1)
@@ -297,7 +344,7 @@ static void generator_drop_client(ckpool_t *ckp, const client_instance_t *client
 	JSON_CPACK(val, "{si,sI:ss:si:ss:s[]}", "id", 42, "client_id", client->id, "address",
 		   client->address_name, "server", client->server, "method", "mining.term",
 		   "params");
-	s = json_dumps(val, 0);
+	s = json_dumps(val, JSON_COMPACT);
 	json_decref(val);
 	send_proc(ckp->generator, s);
 	free(s);
@@ -351,7 +398,59 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	return ret;
 }
 
+static void drop_all_clients(cdata_t *cdata)
+{
+	client_instance_t *client, *tmp;
+
+	ck_wlock(&cdata->lock);
+	HASH_ITER(hh, cdata->clients, client, tmp) {
+		__drop_client(cdata, client);
+	}
+	ck_wunlock(&cdata->lock);
+}
+
 static void send_client(cdata_t *cdata, int64_t id, char *buf);
+
+/* Look for shares being submitted via a redirector and add them to a linked
+ * list for looking up the responses. */
+static void parse_redirector_share(client_instance_t *client, const char *msg, const json_t *val)
+{
+	share_t *share, *tmp;
+	time_t now;
+	int64_t id;
+
+	if (!json_get_int64(&id, val, "id")) {
+		LOGNOTICE("Failed to find redirector share id");
+		return;
+	}
+	/* If this is not a share, delete any matching ID messages so we
+	 * don't falsely assume the client has had an accepted share based on
+	 * a true result to a different message. */
+	if (!strstr(msg, "mining.submit")) {
+		LOGDEBUG("Redirector client %"PRId64" non share message: %s", client->id, msg);
+		DL_FOREACH_SAFE(client->shares, share, tmp) {
+			if (share->id == id) {
+				DL_DELETE(client->shares, share);
+				dealloc(share);
+			}
+		}
+		return;
+	}
+	share = ckzalloc(sizeof(share_t));
+	now = time(NULL);
+	share->submitted = now;
+	share->id = id;
+	DL_APPEND(client->shares, share);
+	LOGINFO("Redirector adding client %"PRId64" share id: %"PRId64, client->id, id);
+
+	/* Age old shares. */
+	DL_FOREACH_SAFE(client->shares, share, tmp) {
+		if (now > share->submitted + 120) {
+			DL_DELETE(client->shares, share);
+			dealloc(share);
+		}
+	}
+}
 
 /* Client is holding a reference count from being on the epoll list */
 static void parse_client_msg(cdata_t *cdata, client_instance_t *client)
@@ -374,7 +473,7 @@ retry:
 	if (ret < 1) {
 		if (likely(errno == EAGAIN || errno == EWOULDBLOCK || !ret))
 			return;
-		LOGINFO("Client id %"PRId64" fd %d disconnected - recv fail with bufofs %d ret %d errno %d %s",
+		LOGINFO("Client id %"PRId64" fd %d disconnected - recv fail with bufofs %lu ret %d errno %d %s",
 			client->id, client->fd, client->bufofs, ret, errno, ret && errno ? strerror(errno) : "");
 		invalidate_client(ckp, cdata, client);
 		return;
@@ -392,6 +491,7 @@ reparse:
 		invalidate_client(ckp, cdata, client);
 		return;
 	}
+
 	memcpy(msg, client->buf, buflen);
 	msg[buflen] = '\0';
 	client->bufofs -= buflen;
@@ -405,29 +505,31 @@ reparse:
 		invalidate_client(ckp, cdata, client);
 		return;
 	} else {
-		int64_t passthrough_id;
 		char *s;
 
 		if (client->passthrough) {
-			passthrough_id = json_integer_value(json_object_get(val, "client_id"));
-			json_object_del(val, "client_id");
+			int64_t passthrough_id;
+
+			json_getdel_int64(&passthrough_id, val, "client_id");
 			passthrough_id = (client->id << 32) | passthrough_id;
 			json_object_set_new_nocheck(val, "client_id", json_integer(passthrough_id));
 		} else {
+			if (ckp->redirector && !client->redirected && strstr(msg, "mining.submit"))
+				parse_redirector_share(client, msg, val);
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		}
 		json_object_set_new_nocheck(val, "server", json_integer(client->server));
-		s = json_dumps(val, 0);
+		s = json_dumps(val, JSON_COMPACT);
 
 		/* Do not send messages of clients we've already dropped. We
 		 * do this unlocked as the occasional false negative can be
 		 * filtered by the stratifier. */
 		if (likely(!client->invalid)) {
+			if (!ckp->passthrough || ckp->node)
+				send_proc(ckp->stratifier, s);
 			if (ckp->passthrough)
 				send_proc(ckp->generator, s);
-			else
-				send_proc(ckp->stratifier, s);
 		}
 
 		free(s);
@@ -477,7 +579,7 @@ void *receiver(void *arg)
 	for (i = 0; i < serverfds; i++) {
 		/* The small values will be less than the first client ids */
 		event.data.u64 = i;
-		event.events = EPOLLIN;
+		event.events = EPOLLIN | EPOLLRDHUP;
 		ret = epoll_ctl(epfd, EPOLL_CTL_ADD, cdata->serverfd[i], &event);
 		if (ret < 0) {
 			LOGEMERG("FATAL: Failed to add epfd %d to epoll_ctl", epfd);
@@ -660,6 +762,115 @@ static void *sender(void *arg)
 	return NULL;
 }
 
+static int add_redirect(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
+{
+	redirect_t *redirect;
+	bool found;
+
+	ck_wlock(&cdata->lock);
+	HASH_FIND_STR(cdata->redirects, client->address_name, redirect);
+	if (!redirect) {
+		redirect = ckzalloc(sizeof(redirect_t));
+		strcpy(redirect->address_name, client->address_name);
+		redirect->redirect_no = cdata->redirect++;
+		if (cdata->redirect >= ckp->redirecturls)
+			cdata->redirect = 0;
+		HASH_ADD_STR(cdata->redirects, address_name, redirect);
+		found = false;
+	} else
+		found = true;
+	ck_wunlock(&cdata->lock);
+
+	LOGNOTICE("Redirecting client %"PRId64" from %s IP %s to redirecturl %d",
+		  client->id, found ? "matching" : "new", client->address_name, redirect->redirect_no);
+	return redirect->redirect_no;
+}
+
+static void redirect_client(ckpool_t *ckp, client_instance_t *client)
+{
+	sender_send_t *sender_send;
+	cdata_t *cdata = ckp->data;
+	json_t *val;
+	char *buf;
+	int num;
+
+	/* Set the redirected boool to only try redirecting them once */
+	client->redirected = true;
+
+	num = add_redirect(ckp, cdata, client);
+	JSON_CPACK(val, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
+		   "params", ckp->redirecturl[num], ckp->redirectport[num], 0);
+	buf = json_dumps(val, JSON_EOL | JSON_COMPACT);
+	json_decref(val);
+
+	sender_send = ckzalloc(sizeof(sender_send_t));
+	sender_send->client = client;
+	sender_send->buf = buf;
+	sender_send->len = strlen(buf);
+	inc_instance_ref(cdata, client);
+
+	mutex_lock(&cdata->sender_lock);
+	cdata->sends_generated++;
+	DL_APPEND(cdata->sender_sends, sender_send);
+	pthread_cond_signal(&cdata->sender_cond);
+	mutex_unlock(&cdata->sender_lock);
+}
+
+/* Look for accepted shares in redirector mode to know we can redirect this
+ * client to a protected server. */
+static void test_redirector_shares(ckpool_t *ckp, client_instance_t *client, const char *buf)
+{
+	json_t *val = json_loads(buf, 0, NULL);
+	share_t *share, *found = NULL;
+	int64_t id;
+
+	if (!val) {
+		LOGNOTICE("Invalid json response to client %"PRId64, client->id);
+		return;
+	}
+	if (!json_get_int64(&id, val, "id")) {
+		LOGINFO("Failed to find response id");
+		goto out;
+	}
+	DL_FOREACH(client->shares, share) {
+		if (share->id == id) {
+			LOGDEBUG("Found matching share %"PRId64" in trs for client %"PRId64,
+				 id, client->id);
+			DL_DELETE(client->shares, share);
+			found = share;
+			break;
+		}
+	}
+	if (found) {
+		bool result = false;
+
+		dealloc(found);
+		if (!json_get_bool(&result, val, "result")) {
+			LOGINFO("Failed to find result in trs share");
+			goto out;
+		}
+		if (!json_is_null(json_object_get(val, "error"))) {
+			LOGINFO("Got error for trs share");
+			goto out;
+		}
+		if (!result) {
+			LOGDEBUG("Rejected trs share");
+			goto out;
+		}
+		LOGNOTICE("Found accepted share for client %"PRId64" - redirecting",
+			   client->id);
+		redirect_client(ckp, client);
+
+		/* Clear the list now since we don't need it any more */
+		DL_FOREACH_SAFE(client->shares, share, found) {
+			DL_DELETE(client->shares, share);
+			dealloc(share);
+		}
+	}
+out:
+	json_decref(val);
+}
+
 /* Send a client by id a heap allocated buffer, allowing this function to
  * free the ram. */
 static void send_client(cdata_t *cdata, const int64_t id, char *buf)
@@ -676,6 +887,13 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 	len = strlen(buf);
 	if (unlikely(!len)) {
 		LOGWARNING("Connector send_client sent a zero length buffer");
+		free(buf);
+		return;
+	}
+
+	if (unlikely(ckp->node && !id)) {
+		LOGDEBUG("Message for node: %s", buf);
+		send_proc(ckp->stratifier, buf);
 		free(buf);
 		return;
 	}
@@ -710,6 +928,20 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			free(buf);
 			return;
 		}
+		if (ckp->node) {
+			json_t *val = json_loads(buf, 0, NULL);
+			char *msg;
+
+			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
+			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
+			json_object_set_new_nocheck(val, "server", json_integer(client->server));
+			msg = json_dumps(val, JSON_COMPACT);
+			json_decref(val);
+			send_proc(ckp->stratifier, msg);
+			free(msg);
+		}
+		if (ckp->redirector && !client->redirected)
+			test_redirector_shares(ckp, client, buf);
 	}
 
 	sender_send = ckzalloc(sizeof(sender_send_t));
@@ -722,6 +954,17 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 	DL_APPEND(cdata->sender_sends, sender_send);
 	pthread_cond_signal(&cdata->sender_cond);
 	mutex_unlock(&cdata->sender_lock);
+}
+
+static bool client_exists(cdata_t *cdata, const int64_t id)
+{
+	client_instance_t *client;
+
+	ck_rlock(&cdata->lock);
+	HASH_FIND_I64(cdata->clients, &id, client);
+	ck_runlock(&cdata->lock);
+
+	return !!client;
 }
 
 static void passthrough_client(cdata_t *cdata, client_instance_t *client)
@@ -742,7 +985,7 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 
 	json_msg = json_loads(buf, 0, NULL);
 	if (unlikely(!json_msg)) {
-		LOGWARNING("Invalid json message: %s", buf);
+		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
 		return;
 	}
 
@@ -753,7 +996,8 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 	 * upstream client_id instead of the passthrough's. */
 	if (client_id > 0xffffffffll)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
-	msg = json_dumps(json_msg, JSON_EOL);
+
+	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
 	send_client(cdata, client_id, msg);
 	json_decref(json_msg);
 }
@@ -874,6 +1118,17 @@ retry:
 		dec_instance_ref(cdata, client);
 		if (ret >= 0)
 			LOGINFO("Connector dropped client id: %"PRId64, client_id);
+	} else if (cmdmatch(buf, "testclient")) {
+		ret = sscanf(buf, "testclient=%"PRId64, &client_id);
+		if (unlikely(ret < 0)) {
+			LOGDEBUG("Connector failed to parse testclient command: %s", buf);
+			goto retry;
+		}
+		client_id &= 0xffffffffll;
+		if (client_exists(cdata, client_id))
+			goto retry;
+		LOGINFO("Connector detected non-existent client id: %"PRId64, client_id);
+		stratifier_drop_id(ckp, client_id);
 	} else if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Connector received ping request");
 		send_unix_msg(umsg->sockd, "pong");
@@ -883,7 +1138,8 @@ retry:
 	} else if (cmdmatch(buf, "reject")) {
 		LOGDEBUG("Connector received reject signal");
 		cdata->accept = false;
-		send_proc(ckp->stratifier, "dropall");
+		if (ckp->passthrough)
+			drop_all_clients(cdata);
 	} else if (cmdmatch(buf, "stats")) {
 		char *msg;
 

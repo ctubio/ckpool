@@ -135,7 +135,7 @@ struct workbase {
 	char *logdir;
 
 	ckpool_t *ckp;
-	bool proxy;
+	bool proxy; /* This workbase is proxied work */
 };
 
 typedef struct workbase workbase_t;
@@ -168,7 +168,7 @@ typedef struct stratum_instance stratum_instance_t;
 struct user_instance {
 	UT_hash_handle hh;
 	char username[128];
-	int64_t id;
+	int id;
 	char *secondaryuserid;
 	bool btcaddress;
 
@@ -225,6 +225,10 @@ struct worker_instance {
 	bool notified_idle;
 };
 
+typedef struct stratifier_data sdata_t;
+
+typedef struct proxy_base proxy_t;
+
 /* Per client stratum instance == workers */
 struct stratum_instance {
 	UT_hash_handle hh;
@@ -260,6 +264,7 @@ struct stratum_instance {
 	time_t start_time;
 
 	char address[INET6_ADDRSTRLEN];
+	bool node; /* Is this a mining node */
 	bool subscribed;
 	bool authorising; /* In progress, protected by instance_lock */
 	bool authorised;
@@ -269,12 +274,16 @@ struct stratum_instance {
 			 * or other problem and should be dropped lazily if
 			 * this is set to 2 */
 
+	bool reconnect; /* This client really needs to reconnect */
+	time_t reconnect_request; /* The time we sent a reconnect message */
+
 	user_instance_t *user_instance;
 	worker_instance_t *worker_instance;
 
 	char *useragent;
 	char *workername;
-	int64_t user_id;
+	char *password;
+	int user_id;
 	int server; /* Which server is this instance bound to */
 
 	ckpool_t *ckp;
@@ -284,6 +293,11 @@ struct stratum_instance {
 
 	int64_t suggest_diff; /* Stratum client suggested diff */
 	double best_diff; /* Best share found by this instance */
+
+	sdata_t *sdata; /* Which sdata this client is bound to */
+	proxy_t *proxy; /* Proxy this is bound to in proxy mode */
+	int proxyid; /* Which proxy id  */
+	int subproxyid; /* Which subproxy */
 };
 
 struct share {
@@ -294,6 +308,50 @@ struct share {
 
 typedef struct share share_t;
 
+struct proxy_base {
+	UT_hash_handle hh;
+	UT_hash_handle sh; /* For subproxy hashlist */
+	proxy_t *next; /* For retired subproxies */
+	proxy_t *prev;
+	int id;
+	int subid;
+
+	/* Priority has the user id encoded in the high bits if it's not a
+	 * global proxy. */
+	int64_t priority;
+
+	bool global; /* Is this a global proxy */
+	int userid; /* Userid for non global proxies */
+
+	double diff;
+
+	char url[128];
+	char auth[128];
+	char pass[128];
+	char enonce1[32];
+	uchar enonce1bin[16];
+	int enonce1constlen;
+	int enonce1varlen;
+
+	int nonce2len;
+	int enonce2varlen;
+
+	bool subscribed;
+	bool notified;
+
+	int64_t clients; /* Incrementing client count */
+	int64_t max_clients; /* Maximum number of clients per subproxy */
+	int64_t bound_clients; /* Currently actively bound clients */
+	int64_t combined_clients; /* Total clients of all subproxies of a parent proxy */
+	int64_t headroom; /* Temporary variable when calculating how many more clients can bind */
+
+	int subproxy_count; /* Number of subproxies */
+	proxy_t *parent; /* Parent proxy of each subproxy */
+	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
+	sdata_t *sdata; /* Unique stratifer data for each subproxy */
+	bool dead;
+};
+
 typedef struct session session_t;
 
 struct session {
@@ -301,7 +359,9 @@ struct session {
 	int session_id;
 	uint64_t enonce1_64;
 	int64_t client_id;
+	int userid;
 	time_t added;
+	char address[INET6_ADDRSTRLEN];
 };
 
 #define ID_AUTH 0
@@ -344,6 +404,8 @@ static const char *ckdb_seq_names[] = {
 #define ID_COUNT (sizeof(ckdb_ids)/sizeof(char *))
 
 struct stratifier_data {
+	ckpool_t *ckp;
+
 	char pubkeytxnbin[25];
 	int pubkeytxnlen;
 	char donkeytxnbin[25];
@@ -363,14 +425,9 @@ struct stratifier_data {
 	uint64_t ckdb_seq_ids[ID_COUNT];
 
 	bool ckdb_offline;
+	bool verbose;
 
-	/* Variable length enonce1 always refers back to a u64 */
-	union {
-		uint64_t u64;
-		uint32_t u32;
-		uint16_t u16;
-		uint8_t u8;
-	} enonce1u;
+	uint64_t enonce1_64;
 
 	/* For protecting the hashtable data */
 	cklock_t workbase_lock;
@@ -398,10 +455,11 @@ struct stratifier_data {
 	ckmsgq_t *sauthq;	// Stratum authorisations
 	ckmsgq_t *stxnq;	// Transaction requests
 
-	int64_t user_instance_id;
+	int user_instance_id;
 
 	stratum_instance_t *stratum_instances;
 	stratum_instance_t *recycled_instances;
+	stratum_instance_t *node_instances;
 
 	int stratum_generated;
 	int disconnected_generated;
@@ -426,22 +484,12 @@ struct stratifier_data {
 	/* Generator message priority */
 	int gen_priority;
 
-	struct {
-		double diff;
-
-		char enonce1[32];
-		uchar enonce1bin[16];
-		int enonce1constlen;
-		int enonce1varlen;
-
-		int nonce2len;
-		int enonce2varlen;
-
-		bool subscribed;
-	} proxy_base;
+	int proxy_count; /* Total proxies generated (not necessarily still alive) */
+	proxy_t *proxy; /* Current proxy in use */
+	proxy_t *proxies; /* Hashlist of all proxies */
+	mutex_t proxy_lock; /* Protects all proxy data */
+	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 };
-
-typedef struct stratifier_data sdata_t;
 
 typedef struct json_entry json_entry_t;
 
@@ -474,6 +522,18 @@ static void notice_msg_entries(char_entry_t **entries)
 	DL_FOREACH_SAFE(*entries, entry, tmpentry) {
 		DL_DELETE(*entries, entry);
 		LOGNOTICE("%s", entry->buf);
+		free(entry->buf);
+		free(entry);
+	}
+}
+
+static void info_msg_entries(char_entry_t **entries)
+{
+	char_entry_t *entry, *tmpentry;
+
+	DL_FOREACH_SAFE(*entries, entry, tmpentry) {
+		DL_DELETE(*entries, entry);
+		LOGINFO("%s", entry->buf);
 		free(entry->buf);
 		free(entry);
 	}
@@ -594,7 +654,7 @@ static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 	hex2bin(wb->headerbin, header, 112);
 }
 
-static void stratum_broadcast_update(sdata_t *sdata, bool clean);
+static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, bool clean);
 
 static void clear_workbase(workbase_t *wb)
 {
@@ -725,7 +785,73 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 
 #define ckdbq_add(ckp, idtype, val) _ckdbq_add(ckp, idtype, val, __FILE__, __func__, __LINE__)
 
-static void send_workinfo(ckpool_t *ckp, const workbase_t *wb)
+static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
+			     const int msg_type);
+
+static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
+{
+	stratum_instance_t *client;
+	ckmsg_t *bulk_send = NULL;
+
+	ck_rlock(&sdata->instance_lock);
+	if (sdata->node_instances) {
+		json_t *wb_val = json_object();
+
+		json_set_int(wb_val, "jobid", wb->id);
+		json_set_string(wb_val, "target", wb->target);
+		json_set_double(wb_val, "diff", wb->diff);
+		json_set_int(wb_val, "version", wb->version);
+		json_set_int(wb_val, "curtime", wb->curtime);
+		json_set_string(wb_val, "prevhash", wb->prevhash);
+		json_set_string(wb_val, "ntime", wb->ntime);
+		json_set_string(wb_val, "bbversion", wb->bbversion);
+		json_set_string(wb_val, "nbit", wb->nbit);
+		json_set_int(wb_val, "coinbasevalue", wb->coinbasevalue);
+		json_set_int(wb_val, "height", wb->height);
+		json_set_string(wb_val, "flags", wb->flags);
+		json_set_int(wb_val, "transactions", wb->transactions);
+		if (likely(wb->transactions))
+			json_set_string(wb_val, "txn_data", wb->txn_data);
+		/* We don't need txn_hashes */
+		json_set_int(wb_val, "merkles", wb->merkles);
+		json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
+		json_set_string(wb_val, "coinb1", wb->coinb1);
+		json_set_int(wb_val, "enonce1varlen", wb->enonce1varlen);
+		json_set_int(wb_val, "enonce2varlen", wb->enonce2varlen);
+		json_set_int(wb_val, "coinb1len", wb->coinb1len);
+		json_set_int(wb_val, "coinb2len", wb->coinb2len);
+		json_set_string(wb_val, "coinb2", wb->coinb2);
+
+		DL_FOREACH(sdata->node_instances, client) {
+			ckmsg_t *client_msg;
+			smsg_t *msg;
+			json_t *json_msg = json_deep_copy(wb_val);
+
+			json_set_string(json_msg, "node.method", stratum_msgs[SM_WORKINFO]);
+			client_msg = ckalloc(sizeof(ckmsg_t));
+			msg = ckzalloc(sizeof(smsg_t));
+			msg->json_msg = json_msg;
+			msg->client_id = client->id;
+			client_msg->data = msg;
+			DL_APPEND(bulk_send, client_msg);
+		}
+		json_decref(wb_val);
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (bulk_send) {
+		ckmsgq_t *ssends = sdata->ssends;
+
+		LOGINFO("Sending workinfo to mining nodes");
+
+		mutex_lock(ssends->lock);
+		DL_CONCAT(ssends->msgs, bulk_send);
+		pthread_cond_signal(ssends->cond);
+		mutex_unlock(ssends->lock);
+	}
+}
+
+static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 {
 	char cdfield[64];
 	json_t *val;
@@ -749,6 +875,7 @@ static void send_workinfo(ckpool_t *ckp, const workbase_t *wb)
 			"createcode", __func__,
 			"createinet", ckp->serverurl[0]);
 	ckdbq_add(ckp, ID_WORKINFO, val);
+	send_node_workinfo(sdata, wb);
 }
 
 static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
@@ -770,10 +897,12 @@ static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
 	ckdbq_add(ckp, ID_AGEWORKINFO, val);
 }
 
-static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
+/* Add a new workbase to the table of workbases. Sdata is the global data in
+ * pool mode but unique to each subproxy in proxy mode */
+static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_block)
 {
 	workbase_t *tmp, *tmpa, *aged = NULL;
-	sdata_t *sdata = ckp->data;
+	sdata_t *ckp_sdata = ckp->data;
 	int len, ret;
 
 	ts_realtime(&wb->gentime);
@@ -786,7 +915,7 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	 * we set workbase_id from it. In server mode the stratifier is
 	 * setting the workbase_id */
 	ck_wlock(&sdata->workbase_lock);
-	sdata->workbases_generated++;
+	ckp_sdata->workbases_generated++;
 	if (!ckp->proxy)
 		wb->id = sdata->workbase_id++;
 	else
@@ -811,6 +940,9 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	if (ckp->logshares)
 		sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
+	/* Is this long enough to ensure we don't dereference a workbase
+	 * immediately? Should be unless clock changes 10 minutes so we use
+	 * ts_realtime */
 	HASH_ITER(hh, sdata->workbases, tmp, tmpa) {
 		if (HASH_COUNT(sdata->workbases) < 3)
 			break;
@@ -827,12 +959,11 @@ static void add_base(ckpool_t *ckp, workbase_t *wb, bool *new_block)
 	sdata->current_workbase = wb;
 	ck_wunlock(&sdata->workbase_lock);
 
-	if (*new_block) {
-		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
+	if (*new_block)
 		purge_share_hashtable(sdata, wb->id);
-	}
 
-	send_workinfo(ckp, wb);
+	if (!ckp->passthrough)
+		send_workinfo(ckp, sdata, wb);
 
 	/* Send the aged work message to ckdb once we have dropped the workbase lock
 	 * to prevent taking recursive locks */
@@ -879,7 +1010,7 @@ static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 	return buf;
 }
 
-static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
+static void send_generator(const ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->data;
 	bool set;
@@ -978,7 +1109,7 @@ retry:
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
-	add_base(ckp, wb, &new_block);
+	add_base(ckp, sdata, wb, &new_block);
 	/* Reset the update time to avoid stacked low priority notifies. Bring
 	 * forward the next notify in case of a new block. */
 	now_t = time(NULL);
@@ -986,7 +1117,9 @@ retry:
 		now_t -= ckp->update_interval / 2;
 	sdata->update_time = now_t;
 
-	stratum_broadcast_update(sdata, new_block);
+	if (new_block)
+		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
+	stratum_broadcast_update(sdata, wb, new_block);
 	ret = true;
 	LOGINFO("Broadcast updated stratum base");
 out:
@@ -1004,6 +1137,63 @@ out:
 	return NULL;
 }
 
+static void add_node_base(ckpool_t *ckp, json_t *val)
+{
+	workbase_t *wb = ckzalloc(sizeof(workbase_t));
+	sdata_t *sdata = ckp->data;
+	bool new_block = false;
+	char header[228];
+	int i;
+
+	wb->ckp = ckp;
+	json_int64cpy(&wb->id, val, "jobid");
+	json_strcpy(wb->target, val, "target");
+	json_dblcpy(&wb->diff, val, "diff");
+	json_uintcpy(&wb->version, val, "version");
+	json_uintcpy(&wb->curtime, val, "curtime");
+	json_strcpy(wb->prevhash, val, "prevhash");
+	json_strcpy(wb->ntime, val, "ntime");
+	sscanf(wb->ntime, "%x", &wb->ntime32);
+	json_strcpy(wb->bbversion, val, "bbversion");
+	json_strcpy(wb->nbit, val, "nbit");
+	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
+	json_intcpy(&wb->height, val, "height");
+	json_strdup(&wb->flags, val, "flags");
+	json_intcpy(&wb->transactions, val, "transactions");
+	if (wb->transactions)
+		json_strdup(&wb->txn_data, val, "txn_data");
+	json_intcpy(&wb->merkles, val, "merkles");
+	wb->merkle_array = json_object_dup(val, "merklehash");
+	for (i = 0; i < wb->merkles; i++) {
+		strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(wb->merkle_array, i)));
+		hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
+	}
+	json_strdup(&wb->coinb1, val, "coinb1");
+	json_intcpy(&wb->coinb1len, val, "coinb1len");
+	wb->coinb1bin = ckzalloc(wb->coinb1len);
+	hex2bin(wb->coinb1bin, wb->coinb1, wb->coinb1len);
+	json_strdup(&wb->coinb2, val, "coinb2");
+	json_intcpy(&wb->coinb2len, val, "coinb2len");
+	wb->coinb2bin = ckzalloc(wb->coinb2len);
+	hex2bin(wb->coinb2bin, wb->coinb2, wb->coinb2len);
+	json_intcpy(&wb->enonce1varlen, val, "enonce1varlen");
+	json_intcpy(&wb->enonce2varlen, val, "enonce2varlen");
+	ts_realtime(&wb->gentime);
+
+	snprintf(header, 225, "%s%s%s%s%s%s%s",
+		 wb->bbversion, wb->prevhash,
+		 "0000000000000000000000000000000000000000000000000000000000000000",
+		 wb->ntime, wb->nbit,
+		 "00000000", /* nonce */
+		 workpadding);
+	LOGDEBUG("Header: %s", header);
+	hex2bin(wb->headerbin, header, 112);
+
+	add_base(ckp, sdata, wb, &new_block);
+	if (new_block)
+		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
+}
+
 static void update_base(ckpool_t *ckp, const int prio)
 {
 	struct update_req *ur = ckalloc(sizeof(struct update_req));
@@ -1019,7 +1209,12 @@ static void update_base(ckpool_t *ckp, const int prio)
  * clients allowing us to reuse it instead of callocing a new one */
 static void __kill_instance(sdata_t *sdata, stratum_instance_t *client)
 {
+	if (client->proxy) {
+		client->proxy->bound_clients--;
+		client->proxy->parent->combined_clients--;
+	}
 	free(client->workername);
+	free(client->password);
 	free(client->useragent);
 	memset(client, 0, sizeof(stratum_instance_t));
 	DL_APPEND(sdata->recycled_instances, client);
@@ -1064,7 +1259,9 @@ static void __disconnect_session(sdata_t *sdata, const stratum_instance_t *clien
 	session->enonce1_64 = client->enonce1_64;
 	session->session_id = client->session_id;
 	session->client_id = client->id;
+	session->userid = client->user_id;
 	session->added = now_t;
+	strcpy(session->address, client->address);
 	HASH_ADD_INT(sdata->disconnected_sessions, session_id, session);
 	sdata->stats.disconnected++;
 	sdata->disconnected_generated++;
@@ -1083,12 +1280,20 @@ static void __del_client(sdata_t *sdata, stratum_instance_t *client)
 	}
 }
 
+static void connector_drop_client(ckpool_t *ckp, const int64_t id)
+{
+	char buf[256];
+
+	LOGDEBUG("Stratifier requesting connector drop client %"PRId64, id);
+	snprintf(buf, 255, "dropclient=%"PRId64, id);
+	send_proc(ckp->connector, buf);
+}
+
 static void drop_allclients(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
 	sdata_t *sdata = ckp->data;
 	int kills = 0;
-	char buf[128];
 
 	ck_wlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
@@ -1100,8 +1305,7 @@ static void drop_allclients(ckpool_t *ckp)
 		} else
 			client->dropped = true;
 		kills++;
-		sprintf(buf, "dropclient=%"PRId64, client_id);
-		send_proc(ckp->connector, buf);
+		connector_drop_client(ckp, client_id);
 	}
 	sdata->stats.users = sdata->stats.workers = 0;
 	ck_wunlock(&sdata->instance_lock);
@@ -1110,86 +1314,572 @@ static void drop_allclients(ckpool_t *ckp)
 		LOGNOTICE("Dropped %d instances for dropall request", kills);
 }
 
-static void update_subscribe(ckpool_t *ckp)
+/* Copy only the relevant parts of the master sdata for each subproxy */
+static sdata_t *duplicate_sdata(const sdata_t *sdata)
 {
-	sdata_t *sdata = ckp->data;
-	json_t *val;
-	char *buf;
+	sdata_t *dsdata = ckzalloc(sizeof(sdata_t));
 
-	buf = send_recv_proc(ckp->generator, "getsubscribe");
-	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get subscribe from generator in update_notify");
-		drop_allclients(ckp);
-		return;
-	}
-	LOGDEBUG("Update subscribe: %s", buf);
-	val = json_loads(buf, 0, NULL);
-	free(buf);
+	dsdata->ckp = sdata->ckp;
 
-	ck_wlock(&sdata->workbase_lock);
-	sdata->proxy_base.subscribed = true;
-	sdata->proxy_base.diff = ckp->startdiff;
-	/* Length is checked by generator */
-	strcpy(sdata->proxy_base.enonce1, json_string_value(json_object_get(val, "enonce1")));
-	sdata->proxy_base.enonce1constlen = strlen(sdata->proxy_base.enonce1) / 2;
-	hex2bin(sdata->proxy_base.enonce1bin, sdata->proxy_base.enonce1, sdata->proxy_base.enonce1constlen);
-	sdata->proxy_base.nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
-	if (ckp->clientsvspeed) {
-		if (sdata->proxy_base.nonce2len > 5)
-			sdata->proxy_base.enonce1varlen = 4;
-		else if (sdata->proxy_base.nonce2len > 3)
-			sdata->proxy_base.enonce1varlen = 2;
-		else
-			sdata->proxy_base.enonce1varlen = 1;
-	} else {
-		if (sdata->proxy_base.nonce2len > 7)
-			sdata->proxy_base.enonce1varlen = 4;
-		else if (sdata->proxy_base.nonce2len > 5)
-			sdata->proxy_base.enonce1varlen = 2;
-		else
-			sdata->proxy_base.enonce1varlen = 1;
-	}
-	sdata->proxy_base.enonce2varlen = sdata->proxy_base.nonce2len - sdata->proxy_base.enonce1varlen;
-	ck_wunlock(&sdata->workbase_lock);
+	/* Copy the transaction binaries for workbase creation */
+	memcpy(dsdata->pubkeytxnbin, sdata->pubkeytxnbin, 25);
+	memcpy(dsdata->donkeytxnbin, sdata->donkeytxnbin, 25);
 
-	LOGNOTICE("Upstream pool extranonce2 length %d, max proxy clients %lld",
-		  sdata->proxy_base.nonce2len, 1ll << (sdata->proxy_base.enonce1varlen * 8));
+	/* Use the same work queues for all subproxies */
+	dsdata->ssends = sdata->ssends;
+	dsdata->srecvs = sdata->srecvs;
+	dsdata->ckdbq = sdata->ckdbq;
+	dsdata->sshareq = sdata->sshareq;
+	dsdata->sauthq = sdata->sauthq;
+	dsdata->stxnq = sdata->stxnq;
 
-	json_decref(val);
-	drop_allclients(ckp);
+	/* Give the sbuproxy its own workbase list and lock */
+	cklock_init(&dsdata->workbase_lock);
+	cksem_init(&dsdata->update_sem);
+	cksem_post(&dsdata->update_sem);
+	return dsdata;
 }
 
-static void update_diff(ckpool_t *ckp);
-
-static void update_notify(ckpool_t *ckp)
+static int64_t prio_sort(proxy_t *a, proxy_t *b)
 {
+	return (a->priority - b->priority);
+}
+
+/* Priority values can be sparse, they do not need to be sequential */
+static void __set_proxy_prio(sdata_t *sdata, proxy_t *proxy, int64_t priority)
+{
+	proxy_t *tmpa, *tmpb, *exists = NULL;
+	int64_t next_prio = 0;
+
+	/* Encode the userid as the high bits in priority */
+	if (!proxy->global) {
+		int64_t high_bits = proxy->userid;
+
+		high_bits <<= 32;
+		priority |= high_bits;
+	}
+
+	/* See if the priority is already in use */
+	HASH_ITER(hh, sdata->proxies, tmpa, tmpb) {
+		if (tmpa->priority > priority)
+			break;
+		if (tmpa->priority == priority) {
+			exists = tmpa;
+			next_prio = exists->priority + 1;
+			break;
+		}
+	}
+	/* See if we need to push the priority of everything after exists up */
+	HASH_ITER(hh, exists, tmpa, tmpb) {
+		if (tmpa->priority > next_prio)
+			break;
+		tmpa->priority++;
+		next_prio++;
+	}
+	proxy->priority = priority;
+	HASH_SORT(sdata->proxies, prio_sort);
+}
+
+static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
+{
+	proxy_t *proxy = ckzalloc(sizeof(proxy_t));
+
+	proxy->parent = proxy;
+	proxy->id = id;
+	proxy->sdata = duplicate_sdata(sdata);
+	proxy->sdata->subproxy = proxy;
+	proxy->sdata->verbose = true;
+	/* subid == 0 on parent proxy */
+	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
+	proxy->subproxy_count++;
+	HASH_ADD_INT(sdata->proxies, id, proxy);
+	/* Set the new proxy priority to its id */
+	__set_proxy_prio(sdata, proxy, id);
+	sdata->proxy_count++;
+	return proxy;
+}
+
+static proxy_t *__generate_subproxy(sdata_t *sdata, proxy_t *proxy, const int subid)
+{
+	proxy_t *subproxy = ckzalloc(sizeof(proxy_t));
+
+	subproxy->parent = proxy;
+	subproxy->id = proxy->id;
+	subproxy->subid = subid;
+	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), subproxy);
+	proxy->subproxy_count++;
+	subproxy->sdata = duplicate_sdata(sdata);
+	subproxy->sdata->subproxy = subproxy;
+	return subproxy;
+}
+
+static proxy_t *__existing_proxy(const sdata_t *sdata, const int id)
+{
+	proxy_t *proxy;
+
+	HASH_FIND_INT(sdata->proxies, &id, proxy);
+	return proxy;
+}
+
+static proxy_t *existing_proxy(sdata_t *sdata, const int id)
+{
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __existing_proxy(sdata, id);
+	mutex_unlock(&sdata->proxy_lock);
+
+	return proxy;
+}
+
+/* Find proxy by id number, generate one if none exist yet by that id */
+static proxy_t *__proxy_by_id(sdata_t *sdata, const int id)
+{
+	proxy_t *proxy = __existing_proxy(sdata, id);
+
+	if (unlikely(!proxy)) {
+		proxy = __generate_proxy(sdata, id);
+		LOGNOTICE("Stratifier added new proxy %d", id);
+	}
+
+	return proxy;
+}
+
+static proxy_t *__existing_subproxy(proxy_t *proxy, const int subid)
+{
+	proxy_t *subproxy;
+
+	HASH_FIND(sh, proxy->subproxies, &subid, sizeof(int), subproxy);
+	return subproxy;
+}
+
+static proxy_t *__subproxy_by_id(sdata_t *sdata, proxy_t *proxy, const int subid)
+{
+	proxy_t *subproxy = __existing_subproxy(proxy, subid);
+
+	if (!subproxy) {
+		subproxy = __generate_subproxy(sdata, proxy, subid);
+		LOGINFO("Stratifier added new subproxy %d:%d", proxy->id, subid);
+	}
+	return subproxy;
+}
+
+static proxy_t *subproxy_by_id(sdata_t *sdata, const int id, const int subid)
+{
+	proxy_t *proxy, *subproxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __proxy_by_id(sdata, id);
+	subproxy = __subproxy_by_id(sdata, proxy, subid);
+	mutex_unlock(&sdata->proxy_lock);
+
+	return subproxy;
+}
+
+static proxy_t *existing_subproxy(sdata_t *sdata, const int id, const int subid)
+{
+	proxy_t *proxy, *subproxy = NULL;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = __existing_proxy(sdata, id);
+	if (proxy)
+		subproxy = __existing_subproxy(proxy, subid);
+	mutex_unlock(&sdata->proxy_lock);
+
+	return subproxy;
+}
+
+static void set_proxy_prio(sdata_t *sdata, proxy_t *proxy, const int priority)
+{
+	mutex_lock(&sdata->proxy_lock);
+	__set_proxy_prio(sdata, proxy, priority);
+	mutex_unlock(&sdata->proxy_lock);
+}
+
+/* Set proxy to the current proxy and calculate how much headroom it has */
+static int64_t current_headroom(sdata_t *sdata, proxy_t **proxy)
+{
+	proxy_t *subproxy, *tmp;
+	int64_t headroom = 0;
+
+	mutex_lock(&sdata->proxy_lock);
+	*proxy = sdata->proxy;
+	if (!*proxy)
+		goto out_unlock;
+	HASH_ITER(sh, (*proxy)->subproxies, subproxy, tmp) {
+		if (subproxy->dead)
+			continue;
+		headroom += subproxy->max_clients - subproxy->clients;
+	}
+out_unlock:
+	mutex_unlock(&sdata->proxy_lock);
+
+	return headroom;
+}
+
+static int64_t proxy_headroom(sdata_t *sdata, const int userid)
+{
+	proxy_t *proxy, *subproxy, *tmp, *subtmp;
+	int64_t headroom = 0;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
+		if (proxy->userid < userid)
+			continue;
+		if (proxy->userid > userid)
+			break;
+		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+			if (subproxy->dead)
+				continue;
+			headroom += subproxy->max_clients - subproxy->clients;
+		}
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	return headroom;
+}
+
+static void reconnect_client(sdata_t *sdata, stratum_instance_t *client);
+
+static void generator_recruit(const ckpool_t *ckp, const int proxyid, const int recruits)
+{
+	char buf[256];
+
+	sprintf(buf, "recruit=%d:%d", proxyid, recruits);
+	LOGINFO("Stratifer requesting %d more subproxies of proxy %d from generator",
+		recruits, proxyid);
+	send_generator(ckp, buf, GEN_PRIORITY);
+}
+
+/* Find how much headroom we have and connect up to that many clients that are
+ * not currently on this pool, recruiting more slots to switch more clients
+ * later on lazily. Only reconnect clients bound to global proxies. */
+static void reconnect_clients(sdata_t *sdata)
+{
+	stratum_instance_t *client, *tmpclient;
+	int reconnects = 0;
+	int64_t headroom;
+	proxy_t *proxy;
+
+	headroom = current_headroom(sdata, &proxy);
+	if (!proxy)
+		return;
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->dropped)
+			continue;
+		if (!client->authorised)
+			continue;
+		/* Is this client bound to a dead proxy? */
+		if (!client->reconnect) {
+			/* This client is bound to a user proxy */
+			if (client->proxy->userid)
+				continue;
+			if (client->proxyid == proxy->id)
+				continue;
+		}
+		if (headroom-- < 1)
+			continue;
+		reconnects++;
+		reconnect_client(sdata, client);
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (reconnects) {
+		LOGINFO("%d clients flagged for reconnect to global proxy %d",
+			reconnects, proxy->id);
+	}
+	if (headroom < 0)
+		generator_recruit(sdata->ckp, proxy->id, -headroom);
+}
+
+static bool __subproxies_alive(proxy_t *proxy)
+{
+	proxy_t *subproxy, *tmp;
+	bool alive = false;
+
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		if (!subproxy->dead) {
+			alive = true;
+			break;
+		}
+	}
+	return alive;
+}
+
+/* Iterate over the current global proxy list and see if the current one is
+ * the highest priority alive one. Proxies are sorted by priority so the first
+ * available will be highest priority. Uses ckp sdata */
+static void check_bestproxy(sdata_t *sdata)
+{
+	proxy_t *proxy, *tmp;
+	int changed_id = -1;
+
+	mutex_lock(&sdata->proxy_lock);
+	if (sdata->proxy && !__subproxies_alive(sdata->proxy))
+		sdata->proxy = NULL;
+	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
+		if (!__subproxies_alive(proxy))
+			continue;
+		if (!proxy->global)
+			break;
+		if (proxy != sdata->proxy) {
+			sdata->proxy = proxy;
+			changed_id = proxy->id;
+		}
+		break;
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	if (changed_id != -1)
+		LOGNOTICE("Stratifier setting active proxy to %d", changed_id);
+}
+
+static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bool replaced)
+{
+	stratum_instance_t *client, *tmp;
+	int reconnects = 0, proxyid = 0;
+	int64_t headroom;
+	proxy_t *proxy;
+
+	proxy = existing_subproxy(sdata, id, subid);
+	if (proxy) {
+		proxy->dead = true;
+		if (!replaced && proxy->global)
+			check_bestproxy(sdata);
+	}
+	LOGINFO("Stratifier dropping clients from proxy %d:%d", id, subid);
+	headroom = current_headroom(sdata, &proxy);
+	if (proxy)
+		proxyid = proxy->id;
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->proxyid != id || client->subproxyid != subid)
+			continue;
+		/* Clients could remain connected to a dead connection here
+		 * but should be picked up when we recruit enough slots after
+		 * another notify. */
+		if (headroom-- < 1) {
+			client->reconnect = true;
+			continue;
+		}
+		reconnects++;
+		reconnect_client(sdata, client);
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (reconnects) {
+		LOGINFO("%d clients flagged to reconnect from dead proxy %d:%d", reconnects,
+			id, subid);
+	}
+	/* When a proxy dies, recruit more of the global proxies for them to
+	 * fail over to in case user proxies are unavailable. */
+	if (headroom < 0)
+		generator_recruit(sdata->ckp, proxyid, -headroom);
+}
+
+static void update_subscribe(ckpool_t *ckp, const char *cmd)
+{
+	sdata_t *sdata = ckp->data, *dsdata;
+	int id = 0, subid = 0, userid = 0;
+	proxy_t *proxy, *old = NULL;
+	const char *buf;
+	bool global;
+	json_t *val;
+
+	if (unlikely(strlen(cmd) < 11)) {
+		LOGWARNING("Received zero length string for subscribe in update_subscribe");
+		return;
+	}
+	buf = cmd + 10;
+	LOGDEBUG("Update subscribe: %s", buf);
+	val = json_loads(buf, 0, NULL);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to json decode subscribe response in update_subscribe %s", buf);
+		return;
+	}
+	if (unlikely(!json_get_int(&id, val, "proxy"))) {
+		LOGWARNING("Failed to json decode proxy value in update_subscribe %s", buf);
+		return;
+	}
+	if (unlikely(!json_get_int(&subid, val, "subproxy"))) {
+		LOGWARNING("Failed to json decode subproxy value in update_subscribe %s", buf);
+		return;
+	}
+	if (unlikely(!json_get_bool(&global, val, "global"))) {
+		LOGWARNING("Failed to json decode global value in update_subscribe %s", buf);
+		return;
+	}
+	if (!global) {
+		if (unlikely(!json_get_int(&userid, val, "userid"))) {
+			LOGWARNING("Failed to json decode userid value in update_subscribe %s", buf);
+			return;
+		}
+	}
+
+	if (!subid)
+		LOGNOTICE("Got updated subscribe for proxy %d", id);
+	else
+		LOGINFO("Got updated subscribe for proxy %d:%d", id, subid);
+
+	/* Is this a replacement for an existing proxy id? */
+	old = existing_subproxy(sdata, id, subid);
+	if (old) {
+		dead_proxyid(sdata, id, subid, true);
+		proxy = old;
+		proxy->dead = false;
+	} else
+		proxy = subproxy_by_id(sdata, id, subid);
+	proxy->global = global;
+	proxy->userid = userid;
+	proxy->subscribed = true;
+	proxy->diff = ckp->startdiff;
+	memset(proxy->url, 0, 128);
+	memset(proxy->auth, 0, 128);
+	memset(proxy->pass, 0, 128);
+	strncpy(proxy->url, json_string_value(json_object_get(val, "url")), 127);
+	strncpy(proxy->auth, json_string_value(json_object_get(val, "auth")), 127);
+	strncpy(proxy->pass, json_string_value(json_object_get(val, "pass")), 127);
+
+	dsdata = proxy->sdata;
+
+	ck_wlock(&dsdata->workbase_lock);
+	/* Length is checked by generator */
+	strcpy(proxy->enonce1, json_string_value(json_object_get(val, "enonce1")));
+	proxy->enonce1constlen = strlen(proxy->enonce1) / 2;
+	hex2bin(proxy->enonce1bin, proxy->enonce1, proxy->enonce1constlen);
+	proxy->nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
+	if (proxy->nonce2len > 7)
+		proxy->enonce1varlen = 4;
+	else if (proxy->nonce2len > 5)
+		proxy->enonce1varlen = 2;
+	else if (proxy->nonce2len > 3)
+		proxy->enonce1varlen = 1;
+	else
+		proxy->enonce1varlen = 0;
+	proxy->enonce2varlen = proxy->nonce2len - proxy->enonce1varlen;
+	proxy->max_clients = 1ll << (proxy->enonce1varlen * 8);
+	proxy->clients = 0;
+	ck_wunlock(&dsdata->workbase_lock);
+
+	if (subid) {
+		LOGINFO("Upstream pool %s %d:%d extranonce2 length %d, max proxy clients %"PRId64,
+			proxy->url, id, subid, proxy->nonce2len, proxy->max_clients);
+	} else {
+		LOGNOTICE("Upstream pool %s %d extranonce2 length %d, max proxy clients %"PRId64,
+			  proxy->url, id, proxy->nonce2len, proxy->max_clients);
+	}
+	json_decref(val);
+}
+
+/* Find the highest priority alive proxy belonging to userid and recruit extra
+ * subproxies. */
+static void recruit_best_userproxy(sdata_t *sdata, const int userid, const int recruits)
+{
+	proxy_t *proxy, *subproxy, *tmp, *subtmp, *best = NULL;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
+		if (proxy->userid < userid)
+			continue;
+		if (proxy->userid > userid)
+			break;
+		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+			if (subproxy->dead)
+				continue;
+			best = proxy;
+		}
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	if (best)
+		generator_recruit(sdata->ckp, best->id, recruits);
+}
+
+/* Check how much headroom the userid proxies have and reconnect any clients
+ * that are not bound to it that should be */
+static void check_userproxies(sdata_t *sdata, const int userid)
+{
+	int64_t headroom = proxy_headroom(sdata, userid);
+	stratum_instance_t *client, *tmpclient;
+	int reconnects = 0;
+
+	ck_rlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->stratum_instances, client, tmpclient) {
+		if (client->dropped)
+			continue;
+		if (!client->authorised)
+			continue;
+		if (client->user_id != userid)
+			continue;
+		/* Is this client bound to a dead proxy? */
+		if (!client->reconnect && client->proxy->userid == userid)
+			continue;
+		if (headroom-- < 1)
+			continue;
+		reconnects++;
+		reconnect_client(sdata, client);
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (reconnects) {
+		LOGINFO("%d clients flagged for reconnect to user %d proxies",
+			reconnects, userid);
+	}
+	if (headroom < 0)
+		recruit_best_userproxy(sdata, userid, -headroom);
+}
+
+static proxy_t *best_proxy(sdata_t *sdata)
+{
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = sdata->proxy;
+	mutex_unlock(&sdata->proxy_lock);
+
+	return proxy;
+}
+
+static void update_notify(ckpool_t *ckp, const char *cmd)
+{
+	sdata_t *sdata = ckp->data, *dsdata;
 	bool new_block = false, clean;
-	sdata_t *sdata = ckp->data;
+	int i, id = 0, subid = 0;
 	char header[228];
+	const char *buf;
+	proxy_t *proxy;
 	workbase_t *wb;
 	json_t *val;
-	char *buf;
-	int i;
 
-	buf = send_recv_proc(ckp->generator, "getnotify");
-	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get notify from generator in update_notify");
+	if (unlikely(strlen(cmd) < 8)) {
+		LOGWARNING("Zero length string passed to update_notify");
 		return;
 	}
-
-	if (unlikely(!sdata->proxy_base.subscribed)) {
-		LOGINFO("No valid proxy subscription to update notify yet");
-		return;
-	}
-
+	buf = cmd + 7; /* "notify=" */
 	LOGDEBUG("Update notify: %s", buf);
-	wb = ckzalloc(sizeof(workbase_t));
+
 	val = json_loads(buf, 0, NULL);
-	dealloc(buf);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to json decode in update_notify");
+		return;
+	}
+	json_get_int(&id, val, "proxy");
+	json_get_int(&subid, val, "subproxy");
+	proxy = existing_subproxy(sdata, id, subid);
+	if (unlikely(!proxy || !proxy->subscribed)) {
+		LOGINFO("No valid proxy %d:%d subscription to update notify yet", id, subid);
+		goto out;
+	}
+	LOGINFO("Got updated notify for proxy %d:%d", id, subid);
+
+	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
 	wb->proxy = true;
 
-	json_int64cpy(&wb->id, val, "jobid");
+	json_get_int64(&wb->id, val, "jobid");
 	json_strcpy(wb->prevhash, val, "prevhash");
 	json_intcpy(&wb->coinb1len, val, "coinb1len");
 	wb->coinb1bin = ckalloc(wb->coinb1len);
@@ -1212,7 +1902,6 @@ static void update_notify(ckpool_t *ckp)
 	json_strcpy(wb->ntime, val, "ntime");
 	sscanf(wb->ntime, "%x", &wb->ntime32);
 	clean = json_is_true(json_object_get(val, "clean"));
-	json_decref(val);
 	ts_realtime(&wb->gentime);
 	snprintf(header, 225, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
@@ -1224,59 +1913,91 @@ static void update_notify(ckpool_t *ckp)
 	hex2bin(wb->headerbin, header, 112);
 	wb->txn_hashes = ckzalloc(1);
 
-	/* Check diff on each notify */
-	update_diff(ckp);
+	dsdata = proxy->sdata;
 
-	ck_rlock(&sdata->workbase_lock);
-	strcpy(wb->enonce1const, sdata->proxy_base.enonce1);
-	wb->enonce1constlen = sdata->proxy_base.enonce1constlen;
-	memcpy(wb->enonce1constbin, sdata->proxy_base.enonce1bin, wb->enonce1constlen);
-	wb->enonce1varlen = sdata->proxy_base.enonce1varlen;
-	wb->enonce2varlen = sdata->proxy_base.enonce2varlen;
-	wb->diff = sdata->proxy_base.diff;
-	ck_runlock(&sdata->workbase_lock);
+	ck_rlock(&dsdata->workbase_lock);
+	strcpy(wb->enonce1const, proxy->enonce1);
+	wb->enonce1constlen = proxy->enonce1constlen;
+	memcpy(wb->enonce1constbin, proxy->enonce1bin, wb->enonce1constlen);
+	wb->enonce1varlen = proxy->enonce1varlen;
+	wb->enonce2varlen = proxy->enonce2varlen;
+	wb->diff = proxy->diff;
+	ck_runlock(&dsdata->workbase_lock);
 
-	add_base(ckp, wb, &new_block);
+	add_base(ckp, dsdata, wb, &new_block);
+	if (new_block) {
+		if (subid)
+			LOGINFO("Block hash on proxy %d:%d changed to %s", id, subid, dsdata->lastswaphash);
+		else
+			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
+	}
 
-	stratum_broadcast_update(sdata, new_block | clean);
+	if (proxy->global) {
+		check_bestproxy(sdata);
+		if (proxy->parent == best_proxy(sdata)->parent)
+			reconnect_clients(sdata);
+	} else
+		check_userproxies(sdata, proxy->userid);
+	clean |= new_block;
+	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
+		subid, clean ? "" : "out");
+	stratum_broadcast_update(dsdata, wb, clean);
+out:
+	json_decref(val);
 }
 
 static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
 
-static void update_diff(ckpool_t *ckp)
+static void update_diff(ckpool_t *ckp, const char *cmd)
 {
+	sdata_t *sdata = ckp->data, *dsdata;
 	stratum_instance_t *client, *tmp;
-	sdata_t *sdata = ckp->data;
 	double old_diff, diff;
+	int id = 0, subid = 0;
+	const char *buf;
+	proxy_t *proxy;
 	json_t *val;
-	char *buf;
 
-	if (unlikely(!sdata->current_workbase)) {
-		LOGINFO("No current workbase to update diff yet");
+	if (unlikely(strlen(cmd) < 6)) {
+		LOGWARNING("Zero length string passed to update_diff");
 		return;
 	}
-
-	buf = send_recv_proc(ckp->generator, "getdiff");
-	if (unlikely(!buf)) {
-		LOGWARNING("Failed to get diff from generator in update_diff");
-		return;
-	}
-
+	buf = cmd + 5; /* "diff=" */
 	LOGDEBUG("Update diff: %s", buf);
+
 	val = json_loads(buf, 0, NULL);
-	dealloc(buf);
+	if (unlikely(!val)) {
+		LOGWARNING("Failed to json decode in update_diff");
+		return;
+	}
+	json_get_int(&id, val, "proxy");
+	json_get_int(&subid, val, "subproxy");
 	json_dblcpy(&diff, val, "diff");
 	json_decref(val);
+
+	LOGINFO("Got updated diff for proxy %d:%d", id, subid);
+	proxy = existing_subproxy(sdata, id, subid);
+	if (!proxy) {
+		LOGINFO("No existing subproxy %d:%d to update diff", id, subid);
+		return;
+	}
 
 	/* We only really care about integer diffs so clamp the lower limit to
 	 * 1 or it will round down to zero. */
 	if (unlikely(diff < 1))
 		diff = 1;
 
-	ck_wlock(&sdata->workbase_lock);
-	old_diff = sdata->proxy_base.diff;
-	sdata->current_workbase->diff = sdata->proxy_base.diff = diff;
-	ck_wunlock(&sdata->workbase_lock);
+	dsdata = proxy->sdata;
+
+	if (unlikely(!dsdata->current_workbase)) {
+		LOGINFO("No current workbase to update diff yet");
+		return;
+	}
+
+	ck_wlock(&dsdata->workbase_lock);
+	old_diff = proxy->diff;
+	dsdata->current_workbase->diff = proxy->diff = diff;
+	ck_wunlock(&dsdata->workbase_lock);
 
 	if (old_diff < diff)
 		return;
@@ -1285,12 +2006,79 @@ static void update_diff(ckpool_t *ckp)
 	 * they're at or below the new diff, and update it if not. */
 	ck_rlock(&sdata->instance_lock);
 	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		if (client->proxyid != id)
+			continue;
+		if (client->subproxyid != subid)
+			continue;
 		if (client->diff > diff) {
 			client->diff = diff;
 			stratum_send_diff(sdata, client);
 		}
 	}
 	ck_runlock(&sdata->instance_lock);
+}
+
+#if 0
+static void generator_drop_proxy(ckpool_t *ckp, const int64_t id, const int subid)
+{
+	char msg[256];
+
+	sprintf(msg, "dropproxy=%ld:%d", id, subid);
+	send_generator(ckp, msg, GEN_LAX);
+}
+#endif
+
+static void free_proxy(proxy_t *proxy)
+{
+	free(proxy->sdata);
+	free(proxy);
+}
+
+/* Remove subproxies that are flagged dead. Then see if there
+ * are any retired proxies that no longer have any other subproxies and reap
+ * those. */
+static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
+{
+	proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
+	int dead = 0;
+
+	if (!ckp->proxy)
+		return;
+
+	mutex_lock(&sdata->proxy_lock);
+	HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
+		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+			if (!subproxy->bound_clients && !subproxy->dead) {
+				/* Reset the counter to reuse this proxy */
+				subproxy->clients = 0;
+				continue;
+			}
+			if (proxy == subproxy)
+				continue;
+			if (subproxy->bound_clients)
+				continue;
+			if (!subproxy->dead)
+				continue;
+			if (unlikely(!subproxy->subid)) {
+				LOGWARNING("Unexepectedly found proxy %d:%d as subproxy of %d:%d",
+					   subproxy->id, subproxy->subid, proxy->id, proxy->subid);
+				continue;
+			}
+			if (unlikely(subproxy == sdata->proxy)) {
+				LOGWARNING("Unexepectedly found proxy %d:%d as current",
+					   subproxy->id, subproxy->subid);
+				continue;
+			}
+			dead++;
+			HASH_DELETE(sh, proxy->subproxies, subproxy);
+			proxy->subproxy_count--;
+			free_proxy(subproxy);
+		}
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	if (dead)
+		LOGINFO("Stratifier discarded %d dead proxies", dead);
 }
 
 /* Enter with instance_lock held */
@@ -1332,6 +2120,8 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazil
 {
 	user_instance_t *user = client->user_instance;
 
+	if (unlikely(client->node))
+		DL_DELETE(sdata->node_instances, client);
 	if (client->workername) {
 		if (user) {
 			ASPRINTF(msg, "Dropped client %"PRId64" %s %suser %s worker %s %s",
@@ -1355,6 +2145,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 			      const char *func, const int line)
 {
 	char_entry_t *entries = NULL;
+	bool dropped = false;
 	char *msg;
 	int ref;
 
@@ -1363,6 +2154,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref)) {
+		dropped = true;
 		__drop_client(sdata, client, true, &msg);
 		add_msg_entry(&entries, &msg);
 	}
@@ -1372,6 +2164,9 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	/* This should never happen */
 	if (unlikely(ref < 0))
 		LOGERR("Instance ref count dropped below zero from %s %s:%d", file, func, line);
+
+	if (dropped)
+		reap_proxies(sdata->ckp, sdata);
 }
 
 #define dec_instance_ref(sdata, instance) _dec_instance_ref(sdata, instance, __FILE__, __func__, __LINE__)
@@ -1399,6 +2194,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	sdata_t *sdata = ckp->data;
 
 	client = __recruit_stratum_instance(sdata);
+	client->start_time = time(NULL);
 	client->id = id;
 	client->session_id = ++sdata->session_id;
 	strcpy(client->address, address);
@@ -1410,41 +2206,21 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	client->ckp = ckp;
 	tv_time(&client->ldc);
 	HASH_ADD_I64(sdata->stratum_instances, id, client);
+	/* Points to ckp sdata in ckpool mode, but is changed later in proxy
+	 * mode . */
+	client->sdata = sdata;
 	return client;
 }
 
-/* passthrough subclients have client_ids in the high bits */
-static inline bool passthrough_subclient(const int64_t client_id)
-{
-	return (client_id > 0xffffffffll);
-}
-
-static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessionid,
-					      int *session_id, const int64_t id)
+static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const int session_id,
+					      const int64_t id)
 {
 	session_t *session;
 	int64_t old_id = 0;
 	uint64_t ret = 0;
-	int slen;
-
-	/* Don't allow passthrough subclients to resume */
-	if (passthrough_subclient(id))
-		goto out;
-
-	if (!sessionid)
-		goto out;
-	slen = strlen(sessionid) / 2;
-	if (slen < 1 || slen > 4)
-		goto out;
-
-	if (!validhex(sessionid))
-		goto out;
-
-	sscanf(sessionid, "%x", session_id);
-	LOGDEBUG("Testing for sessionid %s %x", sessionid, *session_id);
 
 	ck_wlock(&sdata->instance_lock);
-	HASH_FIND_INT(sdata->disconnected_sessions, session_id, session);
+	HASH_FIND_INT(sdata->disconnected_sessions, &session_id, session);
 	if (!session)
 		goto out_unlock;
 	HASH_DEL(sdata->disconnected_sessions, session);
@@ -1454,7 +2230,7 @@ static uint64_t disconnected_sessionid_exists(sdata_t *sdata, const char *sessio
 	dealloc(session);
 out_unlock:
 	ck_wunlock(&sdata->instance_lock);
-out:
+
 	if (ret)
 		LOGNOTICE("Reconnecting old instance %"PRId64" to instance %"PRId64, old_id, id);
 	return ret;
@@ -1465,13 +2241,33 @@ static inline bool client_active(stratum_instance_t *client)
 	return (client->authorised && !client->dropped);
 }
 
+/* Ask the connector asynchronously to send us dropclient commands if this
+ * client no longer exists. */
+static void connector_test_client(ckpool_t *ckp, const int64_t id)
+{
+	char buf[256];
+
+	LOGDEBUG("Stratifier requesting connector test client %"PRId64, id);
+	snprintf(buf, 255, "testclient=%"PRId64, id);
+	send_proc(ckp->connector, buf);
+}
+
+/* passthrough subclients have client_ids in the high bits */
+static inline bool passthrough_subclient(const int64_t client_id)
+{
+	return (client_id > 0xffffffffll);
+}
+
 /* For creating a list of sends without locking that can then be concatenated
  * to the stratum_sends list. Minimises locking and avoids taking recursive
- * locks. */
-static void stratum_broadcast(sdata_t *sdata, json_t *val)
+ * locks. Sends only to sdata bound clients (everyone in ckpool) */
+static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 {
+	ckpool_t *ckp = sdata->ckp;
+	sdata_t *ckp_sdata = ckp->data;
 	stratum_instance_t *client, *tmp;
 	ckmsg_t *bulk_send = NULL;
+	time_t now_t = time(NULL);
 	ckmsgq_t *ssends;
 
 	if (unlikely(!val)) {
@@ -1479,21 +2275,51 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 		return;
 	}
 
-	ck_rlock(&sdata->instance_lock);
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+	if (ckp->node) {
+		json_decref(val);
+		return;
+	}
+
+	/* Use this locking as an opportunity to test other clients. */
+	ck_rlock(&ckp_sdata->instance_lock);
+	HASH_ITER(hh, ckp_sdata->stratum_instances, client, tmp) {
 		ckmsg_t *client_msg;
 		smsg_t *msg;
+
+		if (sdata != ckp_sdata && client->sdata != sdata)
+			continue;
+
+		/* Look for clients that may have been dropped which the stratifer has
+		* not been informed about and ask the connector of they still exist */
+		if (client->dropped) {
+			connector_test_client(ckp, client->id);
+			continue;
+		}
+
+		if (client->node)
+			continue;
+
+		/* Test for clients that haven't authed in over a minute and drop them */
+		if (!client->authorised) {
+			if (now_t > client->start_time + 60) {
+				client->dropped = true;
+				connector_drop_client(ckp, client->id);
+			}
+			continue;
+		}
 
 		if (!client_active(client))
 			continue;
 		client_msg = ckalloc(sizeof(ckmsg_t));
 		msg = ckzalloc(sizeof(smsg_t));
+		if (passthrough_subclient(client->id))
+			json_set_string(val, "node.method", stratum_msgs[msg_type]);
 		msg->json_msg = json_deep_copy(val);
 		msg->client_id = client->id;
 		client_msg->data = msg;
 		DL_APPEND(bulk_send, client_msg);
 	}
-	ck_runlock(&sdata->instance_lock);
+	ck_runlock(&ckp_sdata->instance_lock);
 
 	json_decref(val);
 
@@ -1502,7 +2328,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 
 	ssends = sdata->ssends;
 
-	mutex_lock(sdata->ssends->lock);
+	mutex_lock(ssends->lock);
 	if (ssends->msgs)
 		DL_CONCAT(ssends->msgs, bulk_send);
 	else
@@ -1511,17 +2337,29 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val)
 	mutex_unlock(ssends->lock);
 }
 
-static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id)
+static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
+			     const int msg_type)
 {
 	smsg_t *msg;
+	ckpool_t *ckp = sdata->ckp;
 
+	if (ckp->node) {
+		/* Node shouldn't be sending any messages as it only uses the
+		 * stratifier for monitoring activity. */
+		json_decref(val);
+		return;
+	}
+
+	if (passthrough_subclient(client_id))
+		json_set_string(val, "node.method", stratum_msgs[msg_type]);
+	LOGDEBUG("Sending stratum message %s", stratum_msgs[msg_type]);
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	msg->client_id = client_id;
 	ckmsgq_add(sdata->ssends, msg);
 }
 
-static void drop_client(sdata_t *sdata, const int64_t id)
+static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)
 {
 	char_entry_t *entries = NULL;
 	stratum_instance_t *client;
@@ -1544,6 +2382,7 @@ static void drop_client(sdata_t *sdata, const int64_t id)
 	ck_wunlock(&sdata->instance_lock);
 
 	notice_msg_entries(&entries);
+	reap_proxies(ckp, sdata);
 }
 
 static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
@@ -1552,12 +2391,12 @@ static void stratum_broadcast_message(sdata_t *sdata, const char *msg)
 
 	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_MSG);
 }
 
 /* Send a generic reconnect to all clients without parameters to make them
  * reconnect to the same server. */
-static void reconnect_clients(sdata_t *sdata, const char *cmd)
+static void request_reconnect(sdata_t *sdata, const char *cmd)
 {
 	char *port = strdupa(cmd), *url = NULL;
 	stratum_instance_t *client, *tmp;
@@ -1572,7 +2411,7 @@ static void reconnect_clients(sdata_t *sdata, const char *cmd)
 	} else
 		JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
 		   "params");
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_RECONNECT);
 
 	/* Tag all existing clients as dropped now so they can be removed
 	 * lazily */
@@ -1690,7 +2529,8 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 	ts_t ts_now;
 	json_t *val;
 
-	update_base(ckp, GEN_PRIORITY);
+	if (!ckp->node)
+		update_base(ckp, GEN_PRIORITY);
 
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
@@ -1816,7 +2656,7 @@ static void broadcast_ping(sdata_t *sdata)
 		   "id", 42,
 		   "method", "mining.ping");
 
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_PING);
 }
 
 static void ckmsgq_stats(ckmsgq_t *ckmsgq, const int size, json_t **val)
@@ -1897,6 +2737,550 @@ static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
 	return buf;
 }
 
+/* Send a single client a reconnect request, setting the time we sent the
+ * request so we can drop the client lazily if it hasn't reconnected on its
+ * own more than one minute later if we call reconnect again */
+static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
+{
+	json_t *json_msg;
+
+	/* Already requested? */
+	if (client->reconnect_request) {
+		if (time(NULL) - client->reconnect_request >= 60)
+			connector_drop_client(sdata->ckp, client->id);
+		return;
+	}
+	client->reconnect_request = time(NULL);
+	JSON_CPACK(json_msg, "{sosss[]}", "id", json_null(), "method", "client.reconnect",
+		   "params");
+	stratum_add_send(sdata, json_msg, client->id, SM_RECONNECT);
+}
+
+static void dead_proxy(sdata_t *sdata, const char *buf)
+{
+	int id = 0, subid = 0;
+
+	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
+	dead_proxyid(sdata, id, subid, false);
+}
+
+static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
+{
+	stratum_instance_t *client;
+
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		LOGINFO("reconnect_client_id failed to find client %"PRId64, client_id);
+		return;
+	}
+	client->reconnect = true;
+	reconnect_client(sdata, client);
+	dec_instance_ref(sdata, client);
+}
+
+/* API commands */
+
+static user_instance_t *get_user(sdata_t *sdata, const char *username);
+
+static json_t *userinfo(const user_instance_t *user)
+{
+	json_t *val;
+
+	JSON_CPACK(val, "{ss,si,si,sf,sf,sf,sf,sf,sf,si}",
+		   "user", user->username, "id", user->id, "workers", user->workers,
+	    "bestdiff", user->best_diff, "dsps1", user->dsps1, "dsps5", user->dsps5,
+	    "dsps60", user->dsps60, "dsps1440", user->dsps1440, "dsps10080", user->dsps10080,
+	    "lastshare", user->last_share.tv_sec);
+	return val;
+}
+
+static void getuser(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *username = NULL;
+	user_instance_t *user;
+	json_error_t err_val;
+	json_t *val = NULL;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&username, val, "user")) {
+		val = json_errormsg("Failed to find user key");
+		goto out;
+	}
+	if (!strlen(username)) {
+		val = json_errormsg("Zero length user key");
+		goto out;
+	}
+	user = get_user(sdata, username);
+	val = userinfo(user);
+out:
+	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void userclients(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	char *username = NULL;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&username, val, "user")) {
+		val = json_errormsg("Failed to find user key");
+		goto out;
+	}
+	if (!strlen(username)) {
+		val = json_errormsg("Zero length user key");
+		goto out;
+	}
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		json_array_append_new(client_arr, json_integer(client->id));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "user", username, "clients", client_arr);
+out:
+	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void workerclients(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *tmp, *username, *workername = NULL;
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&workername, val, "worker")) {
+		val = json_errormsg("Failed to find worker key");
+		goto out;
+	}
+	if (!strlen(workername)) {
+		val = json_errormsg("Zero length worker key");
+		goto out;
+	}
+	tmp = strdupa(workername);
+	username = strsep(&tmp, "._");
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		if (strcmp(client->workername, workername))
+			continue;
+		json_array_append_new(client_arr, json_integer(client->id));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "worker", workername, "clients", client_arr);
+out:
+	free(workername);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static worker_instance_t *get_worker(sdata_t *sdata, user_instance_t *user, const char *workername);
+
+static json_t *workerinfo(const user_instance_t *user, const worker_instance_t *worker)
+{
+	json_t *val;
+
+	JSON_CPACK(val, "{ss,ss,si,sf,sf,sf,sf,si,sf,si,sb}",
+		   "user", user->username, "worker", worker->workername, "id", user->id,
+	    "dsps1", worker->dsps1, "dsps5", worker->dsps5, "dsps60", worker->dsps60,
+	    "dsps1440", worker->dsps1440, "lastshare", worker->last_share.tv_sec,
+	    "bestdiff", worker->best_diff, "mindiff", worker->mindiff, "idle", worker->idle);
+	return val;
+}
+
+static void getworker(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *tmp, *username, *workername = NULL;
+	worker_instance_t *worker;
+	user_instance_t *user;
+	json_error_t err_val;
+	json_t *val = NULL;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&workername, val, "worker")) {
+		val = json_errormsg("Failed to find worker key");
+		goto out;
+	}
+	if (!strlen(workername)) {
+		val = json_errormsg("Zero length worker key");
+		goto out;
+	}
+	tmp = strdupa(workername);
+	username = strsep(&tmp, "._");
+	user = get_user(sdata, username);
+	worker = get_worker(sdata, user, workername);
+	val = workerinfo(user, worker);
+out:
+	free(workername);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void getworkers(sdata_t *sdata, int *sockd)
+{
+	json_t *val = NULL, *worker_arr;
+	worker_instance_t *worker;
+	user_instance_t *user;
+
+	worker_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	for (user = sdata->user_instances; user; user = user->hh.next) {
+		DL_FOREACH(user->worker_instances, worker) {
+			json_array_append_new(worker_arr, workerinfo(user, worker));
+		}
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "workers", worker_arr);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void getusers(sdata_t *sdata, int *sockd)
+{
+	json_t *val = NULL, *user_array;
+	user_instance_t *user;
+
+	user_array = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	for (user = sdata->user_instances; user; user = user->hh.next) {
+		json_array_append_new(user_array, userinfo(user));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "users", user_array);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static json_t *clientinfo(const stratum_instance_t *client)
+{
+	json_t *val = json_object();
+
+	/* Too many fields for a pack object, do each discretely to keep track */
+	json_set_int(val, "id", client->id);
+	json_set_string(val, "enonce1", client->enonce1);
+	json_set_string(val, "enonce1var", client->enonce1var);
+	json_set_int(val, "enonce1_64", client->enonce1_64);
+	json_set_double(val, "diff", client->diff);
+	json_set_double(val, "dsps1", client->dsps1);
+	json_set_double(val, "dsps5", client->dsps5);
+	json_set_double(val, "dsps60", client->dsps60);
+	json_set_double(val, "dsps1440", client->dsps1440);
+	json_set_double(val, "dsps10080", client->dsps10080);
+	json_set_int(val, "lastshare", client->last_share.tv_sec);
+	json_set_int(val, "starttime", client->start_time);
+	json_set_string(val, "address", client->address);
+	json_set_bool(val, "subscribed", client->subscribed);
+	json_set_bool(val, "authorised", client->authorised);
+	json_set_bool(val, "idle", client->idle);
+	json_set_string(val, "useragent", client->useragent ? client->useragent : "");
+	json_set_string(val, "workername", client->workername ? client->workername : "");
+	json_set_int(val, "userid", client->user_id);
+	json_set_int(val, "server", client->server);
+	json_set_double(val, "bestdiff", client->best_diff);
+	json_set_int(val, "proxyid", client->proxyid);
+	json_set_int(val, "subproxyid", client->subproxyid);
+	return val;
+}
+
+static void getclient(sdata_t *sdata, const char *buf, int *sockd)
+{
+	stratum_instance_t *client;
+	json_error_t err_val;
+	json_t *val = NULL;
+	int64_t client_id;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int64(&client_id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		val = json_errormsg("Failed to find client %"PRId64, client_id);
+		goto out;
+	}
+	val = clientinfo(client);
+
+	dec_instance_ref(sdata, client);
+out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void getclients(sdata_t *sdata, int *sockd)
+{
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	for (client = sdata->stratum_instances; client; client = client->hh.next) {
+		json_array_append_new(client_arr, clientinfo(client));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{so}", "clients", client_arr);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	char *username = NULL;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&username, val, "user")) {
+		val = json_errormsg("Failed to find user key");
+		goto out;
+	}
+	if (!strlen(username)) {
+		val = json_errormsg("Zero length user key");
+		goto out;
+	}
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		json_array_append_new(client_arr, clientinfo(client));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "user", username, "clients", client_arr);
+out:
+	free(username);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void worker_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
+{
+	char *tmp, *username, *workername = NULL;
+	json_t *val = NULL, *client_arr;
+	stratum_instance_t *client;
+	user_instance_t *user;
+	json_error_t err_val;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_string(&workername, val, "worker")) {
+		val = json_errormsg("Failed to find worker key");
+		goto out;
+	}
+	if (!strlen(workername)) {
+		val = json_errormsg("Zero length worker key");
+		goto out;
+	}
+	tmp = strdupa(workername);
+	username = strsep(&tmp, "._");
+	user = get_user(sdata, username);
+	client_arr = json_array();
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		if (strcmp(client->workername, workername))
+			continue;
+		json_array_append_new(client_arr, clientinfo(client));
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	JSON_CPACK(val, "{ss,so}", "worker", workername, "clients", client_arr);
+out:
+	free(workername);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+/* Return the user masked priority value of the proxy */
+static int proxy_prio(const proxy_t *proxy)
+{
+	int prio = proxy->priority & 0x00000000ffffffff;
+
+	return prio;
+}
+
+static json_t *json_proxyinfo(const proxy_t *proxy)
+{
+	const proxy_t *parent = proxy->parent;
+	json_t *val;
+
+	JSON_CPACK(val, "{si,si,si,sf,ss,ss,ss,ss,si,si,si,si,sb,sb,sI,sI,sI,sI,si,si,sb,sb,si}",
+	    "id", proxy->id, "subid", proxy->subid, "priority", proxy_prio(parent),
+	    "diff", proxy->diff, "url", proxy->url, "auth", proxy->auth, "pass", proxy->pass,
+	    "enonce1", proxy->enonce1, "enonce1constlen", proxy->enonce1constlen,
+	    "enonce1varlen", proxy->enonce1varlen, "nonce2len", proxy->nonce2len,
+	    "enonce2varlen", proxy->enonce2varlen, "subscribed", proxy->subscribed,
+	    "notified", proxy->notified, "clients", proxy->clients, "maxclients", proxy->max_clients,
+	    "bound_clients", proxy->bound_clients, "combined_clients", parent->combined_clients,
+	    "headroom", proxy->headroom, "subproxy_count", parent->subproxy_count,
+	    "dead", proxy->dead, "global", proxy->global, "userid", proxy->userid);
+	return val;
+}
+
+static void getproxy(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id, subid = 0;
+	proxy_t *proxy;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int(&id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	json_get_int(&subid, val, "subid");
+	if (!subid)
+		proxy = existing_proxy(sdata, id);
+	else
+		proxy = existing_subproxy(sdata, id, subid);
+	if (!proxy) {
+		val = json_errormsg("Failed to find proxy %d:%d", id, subid);
+		goto out;
+	}
+	val = json_proxyinfo(proxy);
+out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void proxyinfo(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_t *val = NULL, *arr_val = json_array();
+	proxy_t *proxy, *subproxy;
+	bool all = true;
+	int userid = 0;
+
+	if (buf) {
+		/* See if there's a userid specified */
+		val = json_loads(buf, 0, NULL);
+		if (json_get_int(&userid, val, "userid"))
+			all = false;
+	}
+
+	mutex_lock(&sdata->proxy_lock);
+	for (proxy = sdata->proxies; proxy; proxy = proxy->hh.next) {
+		if (!all && proxy->userid != userid)
+			continue;
+		for (subproxy = proxy->subproxies; subproxy; subproxy = subproxy->sh.next)
+			json_array_append_new(arr_val, json_proxyinfo(subproxy));
+	}
+	mutex_unlock(&sdata->proxy_lock);
+
+	JSON_CPACK(val, "{so}", "proxies", arr_val);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void setproxy(sdata_t *sdata, const char *buf, int *sockd)
+{
+	json_error_t err_val;
+	json_t *val = NULL;
+	int id, priority;
+	proxy_t *proxy;
+
+	val = json_loads(buf, 0, &err_val);
+	if (unlikely(!val)) {
+		val = json_encode_errormsg(&err_val);
+		goto out;
+	}
+	if (!json_get_int(&id, val, "id")) {
+		val = json_errormsg("Failed to find id key");
+		goto out;
+	}
+	if (!json_get_int(&priority, val, "priority")) {
+		val = json_errormsg("Failed to find priority key");
+		goto out;
+	}
+	proxy = existing_proxy(sdata, id);
+	if (!proxy) {
+		val = json_errormsg("Failed to find proxy %d", id);
+		goto out;
+	}
+	if (priority != proxy_prio(proxy))
+		set_proxy_prio(sdata, proxy, priority);
+	val = json_proxyinfo(proxy);
+out:
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void get_poolstats(sdata_t *sdata, int *sockd)
+{
+	pool_stats_t *stats = &sdata->stats;
+	json_t *val;
+
+	mutex_lock(&sdata->stats_lock);
+	JSON_CPACK(val, "{si,si,si,si,si,sI,sf,sf,sf,sf,sI,sI,sf,sf,sf,sf,sf,sf,sf}",
+		   "start", stats->start_time.tv_sec, "update", stats->last_update.tv_sec,
+	    "workers", stats->workers, "users", stats->users, "disconnected", stats->disconnected,
+	    "shares", stats->accounted_shares, "sps1", stats->sps1, "sps5", stats->sps5,
+	    "sps15", stats->sps15, "sps60", stats->sps60, "accepted", stats->accounted_diff_shares,
+	    "rejected", stats->accounted_rejects, "dsps1", stats->dsps1, "dsps5", stats->dsps5,
+	    "dsps15", stats->dsps15, "dsps60", stats->dsps60, "dsps360", stats->dsps360,
+	    "dsps1440", stats->dsps1440, "dsps10080", stats->dsps10080);
+	mutex_unlock(&sdata->stats_lock);
+
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
+static void srecv_process(ckpool_t *ckp, char *buf);
+
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	sdata_t *sdata = ckp->data;
@@ -1960,6 +3344,63 @@ retry:
 		Close(umsg->sockd);
 		goto retry;
 	}
+	/* Parse API commands here to return a message to sockd */
+	if (cmdmatch(buf, "clients")) {
+		getclients(sdata, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "workers")) {
+		getworkers(sdata, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "users")) {
+		getusers(sdata, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "getclient")) {
+		getclient(sdata, buf + 10, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "getuser")) {
+		getuser(sdata, buf + 8, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "getworker")) {
+		getworker(sdata, buf + 10, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "userclients")) {
+		userclients(sdata, buf + 12, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "workerclients")) {
+		workerclients(sdata, buf + 14, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "getproxy")) {
+		getproxy(sdata, buf + 9, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "setproxy")) {
+		setproxy(sdata, buf + 9, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "poolstats")) {
+		get_poolstats(sdata, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "proxyinfo")) {
+		proxyinfo(sdata, buf + 10, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "ucinfo")) {
+		user_clientinfo(sdata, buf + 7, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf, "wcinfo")) {
+		worker_clientinfo(sdata, buf + 7, &umsg->sockd);
+		goto retry;
+	}
 
 	Close(umsg->sockd);
 	LOGDEBUG("Stratifier received request: %s", buf);
@@ -1970,12 +3411,12 @@ retry:
 		update_base(ckp, GEN_PRIORITY);
 	} else if (cmdmatch(buf, "subscribe")) {
 		/* Proxifier has a new subscription */
-		update_subscribe(ckp);
+		update_subscribe(ckp, buf);
 	} else if (cmdmatch(buf, "notify")) {
 		/* Proxifier has a new notify ready */
-		update_notify(ckp);
+		update_notify(ckp, buf);
 	} else if (cmdmatch(buf, "diff")) {
-		update_diff(ckp);
+		update_diff(ckp, buf);
 	} else if (cmdmatch(buf, "dropclient")) {
 		int64_t client_id;
 
@@ -1983,7 +3424,15 @@ retry:
 		if (ret < 0)
 			LOGDEBUG("Stratifier failed to parse dropclient command: %s", buf);
 		else
-			drop_client(sdata, client_id);
+			drop_client(ckp, sdata, client_id);
+	} else if (cmdmatch(buf, "reconnclient")) {
+		int64_t client_id;
+
+		ret = sscanf(buf, "reconnclient=%"PRId64, &client_id);
+		if (ret < 0)
+			LOGWARNING("Stratifier failed to parse reconnclient command: %s", buf);
+		else
+			reconnect_client_id(sdata, client_id);
 	} else if (cmdmatch(buf, "dropall")) {
 		drop_allclients(ckp);
 	} else if (cmdmatch(buf, "block")) {
@@ -1991,7 +3440,9 @@ retry:
 	} else if (cmdmatch(buf, "noblock")) {
 		block_reject(sdata, buf + 8);
 	} else if (cmdmatch(buf, "reconnect")) {
-		reconnect_clients(sdata, buf);
+		request_reconnect(sdata, buf);
+	} else if (cmdmatch(buf, "deadproxy")) {
+		dead_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else
@@ -2030,34 +3481,15 @@ static void *blockupdate(void *arg)
 	return NULL;
 }
 
-/* Enter holding instance_lock */
-static bool __enonce1_free(sdata_t *sdata, const uint64_t enonce1)
-{
-	stratum_instance_t *client, *tmp;
-	bool ret = true;
-
-	if (unlikely(!enonce1)) {
-		ret = false;
-		goto out;
-	}
-
-	HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
-		if (client->enonce1_64 == enonce1) {
-			ret = false;
-			break;
-		}
-	}
-out:
-	return ret;
-}
-
 /* Enter holding workbase_lock and client a ref count. */
 static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
 {
 	if (wb->enonce1constlen)
 		memcpy(client->enonce1bin, wb->enonce1constbin, wb->enonce1constlen);
-	memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
-	__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
+	if (wb->enonce1varlen) {
+		memcpy(client->enonce1bin + wb->enonce1constlen, &client->enonce1_64, wb->enonce1varlen);
+		__bin2hex(client->enonce1var, &client->enonce1_64, wb->enonce1varlen);
+	}
 	__bin2hex(client->enonce1, client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
 }
 
@@ -2066,74 +3498,195 @@ static void __fill_enonce1data(const workbase_t *wb, stratum_instance_t *client)
  * When the proxy space is less than 32 bits to work with, we look for an
  * unused enonce1 value and reject clients instead if there is no space left.
  * Needs to be entered with client holding a ref count. */
-static bool new_enonce1(stratum_instance_t *client)
+static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, stratum_instance_t *client)
 {
-	sdata_t *sdata = client->ckp->data;
-	int enonce1varlen, i;
-	bool ret = false;
+	proxy_t *proxy = NULL;
+	uint64_t enonce1;
 
-	/* Extract the enonce1varlen from the current workbase which may be
-	 * a different workbase to when we __fill_enonce1data but the value
-	 * will not change and this avoids grabbing recursive locks */
-	ck_rlock(&sdata->workbase_lock);
-	enonce1varlen = sdata->current_workbase->enonce1varlen;
-	ck_runlock(&sdata->workbase_lock);
+	if (ckp->proxy) {
+		if (!ckp_sdata->proxy)
+			return false;
 
-	/* instance_lock protects sdata->enonce1u */
-	ck_wlock(&sdata->instance_lock);
-	switch(enonce1varlen) {
-		case 8:
-			sdata->enonce1u.u64++;
-			ret = true;
-			break;
-		case 7:
-		case 6:
-		case 5:
-		case 4:
-			sdata->enonce1u.u32++;
-			ret = true;
-			break;
-		case 3:
-		case 2:
-			for (i = 0; i < 65536; i++) {
-				sdata->enonce1u.u16++;
-				ret = __enonce1_free(sdata, sdata->enonce1u.u64);
-				if (ret)
-					break;
-			}
-			break;
-		case 1:
-			for (i = 0; i < 256; i++) {
-				sdata->enonce1u.u8++;
-				ret = __enonce1_free(sdata, sdata->enonce1u.u64);
-				if (ret)
-					break;
-			}
-			break;
-		default:
-			quit(0, "Invalid enonce1varlen %d", enonce1varlen);
+		mutex_lock(&ckp_sdata->proxy_lock);
+		proxy = sdata->subproxy;
+		client->proxyid = proxy->id;
+		client->subproxyid = proxy->subid;
+		mutex_unlock(&ckp_sdata->proxy_lock);
+
+		if (proxy->clients >= proxy->max_clients) {
+			LOGWARNING("Proxy reached max clients %"PRId64, proxy->max_clients);
+			return false;
+		}
 	}
-	if (ret)
-		client->enonce1_64 = sdata->enonce1u.u64;
-	ck_wunlock(&sdata->instance_lock);
+
+	/* instance_lock protects enonce1_64. Incrementing a little endian 64bit
+	 * number ensures that no matter how many of the bits we take from the
+	 * left depending on nonce2 length, we'll always get a changing value
+	 * for every next client.*/
+	ck_wlock(&ckp_sdata->instance_lock);
+	enonce1 = le64toh(ckp_sdata->enonce1_64);
+	enonce1++;
+	client->enonce1_64 = ckp_sdata->enonce1_64 = htole64(enonce1);
+	if (proxy) {
+		client->proxy = proxy;
+		proxy->clients++;
+		proxy->bound_clients++;
+		proxy->parent->combined_clients++;
+	}
+	ck_wunlock(&ckp_sdata->instance_lock);
 
 	ck_rlock(&sdata->workbase_lock);
 	__fill_enonce1data(sdata->current_workbase, client);
 	ck_runlock(&sdata->workbase_lock);
 
-	if (unlikely(!ret))
-		LOGWARNING("Enonce1 space exhausted! Proxy rejecting clients");
-
-	return ret;
+	return true;
 }
 
 static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *client, const char *msg);
+
+/* Need to hold sdata->proxy_lock */
+static proxy_t *__best_subproxy(proxy_t *proxy)
+{
+	proxy_t *subproxy, *best = NULL, *tmp;
+	int64_t max_headroom;
+
+	proxy->headroom = max_headroom = 0;
+	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
+		int64_t subproxy_headroom;
+
+		if (subproxy->dead)
+			continue;
+		if (!subproxy->sdata->current_workbase)
+			continue;
+		subproxy_headroom = subproxy->max_clients - subproxy->clients;
+
+		proxy->headroom += subproxy_headroom;
+		if (subproxy_headroom > max_headroom) {
+			best = subproxy;
+			max_headroom = subproxy_headroom;
+		}
+		if (best)
+			break;
+	}
+	return best;
+}
+
+/* Choose the stratifier data for a new client. Use the main ckp_sdata except
+ * in proxy mode where we find a subproxy based on the current proxy with room
+ * for more clients. Signal the generator to recruit more subproxies if we are
+ * running out of room. */
+static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, const int userid)
+{
+	proxy_t *current, *proxy, *tmp, *best = NULL;
+
+	if (!ckp->proxy || ckp->passthrough)
+		return ckp_sdata;
+	current = ckp_sdata->proxy;
+	if (!current) {
+		LOGWARNING("No proxy available yet to generate subscribes");
+		return NULL;
+	}
+
+	/* Proxies are ordered by priority so first available will be the best
+	 * priority */
+	mutex_lock(&ckp_sdata->proxy_lock);
+	HASH_ITER(hh, ckp_sdata->proxies, proxy, tmp) {
+		if (proxy->userid < userid)
+			continue;
+		if (proxy->userid > userid)
+			break;
+		best = __best_subproxy(proxy);
+		if (best)
+			break;
+	}
+	mutex_unlock(&ckp_sdata->proxy_lock);
+
+	if (!best) {
+		if (!userid)
+			LOGWARNING("Temporarily insufficient subproxies to accept more clients");
+		return NULL;
+	}
+	if (!userid) {
+		if (best->id != current->id || current_headroom(ckp_sdata, &proxy) < 2)
+			generator_recruit(ckp, current->id, 1);
+	} else {
+		if (proxy_headroom(ckp_sdata, userid) < 2)
+			generator_recruit(ckp, best->id, 1);
+	}
+	return best->sdata;
+}
+
+static int int_from_sessionid(const char *sessionid)
+{
+	int ret = 0, slen;
+
+	if (!sessionid)
+		goto out;
+	slen = strlen(sessionid) / 2;
+	if (slen < 1 || slen > 4)
+		goto out;
+
+	if (!validhex(sessionid))
+		goto out;
+
+	sscanf(sessionid, "%x", &ret);
+out:
+	return ret;
+}
+
+static int userid_from_sessionid(sdata_t *sdata, const int session_id)
+{
+	session_t *session;
+	int ret = -1;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_FIND_INT(sdata->disconnected_sessions, &session_id, session);
+	if (!session)
+		goto out_unlock;
+	HASH_DEL(sdata->disconnected_sessions, session);
+	sdata->stats.disconnected--;
+	ret = session->userid;
+	dealloc(session);
+out_unlock:
+	ck_wunlock(&sdata->instance_lock);
+
+	if (ret != -1)
+		LOGINFO("Found old session id %d for userid %d", session_id, ret);
+	return ret;
+}
+
+static int userid_from_sessionip(sdata_t *sdata, const char *address)
+{
+	session_t *session, *tmp;
+	int ret = -1;
+
+	ck_wlock(&sdata->instance_lock);
+	HASH_ITER(hh, sdata->disconnected_sessions, session, tmp) {
+		if (!strcmp(session->address, address)) {
+			ret = session->userid;
+			break;
+		}
+	}
+	if (ret == -1)
+		goto out_unlock;
+	HASH_DEL(sdata->disconnected_sessions, session);
+	sdata->stats.disconnected--;
+	dealloc(session);
+out_unlock:
+	ck_wunlock(&sdata->instance_lock);
+
+	if (ret != -1)
+		LOGINFO("Found old session address %s for userid %d", address, ret);
+	return ret;
+}
 
 /* Extranonce1 must be set here. Needs to be entered with client holding a ref
  * count. */
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
 {
-	sdata_t *sdata = client->ckp->data;
+	ckpool_t *ckp = client->ckp;
+	sdata_t *sdata, *ckp_sdata = ckp->data;
+	int session_id = 0, userid = -1;
 	bool old_match = false;
 	char sessionid[12];
 	int arr_size;
@@ -2141,12 +3694,14 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	int n2len;
 
 	if (unlikely(!json_is_array(params_val))) {
-		stratum_send_message(sdata, client, "Invalid json: params not an array");
+		stratum_send_message(ckp_sdata, client, "Invalid json: params not an array");
 		return json_string("params not an array");
 	}
 
-	if (unlikely(!sdata->current_workbase)) {
-		stratum_send_message(sdata, client, "Pool Initialising");
+	sdata = select_sdata(ckp, ckp_sdata, 0);
+	if (unlikely(!ckp->node && (!sdata || !sdata->current_workbase))) {
+		LOGWARNING("Failed to provide subscription due to no %s", sdata ? "current workbase" : "sdata");
+		stratum_send_message(ckp_sdata, client, "Pool Initialising");
 		return json_string("Initialising");
 	}
 
@@ -2165,22 +3720,51 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			/* This would be the session id for reconnect, it will
 			 * not work for clients on a proxied connection. */
 			buf = json_string_value(json_array_get(params_val, 1));
-			LOGDEBUG("Found old session id %s", buf);
-			/* Add matching here */
-			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, buf, &client->session_id, client_id))) {
+			session_id = int_from_sessionid(buf);
+			LOGDEBUG("Found old session id %d", session_id);
+		}
+		if (!ckp->proxy && session_id && !passthrough_subclient(client_id)) {
+			if ((client->enonce1_64 = disconnected_sessionid_exists(sdata, session_id, client_id))) {
 				sprintf(client->enonce1, "%016lx", client->enonce1_64);
 				old_match = true;
 
-				ck_rlock(&sdata->workbase_lock);
+				ck_rlock(&ckp_sdata->workbase_lock);
 				__fill_enonce1data(sdata->current_workbase, client);
-				ck_runlock(&sdata->workbase_lock);
+				ck_runlock(&ckp_sdata->workbase_lock);
 			}
 		}
 	} else
 		client->useragent = ckzalloc(1);
+
+	/* We got what we needed */
+	if (ckp->node)
+		return NULL;
+
+	if (ckp->proxy) {
+		/* Use the session_id to tell us which user this was.
+			* If it's not available, see if there's an IP address
+			* which matches a recently disconnected session. */
+		if (session_id)
+			userid = userid_from_sessionid(ckp_sdata, session_id);
+		if (userid == -1)
+			userid = userid_from_sessionip(ckp_sdata, client->address);
+		if (userid != -1) {
+			sdata_t *user_sdata = select_sdata(ckp, ckp_sdata, userid);
+
+			if (user_sdata)
+				sdata = user_sdata;
+		}
+	}
+
+	client->sdata = sdata;
+	if (ckp->proxy) {
+		LOGINFO("Current %d, selecting proxy %d:%d for client %"PRId64, ckp_sdata->proxy->id,
+			sdata->subproxy->id, sdata->subproxy->subid, client->id);
+	}
+
 	if (!old_match) {
 		/* Create a new extranonce1 based on a uint64_t pointer */
-		if (!new_enonce1(client)) {
+		if (!new_enonce1(ckp, ckp_sdata, sdata, client)) {
 			stratum_send_message(sdata, client, "Pool full of clients");
 			client->reject = 2;
 			return json_string("proxy full");
@@ -2192,11 +3776,9 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 			client->id, client->enonce1_64, client->enonce1);
 	}
 
+	/* Workbases will exist if sdata->current_workbase is not NULL */
 	ck_rlock(&sdata->workbase_lock);
-	if (likely(sdata->workbases))
-		n2len = sdata->workbases->enonce2varlen;
-	else
-		n2len = 8;
+	n2len = sdata->workbases->enonce2varlen;
 	sprintf(sessionid, "%08x", client->session_id);
 	JSON_CPACK(ret, "[[[s,s]],s,i]", "mining.notify", sessionid, client->enonce1,
 			n2len);
@@ -2411,7 +3993,7 @@ static user_instance_t *__create_user(sdata_t *sdata, const char *username)
 
 	user->auth_backoff = DEFAULT_AUTH_BACKOFF;
 	strcpy(user->username, username);
-	user->id = sdata->user_instance_id++;
+	user->id = ++sdata->user_instance_id;
 	HASH_ADD_STR(sdata->user_instances, username, user);
 	return user;
 }
@@ -2690,14 +4272,26 @@ static void queue_delayed_auth(stratum_instance_t *client)
 	ckdbq_add(ckp, ID_AUTH, val);
 }
 
+static void check_global_user(ckpool_t *ckp, user_instance_t *user, stratum_instance_t *client)
+{
+	sdata_t *sdata = ckp->data;
+	proxy_t *proxy = best_proxy(sdata);
+	int proxyid = proxy->id;
+	char buf[256];
+
+	sprintf(buf, "globaluser=%d:%d:%"PRId64":%s,%s", proxyid, user->id, client->id,
+		user->username, client->password);
+	send_generator(ckp, buf, GEN_LAX);
+}
+
 /* Needs to be entered with client holding a ref count. */
 static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val,
 			       json_t **err_val, int *errnum)
 {
 	user_instance_t *user;
 	ckpool_t *ckp = client->ckp;
+	const char *buf, *pass;
 	bool ret = false;
-	const char *buf;
 	int arr_size;
 	ts_t now;
 
@@ -2731,6 +4325,7 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		*err_val = json_string("Invalid character in username");
 		goto out;
 	}
+	pass = json_string_value(json_array_get(params_val, 1));
 	user = generate_user(ckp, client, buf);
 	client->user_id = user->id;
 	ts_realtime(&now);
@@ -2738,6 +4333,10 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	/* NOTE workername is NULL prior to this so should not be used in code
 	 * till after this point */
 	client->workername = strdup(buf);
+	if (pass)
+		client->password = strndup(pass, 64);
+	else
+		client->password = strdup("");
 	if (user->failed_authtime) {
 		time_t now_t = time(NULL);
 
@@ -2777,8 +4376,15 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 	if (ret) {
 		client->authorised = ret;
 		user->authorised = ret;
-		LOGNOTICE("Authorised client %"PRId64" %s worker %s as user %s",
-			  client->id, client->address, buf, user->username);
+		if (ckp->proxy) {
+			LOGNOTICE("Authorised client %"PRId64" to proxy %d:%d, worker %s as user %s",
+				  client->id, client->proxyid, client->subproxyid, buf, user->username);
+			if (ckp->userproxy)
+				check_global_user(ckp, user, client);
+		} else {
+			LOGNOTICE("Authorised client %"PRId64" worker %s as user %s",
+				  client->id, buf, user->username);
+		}
 		user->auth_backoff = DEFAULT_AUTH_BACKOFF; /* Reset auth backoff time */
 		user->throttled = false;
 	} else {
@@ -2803,7 +4409,7 @@ static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client)
 
 	JSON_CPACK(json_msg, "{s[I]soss}", "params", client->diff, "id", json_null(),
 			     "method", "mining.set_difficulty");
-	stratum_add_send(sdata, json_msg, client->id);
+	stratum_add_send(sdata, json_msg, client->id, SM_DIFF);
 }
 
 /* Needs to be entered with client holding a ref count. */
@@ -2813,7 +4419,7 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
 
 	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
-	stratum_add_send(sdata, json_msg, client->id);
+	stratum_add_send(sdata, json_msg, client->id, SM_MSG);
 }
 
 static double time_bias(const double tdiff, const double period)
@@ -2830,26 +4436,29 @@ static double time_bias(const double tdiff, const double period)
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const int diff, const bool valid,
 		       const bool submit)
 {
+	sdata_t *ckp_sdata = ckp->data, *sdata = client->sdata;
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	user_instance_t *user = client->user_instance;
 	int64_t next_blockid, optimal;
-	sdata_t *sdata = ckp->data;
 	tv_t now_t;
 
-	mutex_lock(&sdata->stats_lock);
+	mutex_lock(&ckp_sdata->stats_lock);
 	if (valid) {
-		sdata->stats.unaccounted_shares++;
-		sdata->stats.unaccounted_diff_shares += diff;
+		ckp_sdata->stats.unaccounted_shares++;
+		ckp_sdata->stats.unaccounted_diff_shares += diff;
 	} else
-		sdata->stats.unaccounted_rejects += diff;
-	mutex_unlock(&sdata->stats_lock);
+		ckp_sdata->stats.unaccounted_rejects += diff;
+	mutex_unlock(&ckp_sdata->stats_lock);
 
 	/* Count only accepted and stale rejects in diff calculation. */
 	if (valid) {
 		worker->shares += diff;
 		user->shares += diff;
 	} else if (!submit)
+		return;
+
+	if (ckp->node)
 		return;
 
 	tv_time(&now_t);
@@ -2954,10 +4563,10 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 {
 	int transactions = wb->transactions + 1;
 	char hexcoinbase[1024], blockhash[68];
+	sdata_t *sdata = client->sdata;
 	json_t *val = NULL, *val_copy;
 	char *gbt_block, varint[12];
 	ckpool_t *ckp = wb->ckp;
-	sdata_t *sdata = ckp->data;
 	ckmsg_t *block_ckmsg;
 	char cdfield[64];
 	uchar swap[32];
@@ -2969,7 +4578,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 
 	LOGWARNING("Possible block solve diff %f !", diff);
 	/* Can't submit a block in proxy mode without the transactions */
-	if (wb->proxy && wb->merkles)
+	if (!ckp->node && wb->proxy)
 		return;
 
 	ts_realtime(&ts_now);
@@ -3116,12 +4725,12 @@ static bool new_share(sdata_t *sdata, const uchar *hash, const int64_t wb_id)
 	return ret;
 }
 
-static void update_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id);
+static void update_client(const stratum_instance_t *client, const int64_t client_id);
 
 /* Submit a share in proxy mode to the parent pool. workbase_lock is held.
  * Needs to be entered with client holding a ref count. */
 static void submit_share(stratum_instance_t *client, const int64_t jobid, const char *nonce2,
-			 const char *ntime, const char *nonce, const int msg_id)
+			 const char *ntime, const char *nonce)
 {
 	ckpool_t *ckp = client->ckp;
 	json_t *json_msg;
@@ -3129,10 +4738,10 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
-	JSON_CPACK(json_msg, "{sisssssssIsi}", "jobid", jobid, "nonce2", enonce2,
+	JSON_CPACK(json_msg, "{sIsssssssIsIsi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
-			     "msg_id", msg_id);
-	msg = json_dumps(json_msg, 0);
+			     "proxy", client->proxyid, "subproxy", client->subproxyid);
+	msg = json_dumps(json_msg, JSON_COMPACT);
 	json_decref(json_msg);
 	send_generator(ckp, msg, GEN_LAX);
 	free(msg);
@@ -3150,9 +4759,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
 	const char *workername, *job_id, *ntime, *nonce;
 	char *fname = NULL, *s, *nonce2;
+	sdata_t *sdata = client->sdata;
 	enum share_err err = SE_NONE;
 	ckpool_t *ckp = client->ckp;
-	sdata_t *sdata = ckp->data;
 	char idstring[20] = {};
 	workbase_t *wb = NULL;
 	uint32_t ntime32;
@@ -3221,6 +4830,11 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_I64(sdata->workbases, &id, wb);
 	if (unlikely(!wb)) {
+		if (!sdata->current_workbase) {
+			ck_runlock(&sdata->workbase_lock);
+
+			return json_boolean(false);
+		}
 		id = sdata->current_workbase->id;
 		err = SE_INVALID_JOBID;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
@@ -3305,13 +4919,13 @@ out_unlock:
 			submit = false;
 		}
 	}  else
-		LOGINFO("Rejected client %"PRId64" invalid share", client->id);
+		LOGINFO("Rejected client %"PRId64" invalid share %s", client->id, SHARE_ERR(err));
 
 	/* Submit share to upstream pool in proxy mode. We submit valid and
 	 * stale shares and filter out the rest. */
 	if (wb && wb->proxy && submit) {
 		LOGINFO("Submitting share upstream: %s", hexhash);
-		submit_share(client, id, nonce2, ntime, nonce, json_integer_value(json_object_get(json_msg, "id")));
+		submit_share(client, id, nonce2, ntime, nonce);
 	}
 
 	add_submit(ckp, client, diff, result, submit);
@@ -3366,7 +4980,7 @@ out:
 		} else if (client->first_invalid && client->first_invalid < now_t - 60) {
 			if (!client->reject) {
 				LOGINFO("Client %"PRId64" rejecting for 60s, sending update", client->id);
-				update_client(sdata, client, client->id);
+				update_client(client, client->id);
 				client->reject = 1;
 			}
 		}
@@ -3418,27 +5032,36 @@ static json_t *__stratum_notify(const workbase_t *wb, const bool clean)
 	return val;
 }
 
-static void stratum_broadcast_update(sdata_t *sdata, const bool clean)
+static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, const bool clean)
 {
 	json_t *json_msg;
 
 	ck_rlock(&sdata->workbase_lock);
-	json_msg = __stratum_notify(sdata->current_workbase, clean);
+	json_msg = __stratum_notify(wb, clean);
 	ck_runlock(&sdata->workbase_lock);
 
-	stratum_broadcast(sdata, json_msg);
+	stratum_broadcast(sdata, json_msg, SM_UPDATE);
 }
 
 /* For sending a single stratum template update */
 static void stratum_send_update(sdata_t *sdata, const int64_t client_id, const bool clean)
 {
+	ckpool_t *ckp = sdata->ckp;
 	json_t *json_msg;
+
+	if (unlikely(!sdata->current_workbase)) {
+		if (!ckp->proxy)
+			LOGWARNING("No current workbase to send stratum update");
+		else
+			LOGDEBUG("No current workbase to send stratum update for client %"PRId64, client_id);
+		return;
+	}
 
 	ck_rlock(&sdata->workbase_lock);
 	json_msg = __stratum_notify(sdata->current_workbase, clean);
 	ck_runlock(&sdata->workbase_lock);
 
-	stratum_add_send(sdata, json_msg, client_id);
+	stratum_add_send(sdata, json_msg, client_id, SM_UPDATE);
 }
 
 static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_val, const char *err_msg)
@@ -3446,12 +5069,14 @@ static void send_json_err(sdata_t *sdata, const int64_t client_id, json_t *id_va
 	json_t *val;
 
 	JSON_CPACK(val, "{soss}", "id", json_deep_copy(id_val), "error", err_msg);
-	stratum_add_send(sdata, val, client_id);
+	stratum_add_send(sdata, val, client_id, SM_ERROR);
 }
 
 /* Needs to be entered with client holding a ref count. */
-static void update_client(sdata_t *sdata, const stratum_instance_t *client, const int64_t client_id)
+static void update_client(const stratum_instance_t *client, const int64_t client_id)
 {
+	sdata_t *sdata = client->sdata;
+
 	stratum_send_update(sdata, client_id, true);
 	stratum_send_diff(sdata, client);
 }
@@ -3549,12 +5174,23 @@ static void init_client(sdata_t *sdata, const stratum_instance_t *client, const 
 	stratum_send_update(sdata, client_id, true);
 }
 
+static void add_mining_node(sdata_t *sdata, stratum_instance_t *client)
+{
+	client->node = true;
+
+	ck_wlock(&sdata->instance_lock);
+	DL_APPEND(sdata->node_instances, client);
+	ck_wunlock(&sdata->instance_lock);
+
+	LOGWARNING("Added client %"PRId64" %s as mining node!", client->id, client->address);
+}
+
 /* Enter with client holding ref count */
-static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64_t client_id,
-			 json_t *id_val, json_t *method_val, json_t *params_val)
+static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client,
+			 const int64_t client_id, json_t *id_val, json_t *method_val,
+			 json_t *params_val)
 {
 	const char *method;
-	char buf[256];
 
 	/* Random broken clients send something not an integer as the id so we
 	 * copy the json item for id_val as is for the response. By far the
@@ -3564,6 +5200,12 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_params_t *jp = create_json_params(client_id, method_val, params_val, id_val);
 
 		ckmsgq_add(sdata->sshareq, jp);
+		return;
+	}
+
+	if (cmdmatch(method, "mining.term")) {
+		LOGDEBUG("Mining terminate requested from %"PRId64" %s", client_id, client->address);
+		drop_client(ckp, sdata, client_id);
 		return;
 	}
 
@@ -3585,29 +5227,41 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		json_object_set_new_nocheck(val, "result", result_val);
 		json_object_set_nocheck(val, "id", id_val);
 		json_object_set_new_nocheck(val, "error", json_null());
-		stratum_add_send(sdata, val, client_id);
+		stratum_add_send(sdata, val, client_id, SM_SUBSCRIBERESULT);
 		if (likely(client->subscribed))
 			init_client(sdata, client, client_id);
 		return;
 	}
 
+	if (unlikely(cmdmatch(method, "mining.node"))) {
+		char buf[256];
+
+		/* Add this client as a passthrough in the connector and
+		 * add it to the list of mining nodes in the stratifier */
+		add_mining_node(sdata, client);
+		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+		send_proc(ckp->connector, buf);
+		return;
+	}
+
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
+		char buf[256];
+
 		/* We need to inform the connector process that this client
 		 * is a passthrough and to manage its messages accordingly. No
 		 * data from this client id should ever come back to this
 		 * stratifier after this so drop the client in the stratifier. */
 		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
-		drop_client(sdata, client_id);
+		send_proc(ckp->connector, buf);
+		drop_client(ckp, sdata, client_id);
 		return;
 	}
 
 	/* We should only accept subscribed requests from here on */
 	if (!client->subscribed) {
 		LOGINFO("Dropping unsubscribed client %"PRId64" %s", client_id, client->address);
-		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		connector_drop_client(ckp, client_id);
 		return;
 	}
 
@@ -3644,12 +5298,6 @@ static void parse_method(sdata_t *sdata, stratum_instance_t *client, const int64
 		return;
 	}
 
-	if (cmdmatch(method, "mining.term")) {
-		LOGDEBUG("Mining terminate requested from %"PRId64" %s", client_id, client->address);
-		drop_client(sdata, client_id);
-		return;
-	}
-
 	/* Unhandled message here */
 	LOGINFO("Unhandled client %"PRId64" %s method %s", client_id, client->address, method);
 	return;
@@ -3661,18 +5309,134 @@ static void free_smsg(smsg_t *msg)
 	free(msg);
 }
 
+static void parse_diff(stratum_instance_t *client, json_t *val)
+{
+	double diff = json_number_value(json_array_get(val, 0));
+
+	LOGINFO("Set client %"PRId64" to diff %lf", client->id, diff);
+	client->diff = diff;
+}
+
+static void parse_subscribe_result(stratum_instance_t *client, json_t *val)
+{
+	int len;
+
+	strncpy(client->enonce1, json_string_value(json_array_get(val, 1)), 16);
+	len = strlen(client->enonce1) / 2;
+	hex2bin(client->enonce1bin, client->enonce1, len);
+	memcpy(&client->enonce1_64, client->enonce1bin, 8);
+	LOGINFO("Client %"PRId64" got enonce1 %lx string %s", client->id, client->enonce1_64, client->enonce1);
+}
+
+static void parse_authorise_result(stratum_instance_t *client, json_t *val)
+{
+	client->authorised = json_is_true(val);
+	LOGDEBUG("Client %"PRId64" is %sauthorised", client->id, client->authorised ? "" : "not ");
+}
+
+static int node_msg_type(json_t *val)
+{
+	int i, ret = -1;
+	char *method;
+
+	if (!val)
+		goto out;
+	if (!json_get_string(&method, val, "node.method"))
+		goto out;
+	for (i = 0; i < SM_NONE; i++) {
+		if (!strcmp(method, stratum_msgs[i])) {
+			ret = i;
+			break;
+		}
+	}
+	json_object_del(val, "node.method");
+out:
+	if (ret < 0 && json_get_string(&method, val, "method")) {
+		if (!safecmp(method, "mining.submit"))
+			ret = SM_SHARE;
+		else if (!safecmp(method, "mining.notify"))
+			ret = SM_UPDATE;
+		else if (!safecmp(method, "mining.subscribe"))
+			ret = SM_SUBSCRIBE;
+		else if (cmdmatch(method, "mining.auth"))
+			ret = SM_AUTH;
+		else if (cmdmatch(method, "mining.get"))
+			ret = SM_TXNS;
+	}
+	return ret;
+}
+
 /* Entered with client holding ref count */
-static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *client)
+static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum_instance_t *client)
+{
+	json_t *params, *method, *res_val, *id_val, *err_val = NULL;
+	int msg_type = node_msg_type(val);
+	sdata_t *sdata = ckp->data;
+	json_params_t *jp;
+	int errnum;
+
+	if (msg_type < 0) {
+		LOGERR("Missing client %"PRId64" node method from %s", client->id, buf);
+		return;
+	}
+	LOGDEBUG("Got client %"PRId64" node method %d:%s", client->id, msg_type, stratum_msgs[msg_type]);
+	id_val = json_object_get(val, "id");
+	method = json_object_get(val, "method");
+	params = json_object_get(val, "params");
+	res_val = json_object_get(val, "result");
+	switch (msg_type) {
+		case SM_SHARE:
+			jp = create_json_params(client->id, method, params, id_val);
+			ckmsgq_add(sdata->sshareq, jp);
+			break;
+		case SM_DIFF:
+			parse_diff(client, params);
+			break;
+		case SM_SUBSCRIBE:
+			parse_subscribe(client, client->id, params);
+			break;
+		case SM_SUBSCRIBERESULT:
+			parse_subscribe_result(client, res_val);
+			break;
+		case SM_AUTH:
+			parse_authorise(client, params, &err_val, &errnum);
+			break;
+		case SM_AUTHRESULT:
+			parse_authorise_result(client, res_val);
+			break;
+		default:
+			break;
+	}
+}
+
+static void parse_node_msg(ckpool_t *ckp, json_t *val, const char *buf)
+{
+	int msg_type = node_msg_type(val);
+
+	if (msg_type < 0) {
+		LOGERR("Missing node method from %s", buf);
+		return;
+	}
+	LOGDEBUG("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
+	switch (msg_type) {
+		case SM_WORKINFO:
+			add_node_base(ckp, val);
+			break;
+		default:
+			break;
+	}
+}
+
+/* Entered with client holding ref count */
+static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, stratum_instance_t *client)
 {
 	json_t *val = msg->json_msg, *id_val, *method, *params;
 	int64_t client_id = msg->client_id;
-	char buf[256];
 
-	if (unlikely(client->reject == 2)) {
+	if (client->reject == 2) {
 		LOGINFO("Dropping client %"PRId64" %s tagged for lazy invalidation",
 			client_id, client->address);
-		snprintf(buf, 255, "dropclient=%"PRId64, client_id);
-		send_proc(client->ckp->connector, buf);
+		connector_drop_client(ckp, client_id);
 		goto out;
 	}
 
@@ -3706,7 +5470,7 @@ static void parse_instance_msg(sdata_t *sdata, smsg_t *msg, stratum_instance_t *
 		send_json_err(sdata, client_id, id_val, "-1:params not found");
 		goto out;
 	}
-	parse_method(sdata, client, client_id, id_val, method, params);
+	parse_method(ckp, sdata, client, client_id, id_val, method, params);
 out:
 	free_smsg(msg);
 }
@@ -3730,7 +5494,10 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	msg->json_msg = val;
 	val = json_object_get(msg->json_msg, "client_id");
 	if (unlikely(!val)) {
-		LOGWARNING("Failed to extract client_id from connector json smsg %s", buf);
+		if (ckp->node)
+			parse_node_msg(ckp, msg->json_msg, buf);
+		else
+			LOGWARNING("Failed to extract client_id from connector json smsg %s", buf);
 		json_decref(msg->json_msg);
 		free(msg);
 		goto out;
@@ -3776,13 +5543,17 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 		/* Client may be NULL here */
 		LOGNOTICE("Stratifier skipped dropped instance %"PRId64" message from server %d",
 			  msg->client_id, server);
+		connector_drop_client(ckp, msg->client_id);
 		free_smsg(msg);
 		goto out;
 	}
 	if (unlikely(noid))
 		LOGINFO("Stratifier added instance %"PRId64" server %d", client->id, server);
 
-	parse_instance_msg(sdata, msg, client);
+	if (ckp->node)
+		node_client_msg(ckp, msg->json_msg, buf, client);
+	else
+		parse_instance_msg(ckp, sdata, msg, client);
 	dec_instance_ref(sdata, client);
 out:
 	free(buf);
@@ -3801,7 +5572,7 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	/* Add client_id to the json message and send it to the
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
-	s = json_dumps(msg->json_msg, 0);
+	s = json_dumps(msg->json_msg, JSON_COMPACT);
 	send_proc(ckp->connector, s);
 	free(s);
 	free_smsg(msg);
@@ -3846,7 +5617,7 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	steal_json_id(json_msg, jp);
-	stratum_add_send(sdata, json_msg, client_id);
+	stratum_add_send(sdata, json_msg, client_id, SM_SHARERESULT);
 out_decref:
 	dec_instance_ref(sdata, client);
 out:
@@ -3908,7 +5679,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	json_object_set_new_nocheck(json_msg, "result", result_val);
 	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
 	steal_json_id(json_msg, jp);
-	stratum_add_send(sdata, json_msg, client_id);
+	stratum_add_send(sdata, json_msg, client_id, SM_AUTHRESULT);
 
 	if (!json_is_true(result_val) || !client->suggest_diff)
 		goto out;
@@ -4123,7 +5894,7 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 	} else
 		json_set_string(val, "error", "Invalid job_id");
 out_send:
-	stratum_add_send(sdata, val, jp->client_id);
+	stratum_add_send(sdata, val, jp->client_id, SM_TXNSRESULT);
 out:
 	if (client)
 		dec_instance_ref(sdata, client);
@@ -4258,12 +6029,12 @@ static void *statsupdate(void *arg)
 		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
-		char_entry_t *char_list = NULL, *char_t, *chartmp_t;
 		stratum_instance_t *client, *tmp;
 		log_entry_t *log_entries = NULL;
 		user_instance_t *user, *tmpuser;
+		char_entry_t *char_list = NULL;
 		int idle_workers = 0;
-		char *fname, *s;
+		char *fname, *s, *sp;
 		tv_t now, diff;
 		ts_t ts_now;
 		json_t *val;
@@ -4375,11 +6146,10 @@ static void *statsupdate(void *arg)
 			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
 			add_log_entry(&log_entries, &fname, &s);
 			if (!idle) {
-				char_t = ckalloc(sizeof(char_entry_t));
 				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-				ASPRINTF(&char_t->buf, "User %s:%s", user->username, s);
+				ASPRINTF(&sp, "User %s:%s", user->username, s);
 				dealloc(s);
-				DL_APPEND(char_list, char_t);
+				add_msg_entry(&char_list, &sp);
 			}
 			json_decref(val);
 		}
@@ -4387,13 +6157,7 @@ static void *statsupdate(void *arg)
 
 		/* Dump log entries out of instance_lock */
 		dump_log_entries(&log_entries);
-
-		DL_FOREACH_SAFE(char_list, char_t, chartmp_t) {
-			LOGNOTICE("%s", char_t->buf);
-			DL_DELETE(char_list, char_t);
-			free(char_t->buf);
-			dealloc(char_t);
-		}
+		notice_msg_entries(&char_list);
 
 		ghs1 = stats->dsps1 * nonces;
 		suffix_string(ghs1, suffix1, 16, 0);
@@ -4460,6 +6224,53 @@ static void *statsupdate(void *arg)
 		fprintf(fp, "%s\n", s);
 		dealloc(s);
 		fclose(fp);
+
+		if (ckp->proxy && sdata->proxy) {
+			proxy_t *proxy, *proxytmp, *subproxy, *subtmp;
+
+			mutex_lock(&sdata->proxy_lock);
+			JSON_CPACK(val, "{sI,si,si}",
+				   "current", sdata->proxy->id,
+				   "active", HASH_COUNT(sdata->proxies),
+				   "total", sdata->proxy_count);
+			mutex_unlock(&sdata->proxy_lock);
+
+			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+			json_decref(val);
+			LOGNOTICE("Proxy:%s", s);
+			dealloc(s);
+
+			mutex_lock(&sdata->proxy_lock);
+			HASH_ITER(hh, sdata->proxies, proxy, proxytmp) {
+				JSON_CPACK(val, "{sI,si,sI,sb}",
+					   "id", proxy->id,
+					   "subproxies", proxy->subproxy_count,
+					   "clients", proxy->combined_clients,
+					   "alive", !proxy->dead);
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+				json_decref(val);
+				ASPRINTF(&sp, "Proxies:%s", s);
+				dealloc(s);
+				add_msg_entry(&char_list, &sp);
+				HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
+					JSON_CPACK(val, "{sI,si,si,sI,sI,sf,sb}",
+						   "id", subproxy->id,
+						   "subid", subproxy->subid,
+						   "nonce2len", subproxy->nonce2len,
+						   "clients", subproxy->bound_clients,
+						   "maxclients", subproxy->max_clients,
+						   "diff", subproxy->diff,
+						   "alive", !subproxy->dead);
+					s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+					json_decref(val);
+					ASPRINTF(&sp, "Subproxies:%s", s);
+					dealloc(s);
+					add_msg_entry(&char_list, &sp);
+				}
+			}
+			mutex_unlock(&sdata->proxy_lock);
+			info_msg_entries(&char_list);
+		}
 
 		ts_realtime(&ts_now);
 		sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
@@ -4654,6 +6465,8 @@ int stratifier(proc_instance_t *pi)
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
 	ckp->data = sdata;
+	sdata->ckp = ckp;
+	sdata->verbose = true;
 
 	/* Wait for the generator to have something for us */
 	do {
@@ -4661,8 +6474,11 @@ int stratifier(proc_instance_t *pi)
 			ret = 1;
 			goto out;
 		}
+		if (ckp->proxy)
+			break;
 		buf = send_recv_proc(ckp->generator, "ping");
 	} while (!buf);
+	dealloc(buf);
 
 	if (!ckp->proxy) {
 		if (!test_address(ckp, ckp->btcaddress)) {
@@ -4692,14 +6508,13 @@ int stratifier(proc_instance_t *pi)
 		}
 	}
 
-	randomiser = ((int64_t)time(NULL)) << 32;
+	randomiser = time(NULL);
+	sdata->enonce1_64 = htole64(randomiser);
 	/* Set the initial id to time as high bits so as to not send the same
 	 * id on restarts */
+	randomiser <<= 32;
 	if (!ckp->proxy)
 		sdata->blockchange_id = sdata->workbase_id = randomiser;
-	sdata->enonce1u.u64 = htobe64(randomiser);
-
-	dealloc(buf);
 
 	if (!ckp->serverurls) {
 		ckp->serverurl[0] = "127.0.0.1";
@@ -4711,15 +6526,19 @@ int stratifier(proc_instance_t *pi)
 
 	mutex_init(&sdata->ckdb_lock);
 	mutex_init(&sdata->ckdb_msg_lock);
-	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	/* Create half as many share processing threads as there are CPUs */
 	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
 	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
 	/* Create 1/4 as many stratum processing threads as there are CPUs */
-	threads = threads / 2 ? : 1;
+	if (ckp->node)
+		threads = 1;
+	else {
+		sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
+		threads = threads / 2 ? : 1;
+		sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
+		sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
+	}
 	sdata->srecvs = create_ckmsgqs(ckp, "sreceiver", &srecv_process, threads);
-	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
-	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
 	if (!CKP_STANDALONE(ckp)) {
 		sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 		create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
@@ -4729,9 +6548,12 @@ int stratifier(proc_instance_t *pi)
 	cklock_init(&sdata->workbase_lock);
 	if (!ckp->proxy)
 		create_pthread(&pth_blockupdate, blockupdate, ckp);
+	else {
+		mutex_init(&sdata->proxy_lock);
+	}
 
 	mutex_init(&sdata->stats_lock);
-	if (!ckp->passthrough)
+	if (!ckp->passthrough || ckp->node)
 		create_pthread(&pth_statsupdate, statsupdate, ckp);
 
 	mutex_init(&sdata->share_lock);
@@ -4743,6 +6565,16 @@ int stratifier(proc_instance_t *pi)
 
 	ret = stratum_loop(ckp, pi);
 out:
+	if (ckp->proxy) {
+		proxy_t *proxy, *tmpproxy;
+
+		mutex_lock(&sdata->proxy_lock);
+		HASH_ITER(hh, sdata->proxies, proxy, tmpproxy) {
+			HASH_DEL(sdata->proxies, proxy);
+			dealloc(proxy);
+		}
+		mutex_unlock(&sdata->proxy_lock);
+	}
 	dealloc(ckp->data);
 	return process_exit(ckp, pi, ret);
 }

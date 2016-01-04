@@ -20,6 +20,7 @@
 #include <getopt.h>
 #include <grp.h>
 #include <jansson.h>
+#include <zlib.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -375,6 +376,17 @@ out:
 	return ret;
 }
 
+static void api_message(ckpool_t *ckp, char **buf, int *sockd)
+{
+	apimsg_t *apimsg = ckalloc(sizeof(apimsg_t));
+
+	apimsg->buf = *buf;
+	*buf = NULL;
+	apimsg->sockd = *sockd;
+	*sockd = -1;
+	ckmsgq_add(ckp->ckpapi, apimsg);
+}
+
 /* Listen for incoming global requests. Always returns a response if possible */
 static void *listener(void *arg)
 {
@@ -397,6 +409,9 @@ retry:
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
 		send_unix_msg(sockd, "failed");
+	} else if (buf[0] == '{') {
+		/* Any JSON messages received are for the RPC API to handle */
+		api_message(ckp, &buf, &sockd);
 	} else if (cmdmatch(buf, "shutdown")) {
 		LOGWARNING("Listener received shutdown message, terminating ckpool");
 		send_unix_msg(sockd, "exiting");
@@ -492,7 +507,47 @@ bool ping_main(ckpool_t *ckp)
 
 void empty_buffer(connsock_t *cs)
 {
+	if (cs->buf)
+		cs->buf[0] = '\0';
 	cs->buflen = cs->bufofs = 0;
+}
+
+static void clear_bufline(connsock_t *cs)
+{
+	if (unlikely(!cs->buf))
+		cs->buf = ckzalloc(PAGESIZE);
+	else if (cs->buflen) {
+		memmove(cs->buf, cs->buf + cs->bufofs, cs->buflen);
+		memset(cs->buf + cs->buflen, 0, cs->bufofs);
+		cs->bufofs = cs->buflen;
+		cs->buflen = 0;
+		cs->buf[cs->bufofs] = '\0';
+	} else
+		cs->bufofs = 0;
+}
+
+static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
+{
+	int backoff = 1;
+	size_t buflen;
+	char *newbuf;
+
+	buflen = round_up_page(cs->bufofs + len + 1);
+	while (42) {
+		newbuf = realloc(cs->buf, buflen);
+		if (likely(newbuf))
+			break;
+		if (backoff == 1)
+			fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
+		cksleep_ms(backoff);
+		backoff <<= 1;
+	}
+	cs->buf = newbuf;
+	if (unlikely(!cs->buf))
+		quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
+	memcpy(cs->buf + cs->bufofs, readbuf, len);
+	cs->bufofs += len;
+	cs->buf[cs->bufofs] = '\0';
 }
 
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
@@ -502,86 +557,54 @@ int read_socket_line(connsock_t *cs, float *timeout)
 {
 	char *eom = NULL;
 	tv_t start, now;
-	size_t buflen;
 	int ret = -1;
-	bool polled;
 	float diff;
 
 	if (unlikely(cs->fd < 0))
 		goto out;
 
-	if (unlikely(!cs->buf))
-		cs->buf = ckzalloc(PAGESIZE);
-	else if (cs->buflen) {
-		memmove(cs->buf, cs->buf + cs->bufofs, cs->buflen);
-		memset(cs->buf + cs->buflen, 0, cs->bufofs);
-		cs->bufofs = cs->buflen;
-		cs->buflen = 0;
-		cs->buf[cs->bufofs] = '\0';
-		eom = strchr(cs->buf, '\n');
-	}
+	clear_bufline(cs);
+	eom = strchr(cs->buf, '\n');
 
 	tv_time(&start);
-rewait:
-	if (*timeout < 0) {
-		LOGDEBUG("Timed out in read_socket_line");
-		ret = 0;
-		goto out;
-	}
-	ret = wait_read_select(cs->fd, eom ? 0 : *timeout);
-	polled = true;
-	if (ret < 1) {
-		if (!ret) {
-			if (eom)
-				goto parse;
-			LOGDEBUG("Select timed out in read_socket_line");
-		} else
-			LOGERR("Select failed in read_socket_line");
-		goto out;
-	}
-	tv_time(&now);
-	diff = tvdiff(&now, &start);
-	copy_tv(&start, &now);
-	*timeout -= diff;
-	while (42) {
-		char readbuf[PAGESIZE] = {};
-		int backoff = 1;
-		char *newbuf;
 
-		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
-		if (ret < 1) {
-			/* No more to read or closed socket after valid message */
-			if (eom)
-				break;
-			/* Have we used up all the timeout yet? If polled is
-			 * set that means poll has said there should be
-			 * something to read and if we get nothing it means the
-			 * socket is closed. */
-			if (!polled && *timeout >= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || !ret))
-				goto rewait;
-			LOGERR("Failed to recv in read_socket_line");
+	while (!eom) {
+		char readbuf[PAGESIZE];
+
+		if (*timeout < 0) {
+			if (cs->ckp->proxy)
+				LOGINFO("Timed out in read_socket_line");
+			else
+				LOGERR("Timed out in read_socket_line");
+			ret = 0;
 			goto out;
 		}
-		polled = false;
-		buflen = cs->bufofs + ret + 1;
-		while (42) {
-			newbuf = realloc(cs->buf, buflen);
-			if (likely(newbuf))
-				break;
-			if (backoff == 1)
-				fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
-			cksleep_ms(backoff);
-			backoff <<= 1;
+		ret = wait_read_select(cs->fd, *timeout);
+		if (ret < 1) {
+			if (cs->ckp->proxy)
+				LOGINFO("Select %s in read_socket_line", !ret ? "timed out" : "failed");
+			else
+				LOGERR("Select %s in read_socket_line", !ret ? "timed out" : "failed");
+			goto out;
 		}
-		cs->buf = newbuf;
-		if (unlikely(!cs->buf))
-			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		memcpy(cs->buf + cs->bufofs, readbuf, ret);
-		cs->bufofs += ret;
-		cs->buf[cs->bufofs] = '\0';
+		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
+		if (ret < 1) {
+			/* If we have done wait_read_select there should be
+			 * something to read and if we get nothing it means the
+			 * socket is closed. */
+			if (cs->ckp->proxy)
+				LOGINFO("Failed to recv in read_socket_line");
+			else
+				LOGERR("Failed to recv in read_socket_line");
+			goto out;
+		}
+		add_bufline(cs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
 	}
-parse:
 	ret = eom - cs->buf;
 
 	cs->buflen = cs->buf + cs->bufofs - eom - 1;
@@ -1126,7 +1149,7 @@ bool json_get_int64(int64_t *store, const json_t *val, const char *res)
 		goto out;
 	}
 	if (!json_is_integer(entry)) {
-		LOGWARNING("Json entry %s is not an integer", res);
+		LOGINFO("Json entry %s is not an integer", res);
 		goto out;
 	}
 	*store = json_integer_value(entry);
@@ -1176,7 +1199,7 @@ out:
 	return ret;
 }
 
-static bool json_get_bool(bool *store, const json_t *val, const char *res)
+bool json_get_bool(bool *store, const json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);
 	bool ret = false;
@@ -1186,13 +1209,33 @@ static bool json_get_bool(bool *store, const json_t *val, const char *res)
 		goto out;
 	}
 	if (!json_is_boolean(entry)) {
-		LOGWARNING("Json entry %s is not a boolean", res);
+		LOGINFO("Json entry %s is not a boolean", res);
 		goto out;
 	}
 	*store = json_is_true(entry);
 	LOGDEBUG("Json found entry %s: %s", res, *store ? "true" : "false");
 	ret = true;
 out:
+	return ret;
+}
+
+bool json_getdel_int(int *store, json_t *val, const char *res)
+{
+	bool ret;
+
+	ret = json_get_int(store, val, res);
+	if (ret)
+		json_object_del(val, res);
+	return ret;
+}
+
+bool json_getdel_int64(int64_t *store, json_t *val, const char *res)
+{
+	bool ret;
+
+	ret = json_get_int64(store, val, res);
+	if (ret)
+		json_object_del(val, res);
 	return ret;
 }
 
@@ -1261,6 +1304,43 @@ out:
 	return ret;
 }
 
+static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
+{
+	bool ret = false;
+	int arr_size, i;
+	char *redirecturl, url[INET6_ADDRSTRLEN], port[8];
+	redirecturl = alloca(INET6_ADDRSTRLEN);
+
+	if (!arr_val)
+		goto out;
+	if (!json_is_array(arr_val)) {
+		LOGNOTICE("Unable to parse redirecturl entries as an array");
+		goto out;
+	}
+	arr_size = json_array_size(arr_val);
+	if (!arr_size) {
+		LOGWARNING("redirecturl array empty");
+		goto out;
+	}
+	ckp->redirecturls = arr_size;
+	ckp->redirecturl = ckalloc(sizeof(char *) * arr_size);
+	ckp->redirectport = ckalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		json_t *val = json_array_get(arr_val, i);
+
+		strncpy(redirecturl, json_string_value(val), INET6_ADDRSTRLEN - 1);
+		/* See that the url properly resolves */
+		if (!url_from_serverurl(redirecturl, url, port))
+			quit(1, "Invalid redirecturl entry %d %s", i, redirecturl);
+		ckp->redirecturl[i] = strdup(strsep(&redirecturl, ":"));
+		ckp->redirectport[i] = strdup(port);
+	}
+	ret = true;
+out:
+	return ret;
+}
+
+
 static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
@@ -1310,7 +1390,10 @@ static void parse_config(ckpool_t *ckp)
 		if (arr_size)
 			parse_proxies(ckp, arr_val, arr_size);
 	}
-	json_get_bool(&ckp->clientsvspeed, json_conf, "clientsvspeed");
+	arr_val = json_object_get(json_conf, "redirecturl");
+	if (arr_val)
+		parse_redirecturls(ckp, arr_val);
+
 	json_decref(json_conf);
 }
 
@@ -1436,10 +1519,13 @@ static struct option long_options[] = {
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"redirector",	no_argument,		0,	'R'},
 	{"ckdb-sockdir",required_argument,	0,	'S'},
 	{"sockdir",	required_argument,	0,	's'},
+	{"userproxy",	no_argument,		0,	'u'},
 	{0, 0, 0, 0}
 };
 #else
@@ -1453,9 +1539,12 @@ static struct option long_options[] = {
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"redirector",	no_argument,		0,	'R'},
 	{"sockdir",	required_argument,	0,	's'},
+	{"userproxy",	no_argument,		0,	'u'},
 	{0, 0, 0, 0}
 };
 #endif
@@ -1499,7 +1588,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:Nn:PpRS:s:u", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1550,18 +1639,28 @@ int main(int argc, char **argv)
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
 				break;
+			case 'N':
+				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.passthrough)
+					quit(1, "Cannot set another proxy type or redirector and node mode");
+				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.node = true;
+				break;
 			case 'n':
 				ckp.name = optarg;
 				break;
 			case 'P':
-				if (ckp.proxy)
-					quit(1, "Cannot set both proxy and passthrough mode");
+				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.node)
+					quit(1, "Cannot set another proxy type or redirector and passthrough mode");
 				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
-				if (ckp.passthrough)
-					quit(1, "Cannot set both passthrough and proxy mode");
+				if (ckp.passthrough || ckp.redirector || ckp.userproxy || ckp.node)
+					quit(1, "Cannot set another proxy type or redirector and proxy mode");
 				ckp.proxy = true;
+				break;
+			case 'R':
+				if (ckp.proxy || ckp.passthrough || ckp.userproxy || ckp.node)
+					quit(1, "Cannot set a proxy type or passthrough and redirector modes");
+				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.redirector = true;
 				break;
 			case 'S':
 				ckp.ckdb_sockdir = strdup(optarg);
@@ -1569,11 +1668,20 @@ int main(int argc, char **argv)
 			case 's':
 				ckp.socket_dir = strdup(optarg);
 				break;
+			case 'u':
+				if (ckp.proxy || ckp.redirector || ckp.passthrough || ckp.node)
+					quit(1, "Cannot set both userproxy and another proxy type or redirector");
+				ckp.userproxy = ckp.proxy = true;
+				break;
 		}
 	}
 
 	if (!ckp.name) {
-		if (ckp.passthrough)
+		if (ckp.node)
+			ckp.name = "cknode";
+		else if (ckp.redirector)
+			ckp.name = "ckredirector";
+		else if (ckp.passthrough)
 			ckp.name = "ckpassthrough";
 		else if (ckp.proxy)
 			ckp.name = "ckproxy";
@@ -1629,7 +1737,7 @@ int main(int argc, char **argv)
 
 	parse_config(&ckp);
 	/* Set defaults if not found in config file */
-	if (!ckp.btcds && !ckp.proxy) {
+	if (!ckp.btcds) {
 		ckp.btcds = 1;
 		ckp.btcdurl = ckzalloc(sizeof(char *));
 		ckp.btcdauth = ckzalloc(sizeof(char *));
@@ -1672,6 +1780,8 @@ int main(int argc, char **argv)
 		ckp.serverurl = ckzalloc(sizeof(char *));
 	if (ckp.proxy && !ckp.proxies)
 		quit(0, "No proxy entries found in config file %s", ckp.config);
+	if (ckp.redirector && !ckp.redirecturls)
+		quit(0, "No redirect entries found in config file %s", ckp.config);
 
 	/* Create the log directory */
 	trail_slash(&ckp.logdir);
@@ -1763,6 +1873,7 @@ int main(int argc, char **argv)
 	launch_logger(&ckp.main);
 	ckp.logfd = fileno(ckp.logfp);
 
+	ckp.ckpapi = create_ckmsgq(&ckp, "api", &ckpool_api);
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */

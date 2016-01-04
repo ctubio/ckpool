@@ -747,12 +747,12 @@ int write_socket(int fd, const void *buf, size_t nbyte)
 		if (!ret)
 			LOGNOTICE("Select timed out in write_socket");
 		else
-			LOGERR("Select failed in write_socket");
+			LOGNOTICE("Select failed in write_socket");
 		goto out;
 	}
 	ret = write_length(fd, buf, nbyte);
 	if (ret < 0)
-		LOGWARNING("Failed to write in write_socket");
+		LOGNOTICE("Failed to write in write_socket");
 out:
 	return ret;
 }
@@ -1389,6 +1389,18 @@ void *_ckzalloc(size_t len, const char *file, const char *func, const int line)
 	return ptr;
 }
 
+/* Round up to the nearest page size for efficient malloc */
+size_t round_up_page(size_t len)
+{
+	int rem = len % PAGESIZE;
+
+	if (rem)
+		len += PAGESIZE - rem;
+	return len;
+}
+
+
+
 /* Adequate size s==len*2 + 1 must be alloced to use this variant */
 void __bin2hex(void *vs, const void *vp, size_t len)
 {
@@ -1976,7 +1988,10 @@ double diff_from_nbits(char *nbits)
 	if (powdiff < 8)
 		powdiff = 8;
 	diff32 = be32toh(*((uint32_t *)nbits)) & 0x00FFFFFF;
-	numerator = 0xFFFFULL << powdiff;
+	if (likely(powdiff > 0))
+		numerator = 0xFFFFULL << powdiff;
+	else
+		numerator = 0xFFFFULL >> -powdiff;
 	return numerator / (double)diff32;
 }
 
