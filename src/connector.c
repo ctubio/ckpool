@@ -344,7 +344,7 @@ static void generator_drop_client(ckpool_t *ckp, const client_instance_t *client
 	JSON_CPACK(val, "{si,sI:ss:si:ss:s[]}", "id", 42, "client_id", client->id, "address",
 		   client->address_name, "server", client->server, "method", "mining.term",
 		   "params");
-	s = json_dumps(val, 0);
+	s = json_dumps(val, JSON_COMPACT);
 	json_decref(val);
 	send_proc(ckp->generator, s);
 	free(s);
@@ -520,7 +520,7 @@ reparse:
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		}
 		json_object_set_new_nocheck(val, "server", json_integer(client->server));
-		s = json_dumps(val, 0);
+		s = json_dumps(val, JSON_COMPACT);
 
 		/* Do not send messages of clients we've already dropped. We
 		 * do this unlocked as the occasional false negative can be
@@ -800,7 +800,7 @@ static void redirect_client(ckpool_t *ckp, client_instance_t *client)
 	num = add_redirect(ckp, cdata, client);
 	JSON_CPACK(val, "{sosss[ssi]}", "id", json_null(), "method", "client.reconnect",
 		   "params", ckp->redirecturl[num], ckp->redirectport[num], 0);
-	buf = json_dumps(val, JSON_EOL);
+	buf = json_dumps(val, JSON_EOL | JSON_COMPACT);
 	json_decref(val);
 
 	sender_send = ckzalloc(sizeof(sender_send_t));
@@ -935,7 +935,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 			json_object_set_new_nocheck(val, "server", json_integer(client->server));
-			msg = json_dumps(val, 0);
+			msg = json_dumps(val, JSON_COMPACT);
 			json_decref(val);
 			send_proc(ckp->stratifier, msg);
 			free(msg);
@@ -997,7 +997,7 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 	if (client_id > 0xffffffffll)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
 
-	msg = json_dumps(json_msg, JSON_EOL);
+	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
 	send_client(cdata, client_id, msg);
 	json_decref(json_msg);
 }

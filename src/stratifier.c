@@ -4740,7 +4740,7 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	JSON_CPACK(json_msg, "{sIsssssssIsIsi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
 			     "proxy", client->proxyid, "subproxy", client->subproxyid);
-	msg = json_dumps(json_msg, 0);
+	msg = json_dumps(json_msg, JSON_COMPACT);
 	json_decref(json_msg);
 	send_generator(ckp, msg, GEN_LAX);
 	free(msg);
@@ -5571,7 +5571,7 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	/* Add client_id to the json message and send it to the
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
-	s = json_dumps(msg->json_msg, 0);
+	s = json_dumps(msg->json_msg, JSON_COMPACT);
 	send_proc(ckp->connector, s);
 	free(s);
 	free_smsg(msg);
