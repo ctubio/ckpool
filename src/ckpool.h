@@ -82,9 +82,6 @@ struct connsock {
 	ckpool_t *ckp;
 	/* Semaphore used to serialise request/responses */
 	sem_t sem;
-
-	/* Has the other end acknowledged it can receive gz compressed data */
-	bool gz;
 };
 
 typedef struct connsock connsock_t;
@@ -192,9 +189,6 @@ struct ckpool_instance {
 	/* Are we a redirecting passthrough */
 	bool redirector;
 
-	/* Should we compress large packets in passthrough modes */
-	bool compress;
-
 	/* Are we running as a proxy */
 	bool proxy;
 
@@ -287,8 +281,6 @@ static const char __maybe_unused *stratum_msgs[] = {
 	""
 };
 
-extern const char gzip_magic[];
-
 #ifdef USE_CKDB
 #define CKP_STANDALONE(CKP) ((CKP)->standalone == true)
 #else
@@ -309,7 +301,6 @@ ckpool_t *global_ckp;
 bool ping_main(ckpool_t *ckp);
 void empty_buffer(connsock_t *cs);
 int read_socket_line(connsock_t *cs, float *timeout);
-int write_cs(connsock_t *cs, const char *buf, int len);
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
 char *_send_recv_proc(proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,

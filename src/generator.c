@@ -766,15 +766,14 @@ out:
 }
 
 /* cs semaphore must be held */
-static bool passthrough_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
+static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
 	bool res, ret = false;
 	float timeout = 10;
 
-	JSON_CPACK(req, "{ss,sb,s[s]}",
+	JSON_CPACK(req, "{ss,s[s]}",
 			"method", "mining.passthrough",
-			"gz", ckp->compress,
 			"params", PACKAGE"/"VERSION);
 	res = send_json_msg(cs, req);
 	json_decref(req);
@@ -799,9 +798,6 @@ static bool passthrough_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t 
 		LOGWARNING("Denied passthrough for stratum");
 		goto out;
 	}
-	json_get_bool(&cs->gz, val, "gz");
-	if (cs->gz)
-		LOGNOTICE("Negotiated gz compression with pool");
 	proxi->passthrough = true;
 out:
 	if (val)
@@ -812,15 +808,14 @@ out:
 }
 
 /* cs semaphore must be held */
-static bool node_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
+static bool node_stratum(connsock_t *cs, proxy_instance_t *proxi)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
 	bool res, ret = false;
 	float timeout = 10;
 
-	JSON_CPACK(req, "{ss,sb,s[s]}",
+	JSON_CPACK(req, "{ss,s[s]}",
 			"method", "mining.node",
-			"gz", ckp->compress,
 			"params", PACKAGE"/"VERSION);
 
 	res = send_json_msg(cs, req);
@@ -846,9 +841,6 @@ static bool node_stratum(ckpool_t *ckp, connsock_t *cs, proxy_instance_t *proxi)
 		LOGWARNING("Denied node setup for stratum");
 		goto out;
 	}
-	json_get_bool(&cs->gz, val, "gz");
-	if (cs->gz)
-		LOGNOTICE("Negotiated gz compression with pool");
 	proxi->node = true;
 out:
 	if (val)
@@ -1803,7 +1795,7 @@ static void passthrough_send(ckpool_t *ckp, pass_msg_t *pm)
 
 	LOGDEBUG("Sending upstream json msg: %s", pm->msg);
 	len = strlen(pm->msg);
-	sent = write_cs(cs, pm->msg, len);
+	sent = write_socket(cs->fd, pm->msg, len);
 	if (unlikely(sent != len && cs->fd)) {
 		LOGWARNING("Failed to passthrough %d bytes of message %s, attempting reconnect",
 			   len, pm->msg);
@@ -1855,7 +1847,7 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 		goto out;
 	}
 	if (ckp->node) {
-		if (!node_stratum(ckp, cs, proxi)) {
+		if (!node_stratum(cs, proxi)) {
 			LOGWARNING("Failed initial node setup to %s:%s !",
 				   cs->url, cs->port);
 			goto out;
@@ -1864,7 +1856,7 @@ static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
 		goto out;
 	}
 	if (ckp->passthrough) {
-		if (!passthrough_stratum(ckp, cs, proxi)) {
+		if (!passthrough_stratum(cs, proxi)) {
 			LOGWARNING("Failed initial passthrough to %s:%s !",
 				   cs->url, cs->port);
 			goto out;

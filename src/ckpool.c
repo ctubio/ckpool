@@ -36,8 +36,6 @@
 
 ckpool_t *global_ckp;
 
-const char gzip_magic[] = "\x1f\xd5\x01\n";
-
 static void proclog(ckpool_t *ckp, char *msg)
 {
 	FILE *LOGFP;
@@ -553,129 +551,6 @@ static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
 	cs->buf[cs->bufofs] = '\0';
 }
 
-static int read_cs_length(connsock_t *cs, float *timeout, int len)
-{
-	tv_t start, now;
-	float diff;
-	int ret;
-
-	tv_time(&start);
-
-	while (cs->bufofs < len) {
-		char readbuf[PAGESIZE];
-		int readlen;
-
-		if (*timeout < 0) {
-			LOGDEBUG("Timed out in read_cs_length");
-			ret = 0;
-			goto out;
-		}
-		ret = wait_read_select(cs->fd, *timeout);
-		if (ret < 1)
-			goto out;
-		readlen = len - cs->bufofs;
-		if (readlen >= PAGESIZE)
-			readlen = PAGESIZE - 4;
-		ret = recv(cs->fd, readbuf, readlen, MSG_DONTWAIT);
-		if (ret < 1)
-			goto out;
-		add_bufline(cs, readbuf, ret);
-		tv_time(&now);
-		diff = tvdiff(&now, &start);
-		copy_tv(&start, &now);
-		*timeout -= diff;
-	}
-	ret = len;
-out:
-	return ret;
-}
-
-static int read_gz_line(connsock_t *cs, float *timeout)
-{
-	unsigned long compsize, res, decompsize;
-	char *buf, *dest = NULL, *eom;
-	int ret,  buflen;
-	uint32_t msglen;
-
-	/* Remove gz header */
-	clear_bufline(cs);
-
-	/* Get data sizes */
-	ret = read_cs_length(cs, timeout, 8);
-	if (ret != 8) {
-		ret = -1;
-		goto out;
-	}
-
-	memcpy(&msglen, cs->buf, 4);
-	compsize = le32toh(msglen);
-	memcpy(&msglen, cs->buf + 4, 4);
-	decompsize = le32toh(msglen);
-
-	/* Remove the gz variables */
-	cs->buflen = cs->bufofs - 8;
-	cs->bufofs = 8;
-	clear_bufline(cs);
-
-	if (unlikely(compsize < 1 || compsize > 0x80000000 ||
-		decompsize < 1 || decompsize > 0x80000000)) {
-		LOGWARNING("Invalid message length comp %lu decomp %lu sent to read_gz_line", compsize, decompsize);
-		ret = -1;
-		goto out;
-	}
-
-	/* Get compressed data */
-	ret = read_cs_length(cs, timeout, compsize);
-	if (ret != (int)compsize) {
-		LOGWARNING("Failed to read %lu compressed bytes in read_gz_line, got %d", compsize, ret);
-		ret = -1;
-		goto out;
-	}
-
-	/* Clear out all the compressed data */
-	cs->buflen = cs->bufofs - compsize;
-	cs->bufofs = compsize;
-	clear_bufline(cs);
-
-	/* Do decompresion and buffer reconstruction here */
-	res = round_up_page(decompsize);
-	dest = ckalloc(res);
-	ret = uncompress((Bytef *)dest, &res, (Bytef *)cs->buf, compsize);
-	if (ret != Z_OK || res != decompsize) {
-		LOGWARNING("Failed to decompress %lu bytes in read_gz_line, result %d got %lu",
-			   decompsize, ret, res);
-		ret = -1;
-		goto out;
-	}
-
-	eom = dest + decompsize - 1;
-	if (memcmp(eom, "\n", 1)) {
-		LOGWARNING("Failed to find EOM in decompressed data in read_gz_line");
-		ret = -1;
-		goto out;
-	}
-
-	*eom = '\0';
-	ret = decompsize - 1;
-	/* Wedge the decompressed buffer back to the start of cs->buf */
-	buf = cs->buf;
-	buflen = cs->bufofs;
-	cs->buf = dest;
-	dest = NULL;
-	cs->bufofs = decompsize;
-	if (buflen) {
-		add_bufline(cs, buf, buflen);
-		cs->buflen = buflen;
-		cs->bufofs = decompsize;
-	} else
-		cs->buflen = cs->bufofs = 0;
-out:
-	free(dest);
-	if (ret < 1)
-		empty_buffer(cs);
-	return ret;
-}
-
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. */
@@ -743,53 +618,7 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
-	} else if (ret == 3 && !memcmp(cs->buf, gzip_magic, 3))
-		ret = read_gz_line(cs, timeout);
-	return ret;
-}
-
-/* gzip compressed block structure:
- * - 4 byte magic header gzip_magic "\x1f\xd5\x01\n"
- * - 4 byte LE encoded compressed size
- * - 4 byte LE encoded decompressed size
- */
-int write_cs(connsock_t *cs, const char *buf, int len)
-{
-	unsigned long compsize, decompsize = len;
-	char *dest = NULL;
-	uint32_t msglen;
-	int ret;
-
-	/* Connsock doesn't expect gz compressed messages. Only compress if it's
-	 * larger than one MTU. */
-	if (!cs->gz || len <= 1492)
-		return write_socket(cs->fd, buf, len);
-	compsize = round_up_page(len + 12);
-	dest = alloca(compsize);
-	/* Do compression here */
-	compsize -= 12;
-	ret = compress((Bytef *)dest + 12, &compsize, (Bytef *)buf, len);
-	if (ret != Z_OK) {
-		LOGINFO("Failed to gz compress in write_cs, writing uncompressed");
-		return write_socket(cs->fd, buf, len);
 	}
-	if (unlikely(compsize + 12 >= decompsize))
-		return write_socket(cs->fd, buf, len);
-	/* Copy gz magic header */
-	memcpy(dest, gzip_magic, 4);
-	/* Copy compressed message length */
-	msglen = htole32(compsize);
-	memcpy(dest + 4, &msglen, 4);
-	/* Copy decompressed message length */
-	msglen = htole32(decompsize);
-	memcpy(dest + 8, &msglen, 4);
-	len = compsize + 12;
-	LOGDEBUG("Writing connsock message compressed %d from %lu", len, decompsize);
-	ret = write_socket(cs->fd, dest, len);
-	if (ret == len)
-		ret = decompsize;
-	else
-		ret = -1;
 	return ret;
 }
 
@@ -1539,7 +1368,6 @@ static void parse_config(ckpool_t *ckp)
 		ckp->btcsig[38] = '\0';
 	}
 	json_get_int(&ckp->blockpoll, json_conf, "blockpoll");
-	json_get_bool(&ckp->compress, json_conf, "compress");
 	json_get_int(&ckp->nonce1length, json_conf, "nonce1length");
 	json_get_int(&ckp->nonce2length, json_conf, "nonce2length");
 	json_get_int(&ckp->update_interval, json_conf, "update_interval");
@@ -1907,9 +1735,6 @@ int main(int argc, char **argv)
 	ret = mkdir(ckp.socket_dir, 0750);
 	if (ret && errno != EEXIST)
 		quit(1, "Failed to make directory %s", ckp.socket_dir);
-
-	/* Set default on */
-	ckp.compress = true;
 
 	parse_config(&ckp);
 	/* Set defaults if not found in config file */
