@@ -37,22 +37,21 @@
 #include <postgresql/libpq-fe.h>
 #endif
 
+#include <gsl/gsl_math.h>
+#include <gsl/gsl_cdf.h>
+
 #include "ckpool.h"
 #include "libckpool.h"
 
 #include "klist.h"
 #include "ktree.h"
 
-/* TODO: any tree/list accessed in new threads needs
- *  to ensure all code using those trees/lists use locks
- * This code's lock implementation is equivalent to table level locking
- * Consider adding row level locking (a per kitem usage count) if needed
- * TODO: verify all tables with multithread access are locked
- */
+/* This code's lock implementation is equivalent to table level locking
+ * Consider adding row level locking (a per kitem usage count) if needed */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.0"
-#define CKDB_VERSION DB_VERSION"-1.007"
+#define DB_VERSION "1.0.4"
+#define CKDB_VERSION DB_VERSION"-1.910"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -64,13 +63,6 @@
 #define STRINT(x) STRINT2(x)
 #define STRINT2(x) #x
 
-#define FREENULL(mem) do { \
-		if (mem) { \
-			free(mem); \
-			mem = NULL; \
-		} \
-	} while (0)
-
 // So they can fit into a 1 byte flag field
 #define TRUE_STR "Y"
 #define FALSE_STR "N"
@@ -78,14 +70,69 @@
 #define TRUE_CHR 'Y'
 #define FALSE_CHR 'N'
 
-extern char *EMPTY;
+/* Set by cmd_setopts() and used by whatever code needs it
+ * It's loaded during startup but set to SWITCH_STATE_ALL if it's missing,
+ *  meaning all switches are active
+ * The idea is that if you need to manually switch code over from one version
+ *  up to the next version at an indeterminate time then you can do that by
+ *  coding a switch_state test and then externally switch the code over via
+ *  the cmd_setopts() socket interface
+ * It's not for coding runtime options into the code since that can be done
+ *  using optioncontrol directly
+ * It's stored in optioncontrol so that it's value is permanent and
+ *  activationdate and activationheight have their values overridden to
+ *  disable using them
+ * N.B. optioncontrol_item_add() intercepts the change by name and updates
+ *	switch_state but ONLY if the DB update succeeds */
+extern int switch_state;
+#define SWITCH_STATE_NAME "SwitchState"
+/* Each switch state must be higher than all previous
+ * so that future states don't undo old changes */
+#define SWITCH_STATE_AUTHWORKERS 1
+#define SWITCH_STATE_ALL 666666
 
+extern bool genpayout_auto;
+extern bool markersummary_auto;
+
+enum free_modes {
+	FREE_MODE_ALL,
+	FREE_MODE_NONE,
+	FREE_MODE_FAST
+};
+
+#define FREE_MODE_ALL_STR "all"
+#define FREE_MODE_NONE_STR "none"
+#define FREE_MODE_FAST_STR "fast"
+
+extern enum free_modes free_mode;
+
+#define BLANK " "
+extern char *EMPTY;
+extern const char *nullstr;
+
+extern const char *true_str;
+extern const char *false_str;
+
+#define TFSTR(_b) ((_b) ? true_str : false_str)
+
+#define FREENULL(mem) do { \
+		if ((mem) && (void *)(mem) != (void *)EMPTY) { \
+			free(mem); \
+			mem = NULL; \
+		} \
+	} while (0)
+
+// To ensure there's space for the ticker
+#define TICK_PREFIX "  "
+
+// Field patterns
 extern const char *userpatt;
 extern const char *mailpatt;
 extern const char *idpatt;
 extern const char *intpatt;
 extern const char *hashpatt;
 extern const char *addrpatt;
+extern const char *strpatt;
 
 /* If a trimmed username is like an address but this many or more characters,
  * disallow it */
@@ -99,20 +146,13 @@ extern const char *addrpatt;
 #define MAX_PAYADDR '~'
 
 typedef struct loadstatus {
-	tv_t oldest_sharesummary_firstshare_n;
-	tv_t newest_sharesummary_firstshare_a;
-	tv_t newest_sharesummary_firstshare_ay;
-	tv_t sharesummary_firstshare; // whichever of above 2 used
-	tv_t oldest_sharesummary_firstshare_a;
-	tv_t newest_sharesummary_firstshare_y;
+	int64_t newest_workmarker_workinfoid;
+	int64_t newest_workinfoid;
+	tv_t newest_createdate_workmarker_workinfo;
 	tv_t newest_createdate_workinfo;
 	tv_t newest_createdate_poolstats;
-	tv_t newest_starttimeband_userstats;
 	tv_t newest_createdate_blocks;
-	int64_t oldest_workinfoid_n; // of oldest firstshare sharesummary n
-	int64_t oldest_workinfoid_a; // of oldest firstshare sharesummary a
-	int64_t newest_workinfoid_a; // of newest firstshare sharesummary a
-	int64_t newest_workinfoid_y; // of newest firstshare sharesummary y
+	int32_t newest_height_blocks;
 } LOADSTATUS;
 extern LOADSTATUS dbstatus;
 
@@ -151,6 +191,12 @@ extern POOLSTATUS pool;
 // TAB
 #define FLDSEP 0x09
 #define FLDSEPSTR "\011"
+
+#define WORKSEP1 '.'
+#define WORKSEP1STR "."
+#define WORKSEP1PATT "\\."
+#define WORKSEP2 '_'
+#define WORKSEP2STR "_"
 
 #define MAXID 0x7fffffffffffffffLL
 
@@ -192,16 +238,24 @@ extern POOLSTATUS pool;
 		_dstoff += _srclen; \
 	} while(0)
 
+#define APPEND_REALLOC_RESET(_buf, _off) do { \
+		(_buf)[0] = '\0'; \
+		_off = 0; \
+	} while(0)
+
 enum data_type {
 	TYPE_STR,
 	TYPE_BIGINT,
 	TYPE_INT,
 	TYPE_TV,
+	TYPE_BTV,
 	TYPE_TVS,
 	TYPE_CTV,
 	TYPE_FTV,
 	TYPE_BLOB,
-	TYPE_DOUBLE
+	TYPE_DOUBLE,
+	TYPE_T,
+	TYPE_BT
 };
 
 // BLOB does what PTR needs
@@ -233,6 +287,8 @@ extern const tv_t date_eot;
 // All data will be after: 2-Jan-2014 00:00:00+00
 #define DATE_BEGIN 1388620800L
 extern const tv_t date_begin;
+
+#define DATE_ZERO(_tv) (_tv)->tv_sec = (_tv)->tv_usec = 0L
 
 #define BTC_TO_D(_amt) ((double)((_amt) / 100000000.0))
 
@@ -274,6 +330,8 @@ extern bool everyone_die;
 extern tv_t last_heartbeat;
 extern tv_t last_workinfo;
 extern tv_t last_share;
+extern tv_t last_share_acc;
+extern tv_t last_share_inv;
 extern tv_t last_auth;
 extern cklock_t last_lock;
 
@@ -298,6 +356,22 @@ extern cklock_t last_lock;
 extern char *btc_server;
 extern char *btc_auth;
 extern int btc_timeout;
+// Lock access to the above variables so they can be changed
+extern cklock_t btc_lock;
+
+#define EDDB "expirydate"
+#define CDDB "createdate"
+#define CDTRF CDDB
+#define BYDB "createby"
+#define BYTRF BYDB
+#define CODEDB "createcode"
+#define CODETRF CODEDB
+#define INETDB "createinet"
+#define INETTRF INETDB
+#define MDDB "modifydate"
+#define MBYDB "modifyby"
+#define MCODEDB "modifycode"
+#define MINETDB "modifyinet"
 
 extern char *by_default;
 extern char *inet_default;
@@ -305,8 +379,9 @@ extern char *id_default;
 
 enum cmd_values {
 	CMD_UNSET,
+	CMD_DUPSEQ, // Ignore, we've already got it
 	CMD_REPLY, // Means something was wrong - send back reply
-	CMD_SHUTDOWN,
+	CMD_TERMINATE,
 	CMD_PING,
 	CMD_VERSION,
 	CMD_LOGLEVEL,
@@ -318,6 +393,7 @@ enum cmd_values {
 	CMD_HEARTBEAT,
 	CMD_NEWPASS,
 	CMD_CHKPASS,
+	CMD_2FA,
 	CMD_USERSET,
 	CMD_WORKERSET,
 	CMD_POOLSTAT,
@@ -341,8 +417,16 @@ enum cmd_values {
 	CMD_PPLNS,
 	CMD_PPLNS2,
 	CMD_PAYOUTS,
+	CMD_MPAYOUTS,
+	CMD_SHIFTS,
 	CMD_USERSTATUS,
 	CMD_MARKS,
+	CMD_PSHIFT,
+	CMD_SHSTA,
+	CMD_USERINFO,
+	CMD_BTCSET,
+	CMD_QUERY,
+	CMD_LOCKS,
 	CMD_END
 };
 
@@ -375,8 +459,8 @@ enum cmd_values {
 // CCLs are every ...
 #define ROLL_S 3600
 
-#define LOGQUE(_msg) log_queue_message(_msg)
-#define LOGFILE(_msg) rotating_log_nolock(_msg)
+#define LOGQUE(_msg, _db) log_queue_message(_msg, _db)
+#define LOGFILE(_msg, _prefix) rotating_log_nolock(_msg, _prefix)
 #define LOGDUP "dup."
 
 // ***
@@ -386,20 +470,28 @@ enum cmd_values {
 // The size strdup will allocate multiples of
 #define MEMBASE 4
 
+#define LIST_MEM_ADD_SIZ(_list, _siz) do { \
+		if (_siz % MEMBASE) \
+			_siz += MEMBASE - (_siz % MEMBASE); \
+		_list->ram += (int)_siz; \
+	} while (0)
+
 #define LIST_MEM_ADD(_list, _fld) do { \
-		size_t __siz; \
-		__siz = strlen(_fld) + 1; \
-		if (__siz % MEMBASE) \
-			__siz += MEMBASE - (__siz % MEMBASE); \
-		_list->ram += (int)__siz; \
+		if ((_fld) && (_fld) != EMPTY) { \
+			size_t __siz; \
+			__siz = strlen(_fld) + 1; \
+			LIST_MEM_ADD_SIZ(_list, __siz); \
+		} \
 	} while (0)
 
 #define LIST_MEM_SUB(_list, _fld) do { \
-		size_t __siz; \
-		__siz = strlen(_fld) + 1; \
-		if (__siz % MEMBASE) \
-			__siz += MEMBASE - (__siz % MEMBASE); \
-		_list->ram -= (int)__siz; \
+		if ((_fld) && (_fld) != EMPTY) { \
+			size_t __siz; \
+			__siz = strlen(_fld) + 1; \
+			if (__siz % MEMBASE) \
+				__siz += MEMBASE - (__siz % MEMBASE); \
+			_list->ram -= (int)__siz; \
+		} \
 	} while (0)
 
 #define SET_POINTER(_list, _fld, _val, _def) do { \
@@ -418,8 +510,25 @@ enum cmd_values {
 					LIST_MEM_ADD(_list, _val); \
 				_fld = strdup(_val); \
 				if (!(_fld)) \
-					quithere(1, "malloc OOM"); \
+					quithere(1, "strdup OOM"); \
 			} \
+		} \
+	} while (0)
+
+#define DUP_POINTER(_list, _fld, _val) do { \
+		if ((_fld) && ((_fld) != EMPTY)) { \
+			if (_list) \
+				LIST_MEM_SUB(_list, _fld); \
+			free(_fld); \
+		} \
+		if (!(_val) || !(*(_val))) \
+			(_fld) = EMPTY; \
+		else { \
+			if (_list) \
+				LIST_MEM_ADD(_list, _val); \
+			_fld = strdup(_val); \
+			if (!(_fld)) \
+				quithere(1, "strdup OOM"); \
 		} \
 	} while (0)
 
@@ -430,7 +539,7 @@ enum cmd_values {
 #define SET_MODIFYCODE(_list, _fld, _val) SET_POINTER(_list, _fld, _val, EMPTY)
 #define SET_MODIFYINET(_list, _fld, _val) SET_POINTER(_list, _fld, _val, inet_default)
 
-#define HISTORYDATECONTROL ",createdate,createby,createcode,createinet,expirydate"
+#define HISTORYDATECONTROL ","CDDB","BYDB","CODEDB","INETDB","EDDB
 #define HISTORYDATECOUNT 5
 #define HISTORYDATECONTROLFIELDS \
 	tv_t createdate; \
@@ -457,17 +566,17 @@ enum cmd_values {
 			size_t __siz = sizeof(__reply); \
 			K_ITEM *__item; \
 			TRANSFER *__transfer; \
-			__item = optional_name(_root, "createby", 1, NULL, __reply, __siz); \
+			__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
 				STRNCPY(_row->createby, __transfer->mvalue); \
 			} \
-			__item = optional_name(_root, "createcode", 1, NULL, __reply, __siz); \
+			__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
 				STRNCPY(_row->createcode, __transfer->mvalue); \
 			} \
-			__item = optional_name(_root, "createinet", 1, NULL, __reply, __siz); \
+			__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
 				STRNCPY(_row->createinet, __transfer->mvalue); \
@@ -475,8 +584,8 @@ enum cmd_values {
 		} \
 	} while (0)
 
-#define MODIFYDATECONTROL ",createdate,createby,createcode,createinet" \
-			  ",modifydate,modifyby,modifycode,modifyinet"
+#define MODIFYDATECONTROL ","CDDB","BYDB","CODEDB","INETDB \
+			  ","MDDB","MBYDB","MCODEDB","MINETDB
 #define MODIFYDATECOUNT 8
 #define MODIFYUPDATECOUNT 4
 #define MODIFYDATECONTROLFIELDS \
@@ -506,8 +615,7 @@ enum cmd_values {
 		STRNCPY(_row->createby, _by); \
 		STRNCPY(_row->createcode, _code); \
 		STRNCPY(_row->createinet, _inet); \
-		_row->modifydate.tv_sec = 0; \
-		_row->modifydate.tv_usec = 0; \
+		DATE_ZERO(&(_row->modifydate)); \
 		_row->modifyby[0] = '\0'; \
 		_row->modifycode[0] = '\0'; \
 		_row->modifyinet[0] = '\0'; \
@@ -529,8 +637,7 @@ enum cmd_values {
 		SET_CREATEBY(_list, _row->createby, _by); \
 		SET_CREATECODE(_list, _row->createcode, _code); \
 		SET_CREATEINET(_list, _row->createinet, _inet); \
-		_row->modifydate.tv_sec = 0; \
-		_row->modifydate.tv_usec = 0; \
+		DATE_ZERO(&(_row->modifydate)); \
 		SET_MODIFYBY(_list, _row->modifyby, EMPTY); \
 		SET_MODIFYCODE(_list, _row->modifycode, EMPTY); \
 		SET_MODIFYINET(_list, _row->modifyinet, EMPTY); \
@@ -555,17 +662,17 @@ enum cmd_values {
 			size_t __siz = sizeof(__reply); \
 			K_ITEM *__item; \
 			TRANSFER *__transfer; \
-			__item = optional_name(_root, "createby", 1, NULL, __reply, __siz); \
+			__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
 				SET_CREATEBY(_list, _row->createby, __transfer->mvalue); \
 			} \
-			__item = optional_name(_root, "createcode", 1, NULL, __reply, __siz); \
+			__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
 				SET_CREATECODE(_list, _row->createcode, __transfer->mvalue); \
 			} \
-			__item = optional_name(_root, "createinet", 1, NULL, __reply, __siz); \
+			__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
 				SET_CREATEINET(_list, _row->createinet, __transfer->mvalue); \
@@ -574,7 +681,7 @@ enum cmd_values {
 		} \
 	} while (0)
 
-#define SIMPLEDATECONTROL ",createdate,createby,createcode,createinet"
+#define SIMPLEDATECONTROL ","CDDB","BYDB","CODEDB","INETDB
 #define SIMPLEDATECOUNT 4
 #define SIMPLEDATECONTROLFIELDS \
 	tv_t createdate; \
@@ -605,17 +712,17 @@ enum cmd_values {
 		size_t __siz = sizeof(__reply); \
 		K_ITEM *__item; \
 		TRANSFER *__transfer; \
-		__item = optional_name(_root, "createby", 1, NULL, __reply, __siz); \
+		__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
 		if (__item) { \
 			DATA_TRANSFER(__transfer, __item); \
 			STRNCPY(_row->createby, __transfer->mvalue); \
 		} \
-		__item = optional_name(_root, "createcode", 1, NULL, __reply, __siz); \
+		__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
 		if (__item) { \
 			DATA_TRANSFER(__transfer, __item); \
 			STRNCPY(_row->createcode, __transfer->mvalue); \
 		} \
-		__item = optional_name(_root, "createinet", 1, NULL, __reply, __siz); \
+		__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
 		if (__item) { \
 			DATA_TRANSFER(__transfer, __item); \
 			STRNCPY(_row->createinet, __transfer->mvalue); \
@@ -625,6 +732,7 @@ enum cmd_values {
 // LOGQUEUE
 typedef struct logqueue {
 	char *msg;
+	bool db;
 } LOGQUEUE;
 
 #define ALLOC_LOGQUEUE 1024
@@ -635,30 +743,55 @@ typedef struct logqueue {
 extern K_LIST *logqueue_free;
 extern K_STORE *logqueue_store;
 
-// WORKQUEUE
-typedef struct workqueue {
-	char *buf;
+// MSGLINE
+typedef struct msgline {
 	int which_cmds;
-	enum cmd_values cmdnum;
-	char cmd[CMD_SIZ+1];
-	char id[ID_SIZ+1];
 	tv_t now;
-	char by[TXT_SML+1];
-	char code[TXT_MED+1];
-	char inet[TXT_MED+1];
 	tv_t cd;
+	char id[ID_SIZ+1];
+	char cmd[CMD_SIZ+1];
+	char *msg;
+	bool hasseq;
+	char *seqcmdnam;
+	uint64_t n_seqall;
+	uint64_t n_seqcmd;
+	uint64_t n_seqstt;
+	uint64_t n_seqpid;
+	int seqentryflags;
+	char *code;
 	K_TREE *trf_root;
 	K_STORE *trf_store;
+	int sockd;
+} MSGLINE;
+
+#define ALLOC_MSGLINE 8192
+#define LIMIT_MSGLINE 0
+#define CULL_MSGLINE 16
+#define INIT_MSGLINE(_item) INIT_GENERIC(_item, msgline)
+#define DATA_MSGLINE(_var, _item) DATA_GENERIC(_var, _item, msgline, true)
+#define DATA_MSGLINE_NULL(_var, _item) DATA_GENERIC(_var, _item, msgline, false)
+
+extern K_LIST *msgline_free;
+extern K_STORE *msgline_store;
+
+// WORKQUEUE
+typedef struct workqueue {
+	K_ITEM *msgline_item;
+	char *by;
+	char *code;
+	char *inet;
 } WORKQUEUE;
 
 #define ALLOC_WORKQUEUE 1024
 #define LIMIT_WORKQUEUE 0
-#define CULL_WORKQUEUE 16
+#define CULL_WORKQUEUE 32
 #define INIT_WORKQUEUE(_item) INIT_GENERIC(_item, workqueue)
 #define DATA_WORKQUEUE(_var, _item) DATA_GENERIC(_var, _item, workqueue, true)
 
 extern K_LIST *workqueue_free;
-extern K_STORE *workqueue_store;
+extern K_STORE *pool_workqueue_store;
+extern K_STORE *cmd_workqueue_store;
+extern K_STORE *btc_workqueue_store;
 extern mutex_t wq_waitlock;
 extern pthread_cond_t wq_waitcond;
 
@@ -689,7 +822,7 @@ typedef struct transfer {
 // Suggest malloc use MMAP - 1913 = largest under 2MB
 #define ALLOC_TRANSFER 1913
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 16
+#define CULL_TRANSFER 64
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
@@ -711,11 +844,219 @@ extern K_ITEM shareerrors_secondaryuserid;
 extern tv_t missing_secuser_min;
 extern tv_t missing_secuser_max;
 
+/* The aim of the sequence data is to identify and ignore duplicate records -
+ *  which should usually only be during a reload -
+ *  and to identify missing records when their sequence numbers are skipped
+ *
+ * If at any time there is a problem with a sequence number, an error is
+ *  reported, then the record being processed is simply processed normally by
+ *  the cmd_func() it was intended for - which may or may not produce other
+ *  processing error messages depending on the validity of the rest of the data
+ *
+ * Field explanation:
+ *  Normal sequence processing would be that we first get seq N, then N+1
+ *   then N+2 ... etc.
+ *   seqbase,minseq,maxseq are all set to the first N for the given sequence
+ *   maxseq is incremented to the current maximum N+x each time a record is
+ *   processed
+ *  If we get up to N+3 but it is unexpectedly followed by N+5, that means N+4
+ *   is currently missing - so it is flagged as missing by MISSFLAG=0 and the
+ *   missing counters are incremented - maxseq will now be N+5
+ *  Once we reach N+size we need to discard N and use it as N+size
+ *   and increment seqbase N
+ *   When we discard the oldest entry due to needing more, if that oldest
+ *    entry was missing, it is now considered lost and the lost counters
+ *    are incremented (and missing counters decremented)
+ *  If we receive an entry N+x where N+x-maxseq>highlimit we reject it as high
+ *   and increment the high counters - this avoids creating a high bad sequence
+ *   number and flagging any missing sequence numbers, most likely incorrectly,
+ *   as lost in the range N to N+x-size
+ *  If we receive an entry N-x i.e. less than seqbase N, then:
+ *   If maxseq-N = size then N-x is considered stale and the stale counters
+ *    are incremented since there's no unused entries below N available
+ *    This shouldn't normally happen after we've received size seq numbers
+ *   Else maxseq-N is less than size, that means there are unused entries below N
+ *    This will usually only be with a new sequence and the first seq was out
+ *     of order, before lower sequence numbers, thus maxseq should be close to
+ *     seqbase N and no where near N+size and there should be x unused below N
+ *    If there are x unused entries below N then we can move seqbase down to N-x
+ *     after we flag all N-1,N-2,N-3..N-(x-1) as missing
+ *    Else there aren't enough unused entries below N, then N-x is considered
+ *     stale and the stale counters are incremented
+ *
+ * timelimit is an early limit to flag missing sequence numbers as 'transient'
+ * Normally, if a missing entry at N is later reused, it will be discarded and
+ *  reported as lost
+ * After the reload queue is complete, timelimit reports missing sequence
+ *  numbers early, as transient, if they have been missing for 'timelimit' but
+ *  not already lost
+ *  missing isn't decremented, since it is still treated as missing
+ * This is needed in case a size limit on a sequence means it may take a long
+ *  time before it reports messages as lost - this also means that after the
+ *  reload queue has cleared after ckdb startup, it will report the transient
+ *  missing sequence numbers shortly after the timelimit
+ * When they are later found or lost they will again be reported, this time as
+ *  found or lost
+ *
+ * The sequence fields are checked for validity when the message arrives
+ * Sequence order checking of reload lines are done immediately
+ * Checking of ckpool lines isn't done until after the reload completes
+ *  This solves the problem of the overlap from reload to queue
+ *   If we stop the reload when we first match the queue, there's the issue
+ *    that data order in the reload file may not match the data order in the
+ *    queue and thus we could lose a record that is late in the reload file
+ *    but was before the queue start
+ *   To solve this unlikely (but not impossible) issue we reload all reload
+ *    files to the end and then sequence process the queued data after the
+ *    reload completes
+ *   This however produces another (solvable) problem that the queue start
+ *    may be stale when we finally complete the reload
+ *   To handle this we keep a list of all lost records in the reload and check
+ *    the stale queue records against those to see if we found them
+ *    If a queue line is lower than minseq then that's a sequence error
+ *    If a queue line is stale but above minseq, we check if it is in the
+ *     lost list and then report it as recovered (and process it)
+ *    If it wasn't lost then it's an expected duplicate and ignored
+ *    Once the queue exceeds the reload maxseq, the lost records are no longer
+ *     needed and are discarded */
+
+// ckpool sequence numbers
+#define SEQALL "seqall"
+#define SEQSTT "seqstart"
+#define SEQPID "seqpid"
+#define SEQPRE "seq"
+
+/* Value to use for SEQSTT when manually sending messages,
+ *  to make ckdb not check the seq numbers
+ * The message must have a SEQALL but the value is ignored
+ * SEQPID and SEQcmd don't need to exist and are ignored */
+#define SEQSTTIGN 42
+
+enum seq_num {
+	SEQ_NONE = -1, // Invalid to have ckpool seq numbers
+	SEQ_ALL,
+	SEQ_BLOCK,
+	SEQ_SHARES,
+	SEQ_WORKINFO,
+	SEQ_AGEWORKINFO,
+	SEQ_AUTH,
+	SEQ_ADDRAUTH,
+	SEQ_HEARTBEAT,
+	SEQ_SHAREERRORS,
+	SEQ_WORKERSTAT,
+	SEQ_POOLSTATS,
+	SEQ_MAX
+};
+
+// Ensure size is a (multiple of 8)-1
+#define SEQ_CODE 15
+
+#define SECHR(_sif) (((_sif) == SE_EARLYSOCK) ? 'E' : \
+			(((_sif) == SE_RELOAD) ? 'R' : \
+			(((_sif) == SE_SOCKET) ? 'S' : '?')))
+
+// Msg from the socket before startup completed
+#define SE_EARLYSOCK 1
+// Msg was from reload
+#define SE_RELOAD 2
+// Msg from the socket after startup completed
+#define SE_SOCKET 4
+
+typedef struct seqentry {
+	int flags;
+	tv_t cd; // sec:0=missing, usec:0=miss !0=trans
+	tv_t time;
+	char code[SEQ_CODE+1];
+} SEQENTRY;
+
+typedef struct seqdata {
+	size_t	size; // entry count - MUST be a power of 2
+	uint64_t highlimit;
+	int timelimit;
+	uint64_t minseq;
+	uint64_t maxseq;
+	uint64_t seqbase;
+	uint64_t missing;
+	uint64_t trans;
+	uint64_t lost;
+	uint64_t stale;
+	uint64_t high;
+	uint64_t recovered;
+	uint64_t ok;
+	uint64_t reloadmax;
+	tv_t firsttime;
+	tv_t lasttime;
+	tv_t firstcd;
+	tv_t lastcd;
+	SEQENTRY *entry;
+	K_STORE *reload_lost;
+} SEQDATA;
+
+// SEQSET
+typedef struct seqset {
+	uint64_t seqstt; // 0 if unused/unallocated
+	uint64_t seqpid;
+	uint64_t missing; // total from seqdata
+	uint64_t trans; // total from seqdata
+	uint64_t lost; // total from seqdata
+	uint64_t stale; // total from seqdata
+	uint64_t high; // total from seqdata
+	uint64_t recovered; // total from seqdata
+	uint64_t ok; // total from seqdata
+	SEQDATA seqdata[SEQ_MAX];
+} SEQSET;
+
+/* All *_SIZ must be >= 64 and a power of 2
+ *  but if any aren't, the code checks this and quit()s
+ *  the first time it processes a record with sequences */
+
+// SEQALL and SHARES */
+#define SEQ_LARGE_TRANS_LIM 16
+#define SEQ_LARGE_SIZ (65536*SEQ_LARGE_TRANS_LIM)
+// WORKERSTATS, AUTH and ADDRAUTH
+#define SEQ_MEDIUM_TRANS_LIM 32
+#define SEQ_MEDIUM_SIZ 65536
+// The rest
+#define SEQ_SMALL_TRANS_LIM 64
+#define SEQ_SMALL_SIZ 16384
+
+// highlimit ratio (shift down bits)
+#define HIGH_SHIFT 8
+// Smallest highlimit allowed
+#define HIGH_MIN 32 
+// Smallest _SIZ allowed
+#define BASE_SIZ (HIGH_MIN << HIGH_SHIFT)
+
+#define ALLOC_SEQSET 1
+#define LIMIT_SEQSET 16
+#define INIT_SEQSET(_item) INIT_GENERIC(_item, seqset)
+#define DATA_SEQSET(_var, _item) DATA_GENERIC(_var, _item, seqset, true)
+
+// other variables are static in ckdb.c
+extern K_LIST *seqset_free;
+
+// SEQTRANS also used for reload_lost
+typedef struct seqtrans {
+	int seq;
+	uint64_t seqnum;
+	SEQENTRY entry;
+} SEQTRANS;
+
+// The stores are created and freed each time required
+extern K_LIST *seqtrans_free;
+
+#define ALLOC_SEQTRANS 1024
+#define LIMIT_SEQTRANS 0
+#define CULL_SEQTRANS 64
+#define INIT_SEQTRANS(_item) INIT_GENERIC(_item, seqtrans)
+#define DATA_SEQTRANS(_var, _item) DATA_GENERIC(_var, _item, seqtrans, true)
+#define DATA_SEQTRANS_NULL(_var, _item) DATA_GENERIC(_var, _item, seqtrans, false)
+
 // USERS
 typedef struct users {
 	int64_t userid;
 	char username[TXT_BIG+1];
-	char usertrim[TXT_BIG+1]; // Non DB field
+	char usertrim[TXT_BIG+1]; // non-DB field
 	// Anything in 'status' fails mining authentication
 	char status[TXT_BIG+1];
 	char emailaddress[TXT_BIG+1];
@@ -723,6 +1064,10 @@ typedef struct users {
 	char passwordhash[TXT_BIG+1];
 	char secondaryuserid[TXT_SML+1];
 	char salt[TXT_BIG+1];
+	char *userdata;
+	int64_t databits; // non-DB field, Bitmask of userdata content
+	int64_t userbits; // Bitmask of user attributes
+	int32_t lastvalue; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } USERS;
 
@@ -732,10 +1077,42 @@ typedef struct users {
 #define DATA_USERS(_var, _item) DATA_GENERIC(_var, _item, users, true)
 #define DATA_USERS_NULL(_var, _item) DATA_GENERIC(_var, _item, users, false)
 
+#define MIN_USERNAME 3
+
 #define SHA256SIZHEX	64
 #define SHA256SIZBIN	32
 #define SALTSIZHEX	32
 #define SALTSIZBIN	16
+
+#define DATABITS_SEP ','
+#define DATABITS_SEP_STR ","
+
+/* databits attributes
+ * These are generated at dbload time from userdata
+ *  and when the userdata is changed */
+// TOTP Auth 2FA
+#define USER_TOTPAUTH_NAME "totpauth"
+#define USER_TOTPAUTH 0x1
+// 2FA Key untested
+#define USER_TEST2FA_NAME "test2fa"
+#define USER_TEST2FA 0x2
+
+#define USER_TOTP_ENA(_users) \
+	(((_users)->databits & (USER_TOTPAUTH | USER_TEST2FA)) == USER_TOTPAUTH)
+
+// userbits attributes
+// Address account, not a username account
+#define USER_ADDRESS 0x1
+
+// 16 x base 32 (5 bits) = 10 bytes (8 bits)
+#define TOTPAUTH_KEYSIZE 10
+#define TOTPAUTH_DSP_KEYSIZE 16
+// Optioncontrol name
+#define TOTPAUTH_ISSUER "taissuer"
+// Currently only:
+#define TOTPAUTH_AUTH "totp"
+#define TOTPAUTH_HASH "SHA256"
+#define TOTPAUTH_TIME 30
 
 extern K_TREE *users_root;
 extern K_TREE *userid_root;
@@ -768,6 +1145,11 @@ extern K_STORE *useratts_store;
 
 // This att means the user uses multiple % based payout addresses
 #define USER_MULTI_PAYOUT "PayAddresses"
+// If they have multi, then: the default address limit if the useratt num < 1
+#define USER_ADDR_LIMIT 2
+
+#define USER_OLD_WORKERS "OldWorkersDays"
+#define USER_OLD_WORKERS_DEFAULT 7
 
 // WORKERS
 typedef struct workers {
@@ -777,6 +1159,7 @@ typedef struct workers {
 	int32_t difficultydefault;
 	char idlenotificationenabled[TXT_FLAG+1];
 	int32_t idlenotificationtime;
+	int64_t workerbits; // Bitmask of worker attributes
 	HISTORYDATECONTROLFIELDS;
 } WORKERS;
 
@@ -789,6 +1172,10 @@ typedef struct workers {
 extern K_TREE *workers_root;
 extern K_LIST *workers_free;
 extern K_STORE *workers_store;
+// Emulate a list for lock checking
+extern K_LIST *workers_db_free;
+
+// Currently no workerbits attributes
 
 #define DIFFICULTYDEFAULT_MIN 10
 #define DIFFICULTYDEFAULT_MAX 0x7fffffff
@@ -804,14 +1191,25 @@ extern K_STORE *workers_store;
 #define IDLENOTIFICATIONTIME_DEF 0
 #define IDLENOTIFICATIONTIME_DEF_STR STRINT(IDLENOTIFICATIONTIME_DEF)
 
+#define WORKERS_SEL_SEP ','
+#define WORKERS_SEL_SEP_STR ","
+/* There are 2 special select workernames
+ * A DB workername can't accidentally match them
+ *  when including the WORKSEPx at the front of the workername,
+ *  since these 2 don't start with WORKSEP1 or WORKSEP2 */
+#define WORKERS_ALL "all"
+// Empty has a value rather than "", so that "" means nothing selected
+#define WORKERS_EMPTY "noname"
+
 // PAYMENTADDRESSES
 typedef struct paymentaddresses {
 	int64_t paymentaddressid;
 	int64_t userid;
 	char payaddress[TXT_BIG+1];
 	int32_t payratio;
+	char payname[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
-	bool match; // Non-db field
+	bool match; // non-DB field
 } PAYMENTADDRESSES;
 
 #define ALLOC_PAYMENTADDRESSES 1024
@@ -841,7 +1239,7 @@ typedef struct payments {
 	char committxn[TXT_BIG+1];
 	char commitblockhash[TXT_BIG+1];
 	HISTORYDATECONTROLFIELDS;
-	K_ITEM *old_item; // Non-db field
+	K_ITEM *old_item; // non-DB field
 } PAYMENTS;
 
 #define ALLOC_PAYMENTS 1024
@@ -925,6 +1323,7 @@ typedef struct optioncontrol {
 
 // Value it must default to (to work properly)
 #define OPTIONCONTROL_HEIGHT 1
+#define MAX_HEIGHT 999999999
 
 // Test it here rather than obscuring the #define elsewhere
 #if ((OPTIONCONTROL_HEIGHT+1) != START_POOL_HEIGHT)
@@ -955,6 +1354,8 @@ typedef struct workinfo {
 	char bits[TXT_SML+1];
 	char ntime[TXT_SML+1];
 	int64_t reward;
+	int32_t height; // non-DB field
+	double diff_target; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } WORKINFO;
 
@@ -977,6 +1378,13 @@ extern tv_t last_bc;
 // current network diff
 extern double current_ndiff;
 
+// Offset in binary coinbase1 of the block number
+#define BLOCKNUM_OFFSET 42
+// Initial block reward (satoshi)
+#define REWARD_BASE 5000000000.0
+// How many blocks per halving
+#define REWARD_HALVE 210000.0
+
 // SHARES shares.id.json={...}
 typedef struct shares {
 	int64_t workinfoid;
@@ -992,6 +1400,8 @@ typedef struct shares {
 	char error[TXT_SML+1];
 	char secondaryuserid[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
+	int32_t redo; // non-DB field
+	int32_t oldcount; // non-DB field
 } SHARES;
 
 #define ALLOC_SHARES 10000
@@ -1002,6 +1412,24 @@ typedef struct shares {
 extern K_TREE *shares_root;
 extern K_LIST *shares_free;
 extern K_STORE *shares_store;
+// shares unexpectedly before the workinfo
+extern K_TREE *shares_early_root;
+extern K_STORE *shares_early_store;
+
+/* Once a share is this old, it can only once more be
+    check for it's workinfoid and then be discarded */
+#define EARLYSHARESLIMIT 60.0
+
+/* All shares this % less than beng a block, or higher,
+    will be reported on the console */
+#define DIFF_PERCENT_DEFAULT 5
+// OptionControl can override it, > 100 means don't do it
+#define DIFF_PERCENT_NAME "ShareDiffPercent"
+
+// int diff % -> ratio
+#define DIFF_VAL(_v) (1.0 - ((double)(_v) / 100.0))
+
+extern double diff_percent;
 
 // SHAREERRORS shareerrors.id.json={...}
 typedef struct shareerrors {
@@ -1013,9 +1441,11 @@ typedef struct shareerrors {
 	char error[TXT_SML+1];
 	char secondaryuserid[TXT_SML+1];
 	HISTORYDATECONTROLFIELDS;
+	int32_t redo; // non-DB field
+	int32_t oldcount; // non-DB field
 } SHAREERRORS;
 
-#define ALLOC_SHAREERRORS 10000
+#define ALLOC_SHAREERRORS 1000
 #define LIMIT_SHAREERRORS 0
 #define INIT_SHAREERRORS(_item) INIT_GENERIC(_item, shareerrors)
 #define DATA_SHAREERRORS(_var, _item) DATA_GENERIC(_var, _item, shareerrors, true)
@@ -1023,6 +1453,9 @@ typedef struct shareerrors {
 extern K_TREE *shareerrors_root;
 extern K_LIST *shareerrors_free;
 extern K_STORE *shareerrors_store;
+// shareerrors unexpectedly before the workinfo
+extern K_TREE *shareerrors_early_root;
+extern K_STORE *shareerrors_early_store;
 
 // SHARESUMMARY
 typedef struct sharesummary {
@@ -1041,12 +1474,10 @@ typedef struct sharesummary {
 	double sharerej;
 	int64_t sharecount;
 	int64_t errorcount;
-	int64_t countlastupdate; // non-DB field
-	bool inserted; // non-DB field
-	bool saveaged; // non-DB field
-	bool reset; // non-DB field
 	tv_t firstshare;
 	tv_t lastshare;
+	tv_t firstshareacc;
+	tv_t lastshareacc;
 	double lastdiffacc;
 	char complete[TXT_FLAG+1];
 	MODIFYDATECONTROLPOINTERS;
@@ -1070,6 +1501,9 @@ extern K_TREE *sharesummary_root;
 extern K_TREE *sharesummary_workinfoid_root;
 extern K_LIST *sharesummary_free;
 extern K_STORE *sharesummary_store;
+// Pool total sharesummary stats
+extern K_TREE *sharesummary_pool_root;
+extern K_STORE *sharesummary_pool_store;
 
 // BLOCKS block.id.json={...}
 typedef struct blocks {
@@ -1084,6 +1518,8 @@ typedef struct blocks {
 	char nonce[TXT_SML+1];
 	int64_t reward;
 	char confirmed[TXT_FLAG+1];
+	// block Short:Description to use vs default for 'R' in page_blocks.php
+	char info[TXT_SML+1];
 	double diffacc;
 	double diffinv;
 	double shareacc;
@@ -1091,7 +1527,34 @@ typedef struct blocks {
 	int64_t elapsed;
 	char statsconfirmed[TXT_FLAG+1];
 	HISTORYDATECONTROLFIELDS;
-	bool ignore; // Non DB field
+	bool ignore; // non-DB field
+
+	// Calculated only when = 0
+	double netdiff;
+
+	/* non-DB fields for the web page
+	 * Calculate them once off/recalc them when required */
+	double blockdiffratio;
+	double blockcdf;
+	double blockluck;
+
+	/* diffacc for range calculations - includes orphans before it
+	 * orphans have this set to 0 so they can't be double counted */
+	double diffcalc;
+
+	/* From the last found block to this one
+	 * Orphans have these set to zero */
+	double diffratio;
+	double diffmean;
+	double cdferl;
+	double luck;
+
+	// Mean reward ratio per block from last to this
+	double txmean;
+
+	// To save looking them up when needed
+	tv_t prevcreatedate; // non-DB field
+	tv_t blockcreatedate; // non-DB field
 } BLOCKS;
 
 #define ALLOC_BLOCKS 100
@@ -1111,6 +1574,15 @@ typedef struct blocks {
 #define BLOCKS_42_VALUE 101
 #define BLOCKS_ORPHAN 'O'
 #define BLOCKS_ORPHAN_STR "O"
+#define BLOCKS_REJECT 'R'
+#define BLOCKS_REJECT_STR "R"
+
+#define BLOCKS_N_C_STR BLOCKS_NEW_STR " or " BLOCKS_CONFIRM_STR
+#define BLOCKS_N_C_O_STR BLOCKS_NEW_STR ", " BLOCKS_CONFIRM_STR " or " \
+	BLOCKS_ORPHAN_STR
+#define BLOCKS_N_C_O_R_STR BLOCKS_NEW_STR ", " BLOCKS_CONFIRM_STR ", " \
+	BLOCKS_ORPHAN_STR " or " BLOCKS_REJECT_STR
+
 /* Block height difference required before checking if it's orphaned
  * TODO: add a cmd_blockstatus option to un-orphan a block */
 #define BLOCKS_ORPHAN_CHECK 1
@@ -1124,6 +1596,7 @@ extern const char *blocks_new;
 extern const char *blocks_confirm;
 extern const char *blocks_42;
 extern const char *blocks_orphan;
+extern const char *blocks_reject;
 extern const char *blocks_unknown;
 
 #define KANO -27972
@@ -1131,6 +1604,14 @@ extern const char *blocks_unknown;
 extern K_TREE *blocks_root;
 extern K_LIST *blocks_free;
 extern K_STORE *blocks_store;
+// Access both under blocks_free lock
+extern tv_t blocks_stats_time;
+extern bool blocks_stats_rebuild;
+
+// Default number of blocks to display on web
+#define BLOCKS_DEFAULT 42
+// OptionControl can override it
+#define BLOCKS_SETTING_NAME "BlocksPageSize"
 
 // MININGPAYOUTS
 typedef struct miningpayouts {
@@ -1139,7 +1620,7 @@ typedef struct miningpayouts {
 	double diffacc;
 	int64_t amount;
 	HISTORYDATECONTROLFIELDS;
-	K_ITEM *old_item; // Non-db field
+	K_ITEM *old_item; // non-DB field
 } MININGPAYOUTS;
 
 #define ALLOC_MININGPAYOUTS 1000
@@ -1157,6 +1638,7 @@ typedef struct payouts {
 	int64_t payoutid;
 	int32_t height;
 	char blockhash[TXT_BIG+1];
+	tv_t blockcreatedate; // non-DB field
 	int64_t minerreward;
 	int64_t workinfoidstart;
 	int64_t workinfoidend;
@@ -1178,9 +1660,11 @@ typedef struct payouts {
 
 extern K_TREE *payouts_root;
 extern K_TREE *payouts_id_root;
+extern K_TREE *payouts_wid_root;
 extern K_LIST *payouts_free;
 extern K_STORE *payouts_store;
-extern cklock_t process_pplns_lock;
+// Emulate a list for lock checking
+extern K_LIST *process_pplns_free;
 
 // N.B. status should be checked under r/w lock
 #define PAYOUTS_GENERATED 'G'
@@ -1190,6 +1674,20 @@ extern cklock_t process_pplns_lock;
 #define PAYOUTS_PROCESSING 'P'
 #define PAYOUTS_PROCESSING_STR "P"
 #define PAYPROCESSING(_status) ((_status)[0] == PAYOUTS_PROCESSING)
+// An orphaned payout must be ignored
+#define PAYOUTS_ORPHAN 'O'
+#define PAYOUTS_ORPHAN_STR "O"
+#define PAYORPHAN(_status) ((_status)[0] == PAYOUTS_ORPHAN)
+// A rejected payout must be ignored
+#define PAYOUTS_REJECT 'R'
+#define PAYOUTS_REJECT_STR "R"
+#define PAYREJECT(_status) ((_status)[0] == PAYOUTS_REJECT)
+
+// Default number of shifts (payouts) to display on web
+#define SHIFTS_DEFAULT 99
+/* OptionControl can override it
+ * UserAtts can also at the user level */
+#define SHIFTS_SETTING_NAME "ShiftsPageSize"
 
 /*
 // EVENTLOG
@@ -1247,11 +1745,11 @@ typedef struct poolstats {
 	double hashrate5m;
 	double hashrate1hr;
 	double hashrate24hr;
-	bool stored; // Non-db field
+	bool stored; // non-DB field
 	SIMPLEDATECONTROLFIELDS;
 } POOLSTATS;
 
-#define ALLOC_POOLSTATS 10000
+#define ALLOC_POOLSTATS 1000
 #define LIMIT_POOLSTATS 0
 #define INIT_POOLSTATS(_item) INIT_GENERIC(_item, poolstats)
 #define DATA_POOLSTATS(_var, _item) DATA_GENERIC(_var, _item, poolstats, true)
@@ -1278,7 +1776,7 @@ typedef struct userstats {
 	double hashrate5m;
 	double hashrate1hr;
 	double hashrate24hr;
-	bool idle; // Non-db field
+	bool idle; // non-DB field
 	char summarylevel[TXT_FLAG+1]; // SUMMARY_NONE in RAM
 	int32_t summarycount;
 	tv_t statsdate;
@@ -1290,7 +1788,7 @@ typedef struct userstats {
  * createdate batch, and thus could move all (complete) records
  * matching the createdate from userstats_eos_store into the tree */
 
-#define ALLOC_USERSTATS 10000
+#define ALLOC_USERSTATS 1000
 #define LIMIT_USERSTATS 0
 #define INIT_USERSTATS(_item) INIT_GENERIC(_item, userstats)
 #define DATA_USERSTATS(_var, _item) DATA_GENERIC(_var, _item, userstats, true)
@@ -1380,22 +1878,37 @@ typedef struct workerstatus {
 	char workername[TXT_BIG+1];
 	tv_t last_auth;
 	tv_t last_share;
-	double last_diff;
+	tv_t last_share_acc;
+	double last_diff_acc;
 	tv_t last_stats;
 	tv_t last_idle;
 	// Below gets reset on each block
-	double diffacc;
-	double diffinv; // Non-acc
-	double diffsta;
-	double diffdup;
-	double diffhi;
-	double diffrej;
-	double shareacc;
-	double shareinv; // Non-acc
-	double sharesta;
-	double sharedup;
-	double sharehi;
-	double sharerej;
+	double block_diffacc;
+	double block_diffinv; // Non-acc
+	double block_diffsta;
+	double block_diffdup;
+	double block_diffhi;
+	double block_diffrej;
+	double block_shareacc;
+	double block_shareinv; // Non-acc
+	double block_sharesta;
+	double block_sharedup;
+	double block_sharehi;
+	double block_sharerej;
+	// Below gets reset on each idle
+	double active_diffacc;
+	double active_diffinv; // Non-acc
+	double active_diffsta;
+	double active_diffdup;
+	double active_diffhi;
+	double active_diffrej;
+	double active_shareacc;
+	double active_shareinv; // Non-acc
+	double active_sharesta;
+	double active_sharedup;
+	double active_sharehi;
+	double active_sharerej;
+	tv_t active_start;
 } WORKERSTATUS;
 
 #define ALLOC_WORKERSTATUS 1000
@@ -1426,6 +1939,8 @@ typedef struct markersummary {
 	int64_t errorcount;
 	tv_t firstshare;
 	tv_t lastshare;
+	tv_t firstshareacc;
+	tv_t lastshareacc;
 	double lastdiffacc;
 	MODIFYDATECONTROLPOINTERS;
 } MARKERSUMMARY;
@@ -1440,6 +1955,12 @@ extern K_TREE *markersummary_root;
 extern K_TREE *markersummary_userid_root;
 extern K_LIST *markersummary_free;
 extern K_STORE *markersummary_store;
+// Pool total markersummary stats
+extern K_TREE *markersummary_pool_root;
+extern K_STORE *markersummary_pool_store;
+
+// The markerid load start for markersummary
+extern char *mark_start;
 
 // WORKMARKERS
 typedef struct workmarkers {
@@ -1449,6 +1970,9 @@ typedef struct workmarkers {
 	int64_t workinfoidstart;
 	char *description;
 	char status[TXT_FLAG+1];
+	int rewards; // non-DB field
+	double pps_value; // non-DB field
+	double rewarded; // non-DB field
 	HISTORYDATECONTROLFIELDS;
 } WORKMARKERS;
 
@@ -1538,6 +2062,7 @@ extern K_STORE *marks_store;
 #define MARKTYPE_SHIFT_END 'e'
 // 'o' used for manual marks
 #define MARKTYPE_OTHER_BEGIN 'o'
+#define MARKTYPE_OTHER_BEGIN_STR "o"
 // 'f' used for manual marks
 #define MARKTYPE_OTHER_FINISH 'f'
 
@@ -1566,10 +2091,47 @@ extern const char *marktype_shift_end_skip;
 #define MARK_USED_STR "u"
 #define MUSED(_status) (tolower((_status)[0]) == MARK_USED)
 
+enum info_type {
+	INFO_NEW,
+	INFO_ORPHAN,
+	INFO_REJECT
+};
+
+// USERINFO from various incoming data
+typedef struct userinfo {
+	int64_t userid;
+	char username[TXT_BIG+1];
+	int blocks;
+	int orphans; // How many blocks are orphans
+	int rejects; // How many blocks are rejects
+	tv_t last_block;
+	// For all time
+	double diffacc;
+	double diffsta;
+	double diffdup;
+	double diffhi;
+	double diffrej;
+	double shareacc;
+	double sharesta;
+	double sharedup;
+	double sharehi;
+	double sharerej;
+} USERINFO;
+
+#define ALLOC_USERINFO 1000
+#define LIMIT_USERINFO 0
+#define INIT_USERINFO(_item) INIT_GENERIC(_item, userinfo)
+#define DATA_USERINFO(_var, _item) DATA_GENERIC(_var, _item, userinfo, true)
+
+extern K_TREE *userinfo_root;
+extern K_LIST *userinfo_free;
+extern K_STORE *userinfo_store;
+
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnow(tv_t *now);
 extern void tick();
 extern PGconn *dbconnect();
+extern void sequence_report(bool lock);
 
 // ***
 // *** ckdb_data.c ***
@@ -1589,15 +2151,34 @@ extern PGconn *dbconnect();
 #define PPLNSDIFFTIMES "pplns_diff_times"
 #define PPLNSDIFFADD "pplns_diff_add"
 
+#define REWARDOVERRIDE "MinerReward"
+
+#define PPSOVERRIDE "PPSValue"
+
 // Data free functions (first)
+#define FREE_ITEM(item) do { } while(0)
+// TODO: make a macro for all other to use above macro
+extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
+extern void free_users_data(K_ITEM *item);
 extern void free_workinfo_data(K_ITEM *item);
 extern void free_sharesummary_data(K_ITEM *item);
+extern void free_payouts_data(K_ITEM *item);
 extern void free_optioncontrol_data(K_ITEM *item);
 extern void free_markersummary_data(K_ITEM *item);
 extern void free_workmarkers_data(K_ITEM *item);
 extern void free_marks_data(K_ITEM *item);
+#define free_seqset_data(_item) _free_seqset_data(_item)
+extern void _free_seqset_data(K_ITEM *item);
 
-extern char *safe_text(char *txt);
+// Data copy functions
+#define COPY_DATA(_new, _old) memcpy(_new, _old, sizeof(*(_new)))
+
+extern void copy_users(USERS *newu, USERS *oldu);
+#define copy_blocks(_newb, _oldb) COPY_DATA(_newb, _oldb)
+
+#define safe_text(_txt) _safe_text(_txt, true)
+#define safe_text_nonull(_txt) _safe_text(_txt, false)
+extern char *_safe_text(char *txt, bool shownull);
 extern void username_trim(USERS *users);
 extern bool like_address(char *username);
 
@@ -1630,8 +2211,12 @@ extern char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz,
 #define ctv_to_buf(_data, _buf, _siz) _ctv_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 #define ftv_to_buf(_data, _buf, _siz) _ftv_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 #define tvs_to_buf(_data, _buf, _siz) _tvs_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
+#define btv_to_buf(_data, _buf, _siz) _btv_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 //#define blob_to_buf(_data, _buf, _siz) _blob_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 #define double_to_buf(_data, _buf, _siz) _double_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
+#define t_to_buf(_data, _buf, _siz) _t_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
+#define bt_to_buf(_data, _buf, _siz) _bt_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
+#define btu64_to_buf(_data, _buf, _siz) _btu64_to_buf(_data, _buf, _siz, WHERE_FFL_HERE)
 
 extern char *_str_to_buf(char data[], char *buf, size_t siz, WHERE_FFL_ARGS);
 extern char *_bigint_to_buf(int64_t data, char *buf, size_t siz, WHERE_FFL_ARGS);
@@ -1643,10 +2228,17 @@ extern char *_ctv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 extern char *_ftv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 // Convert tv to seconds (ignore uS)
 extern char *_tvs_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
+// Convert tv to (brief) DD/HH:MM:SS
+extern char *_btv_to_buf(tv_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 /* unused yet
 extern char *_blob_to_buf(char *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 */
 extern char *_double_to_buf(double data, char *buf, size_t siz, WHERE_FFL_ARGS);
+// Convert seconds (only) time to date
+extern char *_t_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
+// Convert seconds (only) time to (brief) M-DD/HH:MM:SS
+extern char *_bt_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
+extern char *_btu64_to_buf(uint64_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
@@ -1663,16 +2255,16 @@ extern K_ITEM *_optional_name(K_TREE *trf_root, char *name, int len, char *patt,
 extern K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 				char *reply, size_t siz, WHERE_FFL_ARGS);
 extern cmp_t cmp_workerstatus(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *get_workerstatus(int64_t userid, char *workername);
-#define find_create_workerstatus(_u, _w, _file, _func, _line) \
-	_find_create_workerstatus(_u, _w, true, _file, _func, _line, WHERE_FFL_HERE)
-#define find_workerstatus(_u, _w, _file, _func, _line) \
-	 _find_create_workerstatus(_u, _w, false, _file, _func, _line, WHERE_FFL_HERE)
-
-extern K_ITEM *_find_create_workerstatus(int64_t userid, char *workername,
-					 bool create, const char *file2,
+extern K_ITEM *find_workerstatus(bool gotlock, int64_t userid, char *workername);
+#define find_create_workerstatus(_gl, _ac, _u, _w, _hw, _file, _func, _line) \
+	_find_create_workerstatus(_gl, _ac, _u, _w, _hw, _file, _func, _line, \
+				  WHERE_FFL_HERE)
+extern K_ITEM *_find_create_workerstatus(bool gotlock, bool alertcreate,
+					 int64_t userid, char *workername,
+					 bool hasworker, const char *file2,
 					 const char *func2, const int line2,
 					 WHERE_FFL_ARGS);
+extern void zero_all_active(tv_t *when);
 extern void workerstatus_ready();
 #define workerstatus_update(_auths, _shares, _userstats) \
 	_workerstatus_update(_auths, _shares, _userstats, WHERE_FFL_HERE)
@@ -1683,12 +2275,40 @@ extern cmp_t cmp_userid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_users(char *username);
 extern K_ITEM *find_userid(int64_t userid);
 extern void make_salt(USERS *users);
-extern void password_hash(char *username, char *passwordhash, char *salt, char *result, size_t siz);
+extern void password_hash(char *username, char *passwordhash, char *salt,
+			  char *result, size_t siz);
 extern bool check_hash(USERS *users, char *passwordhash);
+extern void users_databits(USERS *users);
+#define users_userdata_get_hex(_users, _name, _bit, _hexlen) \
+	_users_userdata_get_hex(_users, _name, _bit, _hexlen, WHERE_FFL_HERE)
+extern char *_users_userdata_get_hex(USERS *users, char *name, int64_t bit,
+				     size_t *hexlen, WHERE_FFL_ARGS);
+#define users_userdata_get_bin(_users, _name, _bit, _binlen) \
+	_users_userdata_get_bin(_users, _name, _bit, _binlen, WHERE_FFL_HERE)
+extern unsigned char *_users_userdata_get_bin(USERS *users, char *name,
+					      int64_t bit, size_t *binlen,
+					      WHERE_FFL_ARGS);
+#define users_userdata_del(_users, _name, _bit) \
+	_users_userdata_del(_users, _name, _bit, WHERE_FFL_HERE)
+extern void _users_userdata_del(USERS *users, char *name, int64_t bit,
+				WHERE_FFL_ARGS);
+// If we want to store a simple string, no point encoding it
+#define users_userdata_add_txt(_users, _name, _bit, _hex) \
+	_users_userdata_add_hex(_users, _name, _bit, _hex, WHERE_FFL_HERE)
+#define users_userdata_add_hex(_users, _name, _bit, _hex) \
+	_users_userdata_add_hex(_users, _name, _bit, _hex, WHERE_FFL_HERE)
+extern void _users_userdata_add_hex(USERS *users, char *name, int64_t bit,
+				    char *hex, WHERE_FFL_ARGS);
+#define users_userdata_add_bin(_users, _name, _bit, _bin, _len) \
+	_users_userdata_add_bin(_users, _name, _bit, _bin, _len, WHERE_FFL_HERE)
+extern void _users_userdata_add_bin(USERS *users, char *name, int64_t bit,
+				    unsigned char *bin, size_t len,
+				    WHERE_FFL_ARGS);
 extern cmp_t cmp_useratts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_useratts(int64_t userid, char *attname);
 extern cmp_t cmp_workers(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_workers(int64_t userid, char *workername);
+extern K_ITEM *find_workers(bool gotlock, int64_t userid, char *workername);
+extern K_ITEM *first_workers(int64_t userid, K_TREE_CTX *ctx);
 extern K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *workername,
 			  char *diffdef, char *idlenotificationenabled,
 			  char *idlenotificationtime, char *by,
@@ -1709,52 +2329,77 @@ extern K_ITEM *find_first_paypayid(int64_t userid, int64_t payoutid, K_TREE_CTX 
 extern cmp_t cmp_accountbalance(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_accountbalance(int64_t userid);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_optioncontrol(char *optionname, tv_t *now, int32_t height);
+extern K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t height);
+#define sys_setting(_name, _def, _now) user_sys_setting(0, _name, _def, _now)
+extern int64_t user_sys_setting(int64_t userid, char *setting_name,
+				int64_t setting_default, const tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
-#define coinbase1height(_cb1) _coinbase1height(_cb1, WHERE_FFL_HERE)
-extern int32_t _coinbase1height(char *coinbase1, WHERE_FFL_ARGS);
-#define cmp_height(_cb1a, _cb1b) _cmp_height(_cb1a, _cb1b, WHERE_FFL_HERE)
-extern cmp_t _cmp_height(char *coinbase1a, char *coinbase1b, WHERE_FFL_ARGS);
+#define coinbase1height(_wi) _coinbase1height(_wi, WHERE_FFL_HERE)
+extern int32_t _coinbase1height(WORKINFO *wi, WHERE_FFL_ARGS);
 extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
-extern bool workinfo_age(PGconn *conn, int64_t workinfoid, char *poolinstance,
-			 char *by, char *code, char *inet, tv_t *cd,
-			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
-			 int64_t *s_count, int64_t *s_diff);
+#define find_workinfo(_wid, _ctx) _find_workinfo(_wid, false, _ctx);
+extern K_ITEM *_find_workinfo(int64_t workinfoid, bool gotlock, K_TREE_CTX *ctx);
+extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
+extern bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by,
+			 char *code, char *inet, tv_t *cd, tv_t *ss_first,
+			 tv_t *ss_last, int64_t *ss_count, int64_t *s_count,
+			 int64_t *s_diff);
+extern double coinbase_reward(int32_t height);
+extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_sharesummary_workinfoid(K_ITEM *a, K_ITEM *b);
-extern void zero_sharesummary(SHARESUMMARY *row, tv_t *cd, double diff);
-extern K_ITEM *find_sharesummary(int64_t userid, char *workername,
-				 int64_t workinfoid);
-extern void auto_age_older(PGconn *conn, int64_t workinfoid, char *poolinstance,
-			   char *by, char *code, char *inet, tv_t *cd);
+extern void zero_sharesummary(SHARESUMMARY *row);
+#define find_sharesummary(_userid, _workername, _workinfoid) \
+	_find_sharesummary(_userid, _workername, _workinfoid, false)
+#define find_sharesummary_p(_workinfoid) \
+	_find_sharesummary(KANO, EMPTY, _workinfoid, true)
+#define POOL_SS(_row) do { \
+		(_row)->userid = KANO; \
+		(_row)->workername = strdup(EMPTY); \
+	} while (0)
+extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
+				  int64_t workinfoid, bool pool);
+extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
+extern void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
+			   char *code, char *inet, tv_t *cd);
 #define dbhash2btchash(_hash, _buf, _siz) \
 	_dbhash2btchash(_hash, _buf, _siz, WHERE_FFL_HERE)
 void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
 #define dsp_hash(_hash, _buf, _siz) \
 	_dsp_hash(_hash, _buf, _siz, WHERE_FFL_HERE)
 extern void _dsp_hash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
+#define blockhash_diff(_hash) _blockhash_diff(_hash, WHERE_FFL_HERE)
+extern double _blockhash_diff(char *hash, WHERE_FFL_ARGS);
 extern void dsp_blocks(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_blocks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_blocks(int32_t height, char *blockhash, K_TREE_CTX *ctx);
-extern K_ITEM *find_prev_blocks(int32_t height);
+extern K_ITEM *find_prev_blocks(int32_t height, K_TREE_CTX *ctx);
 extern const char *blocks_confirmed(char *confirmed);
-extern void zero_on_new_block();
+extern void zero_on_new_block(bool gotlock);
 extern void set_block_share_counters();
+extern bool check_update_blocks_stats(tv_t *stats);
+#define set_blockcreatedate(_h) _set_blockcreatedate(_h, WHERE_FFL_HERE)
+extern bool _set_blockcreatedate(int32_t oldest_height, WHERE_FFL_ARGS);
+#define set_prevcreatedate(_oh) _set_prevcreatedate(_oh, WHERE_FFL_HERE)
+extern bool _set_prevcreatedate(int32_t oldest_height, WHERE_FFL_ARGS);
 extern cmp_t cmp_miningpayouts(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_miningpayouts(int64_t payoutid, int64_t userid);
 extern K_ITEM *first_miningpayouts(int64_t payoutid, K_TREE_CTX *ctx);
 extern cmp_t cmp_mu(K_ITEM *a, K_ITEM *b);
-extern K_TREE *upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid,
-			  double diffacc);
+extern void upd_add_mu(K_TREE *mu_root, K_STORE *mu_store, int64_t userid,
+			double diffacc);
 extern cmp_t cmp_payouts(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_payouts_id(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_payouts_wid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_payouts(int32_t height, char *blockhash);
+extern K_ITEM *first_payouts(int32_t height, K_TREE_CTX *ctx);
 extern K_ITEM *find_last_payouts();
 extern K_ITEM *find_payoutid(int64_t payoutid);
+extern K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx);
+extern double payout_stats(PAYOUTS *payouts, char *statname);
 extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b);
@@ -1766,18 +2411,28 @@ extern cmp_t cmp_markersummary(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_markersummary_userid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_markersummary_userid(int64_t userid, char *workername,
 					 K_TREE_CTX *ctx);
-extern K_ITEM *find_markersummary(int64_t workinfoid, int64_t userid,
-				  char *workername);
+#define find_markersummary(_workinfoid, _userid, _workername) \
+	_find_markersummary(0, _workinfoid, _userid, _workername, false)
+#define find_markersummary_p(_markerid) \
+	_find_markersummary(_markerid, 0, KANO, EMPTY, true)
+#define POOL_MS(_row) do { \
+		(_row)->userid = KANO; \
+		(_row)->workername = EMPTY; \
+	} while (0)
+extern K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
+				   int64_t userid, char *workername, bool pool);
 extern bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 				 tv_t *cd, K_TREE *trf_root);
 extern void dsp_workmarkers(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status);
+extern K_ITEM *find_workmarkers(int64_t workinfoid, bool anystatus, char status, K_TREE_CTX *ctx);
 extern K_ITEM *find_workmarkerid(int64_t markerid, bool anystatus, char status);
 extern bool workmarkers_generate(PGconn *conn, char *err, size_t siz,
 				 char *by, char *code, char *inet, tv_t *cd,
 				 K_TREE *trf_root, bool none_error);
+extern bool reward_shifts(PAYOUTS *payouts, int delta);
+extern bool shift_rewards(K_ITEM *wm_item);
 extern cmp_t cmp_marks(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_marks(int64_t workinfoid);
 extern const char *marks_marktype(char *marktype);
@@ -1787,6 +2442,13 @@ extern bool _marks_description(char *description, size_t siz, char *marktype,
 				int32_t height, char *shift, char *other,
 				WHERE_FFL_ARGS);
 extern char *shiftcode(tv_t *createdate);
+extern cmp_t cmp_userinfo(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *get_userinfo(int64_t userid);
+#define find_create_userinfo(_userid) _find_create_userinfo(_userid, WHERE_FFL_HERE)
+extern K_ITEM *_find_create_userinfo(int64_t userid, WHERE_FFL_ARGS);
+extern void userinfo_update(SHARES *shares, SHARESUMMARY *sharesummary,
+			    MARKERSUMMARY *markersummary, bool ss_sub);
+extern void userinfo_block(BLOCKS *blocks, enum info_type isnew, int delta);
 
 // ***
 // *** PostgreSQL functions ckdb_dbio.c
@@ -1798,6 +2460,8 @@ extern char *shiftcode(tv_t *createdate);
 #define PGOK(_res) ((_res) == PGRES_COMMAND_OK || \
 			(_res) == PGRES_TUPLES_OK || \
 			(_res) == PGRES_EMPTY_QUERY)
+
+#define SQL_UNIQUE_VIOLATION "23505"
 
 #define CKPQ_READ true
 #define CKPQ_WRITE false
@@ -1844,8 +2508,11 @@ extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			 char *newhash, char *email, char *by, char *code,
 			 char *inet, tv_t *cd, K_TREE *trf_root, char *status);
 extern K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
-			char *passwordhash, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root);
+			char *passwordhash, int64_t userbits, char *by,
+			char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+extern bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item,
+			  char *by, char *code, char *inet, tv_t *cd,
+			  K_TREE *trf_root);
 extern bool users_fill(PGconn *conn);
 extern bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun);
 extern K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
@@ -1857,7 +2524,8 @@ extern K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 extern bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd);
 extern bool useratts_fill(PGconn *conn);
 extern K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername,
-			   char *difficultydefault, char *idlenotificationenabled,
+			   bool add_ws, char *difficultydefault,
+			   char *idlenotificationenabled,
 			   char *idlenotificationtime, char *by,
 			   char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
@@ -1901,20 +2569,27 @@ extern bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 extern bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 						char *by, char *code, char *inet,
 						tv_t *cd, K_TREE *trf_root);
-#define sharesummary_update(_conn, _s_row, _e_row, _ss_item, _by, _code, _inet, _cd) \
-		_sharesummary_update(_conn, _s_row, _e_row, _ss_item, _by, _code, _inet, _cd, \
+extern bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm);
+extern char *ooo_status(char *buf, size_t siz);
+#define sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd) \
+	_sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd, \
 					WHERE_FFL_HERE)
-extern bool _sharesummary_update(PGconn *conn, SHARES *s_row, SHAREERRORS *e_row, K_ITEM *ss_item,
-				char *by, char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS);
+extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
+				 char *code, char *inet, tv_t *cd,
+				 WHERE_FFL_ARGS);
+#define sharesummary_age(_ss_item, _by, _code, _inet, _cd) \
+	_sharesummary_age(_ss_item, _by, _code, _inet, _cd, WHERE_FFL_HERE)
+extern bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
+				tv_t *cd, WHERE_FFL_ARGS);
 extern bool sharesummary_fill(PGconn *conn);
 extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 			 double diffacc, double diffinv, double shareacc,
 			 double shareinv, int64_t elapsed,
 			 char *by, char *code, char *inet, tv_t *cd);
-extern bool blocks_add(PGconn *conn, char *height, char *blockhash,
-			char *confirmed, char *workinfoid, char *username,
-			char *workername, char *clientid, char *enonce1,
-			char *nonce2, char *nonce, char *reward,
+extern bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
+			char *confirmed, char *info, char *workinfoid,
+			char *username, char *workername, char *clientid,
+			char *enonce1, char *nonce2, char *nonce, char *reward,
 			char *by, char *code, char *inet, tv_t *cd,
 			bool igndup, char *id, K_TREE *trf_root);
 extern bool blocks_fill(PGconn *conn);
@@ -1930,6 +2605,8 @@ extern void payouts_add_ram(bool ok, K_ITEM *p_item, K_ITEM *old_p_item,
 extern bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item,
 			K_ITEM **old_p_item, char *by, char *code, char *inet,
 			tv_t *cd, K_TREE *trf_root, bool already);
+extern K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now,
+				bool lock);
 extern bool payouts_fill(PGconn *conn);
 extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,
@@ -1990,6 +2667,13 @@ extern bool check_db_version(PGconn *conn);
 // *** ckdb_cmd.c
 // ***
 
+// TODO: limit access by having seperate sockets for each
+#define ACCESS_POOL	(1 << 0)
+#define ACCESS_SYSTEM	(1 << 1)
+#define ACCESS_WEB	(1 << 2)
+#define ACCESS_PROXY	(1 << 3)
+#define ACCESS_CKDB	(1 << 4)
+
 struct CMDS {
 	enum cmd_values cmd_val;
 	char *cmd_str;
@@ -1997,7 +2681,8 @@ struct CMDS {
 	bool createdate; // requires a createdate
 	char *(*func)(PGconn *, char *, char *, tv_t *, char *, char *,
 			char *, tv_t *, K_TREE *);
-	char *access;
+	enum seq_num seq;
+	int access;
 };
 
 extern struct CMDS ckdb_cmds[];
@@ -2008,5 +2693,24 @@ extern struct CMDS ckdb_cmds[];
 
 extern bool btc_valid_address(char *addr);
 extern void btc_blockstatus(BLOCKS *blocks);
+
+// ***
+// *** ckdb_crypt.c
+// ***
+
+#define tob32(_users, _bin, _len, _name, _olen) \
+	_tob32(_users, _bin, _len, _name, _olen, WHERE_FFL_HERE)
+extern char *_tob32(USERS *users, unsigned char *bin, size_t len, char *name,
+		    size_t olen, WHERE_FFL_ARGS);
+extern bool gen_data(USERS *users, unsigned char *buf, size_t len,
+		     int32_t entropy);
+extern K_ITEM *gen_2fa_key(K_ITEM *old_u_item, int32_t entropy, char *by,
+			   char *code, char *inet, tv_t *cd,  K_TREE *trf_root);
+extern bool check_2fa(USERS *users, int32_t value);
+extern bool tst_2fa(K_ITEM *old_u_item, int32_t value, char *by, char *code,
+		    char *inet, tv_t *cd, K_TREE *trf_root);
+extern K_ITEM *remove_2fa(K_ITEM *old_u_item, int32_t value, char *by,
+			  char *code, char *inet, tv_t *cd, K_TREE *trf_root,
+			  bool check);
 
 #endif

@@ -28,6 +28,42 @@ function dq($str)
  return str_replace('"', "\\\"", $str);
 }
 #
+function daysago($val)
+{
+ if ($val < -13)
+	return '';
+
+ if ($val < 60)
+	$des = number_format($val,0).'s';
+ else
+ {
+	$val = $val/60;
+	if ($val < 60)
+		$des = number_format($val,1).'min';
+	else
+	{
+		$val = $val/60;
+		if ($val < 24)
+			$des = number_format($val,1).'hrs';
+		else
+		{
+			$val = $val/24;
+			if ($val < 43)
+				$des = number_format($val,1).'days';
+			else
+			{
+				$val = $val/7;
+				if ($val < 10000)
+					$des = number_format($val,1).'wks';
+				else
+					$des = '';
+			}
+		}
+	}
+ }
+ return $des;
+}
+#
 function howlongago($sec)
 {
  if ($sec < 60)
@@ -63,10 +99,83 @@ function howlongago($sec)
  return $des;
 }
 #
+function howmanyhrs($tot, $days = false, $dh = false)
+{
+ $sec = round($tot);
+ if ($sec < 60)
+	$des = $sec.'s';
+ else
+ {
+	$min = floor($sec / 60);
+	$sec -= $min * 60;
+	if ($min < 60)
+		$des = $min.'m '.$sec.'s';
+	else
+	{
+		$hr = floor($min / 60);
+		$min -= $hr * 60;
+		if ($days && $hr > 23)
+		{
+			$dy = floor($hr / 24);
+			$hr -= $dy * 24;
+			if ($dh == true)
+			{
+				if ($min >= 30)
+				{
+					$hr++;
+					if ($hr > 23)
+					{
+						$dy++;
+						$hr -= 24;
+					}
+				}
+				$ds = '';
+				if ($dy != 1)
+					$ds = 's';
+				if ($hr == 0)
+					$des = "${dy}day$ds";
+				else
+				{
+					$hs = '';
+					if ($hr != 1)
+						$hs = 's';
+					$des = "${dy}day$ds ${hr}hr$hs";
+				}
+			}
+			else
+				$des = $dy.'d '.$hr.'hr '.$min.'m '.$sec.'s';
+		}
+		else
+		{
+			if ($dh == true)
+			{
+				if ($min >= 30)
+					$hr++;
+				$hs = '';
+				if ($hr != 1)
+					$hs = 's';
+				$des = "${hr}hr$hs";
+			}
+			else
+				$des = $hr.'hr '.$min.'m '.$sec.'s';
+		}
+	}
+ }
+ return $des;
+}
+#
 function btcfmt($amt)
 {
  $amt /= 100000000;
  return number_format($amt, 8);
+}
+#
+function utcd($when, $brief = false)
+{
+ if ($brief)
+	 return gmdate('M-d H:i:s', round($when));
+ else
+	 return gmdate('Y-m-d H:i:s+00', round($when));
 }
 #
 global $sipre;
@@ -74,18 +183,18 @@ global $sipre;
 # max of uint256 is ~1.158x10^77, which is well above 'Y' (10^24)
 $sipre = array('', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y');
 #
-function siprefmt($amt)
+function siprefmt($amt, $dot = 2)
 {
  global $sipre;
 
- $dot = 2;
+ $rnd = pow(10, $dot);
  $pref = floor(log10($amt)/3);
  if ($pref < 0)
 	$pref = 0;
  if ($pref >= count($sipre))
 	$pref = count($sipre)-1;
 
- $amt = round(100.0 * $amt / pow(10, $pref * 3)) / 100;
+ $amt = round($rnd * $amt / pow(10, $pref * 3)) / $rnd;
  if ($amt > 999.99 && $pref < (count($sipre)-1))
  {
   $amt /= 1000;
@@ -115,7 +224,7 @@ function dsprate($hr)
 #
 function difffmt($amt)
 {
- return siprefmt($amt);
+ return siprefmt($amt, 3);
 }
 #
 function emailStr($str)
@@ -233,7 +342,7 @@ function safetext($txt, $len = 1024)
 #
 function dbd($data, $user)
 {
- return "<span class=alert><br>Web site is currently down</span>";
+ return "<span class=alert><br>Database is reloading, mining is all OK</span>";
 }
 #
 function dbdown()
@@ -297,18 +406,20 @@ session_start();
 #
 include_once('db.php');
 #
-function validUserPass($user, $pass)
+function validUserPass($user, $pass, $twofa)
 {
- $rep = checkPass($user, $pass);
+ $rep = checkPass($user, $pass, $twofa);
  if ($rep != null)
 	$ans = repDecode($rep);
- usleep(100000); // Max 10x per second
+ usleep(500000); // Max twice per second
  if ($rep != null && $ans['STATUS'] == 'ok')
  {
 	$key = 'ckp'.rand(1000000,9999999);
 	$_SESSION['ckpkey'] = $key;
 	$_SESSION[$key] = array('who' => $user, 'id' => $user);
+	return true;
  }
+ return false;
 }
 #
 function logout()
@@ -324,9 +435,9 @@ function logout()
  }
 }
 #
-function requestRegister()
+function requestLoginRegReset()
 {
- $reg = getparam('Register', false);
+ $reg = getparam('Register', true);
  $reg2 = getparam('Reset', false);
  if ($reg !== NULL || $reg2 !== NULL)
  {
@@ -338,6 +449,8 @@ function requestRegister()
 #
 function tryLogInOut()
 {
+ global $loginfailed;
+
  // If already logged in, it will ignore User/Pass
  if (isset($_SESSION['ckpkey']))
  {
@@ -347,21 +460,31 @@ function tryLogInOut()
  }
  else
  {
-	$user = getparam('User', false);
-	if ($user !== NULL)
-		$user = loginStr($user);
-	if (nuem($user))
-		return;
-
-	$pass = getparam('Pass', false);
-	if (nuem($pass))
-		return;
-
 	$login = getparam('Login', false);
 	if (nuem($login))
 		return;
 
-	validUserPass($user, $pass);
+	$user = getparam('User', false);
+	if ($user !== NULL)
+		$user = loginStr($user);
+	if (nuem($user))
+	{
+		$loginfailed = true;
+		return;
+	}
+
+	$pass = getparam('Pass', false);
+	if (nuem($pass))
+	{
+		$loginfailed = true;
+		return;
+	}
+
+	$twofa = getparam('2fa', false);
+
+	$valid = validUserPass($user, $pass, $twofa);
+	if (!$valid)
+		$loginfailed = true;
  }
 }
 #

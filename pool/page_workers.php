@@ -1,16 +1,35 @@
 <?php
 #
+function worktable()
+{
+ $pg = "<script type='text/javascript'>\n";
+ $pg .= "function wkdet(n,i){var t=document.getElementById(n);if(i&&t){var b,cs,j,c,a;b=i.checked;cs=t.getElementsByTagName('td');for(j=0;c=cs[j];j++)
+{a=c.getAttribute('data-hid');if(a){if(b){c.className=a}else{c.className='hid'}}}}}";
+ $pg .= "</script>\n";
+ $pg .= "Show Details for Invalids: <input type=checkbox onclick='wkdet(\"wkt\",this)'><br>";
+ $pg .= "<table id=wkt callpadding=0 cellspacing=0 border=0>\n";
+ return $pg;
+}
+#
 function worktitle($data, $user)
 {
+ addSort();
+ $r = "input type=radio name=srt onclick=\"sott('worksrt',this);\"";
  $pg  = '<tr class=title>';
- $pg .= '<td class=dl>Worker Name</td>';
+ $pg .= "<td class=dl>Worker <span class=nb>Name:<$r id=srtwrk data-sf=s0></span></td>";
  $pg .= '<td class=dr>Work Diff</td>';
- $pg .= '<td class=dr>Last Share</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtlst data-sf=n2>:Last</span> Share</td>";
  $pg .= '<td class=dr>Shares</td>';
- $pg .= '<td class=dr>Diff</td>';
- $pg .= '<td class=dr>Invalid</td>';
- $pg .= '<td class=dr>Block %</td>';
- $pg .= '<td class=dr>Hash Rate</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtdiff data-sf=r4>:Diff</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtshrate data-sf=r5>:Share Rate</span></td>";
+ $pg .= '<td class=dr>&laquo;Elapsed</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtinv data-sf=r7>:Invalid</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtstale data-sf=r8>:Stale</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtdup data-sf=r9>:Dup</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srthi data-sf=r10>:Hi</span></td>";
+ $pg .= "<td class=hid data-hid=dr><span class=nb><$r id=srtreject data-sf=r11>:Rej</span></td>";
+ $pg .= '<td class=dr>Block&nbsp;%</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtrate data-sf=r13>:Hash</span> Rate</td>";
  $pg .= "</tr>\n";
  return $pg;
 }
@@ -21,8 +40,9 @@ function workhashorder($a, $b)
 }
 #
 function workuser($data, $user, &$offset, &$totshare, &$totdiff,
-			&$totinvalid, &$totrate, &$blockacc,
-			&$blockreward, $old = false, $srt = false)
+			&$totshrate, &$totinvalid, &$totrate, &$blockacc,
+			&$blockreward, $old = false, $srt = false,
+			 $one = false, &$title)
 {
  $ans = getWorkers($user);
 
@@ -33,11 +53,19 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 		$blockacc = $ans['blockacc'];
 	if (isset($ans['blockreward']))
 		$blockreward = $ans['blockreward'];
+	if ($one === true && isset($ans['oldworkers']))
+	{
+		$days = intval($ans['oldworkers']);
+		if ($days != 0)
+			$title = '&nbsp;(active during the last '.$days.' day'.
+				 (($days==1)?'':'s').')';
+	}
 	$all = array();
 	$count = $ans['rows'];
+	$now = $ans['STAMP'];
 	for ($i = 0; $i < $count; $i++)
 	{
-		$lst = $ans['STAMP'] - $ans['w_lastshare:'.$i];
+		$lst = $now - $ans['w_lastshare:'.$i];
 		if ($old !== false && $lst > $old)
 			continue;
 
@@ -48,11 +76,22 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 		$all[] = array('workername' => $ans['workername:'.$i],
 				'w_lastshare' => $ans['w_lastshare:'.$i],
+				'w_lastshareacc' => $ans['w_lastshareacc:'.$i],
 				'w_lastdiff' => $ans['w_lastdiff:'.$i],
 				'w_shareacc' => $ans['w_shareacc:'.$i],
 				'w_diffacc' => $ans['w_diffacc:'.$i],
 				'w_diffinv' => $ans['w_diffinv:'.$i],
+				'w_diffsta' => $ans['w_diffsta:'.$i],
+				'w_diffdup' => $ans['w_diffdup:'.$i],
+				'w_diffhi' => $ans['w_diffhi:'.$i],
+				'w_diffrej' => $ans['w_diffrej:'.$i],
+				'w_sharesta' => $ans['w_sharesta:'.$i],
+				'w_sharedup' => $ans['w_sharedup:'.$i],
+				'w_sharehi' => $ans['w_sharehi:'.$i],
+				'w_sharerej' => $ans['w_sharerej:'.$i],
 				'w_lastdiff' => $ans['w_lastdiff:'.$i],
+				'w_active_diffacc' => $ans['w_active_diffacc:'.$i],
+				'w_active_start' => $ans['w_active_start:'.$i],
 				'w_uhr' => $uhr);
 	}
 
@@ -61,9 +100,11 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 
 	for ($i = 0; $i < $count; $i++)
 	{
-		$lst = $ans['STAMP'] - $all[$i]['w_lastshare'];
+		$lst = $now - $all[$i]['w_lastshare'];
 		if ($old !== false && $lst > $old)
 			continue;
+
+		$lstacc = $now - $all[$i]['w_lastshareacc'];
 
 		if ((($offset) % 2) == 0)
 			$row = 'even';
@@ -78,40 +119,82 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
 			$ld = '&nbsp;';
 		$pg .= "<td class=dr>$ld</td>";
 
-		$pg .= '<td class=dr>'.howlongago($lst).'</td>';
+		$pg .= "<td class=dr data-srt=$lstacc>".howlongago($lstacc).'</td>';
 
 		$shareacc = number_format($all[$i]['w_shareacc'], 0);
 		$totshare += $all[$i]['w_shareacc'];
-		$diffacc = number_format($all[$i]['w_diffacc'], 0);
-		$totdiff += $all[$i]['w_diffacc'];
+		$dacc = $all[$i]['w_diffacc'];
+		$diffacc = number_format($dacc, 0);
+		$ds = round($dacc);
+		$totdiff += $dacc;
 		$pg .= "<td class=dr>$shareacc</td>";
-		$pg .= "<td class=dr>$diffacc</td>";
+		$pg .= "<td class=dr data-srt=$ds>$diffacc</td>";
 
-		$dtot = $all[$i]['w_diffacc'] + $all[$i]['w_diffinv'];
-		if ($dtot > 0)
-			$rej = number_format(100.0 * $all[$i]['w_diffinv'] / $dtot, 3);
+		$acthr = '0';
+		$acthrv = 0;
+		$actstt = $all[$i]['w_active_start'];
+		if ($actstt <= 0 || ($now - $actstt) < 0)
+			$actsin = '&nbsp;';
 		else
-			$rej = '0';
-		$totinvalid +=  $all[$i]['w_diffinv'];
+		{
+			$actsin = howmanyhrs($now - $actstt);
+			$elapsed = $now - $actstt;
+			if ($elapsed > 0)
+			{
+				$acthrv = $all[$i]['w_active_diffacc'] *
+						pow(2,32) / $elapsed;
+				$acthr = dsprate($acthrv);
+				$totshrate += $acthrv;
+			}
+		}
+		$pg .= "<td class=dr data-srt=$acthrv>$acthr</td>";
+		$pg .= "<td class=dr>$actsin</td>";
 
-		$pg .= "<td class=dr>$rej%</td>";
+		$dinv = $all[$i]['w_diffinv'];
+		$dtot = $dacc + $dinv;
+		if ($dtot > 0)
+		{
+			$rejf = $dinv / $dtot;
+			$rej = number_format(100.0 * $rejf, 3);
+		}
+		else
+		{
+			$rejf = 0;
+			$rej = '0';
+		}
+		$totinvalid += $dinv;
+
+		$pg .= "<td class=dr data-srt=$rejf>$rej%</td>";
+
+		foreach(array('sta','dup','hi','rej') as $fld)
+		{
+			$shr = number_format($all[$i]['w_share'.$fld]);
+			$dif = $all[$i]['w_diff'.$fld];
+			$ddif = number_format($dif);
+			$sdif = number_format($dif,0,'','');
+			$pg .= "<td class=hid data-srt=$sdif data-hid=dr>$ddif/$shr</td>";
+		}
 
 		if ($blockacc <= 0)
 			$blkpct = '&nbsp;';
 		else
-			$blkpct = number_format(100.0 * $all[$i]['w_diffacc'] / $blockacc, 3) . '%';
+			$blkpct = number_format(100.0 * $dacc / $blockacc, 3) . '%';
 
 		$pg .= "<td class=dr>$blkpct</td>";
 
 		$uhr = $all[$i]['w_uhr'];
 		if ($uhr == '?')
+		{
 			$uhr = '?GHs';
+			$su = 0;
+		}
 		else
 		{
+			$su = round($uhr);
 			$totrate += $uhr;
 			$uhr = dsprate($uhr);
 		}
-		$pg .= "<td class=dr>$uhr</td>";
+		$pg .= "<td class=dr data-srt=$su>$uhr</td>";
 
 		$pg .= "</tr>\n";
 
@@ -121,19 +204,22 @@ function workuser($data, $user, &$offset, &$totshare, &$totdiff,
  return $pg;
 }
 #
-function worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate, $blockacc, $blockreward)
+function worktotal($offset, $totshare, $totdiff, $totshrate, $totinvalid,
+			$totrate, $blockacc, $blockreward)
 {
  $pg = '';
+ $totshrate = dsprate($totshrate);
  $totrate = dsprate($totrate);
  if (($offset % 2) == 0)
 	$row = 'even';
  else
 	$row = 'odd';
- $pg .= "<tr class=$row><td class=dl>Total:</td><td colspan=2 class=dl></td>";
+ $pg .= "<tr class=$row><td class=dl>Total: $offset</td><td colspan=2 class=dl></td>";
  $shareacc = number_format($totshare, 0);
  $pg .= "<td class=dr>$shareacc</td>";
  $diffacc = number_format($totdiff, 0);
  $pg .= "<td class=dr>$diffacc</td>";
+ $pg .= "<td class=dr>$totshrate</td><td>&nbsp;</td>";
  $dtot = $totdiff + $totinvalid;
  if ($dtot > 0)
 	$rej = number_format(100.0 * $totinvalid / $dtot, 3);
@@ -144,6 +230,7 @@ function worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate, $blockac
 	$blkpct = '&nbsp;';
  else
 	$blkpct = number_format(100.0 * $totdiff / $blockacc, 3) . '%';
+ $pg .= "<td class=hid colspan=4 data-hid=dr>&nbsp;</td>";
  $pg .= "<td class=dr>$blkpct</td>";
  $pg .= "<td class=dr>$totrate</td></tr>\n";
  return $pg;
@@ -151,12 +238,13 @@ function worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate, $blockac
 #
 function doworker($data, $user)
 {
- $pg = '<h1>Workers</h1>';
+ $title = '';
 
- $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
+ $pg = worktable();
 
  $totshare = 0;
  $totdiff = 0;
+ $totshrate = 0;
  $totinvalid = 0;
  $totrate = 0;
  $offset = 0;
@@ -164,12 +252,13 @@ function doworker($data, $user)
  $blockreward = 0;
 
  $pg .= worktitle($data, $user);
- $pg .= workuser($data, $user, $offset, $totshare, $totdiff, $totinvalid,
-			$totrate, $blockacc, $blockreward, false, true);
- $pg .= worktotal($offset, $totshare, $totdiff, $totinvalid, $totrate,
-			$blockacc, $blockreward);
+ $pg .= workuser($data, $user, $offset, $totshare, $totdiff, $totshrate,
+			$totinvalid, $totrate, $blockacc, $blockreward,
+			false, true, true, $title);
+ $pg .= worktotal($offset, $totshare, $totdiff, $totshrate, $totinvalid,
+			$totrate, $blockacc, $blockreward);
 
- if ($blockacc > 0 && $blockreward > 0)
+ if (false && $blockacc > 0 && $blockreward > 0)
  {
 	$btc = btcfmt($totdiff / $blockacc * $blockreward);
 	$pg .= '<tr><td colspan=8 class=dc>';
@@ -178,8 +267,10 @@ function doworker($data, $user)
  }
 
  $pg .= "</table>\n";
+ $pg .= "<script type='text/javascript'>\n";
+ $pg .= "sotc('worksrt','srtrate');</script>\n";
 
- return $pg;
+ return "<h1>Workers$title</h1>".$pg;
 }
 #
 function doworkers($data, $user)

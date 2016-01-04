@@ -106,6 +106,151 @@ function passReset($to, $code, $whoip, $emailinfo)
  return sendnoheader($to, "Password Reset", $message, $emailinfo);
 }
 #
+function payoutAddressChanged($to, $whoip, $emailinfo)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('payout address change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "Your payout address has been changed.$eol$eol";
+ $message .= $ret;
+
+ return sendnoheader($to, "Payout Address Change", $message, $emailinfo);
+}
+#
+function emailAddressChanged($to, $whoip, $emailinfo, $old)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('email address change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "Your email address has been changed to:$eol <$to>$eol$eol";
+ if ($old != null && $old != '')
+ {
+	$message .= "You will no longer receive notifications at the address:$eol <$old>$eol$eol";
+	$send = "$to,$old";
+ }
+ else
+	$send = $to;
+ $message .= $ret;
+
+ return sendnoheader($send, "EMail Address Change", $message, $emailinfo);
+}
+#
+function passChanged($to, $whoip, $emailinfo)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('password change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "Your password was changed.$eol$eol";
+ $message .= "If you didn't change it, then you need to urgently use$eol";
+ $message .= "the password reset at the pool to change it again.$eol$eol";
+ $message .= $ret;
+
+ return sendnoheader($to, "Password Change", $message, $emailinfo);
+}
+#
+function twofaSetup($to, $whoip, $emailinfo)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('2fa change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "2FA is ready to be tested.$eol";
+ $message .= "It will be enabled once you test it.$eol$eol";
+ $message .= $ret;
+
+ return sendnoheader($to, "2FA is Ready to be Enabled", $message, $emailinfo);
+}
+#
+function twofaEnabled($to, $whoip, $emailinfo)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('2fa change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "2FA is enabled on your account.$eol$eol";
+ $message .= $ret;
+
+ return sendnoheader($to, "2FA is Enabled", $message, $emailinfo);
+}
+#
+function twofaCancel($to, $whoip, $emailinfo)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('2fa change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "2FA setup was cancelled on your account.$eol";
+ $message .= "You can set it up later if you want.$eol$eol";
+ $message .= $ret;
+
+ return sendnoheader($to, "2FA was Cancelled", $message, $emailinfo);
+}
+#
+function twofaRemove($to, $whoip, $emailinfo)
+{
+ global $eol;
+
+ if (!isset($emailinfo['KWebURL']))
+	return false;
+
+ $web = $emailinfo['KWebURL'];
+
+ $ret = emailEnd('2fa change', $whoip, $emailinfo);
+ if ($ret === false)
+	return false;
+
+ $message = "2FA was removed from your account.$eol";
+ $message .= "You can set it up again later if you want.$eol$eol";
+ $message .= $ret;
+
+ return sendnoheader($to, "2FA was Removed", $message, $emailinfo);
+}
+#
 # getOpts required for email
 # If they aren't all setup in the DB then email functions will return false
 function emailOptList()

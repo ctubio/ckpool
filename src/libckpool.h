@@ -166,12 +166,8 @@ static inline void flip_80(void *dest_p, const void *src_p)
 
 #define cklock_init(_lock) _cklock_init(_lock, __FILE__, __func__, __LINE__)
 #define ck_rlock(_lock) _ck_rlock(_lock, __FILE__, __func__, __LINE__)
-#define ck_ilock(_lock) _ck_ilock(_lock, __FILE__, __func__, __LINE__)
-#define ck_uilock(_lock) _ck_uilock(_lock, __FILE__, __func__, __LINE__)
-#define ck_ulock(_lock) _ck_ulock(_lock, __FILE__, __func__, __LINE__)
 #define ck_wlock(_lock) _ck_wlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_dwlock(_lock) _ck_dwlock(_lock, __FILE__, __func__, __LINE__)
-#define ck_dwilock(_lock) _ck_dwilock(_lock, __FILE__, __func__, __LINE__)
 #define ck_dlock(_lock) _ck_dlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_runlock(_lock) _ck_runlock(_lock, __FILE__, __func__, __LINE__)
 #define ck_wunlock(_lock) _ck_wunlock(_lock, __FILE__, __func__, __LINE__)
@@ -196,8 +192,11 @@ static inline void flip_80(void *dest_p, const void *src_p)
 
 void logmsg(int loglevel, const char *fmt, ...);
 
-#define DEFLOGBUFSIZ 512
+#define DEFLOGBUFSIZ 1000
 
+#define LOGMSGBUF(__lvl, __buf) do { \
+		logmsg(__lvl, "%s", __buf); \
+	} while(0)
 #define LOGMSGSIZ(__siz, __lvl, __fmt, ...) do { \
 		char tmp42[__siz]; \
 		snprintf(tmp42, sizeof(tmp42), __fmt, ##__VA_ARGS__); \
@@ -236,6 +235,12 @@ void logmsg(int loglevel, const char *fmt, ...);
 } while (0)
 
 #define PAGESIZE (4096)
+
+/* Default timeouts for unix socket reads and writes in seconds. Set write
+ * timeout to double the read timeout in case of one read blocking the next
+ * writer. */
+#define UNIX_READ_TIMEOUT 5
+#define UNIX_WRITE_TIMEOUT 10
 
 /* Share error values */
 
@@ -312,9 +317,6 @@ struct unixsock {
 };
 
 typedef struct unixsock unixsock_t;
-
-typedef struct proc_instance proc_instance_t;
-
 
 void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line);
 #define json_check(VAL, ERR) _json_check(VAL, ERR,  __FILE__, __func__, __LINE__)
@@ -494,18 +496,19 @@ int _open_unix_server(const char *server_path, const char *file, const char *fun
 int _open_unix_client(const char *server_path, const char *file, const char *func, const int line);
 #define open_unix_client(server_path) _open_unix_client(server_path, __FILE__, __func__, __LINE__)
 int wait_close(int sockd, int timeout);
-int wait_read_select(int sockd, int timeout);
+int wait_read_select(int sockd, float timeout);
 int read_length(int sockd, void *buf, int len);
 char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, const char *func, const int line);
 #define RECV_UNIX_TIMEOUT1 30
 #define RECV_UNIX_TIMEOUT2 5
-#define recv_unix_msg(sockd) _recv_unix_msg(sockd, RECV_UNIX_TIMEOUT1, RECV_UNIX_TIMEOUT2, __FILE__, __func__, __LINE__)
-#define recv_unix_msg_tmo(sockd, tmo) _recv_unix_msg(sockd, tmo, RECV_UNIX_TIMEOUT2, __FILE__, __func__, __LINE__)
+#define recv_unix_msg(sockd) _recv_unix_msg(sockd, UNIX_READ_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
+#define recv_unix_msg_tmo(sockd, tmo) _recv_unix_msg(sockd, tmo, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
 #define recv_unix_msg_tmo2(sockd, tmo1, tmo2) _recv_unix_msg(sockd, tmo1, tmo2, __FILE__, __func__, __LINE__)
-int wait_write_select(int sockd, int timeout);
-int write_length(int sockd, const void *buf, int len);
-bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line);
-#define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, __FILE__, __func__, __LINE__)
+int wait_write_select(int sockd, float timeout);
+#define write_length(sockd, buf, len) _write_length(sockd, buf, len, __FILE__, __func__, __LINE__)
+int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line);
+bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line);
+#define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, UNIX_WRITE_TIMEOUT, __FILE__, __func__, __LINE__)
 bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, const char *func, const int line);
 #define send_unix_data(sockd, msg) _send_unix_data(sockd, msg, __FILE__, __func__, __LINE__)
 bool _recv_unix_data(int sockd, struct msghdr *msg, const char *file, const char *func, const int line);
@@ -528,6 +531,8 @@ void trail_slash(char **buf);
 void *_ckalloc(size_t len, const char *file, const char *func, const int line);
 void *json_ckalloc(size_t size);
 void *_ckzalloc(size_t len, const char *file, const char *func, const int line);
+size_t round_up_page(size_t len);
+
 extern const int hex2bin_tbl[];
 void __bin2hex(void *vs, const void *vp, size_t len);
 void *bin2hex(const void *vp, size_t len);
@@ -541,6 +546,7 @@ int safecmp(const char *a, const char *b);
 bool cmdmatch(const char *buf, const char *cmd);
 
 void address_to_pubkeytxn(char *pkh, const char *addr);
+void address_to_scripttxn(char *pkh, const char *addr);
 int ser_number(uchar *s, int32_t val);
 int get_sernumber(uchar *s);
 bool fulltest(const uchar *hash, const uchar *target);

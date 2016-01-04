@@ -1,4 +1,4 @@
-AC_INIT(ckpool, 0.8.6, kernel@kolivas.org)
+AC_INIT(ckpool, 0.9.0, kernel@kolivas.org)
 
 AC_CANONICAL_SYSTEM
 AC_CONFIG_MACRO_DIR([m4])
@@ -38,17 +38,13 @@ AC_CHECK_HEADERS(alloca.h pthread.h stdio.h math.h signal.h sys/prctl.h)
 AC_CHECK_HEADERS(sys/types.h sys/socket.h sys/stat.h linux/un.h netdb.h)
 AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h getopt.h)
 AC_CHECK_HEADERS(sys/epoll.h libpq-fe.h postgresql/libpq-fe.h grp.h)
-
-PTHREAD_LIBS="-lpthread"
-MATH_LIBS="-lm"
-RT_LIBS="-lrt"
+AC_CHECK_HEADERS(gsl/gsl_math.h gsl/gsl_cdf.h)
+AC_CHECK_HEADERS(openssl/x509.h openssl/hmac.h)
+AC_CHECK_HEADERS(zlib.h)
 
 AC_CONFIG_SUBDIRS([src/jansson-2.6])
 JANSSON_LIBS="jansson-2.6/src/.libs/libjansson.a"
 
-AC_SUBST(PTHREAD_LIBS)
-AC_SUBST(MATH_LIBS)
-AC_SUBST(RT_LIBS)
 AC_SUBST(JANSSON_LIBS)
 
 AC_ARG_WITH([ckdb],
@@ -56,16 +52,28 @@ AC_ARG_WITH([ckdb],
 	[ckdb=$withval]
 	)
 
+#AC_SEARCH_LIBS(whatgoeshere?, rt, , echo "Error: Required library realtime not found." && exit 1)
+AC_SEARCH_LIBS(exp, m, , echo "Error: Required library math not found." && exit 1)
+AC_SEARCH_LIBS(pthread_mutex_trylock, pthread, , "Error: Required library pthreads not found." && exit 1)
+
 if test "x$ckdb" != "xno"; then
 	AC_CHECK_LIB([pq], [main],[PQ=-lpq],echo "Error: Required library libpq-dev
 		not found. Install it or disable postgresql support with --without-ckdb" && exit 1)
+	AC_CHECK_LIB([gsl], [main],[GSL=-lgsl],echo "Error: Required library gsl-dev
+		not found. Install it or disable support with --without-ckdb" && exit 1)
+	AC_CHECK_LIB([gslcblas], [main],[GSLCBLAS=-lgslcblas],echo "Error: Required library gslcblas
+		not found. Install it or disable support with --without-ckdb" && exit 1)
+	AC_CHECK_LIB([ssl], [main],[SSL=-lssl],echo "Error: Required library ssl
+		not found. Install it or disable support with --without-ckdb" && exit 1)
+	AC_CHECK_LIB([crypto], [main],[SSL=-lcrypto],echo "Error: Required library crypto
+		not found. Install it or disable support with --without-ckdb" && exit 1)
 	AC_DEFINE([USE_CKDB], [1], [Defined to 1 if ckdb support required])
-	PQ_LIBS="-lpq"
+	DB_LIBS="-lpq -lgsl -lgslcblas -lssl -lcrypto"
 else
-	PQ_LIBS=""
+	DB_LIBS=""
 fi
 AM_CONDITIONAL([WANT_CKDB], [test "x$ckdb" != "xno"])
-AC_SUBST(PQ_LIBS)
+AC_SUBST(DB_LIBS)
 
 AC_OUTPUT([Makefile] [src/Makefile])
 
@@ -74,8 +82,10 @@ echo "Compilation............: make (or gmake)"
 echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS"
-echo "  LDADD................: $PTHREAD_LIBS $MATH_LIBS $RT_LIBS $JANSSON_LIBS"
-echo "  db LDADD.............: $PQ_LIBS"
+echo "  LDADD................: $LIBS $JANSSON_LIBS"
+if test "x$ckdb" != "xno"; then
+	echo "  db LDADD.............: $LIBS $DB_LIBS $JANSSON_LIBS"
+fi
 echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"

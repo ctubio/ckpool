@@ -19,6 +19,9 @@
 #include "libckpool.h"
 #include "uthash.h"
 
+#define RPC_TIMEOUT 60
+
+struct ckpool_instance;
 typedef struct ckpool_instance ckpool_t;
 
 struct ckmsg {
@@ -28,6 +31,15 @@ struct ckmsg {
 };
 
 typedef struct ckmsg ckmsg_t;
+
+typedef struct unix_msg unix_msg_t;
+
+struct unix_msg {
+	unix_msg_t *next;
+	unix_msg_t *prev;
+	int sockd;
+	char *buf;
+};
 
 struct ckmsgq {
 	ckpool_t *ckp;
@@ -42,6 +54,8 @@ struct ckmsgq {
 
 typedef struct ckmsgq ckmsgq_t;
 
+typedef struct proc_instance proc_instance_t;
+
 struct proc_instance {
 	ckpool_t *ckp;
 	unixsock_t us;
@@ -50,6 +64,11 @@ struct proc_instance {
 	int pid;
 	int oldpid;
 	int (*process)(proc_instance_t *);
+
+	/* Linked list of received messages, locking and conditional */
+	unix_msg_t *unix_msgs;
+	mutex_t rmsg_lock;
+	pthread_cond_t rmsg_cond;
 };
 
 struct connsock {
@@ -61,6 +80,8 @@ struct connsock {
 	int bufofs;
 	int buflen;
 	ckpool_t *ckp;
+	/* Semaphore used to serialise request/responses */
+	sem_t sem;
 };
 
 typedef struct connsock connsock_t;
@@ -91,6 +112,7 @@ struct server_instance {
 	char *auth;
 	char *pass;
 	bool notify;
+	bool alive;
 	connsock_t cs;
 
 	void *data; // Private data
@@ -99,6 +121,10 @@ struct server_instance {
 typedef struct server_instance server_instance_t;
 
 struct ckpool_instance {
+	/* Start time */
+	time_t starttime;
+	/* Start pid */
+	pid_t startpid;
 	/* The initial command line arguments */
 	char **initial_args;
 	/* Number of arguments */
@@ -135,6 +161,9 @@ struct ckpool_instance {
 	/* How many clients maximum to accept before rejecting further */
 	int maxclients;
 
+	/* API message queue */
+	ckmsgq_t *ckpapi;
+
 	/* Logger message queue NOTE: Unique per process */
 	ckmsgq_t *logger;
 	/* Process instance data of parent/child processes */
@@ -151,17 +180,23 @@ struct ckpool_instance {
 	pthread_t pth_listener;
 	pthread_t pth_watchdog;
 
+	/* Are we running in node proxy mode */
+	bool node;
+
 	/* Are we running in passthrough mode */
 	bool passthrough;
+
+	/* Are we a redirecting passthrough */
+	bool redirector;
 
 	/* Are we running as a proxy */
 	bool proxy;
 
-	/* Do we prefer more proxy clients over support for >5TH clients */
-	bool clientsvspeed;
-
 	/* Are we running without ckdb */
 	bool standalone;
+
+	/* Are we running in userproxy mode */
+	bool userproxy;
 
 	/* Should we daemonise the ckpool process */
 	bool daemon;
@@ -199,8 +234,51 @@ struct ckpool_instance {
 	char **proxyauth;
 	char **proxypass;
 
+	/* Passthrough redirect options */
+	int redirecturls;
+	char **redirecturl;
+	char **redirectport;
+
 	/* Private data for each process */
 	void *data;
+};
+
+enum stratum_msgtype {
+	SM_RECONNECT = 0,
+	SM_DIFF,
+	SM_MSG,
+	SM_UPDATE,
+	SM_ERROR,
+	SM_SUBSCRIBE,
+	SM_SUBSCRIBERESULT,
+	SM_SHARE,
+	SM_SHARERESULT,
+	SM_AUTH,
+	SM_AUTHRESULT,
+	SM_TXNS,
+	SM_TXNSRESULT,
+	SM_PING,
+	SM_WORKINFO,
+	SM_NONE
+};
+
+static const char __maybe_unused *stratum_msgs[] = {
+	"reconnect",
+	"diff",
+	"message",
+	"update",
+	"error",
+	"subscribe",
+	"subscribe.result",
+	"share",
+	"share.result",
+	"auth",
+	"auth.result",
+	"txns",
+	"txns.result",
+	"ping",
+	"workinfo",
+	""
 };
 
 #ifdef USE_CKDB
@@ -215,16 +293,19 @@ ckmsgq_t *create_ckmsgq(ckpool_t *ckp, const char *name, const void *func);
 ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, const int count);
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data);
 bool ckmsgq_empty(ckmsgq_t *ckmsgq);
+unix_msg_t *get_unix_msg(proc_instance_t *pi);
+void create_unix_receiver(proc_instance_t *pi);
 
 ckpool_t *global_ckp;
 
 bool ping_main(ckpool_t *ckp);
 void empty_buffer(connsock_t *cs);
-int read_socket_line(connsock_t *cs, const int timeout);
+int read_socket_line(connsock_t *cs, float *timeout);
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)
-char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
-#define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, __FILE__, __func__, __LINE__)
+char *_send_recv_proc(proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,
+		      const char *file, const char *func, const int line);
+#define send_recv_proc(pi, msg) _send_recv_proc(pi, msg, UNIX_WRITE_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
 char *_send_recv_ckdb(const ckpool_t *ckp, const char *msg, const char *file, const char *func, const int line);
 #define send_recv_ckdb(ckp, msg) _send_recv_ckdb(ckp, msg, __FILE__, __func__, __LINE__)
 char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, const char *func,
@@ -233,11 +314,14 @@ char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, co
 
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req);
 
+void childsighandler(const int sig);
 int process_exit(ckpool_t *ckp, const proc_instance_t *pi, int ret);
 bool json_get_string(char **store, const json_t *val, const char *res);
 bool json_get_int64(int64_t *store, const json_t *val, const char *res);
 bool json_get_int(int *store, const json_t *val, const char *res);
 bool json_get_double(double *store, const json_t *val, const char *res);
 bool json_get_bool(bool *store, const json_t *val, const char *res);
+bool json_getdel_int(int *store, json_t *val, const char *res);
+bool json_getdel_int64(int64_t *store, json_t *val, const char *res);
 
 #endif /* CKPOOL_H */

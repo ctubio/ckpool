@@ -36,30 +36,7 @@
  *  much larger DB tables so that ckdb is effectively ready for messages
  *  almost immediately
  * The first ckpool message allows us to know where ckpool is up to
- *  in the CCLs and thus where to stop processing the CCLs to stay in
- *  sync with ckpool
- * If ckpool isn't running, then the reload will complete at the end of
- *  the last CCL file, however if the 1st message arrives from ckpool while
- *  processing the CCLs, that will mark the point where to stop processing
- *  but can also produce a fatal error at the end of processing, reporting
- *  the ckpool message, if the message was not found in the CCL processing
- *  after the message was received
- *  This can be caused by two circumstances:
- *  1) the disk had not yet written it to the CCL when ckdb read EOF and
- *	ckpool was started at about the same time as the reload completed.
- *	This can be seen if the message displayed in the fatal error IS NOT
- *	in ckdb's message logfile.
- *	A ckdb restart will resolve this
- *  2) ckpool was started at the time of the end of the reload, but the
- *	message was written to disk and found in the CCL before it was
- *	processed in the message queue.
- *	This can be seen if the message displayed in the fatal error IS in
- *	ckdb's message logfile and means the messages after it in ckdb's
- *	message logfile have already been processed.
- *	Again, a ckdb restart will resolve this
- *  In both the above (very rare) cases, if ckdb was to continue running,
- *  it would break the synchronisation and could cause DB problems, so
- *  ckdb aborting and needing a complete restart resolves it
+ *  in the CCLs - see reload_from() for how this is handled
  * The users table, required for the authorise messages, is always updated
  *  immediately
  */
@@ -135,9 +112,15 @@ static bool socketer_using_data;
 static bool summariser_using_data;
 static bool marker_using_data;
 static bool logger_using_data;
-static bool listener_using_data;
+static bool plistener_using_data;
+static bool clistener_using_data;
+static bool blistener_using_data;
 
 char *EMPTY = "";
+const char *nullstr = "(null)";
+
+const char *true_str = "true";
+const char *false_str = "false";
 
 static char *db_name;
 static char *db_user;
@@ -148,11 +131,15 @@ static char *status_chars = "|/-\\";
 
 static char *restorefrom;
 
-// Only accessed in here
-static bool markersummary_auto;
+bool genpayout_auto;
+bool markersummary_auto;
 
-// disallow: '/' '.' '_' and FLDSEP
-const char *userpatt = "^[^/\\._"FLDSEPSTR"]*$";
+enum free_modes free_mode = FREE_MODE_FAST;
+
+int switch_state = SWITCH_STATE_ALL;
+
+// disallow: '/' WORKSEP1 WORKSEP2 and FLDSEP
+const char *userpatt = "^[^/"WORKSEP1PATT WORKSEP2STR FLDSEPSTR"]*$";
 const char *mailpatt = "^[A-Za-z0-9_-][A-Za-z0-9_\\.-]*@[A-Za-z0-9][A-Za-z0-9\\.-]*[A-Za-z0-9]$";
 const char *idpatt = "^[_A-Za-z][_A-Za-z0-9]*$";
 const char *intpatt = "^[0-9][0-9]*$";
@@ -163,6 +150,8 @@ const char *hashpatt = "^[A-Fa-f0-9]*$";
  *  and with a simple test must be ADDR_MIN_LEN to ADDR_MAX_LEN (ckdb.h)
  * bitcoind is used to fully validate them when required */
 const char *addrpatt = "^[13][A-HJ-NP-Za-km-z1-9]*$";
+// Strings in socket transfer: space to '~' excluding '='
+const char *strpatt = "^[ -<>-~]*$";
 
 // So the records below have the same 'name' as the klist
 const char Transfer[] = "Transfer";
@@ -212,6 +201,9 @@ bool confirm_sharesummary;
 
 /* Optional workinfoid range -Y to supply when confirming sharesummaries
  * N.B. if you specify -Y it will enable -y, so -y isn't also required
+ *
+ * TODO: update to include markersummaries
+ *	-Y/-y isn't currently usable since it won't work without the update
  *
  * Default (NULL) is to confirm all aged sharesummaries
  * Default should normally be used every time
@@ -263,22 +255,30 @@ bool dbload_only_sharesummary = false;
  *  markersummaries and pplns payouts may not be correct */
 bool sharesummary_marks_limit = false;
 
-// DB users,workers load is complete
+// DB optioncontrol,users,workers,useratts load is complete
 bool db_users_complete = false;
 // DB load is complete
 bool db_load_complete = false;
 // Different input data handling
 bool reloading = false;
+// Start marks processing during a larger reload
+static bool reloaded_N_files = false;
 // Data load is complete
 bool startup_complete = false;
+// Set to true the first time workqueue reaches 0 after startup
+static bool reload_queue_complete = false;
 // Tell everyone to die
 bool everyone_die = false;
+// Set to true every time a store is created
+static bool seqdata_reload_lost = false;
 
 /* These are included in cmd_homepage
  *  to help identify when ckpool locks up (or dies) */
 tv_t last_heartbeat;
 tv_t last_workinfo;
 tv_t last_share;
+tv_t last_share_acc;
+tv_t last_share_inv;
 tv_t last_auth;
 cklock_t last_lock;
 
@@ -289,6 +289,7 @@ static sem_t socketer_sem;
 char *btc_server = "http://127.0.0.1:8330";
 char *btc_auth;
 int btc_timeout = 5;
+cklock_t btc_lock;
 
 char *by_default = "code";
 char *inet_default = "127.0.0.1";
@@ -298,9 +299,15 @@ char *id_default = "42";
 K_LIST *logqueue_free;
 K_STORE *logqueue_store;
 
+// MSGLINE
+K_LIST *msgline_free;
+K_STORE *msgline_store;
+
 // WORKQUEUE
 K_LIST *workqueue_free;
-K_STORE *workqueue_store;
+K_STORE *pool_workqueue_store;
+K_STORE *cmd_workqueue_store;
+K_STORE *btc_workqueue_store;
 mutex_t wq_waitlock;
 pthread_cond_t wq_waitcond;
 
@@ -310,6 +317,20 @@ K_STORE *heartbeatqueue_store;
 
 // TRANSFER
 K_LIST *transfer_free;
+
+// SEQSET
+K_LIST *seqset_free;
+// each new seqset is added to the head, so head is the current one
+static K_STORE *seqset_store;
+// Initialised when seqset_free is allocated
+static char *seqnam[SEQ_MAX];
+
+// Full lock for access to sequence processing data
+#define SEQLOCK() K_WLOCK(seqset_free);
+#define SEQUNLOCK() K_WUNLOCK(seqset_free);
+
+// SEQTRANS
+K_LIST *seqtrans_free;
 
 // USERS
 K_TREE *users_root;
@@ -326,6 +347,8 @@ K_STORE *useratts_store;
 K_TREE *workers_root;
 K_LIST *workers_free;
 K_STORE *workers_store;
+// Emulate a list for lock checking
+K_LIST *workers_db_free;
 
 // PAYMENTADDRESSES
 K_TREE *paymentaddresses_root;
@@ -376,28 +399,41 @@ double current_ndiff;
 K_TREE *shares_root;
 K_LIST *shares_free;
 K_STORE *shares_store;
+K_TREE *shares_early_root;
+K_STORE *shares_early_store;
+
+double diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
 
 // SHAREERRORS shareerrors.id.json={...}
 K_TREE *shareerrors_root;
 K_LIST *shareerrors_free;
 K_STORE *shareerrors_store;
+K_TREE *shareerrors_early_root;
+K_STORE *shareerrors_early_store;
 
 // SHARESUMMARY
 K_TREE *sharesummary_root;
 K_TREE *sharesummary_workinfoid_root;
 K_LIST *sharesummary_free;
 K_STORE *sharesummary_store;
+// Pool total sharesummary stats
+K_TREE *sharesummary_pool_root;
+K_STORE *sharesummary_pool_store;
 
 // BLOCKS block.id.json={...}
 const char *blocks_new = "New";
 const char *blocks_confirm = "1-Confirm";
 const char *blocks_42 = "Matured";
 const char *blocks_orphan = "Orphan";
+const char *blocks_reject = "Unworthy";
 const char *blocks_unknown = "?Unknown?";
 
 K_TREE *blocks_root;
 K_LIST *blocks_free;
 K_STORE *blocks_store;
+// Access both under blocks_free lock
+tv_t blocks_stats_time;
+bool blocks_stats_rebuild = true;
 
 // MININGPAYOUTS
 K_TREE *miningpayouts_root;
@@ -407,9 +443,11 @@ K_STORE *miningpayouts_store;
 // PAYOUTS
 K_TREE *payouts_root;
 K_TREE *payouts_id_root;
+K_TREE *payouts_wid_root;
 K_LIST *payouts_free;
 K_STORE *payouts_store;
-cklock_t process_pplns_lock;
+// Emulate a list for lock checking
+K_LIST *process_pplns_free;
 
 /*
 // EVENTLOG
@@ -445,6 +483,12 @@ K_TREE *markersummary_root;
 K_TREE *markersummary_userid_root;
 K_LIST *markersummary_free;
 K_STORE *markersummary_store;
+// Pool total markersummary stats
+K_TREE *markersummary_pool_root;
+K_STORE *markersummary_pool_store;
+
+// The markerid load start for markersummary
+char *mark_start = NULL;
 
 // WORKMARKERS
 K_TREE *workmarkers_root;
@@ -475,17 +519,23 @@ const char *marktype_other_finish_fmt = "fin: %s";
 const char *marktype_shift_begin_skip = "Shift stt: ";
 const char *marktype_shift_end_skip = "Shift fin: ";
 
-static char logname[512];
+// USERINFO from various incoming data
+K_TREE *userinfo_root;
+K_LIST *userinfo_free;
+K_STORE *userinfo_store;
+
+static char logname_db[512];
+static char logname_io[512];
 static char *dbcode;
 
 // low spec version of rotating_log() - no locking
-static bool rotating_log_nolock(char *msg)
+static bool rotating_log_nolock(char *msg, char *prefix)
 {
 	char *filename;
 	FILE *fp;
 	bool ok = false;
 
-	filename = rotating_filename(logname, time(NULL));
+	filename = rotating_filename(prefix, time(NULL));
 	fp = fopen(filename, "a+e");
 	if (unlikely(!fp)) {
 		LOGERR("Failed to fopen %s in rotating_log!", filename);
@@ -501,7 +551,7 @@ stageleft:
 	return ok;
 }
 
-static void log_queue_message(char *msg)
+static void log_queue_message(char *msg, bool db)
 {
 	K_ITEM *lq_item;
 	LOGQUEUE *lq;
@@ -512,6 +562,7 @@ static void log_queue_message(char *msg)
 	lq->msg = strdup(msg);
 	if (!(lq->msg))
 		quithere(1, "malloc (%d) OOM", (int)strlen(msg));
+	lq->db = db;
 	k_add_tail(logqueue_store, lq_item);
 	K_WUNLOCK(logqueue_free);
 }
@@ -521,7 +572,8 @@ void logmsg(int loglevel, const char *fmt, ...)
 	int logfd = 0;
 	char *buf = NULL;
 	struct tm tm;
-	time_t now_t;
+	tv_t now_tv;
+	int ms;
 	va_list ap;
 	char stamp[128];
 	char *extra = EMPTY;
@@ -532,8 +584,9 @@ void logmsg(int loglevel, const char *fmt, ...)
 	if (loglevel > global_ckp->loglevel)
 		return;
 
-	now_t = time(NULL);
-	localtime_r(&now_t, &tm);
+	tv_time(&now_tv);
+	ms = (int)(now_tv.tv_usec / 1000);
+	localtime_r(&(now_tv.tv_sec), &tm);
 	minoff = tm.tm_gmtoff / 60;
 	if (minoff < 0) {
 		tzch = '-';
@@ -551,13 +604,13 @@ void logmsg(int loglevel, const char *fmt, ...)
 			 tzch, hroff);
 	}
 	snprintf(stamp, sizeof(stamp),
-			"[%d-%02d-%02d %02d:%02d:%02d%s]",
+			"[%d-%02d-%02d %02d:%02d:%02d.%03d%s]",
 			tm.tm_year + 1900,
 			tm.tm_mon + 1,
 			tm.tm_mday,
 			tm.tm_hour,
 			tm.tm_min,
-			tm.tm_sec,
+			tm.tm_sec, ms,
 			tzinfo);
 
 	if (!fmt) {
@@ -607,7 +660,8 @@ void setnow(tv_t *now)
 	now->tv_usec = spec.tv_nsec / 1000;
 }
 
-// Limits are all +/-1s since on the live machine all were well within that
+/* Limits are all +/-1s since on the live machine all were well within that
+ * TODO: not thread safe */
 static void check_createdate_ccl(char *cmd, tv_t *cd)
 {
 	static tv_t last_cd;
@@ -717,7 +771,9 @@ static bool getdata1()
 		goto matane;
 	if (!(ok = users_fill(conn)))
 		goto matane;
-	ok = workers_fill(conn);
+	if (!(ok = workers_fill(conn)))
+		goto matane;
+	ok = useratts_fill(conn);
 
 matane:
 
@@ -746,30 +802,28 @@ static bool getdata3()
 	if (!confirm_sharesummary) {
 		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
 			goto sukamudai;
+		/* FYI must be after blocks */
 		if (!(ok = payments_fill(conn)) || everyone_die)
 			goto sukamudai;
 		if (!(ok = miningpayouts_fill(conn)) || everyone_die)
 			goto sukamudai;
-		if (!(ok = payouts_fill(conn)) || everyone_die)
-			goto sukamudai;
 	}
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
 		goto sukamudai;
-	/* marks must be loaded before sharesummary
-	 * since sharesummary looks at the marks data */
 	if (!(ok = marks_fill(conn)) || everyone_die)
 		goto sukamudai;
+	/* must be after workinfo */
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
+	if (!confirm_sharesummary) {
+		/* must be after workmarkers */
+		if (!(ok = payouts_fill(conn)) || everyone_die)
+			goto sukamudai;
+	}
 	if (!(ok = markersummary_fill(conn)) || everyone_die)
 		goto sukamudai;
-	if (!(ok = sharesummary_fill(conn)) || everyone_die)
-		goto sukamudai;
-	if (!confirm_sharesummary) {
-		if (!(ok = useratts_fill(conn)) || everyone_die)
-			goto sukamudai;
+	if (!confirm_sharesummary && !everyone_die)
 		ok = poolstats_fill(conn);
-	}
 
 sukamudai:
 
@@ -787,31 +841,25 @@ static bool reload()
 	char *reason;
 	FILE *fp;
 
-	tv_to_buf(&(dbstatus.oldest_sharesummary_firstshare_n), buf, sizeof(buf));
-	LOGWARNING("%s(): %s oldest DB incomplete sharesummary", __func__, buf);
-	tv_to_buf(&(dbstatus.newest_sharesummary_firstshare_ay), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB complete sharesummary", __func__, buf);
+	tv_to_buf(&(dbstatus.newest_createdate_workmarker_workinfo),
+		  buf, sizeof(buf));
+	LOGWARNING("%s(): %s newest DB workmarker wid %"PRId64,
+		   __func__, buf,
+		   dbstatus.newest_workmarker_workinfoid);
 	tv_to_buf(&(dbstatus.newest_createdate_workinfo), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB workinfo", __func__, buf);
+	LOGWARNING("%s(): %s newest DB workinfo wid %"PRId64,
+		   __func__, buf, dbstatus.newest_workinfoid);
 	tv_to_buf(&(dbstatus.newest_createdate_poolstats), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB poolstats", __func__, buf);
+	LOGWARNING("%s(): %s newest DB poolstats (ignored)", __func__, buf);
 	tv_to_buf(&(dbstatus.newest_createdate_blocks), buf, sizeof(buf));
-	LOGWARNING("%s(): %s newest DB blocks (ignored)", __func__, buf);
+	LOGWARNING("%s(): %"PRId32"/%s newest DB blocks (ignored)",
+		   __func__, dbstatus.newest_height_blocks, buf);
 
-	if (dbstatus.oldest_sharesummary_firstshare_n.tv_sec)
-		copy_tv(&(dbstatus.sharesummary_firstshare), &(dbstatus.oldest_sharesummary_firstshare_n));
-	else
-		copy_tv(&(dbstatus.sharesummary_firstshare), &(dbstatus.newest_sharesummary_firstshare_ay));
-
-	copy_tv(&start, &(dbstatus.sharesummary_firstshare));
-	reason = "sharesummary";
+	copy_tv(&start, &(dbstatus.newest_createdate_workmarker_workinfo));
+	reason = "workmarkers";
 	if (!tv_newer(&start, &(dbstatus.newest_createdate_workinfo))) {
 		copy_tv(&start, &(dbstatus.newest_createdate_workinfo));
 		reason = "workinfo";
-	}
-	if (!tv_newer(&start, &(dbstatus.newest_createdate_poolstats))) {
-		copy_tv(&start, &(dbstatus.newest_createdate_poolstats));
-		reason = "poolstats";
 	}
 
 	tv_to_buf(&start, buf, sizeof(buf));
@@ -860,15 +908,18 @@ static bool write_pid(ckpool_t *ckp, const char *path, pid_t pid)
 		fclose(fp);
 		if (ret == 1 && !(kill(oldpid, 0))) {
 			if (!ckp->killold) {
-				LOGEMERG("Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
+				LOGEMERG("Process %s pid %d still exists, start"
+					 " ckpool with -k if you wish to kill it",
 					 path, oldpid);
 				return false;
 			}
 			if (kill(oldpid, 9)) {
-				LOGEMERG("Unable to kill old process %s pid %d", path, oldpid);
+				LOGEMERG("Unable to kill old process %s pid %d",
+					 path, oldpid);
 				return false;
 			}
-			LOGWARNING("Killing off old process %s pid %d", path, oldpid);
+			LOGWARNING("Killing off old process %s pid %d",
+				   path, oldpid);
 		}
 	}
 	fp = fopen(path, "we");
@@ -922,11 +973,54 @@ static void clean_up(ckpool_t *ckp)
 
 static void alloc_storage()
 {
+	size_t len;
+	int seq;
+
+	seqset_free = k_new_list("SeqSet", sizeof(SEQSET),
+				 ALLOC_SEQSET, LIMIT_SEQSET, true);
+	seqset_store = k_new_store(seqset_free);
+
+	// Map the SEQ_NNN values to their cmd names
+	seqnam[0] = strdup(SEQALL);
+	for (seq = 0; ckdb_cmds[seq].cmd_val != CMD_END; seq++) {
+		if (ckdb_cmds[seq].seq != SEQ_NONE) {
+			if (seqnam[ckdb_cmds[seq].seq]) {
+				quithere(1, "Name map in cddb_cmds[] to seqnam"
+					    " isn't unique - seq %d is listed"
+					    " twice as %s and %s",
+					    seq, seqnam[ckdb_cmds[seq].seq],
+					    ckdb_cmds[seq].cmd_str);
+			}
+			len = strlen(SEQPRE) + strlen(ckdb_cmds[seq].cmd_str) + 1;
+			seqnam[ckdb_cmds[seq].seq] = malloc(len);
+			if (!(seqnam[ckdb_cmds[seq].seq]))
+				quithere(1, "malloc (%d) OOM", (int)len);
+			snprintf(seqnam[ckdb_cmds[seq].seq], len, "%s%s",
+				 SEQPRE, ckdb_cmds[seq].cmd_str);
+		}
+	}
+	for (seq = 0; seq < SEQ_MAX; seq++) {
+		if (seqnam[seq] == NULL) {
+			quithere(1, "Name map in cddb_cmds[] is incomplete - "
+				    " %d is missing", seq);
+		}
+	}
+
+	seqtrans_free = k_new_list("SeqTrans", sizeof(SEQTRANS),
+				   ALLOC_SEQTRANS, LIMIT_SEQTRANS, true);
+
+	msgline_free = k_new_list("MsgLine", sizeof(MSGLINE),
+					ALLOC_MSGLINE, LIMIT_MSGLINE, true);
+	msgline_store = k_new_store(msgline_free);
+
 	workqueue_free = k_new_list("WorkQueue", sizeof(WORKQUEUE),
 					ALLOC_WORKQUEUE, LIMIT_WORKQUEUE, true);
-	workqueue_store = k_new_store(workqueue_free);
+	pool_workqueue_store = k_new_store(workqueue_free);
+	cmd_workqueue_store = k_new_store(workqueue_free);
+	btc_workqueue_store = k_new_store(workqueue_free);
 
-	heartbeatqueue_free = k_new_list("HeartBeatQueue", sizeof(HEARTBEATQUEUE),
+	heartbeatqueue_free = k_new_list("HeartBeatQueue",
+					 sizeof(HEARTBEATQUEUE),
 					 ALLOC_HEARTBEATQUEUE,
 					 LIMIT_HEARTBEATQUEUE, true);
 	heartbeatqueue_store = k_new_store(heartbeatqueue_free);
@@ -938,43 +1032,49 @@ static void alloc_storage()
 	users_free = k_new_list("Users", sizeof(USERS),
 					ALLOC_USERS, LIMIT_USERS, true);
 	users_store = k_new_store(users_free);
-	users_root = new_ktree();
-	userid_root = new_ktree();
+	users_root = new_ktree(NULL, cmp_users, users_free);
+	userid_root = new_ktree("UsersId", cmp_userid, users_free);
 
 	useratts_free = k_new_list("Useratts", sizeof(USERATTS),
 					ALLOC_USERATTS, LIMIT_USERATTS, true);
 	useratts_store = k_new_store(useratts_free);
-	useratts_root = new_ktree();
+	useratts_root = new_ktree(NULL, cmp_useratts, useratts_free);
 
 	optioncontrol_free = k_new_list("OptionControl", sizeof(OPTIONCONTROL),
 					ALLOC_OPTIONCONTROL,
 					LIMIT_OPTIONCONTROL, true);
 	optioncontrol_store = k_new_store(optioncontrol_free);
-	optioncontrol_root = new_ktree();
+	optioncontrol_root = new_ktree(NULL, cmp_optioncontrol,
+					optioncontrol_free);
 
 	workers_free = k_new_list("Workers", sizeof(WORKERS),
 					ALLOC_WORKERS, LIMIT_WORKERS, true);
 	workers_store = k_new_store(workers_free);
-	workers_root = new_ktree();
+	workers_root = new_ktree(NULL, cmp_workers, workers_free);
 
-	paymentaddresses_free = k_new_list("PaymentAddresses",
-					   sizeof(PAYMENTADDRESSES),
+	paymentaddresses_free = k_new_list("PayAddr", sizeof(PAYMENTADDRESSES),
 					   ALLOC_PAYMENTADDRESSES,
 					   LIMIT_PAYMENTADDRESSES, true);
 	paymentaddresses_store = k_new_store(paymentaddresses_free);
-	paymentaddresses_root = new_ktree();
-	paymentaddresses_create_root = new_ktree();
+	paymentaddresses_root = new_ktree(NULL, cmp_paymentaddresses,
+					  paymentaddresses_free);
+	paymentaddresses_create_root = new_ktree("PayAddrCreate",
+						 cmp_payaddr_create,
+						 paymentaddresses_free);
 	paymentaddresses_free->dsp_func = dsp_paymentaddresses;
 
 	payments_free = k_new_list("Payments", sizeof(PAYMENTS),
 					ALLOC_PAYMENTS, LIMIT_PAYMENTS, true);
 	payments_store = k_new_store(payments_free);
-	payments_root = new_ktree();
+	payments_root = new_ktree(NULL, cmp_payments, payments_free);
 
-	accountbalance_free = k_new_list("AccountBalance", sizeof(ACCOUNTBALANCE),
-					ALLOC_ACCOUNTBALANCE, LIMIT_ACCOUNTBALANCE, true);
+	accountbalance_free = k_new_list("AccountBalance",
+					 sizeof(ACCOUNTBALANCE),
+					 ALLOC_ACCOUNTBALANCE,
+					 LIMIT_ACCOUNTBALANCE, true);
 	accountbalance_store = k_new_store(accountbalance_free);
-	accountbalance_root = new_ktree();
+	accountbalance_root = new_ktree(NULL, cmp_accountbalance,
+					accountbalance_free);
 
 	idcontrol_free = k_new_list("IDControl", sizeof(IDCONTROL),
 					ALLOC_IDCONTROL, LIMIT_IDCONTROL, true);
@@ -983,89 +1083,217 @@ static void alloc_storage()
 	workinfo_free = k_new_list("WorkInfo", sizeof(WORKINFO),
 					ALLOC_WORKINFO, LIMIT_WORKINFO, true);
 	workinfo_store = k_new_store(workinfo_free);
-	workinfo_root = new_ktree();
-	if (!confirm_sharesummary)
-		workinfo_height_root = new_ktree();
+	workinfo_root = new_ktree(NULL, cmp_workinfo, workinfo_free);
+	if (!confirm_sharesummary) {
+		workinfo_height_root = new_ktree("WorkInfoHeight",
+						 cmp_workinfo_height,
+						 workinfo_free);
+	}
 
 	shares_free = k_new_list("Shares", sizeof(SHARES),
 					ALLOC_SHARES, LIMIT_SHARES, true);
 	shares_store = k_new_store(shares_free);
-	shares_root = new_ktree();
+	shares_early_store = k_new_store(shares_free);
+	shares_root = new_ktree(NULL, cmp_shares, shares_free);
+	shares_early_root = new_ktree("SharesEarly", cmp_shares, shares_free);
 
 	shareerrors_free = k_new_list("ShareErrors", sizeof(SHAREERRORS),
-					ALLOC_SHAREERRORS, LIMIT_SHAREERRORS, true);
+					ALLOC_SHAREERRORS, LIMIT_SHAREERRORS,
+					true);
 	shareerrors_store = k_new_store(shareerrors_free);
-	shareerrors_root = new_ktree();
+	shareerrors_early_store = k_new_store(shareerrors_free);
+	shareerrors_root = new_ktree(NULL, cmp_shareerrors, shareerrors_free);
+	shareerrors_early_root = new_ktree("ShareErrorsEarly", cmp_shareerrors,
+					   shareerrors_free);
 
 	sharesummary_free = k_new_list("ShareSummary", sizeof(SHARESUMMARY),
-					ALLOC_SHARESUMMARY, LIMIT_SHARESUMMARY, true);
+					ALLOC_SHARESUMMARY, LIMIT_SHARESUMMARY,
+					true);
 	sharesummary_store = k_new_store(sharesummary_free);
-	sharesummary_root = new_ktree();
-	sharesummary_workinfoid_root = new_ktree();
+	sharesummary_root = new_ktree(NULL, cmp_sharesummary,
+					sharesummary_free);
+	sharesummary_workinfoid_root = new_ktree("ShareSummaryWId",
+						 cmp_sharesummary_workinfoid,
+						 sharesummary_free);
 	sharesummary_free->dsp_func = dsp_sharesummary;
+	sharesummary_pool_store = k_new_store(sharesummary_free);
+	sharesummary_pool_root = new_ktree("ShareSummaryPool",
+					   cmp_sharesummary, sharesummary_free);
 
 	blocks_free = k_new_list("Blocks", sizeof(BLOCKS),
 					ALLOC_BLOCKS, LIMIT_BLOCKS, true);
 	blocks_store = k_new_store(blocks_free);
-	blocks_root = new_ktree();
+	blocks_root = new_ktree(NULL, cmp_blocks, blocks_free);
 	blocks_free->dsp_func = dsp_blocks;
 
 	miningpayouts_free = k_new_list("MiningPayouts", sizeof(MININGPAYOUTS),
-					ALLOC_MININGPAYOUTS, LIMIT_MININGPAYOUTS, true);
+					ALLOC_MININGPAYOUTS, LIMIT_MININGPAYOUTS,
+					true);
 	miningpayouts_store = k_new_store(miningpayouts_free);
-	miningpayouts_root = new_ktree();
+	miningpayouts_root = new_ktree(NULL, cmp_miningpayouts,
+					miningpayouts_free);
 
 	payouts_free = k_new_list("Payouts", sizeof(PAYOUTS),
 					ALLOC_PAYOUTS, LIMIT_PAYOUTS, true);
 	payouts_store = k_new_store(payouts_free);
-	payouts_root = new_ktree();
-	payouts_id_root = new_ktree();
+	payouts_root = new_ktree(NULL, cmp_payouts, payouts_free);
+	payouts_id_root = new_ktree("PayoutsId", cmp_payouts_id, payouts_free);
+	payouts_wid_root = new_ktree("PayoutsWId", cmp_payouts_wid,
+					payouts_free);
 
 	auths_free = k_new_list("Auths", sizeof(AUTHS),
 					ALLOC_AUTHS, LIMIT_AUTHS, true);
 	auths_store = k_new_store(auths_free);
-	auths_root = new_ktree();
+	auths_root = new_ktree(NULL, cmp_auths, auths_free);
 
 	poolstats_free = k_new_list("PoolStats", sizeof(POOLSTATS),
 					ALLOC_POOLSTATS, LIMIT_POOLSTATS, true);
 	poolstats_store = k_new_store(poolstats_free);
-	poolstats_root = new_ktree();
+	poolstats_root = new_ktree(NULL, cmp_poolstats, poolstats_free);
 
 	userstats_free = k_new_list("UserStats", sizeof(USERSTATS),
 					ALLOC_USERSTATS, LIMIT_USERSTATS, true);
 	userstats_store = k_new_store(userstats_free);
 	userstats_eos_store = k_new_store(userstats_free);
-	userstats_root = new_ktree();
+	userstats_root = new_ktree(NULL, cmp_userstats, userstats_free);
 	userstats_free->dsp_func = dsp_userstats;
 
 	workerstatus_free = k_new_list("WorkerStatus", sizeof(WORKERSTATUS),
-					ALLOC_WORKERSTATUS, LIMIT_WORKERSTATUS, true);
+					ALLOC_WORKERSTATUS, LIMIT_WORKERSTATUS,
+					true);
 	workerstatus_store = k_new_store(workerstatus_free);
-	workerstatus_root = new_ktree();
+	workerstatus_root = new_ktree(NULL, cmp_workerstatus, workerstatus_free);
 
 	markersummary_free = k_new_list("MarkerSummary", sizeof(MARKERSUMMARY),
-					ALLOC_MARKERSUMMARY, LIMIT_MARKERSUMMARY, true);
+					ALLOC_MARKERSUMMARY, LIMIT_MARKERSUMMARY,
+					true);
 	markersummary_store = k_new_store(markersummary_free);
-	markersummary_root = new_ktree();
-	markersummary_userid_root = new_ktree();
+	markersummary_root = new_ktree(NULL, cmp_markersummary,
+					markersummary_free);
+	markersummary_userid_root = new_ktree("MarkerSummaryUserId",
+					      cmp_markersummary_userid,
+					      markersummary_free);
 	markersummary_free->dsp_func = dsp_markersummary;
+	markersummary_pool_store = k_new_store(markersummary_free);
+	markersummary_pool_root = new_ktree("MarkerSummaryPool",
+					    cmp_markersummary,
+					    markersummary_free);
 
 	workmarkers_free = k_new_list("WorkMarkers", sizeof(WORKMARKERS),
 					ALLOC_WORKMARKERS, LIMIT_WORKMARKERS, true);
 	workmarkers_store = k_new_store(workmarkers_free);
-	workmarkers_root = new_ktree();
-	workmarkers_workinfoid_root = new_ktree();
+	workmarkers_root = new_ktree(NULL, cmp_workmarkers, workmarkers_free);
+	workmarkers_workinfoid_root = new_ktree("WorkMarkersWId",
+						cmp_workmarkers_workinfoid,
+						workmarkers_free);
 	workmarkers_free->dsp_func = dsp_workmarkers;
 
 	marks_free = k_new_list("Marks", sizeof(MARKS),
 				ALLOC_MARKS, LIMIT_MARKS, true);
 	marks_store = k_new_store(marks_free);
-	marks_root = new_ktree();
+	marks_root = new_ktree(NULL, cmp_marks, marks_free);
+
+	userinfo_free = k_new_list("UserInfo", sizeof(USERINFO),
+					ALLOC_USERINFO, LIMIT_USERINFO, true);
+	userinfo_store = k_new_store(userinfo_free);
+	userinfo_root = new_ktree(NULL, cmp_userinfo, userinfo_free);
+
+#if LOCK_CHECK
+	DLPRIO(seqset, 91);
+
+	DLPRIO(transfer, 90);
+
+	DLPRIO(payouts, 87);
+	DLPRIO(miningpayouts, 86);
+	DLPRIO(payments, 85);
+
+	DLPRIO(accountbalance, 80);
+
+	DLPRIO(workerstatus, 69);
+	DLPRIO(sharesummary, 68);
+	DLPRIO(markersummary, 67);
+	DLPRIO(workmarkers, 66);
+
+	DLPRIO(marks, 60);
+
+	DLPRIO(workinfo, 56);
+
+	DLPRIO(blocks, 53);
+
+	DLPRIO(userinfo, 50);
+
+	DLPRIO(auths, 44);
+	DLPRIO(users, 43);
+	DLPRIO(useratts, 42);
+
+	DLPRIO(shares, 31);
+	DLPRIO(shareerrors, 30);
+
+	DLPRIO(seqset, 21);
+	DLPRIO(seqtrans, 20);
+
+	DLPRIO(msgline, 17);
+	DLPRIO(workqueue, 16);
+	DLPRIO(heartbeatqueue, 15);
+
+	DLPRIO(poolstats, 11);
+	DLPRIO(userstats, 10);
+
+	// Don't currently nest any locks in these:
+	DLPRIO(workers, PRIO_TERMINAL);
+	DLPRIO(idcontrol, PRIO_TERMINAL);
+	DLPRIO(optioncontrol, PRIO_TERMINAL);
+	DLPRIO(paymentaddresses, PRIO_TERMINAL);
+
+	DLPCHECK();
+
+	if (auto_check_deadlocks)
+		check_deadlocks = true;
+#endif
 }
+
+#define SEQSETMSG(_set, _seqset, _msgtxt, _endtxt) do { \
+	char _t_buf[DATE_BUFSIZ]; \
+	bool _warn = ((_seqset)->seqdata[SEQ_SHARES].missing > 0) || \
+		     ((_seqset)->seqdata[SEQ_SHARES].lost > 0); \
+	btu64_to_buf(&((_seqset)->seqstt), _t_buf, sizeof(_t_buf)); \
+	LOGWARNING("%s %s: %d/"SEQSTT":%"PRIu64"=%s "SEQPID":%"PRIu64 \
+		   " M%"PRIu64"/T%"PRIu64"/L%"PRIu64"/S%"PRIu64"/H%"PRIu64 \
+		   "/R%"PRIu64"/OK%"PRIu64" %s v%"PRIu64"/^%"PRIu64"/M%"PRIu64 \
+		   "/T%"PRIu64"/L%"PRIu64"/S%"PRIu64"/H%"PRIu64"/R%"PRIu64 \
+		   "/OK%"PRIu64" %s v%"PRIu64"/^%"PRIu64"/M%"PRIu64"/T%"PRIu64 \
+		   "/L%"PRIu64"/S%"PRIu64"/H%"PRIu64"/R%"PRIu64 \
+		   "/OK%"PRIu64"%s", \
+		   _warn ? "SEQ" : "Seq", \
+		   _msgtxt, _set, (_seqset)->seqstt, _t_buf, \
+		   (_seqset)->seqpid, (_seqset)->missing, (_seqset)->trans, \
+		   (_seqset)->lost, (_seqset)->stale, (_seqset)->high, \
+		   (_seqset)->recovered, (_seqset)->ok, \
+		   seqnam[SEQ_ALL], \
+		   (_seqset)->seqdata[SEQ_ALL].minseq, \
+		   (_seqset)->seqdata[SEQ_ALL].maxseq, \
+		   (_seqset)->seqdata[SEQ_ALL].missing, \
+		   (_seqset)->seqdata[SEQ_ALL].trans, \
+		   (_seqset)->seqdata[SEQ_ALL].lost, \
+		   (_seqset)->seqdata[SEQ_ALL].stale, \
+		   (_seqset)->seqdata[SEQ_ALL].high, \
+		   (_seqset)->seqdata[SEQ_ALL].recovered, \
+		   (_seqset)->seqdata[SEQ_ALL].ok, \
+		   seqnam[SEQ_SHARES], \
+		   (_seqset)->seqdata[SEQ_SHARES].minseq, \
+		   (_seqset)->seqdata[SEQ_SHARES].maxseq, \
+		   (_seqset)->seqdata[SEQ_SHARES].missing, \
+		   (_seqset)->seqdata[SEQ_SHARES].trans, \
+		   (_seqset)->seqdata[SEQ_SHARES].lost, \
+		   (_seqset)->seqdata[SEQ_SHARES].stale, \
+		   (_seqset)->seqdata[SEQ_SHARES].high, \
+		   (_seqset)->seqdata[SEQ_SHARES].recovered, \
+		   (_seqset)->seqdata[SEQ_SHARES].ok, _endtxt); \
+	} while(0)
 
 #define FREE_TREE(_tree) \
 	if (_tree ## _root) \
-		_tree ## _root = free_ktree(_tree ## _root, NULL) \
+		free_ktree(_tree ## _root, NULL) \
 
 #define FREE_STORE(_list) \
 	if (_list ## _store) \
@@ -1077,7 +1305,7 @@ static void alloc_storage()
 
 #define FREE_STORE_DATA(_list) \
 	if (_list ## _store) { \
-		K_ITEM *_item = _list ## _store->head; \
+		K_ITEM *_item = STORE_HEAD_NOLOCK(_list ## _store); \
 		while (_item) { \
 			free_ ## _list ## _data(_item); \
 			_item = _item->next; \
@@ -1087,7 +1315,7 @@ static void alloc_storage()
 
 #define FREE_LIST_DATA(_list) \
 	if (_list ## _free) { \
-		K_ITEM *_item = _list ## _free->head; \
+		K_ITEM *_item = LIST_HEAD_NOLOCK(_list ## _free); \
 		while (_item) { \
 			free_ ## _list ## _data(_item); \
 			_item = _item->next; \
@@ -1099,11 +1327,75 @@ static void alloc_storage()
 
 #define FREE_ALL(_list) FREE_TREE(_list); FREE_LISTS(_list)
 
+/* Write a share missing/lost report to the console - always report set 0
+ * It's possible for the set numbers to be wrong and the output to report one
+ *  seqset twice if a new seqset arrives between the unlock/lock for writing
+ *  the console message - since a new seqset would shuffle the sets down and
+ *  if the list was full, move the last one back to the top of the setset_store
+ *  list, but this would normally only be when ckpool restarts and also wont
+ *  cause a problem since only the last set can be moved and the code checks
+ *  if it is the end and also duplicates the set before releasing the lock */
+void sequence_report(bool lock)
+{
+	SEQSET *seqset, seqset_copy;
+	K_ITEM *ss_item;
+	bool last, miss;
+	int set;
+
+	last = false;
+	set = 0;
+	if (lock) {
+		SEQLOCK();
+		ss_item = STORE_RHEAD(seqset_store);
+	} else {
+		ss_item = STORE_HEAD_NOLOCK(seqset_store);
+	}
+	while (!last && ss_item) {
+		if (!ss_item->next)
+			last = true;
+		DATA_SEQSET(seqset, ss_item);
+		/* Missing/Trans/Lost should all be 0 for shares */
+		if (seqset->seqstt && (set == 0 ||
+		    seqset->seqdata[SEQ_SHARES].missing ||
+		    seqset->seqdata[SEQ_SHARES].trans ||
+		    seqset->seqdata[SEQ_SHARES].lost)) {
+			miss = (seqset->seqdata[SEQ_SHARES].missing > 0) ||
+				(seqset->seqdata[SEQ_SHARES].lost > 0);
+			if (lock) {
+				memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+				SEQUNLOCK();
+				seqset = &seqset_copy;
+			}
+			SEQSETMSG(set, seqset,
+				  miss ? "SHARES MISSING" : "status" , EMPTY);
+			if (lock)
+				SEQLOCK();
+		}
+		ss_item = ss_item->next;
+		set++;
+	}
+	if (lock)
+		SEQUNLOCK();
+}
+
 static void dealloc_storage()
 {
+	SHAREERRORS *shareerrors;
+	K_ITEM *s_item;
+	char *st = NULL;
+	SHARES *shares;
+	int seq;
+
+	if (free_mode == FREE_MODE_NONE) {
+		LOGWARNING("%s() skipped", __func__);
+		return;
+	}
+
 	LOGWARNING("%s() logqueue ...", __func__);
 
 	FREE_LISTS(logqueue);
+
+	FREE_ALL(userinfo);
 
 	FREE_TREE(marks);
 	FREE_STORE_DATA(marks);
@@ -1114,12 +1406,20 @@ static void dealloc_storage()
 	FREE_STORE_DATA(workmarkers);
 	FREE_LIST_DATA(workmarkers);
 
-	LOGWARNING("%s() markersummary ...", __func__);
+	if (free_mode != FREE_MODE_ALL)
+		LOGWARNING("%s() markersummary skipped", __func__);
+	else {
+		LOGWARNING("%s() markersummary ...", __func__);
 
-	FREE_TREE(markersummary_userid);
-	FREE_TREE(markersummary);
-	FREE_STORE_DATA(markersummary);
-	FREE_LIST_DATA(markersummary);
+		FREE_TREE(markersummary_pool);
+		k_list_transfer_to_tail_nolock(markersummary_pool_store,
+					       markersummary_store);
+		FREE_STORE(markersummary_pool);
+		FREE_TREE(markersummary_userid);
+		FREE_TREE(markersummary);
+		FREE_STORE_DATA(markersummary);
+		FREE_LIST_DATA(markersummary);
+	}
 
 	FREE_ALL(workerstatus);
 
@@ -1133,28 +1433,79 @@ static void dealloc_storage()
 	FREE_ALL(poolstats);
 	FREE_ALL(auths);
 
+	FREE_TREE(payouts_wid);
 	FREE_TREE(payouts_id);
-	FREE_ALL(payouts);
+	FREE_TREE(payouts);
+	FREE_STORE_DATA(payouts);
+	FREE_LIST_DATA(payouts);
 
 	FREE_ALL(miningpayouts);
 	FREE_ALL(blocks);
 
 	LOGWARNING("%s() sharesummary ...", __func__);
 
+	FREE_TREE(sharesummary_pool);
+	k_list_transfer_to_tail_nolock(sharesummary_pool_store,
+				       sharesummary_store);
+	FREE_STORE(sharesummary_pool);
 	FREE_TREE(sharesummary_workinfoid);
 	FREE_TREE(sharesummary);
 	FREE_STORE_DATA(sharesummary);
 	FREE_LIST_DATA(sharesummary);
 
+	if (shareerrors_early_store->count > 0) {
+		LOGERR("%s() *** shareerrors_early count %d ***",
+			__func__, shareerrors_early_store->count);
+		s_item = STORE_HEAD_NOLOCK(shareerrors_early_store);
+		while (s_item) {
+			DATA_SHAREERRORS(shareerrors, s_item);
+			LOGERR("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
+				__func__,
+				shareerrors->workinfoid,
+				st = safe_text_nonull(shareerrors->workername),
+				shareerrors->errn,
+				shareerrors->error,
+				shareerrors->createdate.tv_sec,
+				shareerrors->createdate.tv_usec);
+			FREENULL(st);
+			s_item = s_item->next;
+		}
+	}
+	FREE_TREE(shareerrors_early);
+	FREE_STORE(shareerrors_early);
 	FREE_ALL(shareerrors);
+	if (shares_early_store->count > 0) {
+		LOGERR("%s() *** shares_early count %d ***",
+			__func__, shares_early_store->count);
+		s_item = STORE_HEAD_NOLOCK(shares_early_store);
+		while (s_item) {
+			DATA_SHARES(shares, s_item);
+			LOGERR("%s(): %"PRId64"/%s/%s/%"PRId32"/%ld,%ld",
+				__func__,
+				shares->workinfoid,
+				st = safe_text_nonull(shares->workername),
+				shares->nonce,
+				shares->errn,
+				shares->createdate.tv_sec,
+				shares->createdate.tv_usec);
+			FREENULL(st);
+			s_item = s_item->next;
+		}
+	}
+	FREE_TREE(shares_early);
+	FREE_STORE(shares_early);
 	FREE_ALL(shares);
 
-	LOGWARNING("%s() workinfo ...", __func__);
+	if (free_mode != FREE_MODE_ALL)
+		LOGWARNING("%s() workinfo skipped", __func__);
+	else {
+		LOGWARNING("%s() workinfo ...", __func__);
 
-	FREE_TREE(workinfo_height);
-	FREE_TREE(workinfo);
-	FREE_STORE_DATA(workinfo);
-	FREE_LIST_DATA(workinfo);
+		FREE_TREE(workinfo_height);
+		FREE_TREE(workinfo);
+		FREE_STORE_DATA(workinfo);
+		FREE_LIST_DATA(workinfo);
+	}
 
 	FREE_LISTS(idcontrol);
 	FREE_ALL(accountbalance);
@@ -1171,13 +1522,36 @@ static void dealloc_storage()
 	FREE_ALL(useratts);
 
 	FREE_TREE(userid);
-	FREE_ALL(users);
+	FREE_TREE(users);
+	FREE_STORE_DATA(users);
+	FREE_LIST_DATA(users);
 
 	LOGWARNING("%s() transfer/heartbeatqueue/workqueue ...", __func__);
 
 	FREE_LIST(transfer);
 	FREE_LISTS(heartbeatqueue);
-	FREE_LISTS(workqueue);
+	FREE_STORE(pool_workqueue);
+	FREE_STORE(cmd_workqueue);
+	FREE_STORE(btc_workqueue);
+	FREE_LIST(workqueue);
+	FREE_LISTS(msgline);
+
+	if (free_mode != FREE_MODE_ALL)
+		LOGWARNING("%s() seqset skipped", __func__);
+	else {
+		LOGWARNING("%s() seqset ...", __func__);
+		sequence_report(false);
+
+		FREE_STORE_DATA(seqset);
+		FREE_LIST_DATA(seqset);
+		FREE_LISTS(seqset);
+
+		// Must be after seqset
+		FREE_LIST(seqtrans);
+
+		for (seq = 0; seq < SEQ_MAX; seq++)
+			FREENULL(seqnam[seq]);
+	}
 
 	LOGWARNING("%s() finished", __func__);
 }
@@ -1187,13 +1561,24 @@ static bool setup_data()
 	K_TREE_CTX ctx[1];
 	K_ITEM look, *found;
 	WORKINFO wi, *wic, *wif;
+	tv_t db_stt, db_fin, rel_stt, rel_fin;
+	double min, sec;
 
 	cklock_init(&fpm_lock);
 	cksem_init(&socketer_sem);
 	mutex_init(&wq_waitlock);
 	cond_init(&wq_waitcond);
 
+	LOGWARNING("%sStartup payout generation state is %s",
+		   genpayout_auto ? "" : "WARNING: ",
+		   genpayout_auto ? "On" : "Off");
+	LOGWARNING("%sStartup mark generation state is %s",
+		   markersummary_auto ? "" : "WARNING: ",
+		   markersummary_auto ? "On" : "Off");
+
 	alloc_storage();
+
+	setnow(&db_stt);
 
 	if (!getdata1() || everyone_die)
 		return false;
@@ -1214,57 +1599,1065 @@ static bool setup_data()
 	if (!getdata3() || everyone_die)
 		return false;
 
+	setnow(&db_fin);
+	sec = tvdiff(&db_fin, &db_stt);
+	min = floor(sec / 60.0);
+	sec -= min * 60.0;
+	LOGWARNING("dbload complete %.0fm %.3fs", min, sec);
+
 	db_load_complete = true;
+
+	setnow(&rel_stt);
 
 	if (!reload() || everyone_die)
 		return false;
 
+	setnow(&rel_fin);
+	sec = tvdiff(&rel_fin, &rel_stt);
+	min = floor(sec / 60.0);
+	sec -= min * 60.0;
+	LOGWARNING("reload complete %.0fm %.3fs", min, sec);
+
+	// full lock access since mark processing can occur
+	K_WLOCK(process_pplns_free);
+
+	K_WLOCK(workerstatus_free);
+	K_RLOCK(sharesummary_free);
+	K_RLOCK(markersummary_free);
+	K_RLOCK(workmarkers_free);
+
 	set_block_share_counters();
+
+	if (!everyone_die)
+		workerstatus_ready();
+
+	K_RUNLOCK(workmarkers_free);
+	K_RUNLOCK(markersummary_free);
+	K_RUNLOCK(sharesummary_free);
+	K_WUNLOCK(workerstatus_free);
+
+	K_WUNLOCK(process_pplns_free);
 
 	if (everyone_die)
 		return false;
 
-	workerstatus_ready();
-
+	K_WLOCK(workinfo_free);
 	workinfo_current = last_in_ktree(workinfo_height_root, ctx);
 	if (workinfo_current) {
 		DATA_WORKINFO(wic, workinfo_current);
 		STRNCPY(wi.coinbase1, wic->coinbase1);
-		wi.createdate.tv_sec = 0L;
-		wi.createdate.tv_usec = 0L;
+		DATE_ZERO(&(wi.createdate));
 		INIT_WORKINFO(&look);
 		look.data = (void *)(&wi);
 		// Find the first workinfo for this height
-		found = find_after_in_ktree(workinfo_height_root, &look, cmp_workinfo_height, ctx);
+		found = find_after_in_ktree(workinfo_height_root, &look, ctx);
 		if (found) {
 			DATA_WORKINFO(wif, found);
 			copy_tv(&last_bc,  &(wif->createdate));
 		}
 		// No longer needed
-		workinfo_height_root = free_ktree(workinfo_height_root, NULL);
+		free_ktree(workinfo_height_root, NULL);
 	}
+	K_WUNLOCK(workinfo_free);
 
 	return true;
 }
 
-static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
-				 char *buf, int *which_cmds, char *cmd,
-				 char *id, tv_t *now, tv_t *cd)
+#define SEQINUSE firstcd.tv_sec
+
+#define RESETSET(_seqset, _n_seqstt, _n_seqpid) do { \
+		int _i; \
+		(_seqset)->seqstt = (_n_seqstt); \
+		(_seqset)->seqpid = (_n_seqpid); \
+		for (_i = 0; _i < SEQ_MAX; _i++) { \
+			(_seqset)->seqdata[_i].minseq = \
+			(_seqset)->seqdata[_i].maxseq = \
+			(_seqset)->seqdata[_i].seqbase = \
+			(_seqset)->seqdata[_i].missing = \
+			(_seqset)->seqdata[_i].trans = \
+			(_seqset)->seqdata[_i].lost = \
+			(_seqset)->seqdata[_i].stale = \
+			(_seqset)->seqdata[_i].high = \
+			(_seqset)->seqdata[_i].recovered = \
+			(_seqset)->seqdata[_i].ok = 0; \
+			(_seqset)->seqdata[_i].SEQINUSE = \
+			(_seqset)->seqdata[_i].firstcd.tv_usec = \
+			(_seqset)->seqdata[_i].lastcd.tv_sec = \
+			(_seqset)->seqdata[_i].lastcd.tv_usec = \
+			(_seqset)->seqdata[_i].firsttime.tv_sec = \
+			(_seqset)->seqdata[_i].firsttime.tv_usec = \
+			(_seqset)->seqdata[_i].lasttime.tv_sec = \
+			(_seqset)->seqdata[_i].lasttime.tv_usec = 0L; \
+		} \
+	} while (0);
+
+#define MISSFLAG cd.tv_sec
+#define TRANSFLAG cd.tv_usec
+
+// Test if an item is missing/transient
+#define ENTRYISMIS(_seqentry) ((_seqentry)->MISSFLAG == 0)
+#define DATAISMIS(_seqdata, _u) \
+	ENTRYISMIS(&((_seqdata)->entry[(_u) & ((_seqdata)->size - 1)]))
+
+#define ENTRYONLYMIS(_seqentry) (((_seqentry)->MISSFLAG == 0) && \
+				 ((_seqentry)->TRANSFLAG == 0))
+
+#define ENTRYISTRANS(_seqentry) (((_seqentry)->MISSFLAG == 0) && \
+				 ((_seqentry)->TRANSFLAG != 0))
+#define DATAISTRANS(_seqdata, _u) \
+	ENTRYISTRANS(&((_seqdata)->entry[(_u) & ((_seqdata)->size - 1)]))
+
+// Flag an item as missing
+#define ENTRYSETMIS(_seqentry, _now) do { \
+		(_seqentry)->MISSFLAG = 0; \
+		(_seqentry)->TRANSFLAG = 0; \
+		(_seqentry)->time.tv_sec = now->tv_sec; \
+		(_seqentry)->time.tv_usec = now->tv_usec; \
+	} while(0)
+#define DATASETMIS(_seqdata, _u, _now) \
+	ENTRYSETMIS(&((_seqdata)->entry[(_u) & ((_seqdata)->size - 1)]), _now)
+
+/* Flag an item directly as transient missing -
+ *  it will already be missing but we set both flags */
+#define ENTRYSETTRANS(_seqentry) do { \
+		(_seqentry)->MISSFLAG = 0; \
+		(_seqentry)->TRANSFLAG = 1; \
+	} while(0)
+#define DATASETTRANS(_seqdata, _u) \
+	ENTRYSETTRANS(&((_seqdata)->entry[(_u) & ((_seqdata)->size - 1)]))
+
+// Check for transient missing every 2s
+#define TRANCHECKLIMIT 2.0
+static tv_t last_trancheck;
+// Don't let these messages be slowed down by a trans_process()
+#define TRANCHKSEQOK(_seq) ((_seq) != SEQ_SHARES && (_seq) != SEQ_AUTH && \
+			    (_seq) != SEQ_ADDRAUTH && (_seq) != SEQ_BLOCK)
+
+/* time (now) is used, not cd, since cd is only relevant to reloading
+ *  and we don't run trans_process() during reloading
+ * We also only know now, not cd, for a missing item
+ * This fills in store with a copy of the details of all the new transients
+ * N.B. this is called under SEQLOCK() */
+static void trans_process(SEQSET *seqset, tv_t *now, K_STORE *store)
+{
+	SEQDATA *seqdata = NULL;
+	SEQENTRY *seqentry = NULL;
+	uint64_t zero, top, u;
+	SEQTRANS *seqtrans;
+	K_ITEM *st_item;
+	int seq;
+
+	for (seq = 0; seq < SEQ_MAX; seq++) {
+		seqdata = &(seqset->seqdata[seq]);
+		if (seqdata->SEQINUSE == 0)
+			continue;
+
+		/* run as 2 loops from seqbase to top, then bottom to maxseq
+		 * thus we can use seqentry++ rather than calculating it
+		 * each time */
+		zero = seqdata->seqbase - (seqdata->seqbase & (seqdata->size - 1));
+		top = zero + seqdata->size - 1;
+		if (top > seqdata->maxseq)
+			top = seqdata->maxseq;
+		u = seqdata->seqbase;
+		seqentry = &(seqdata->entry[seqdata->seqbase & (seqdata->size - 1)]);
+		while (u <= top) {
+			if (ENTRYONLYMIS(seqentry) &&
+			    tvdiff(now, &(seqentry->time)) > seqdata->timelimit) {
+				ENTRYSETTRANS(seqentry);
+				seqdata->trans++;
+				seqset->trans++;
+				// N.B. lock inside lock
+				K_WLOCK(seqtrans_free);
+				st_item = k_unlink_head(seqtrans_free);
+				K_WUNLOCK(seqtrans_free);
+				DATA_SEQTRANS(seqtrans, st_item);
+				seqtrans->seq = seq;
+				seqtrans->seqnum = u;
+				memcpy(&(seqtrans->entry), seqentry, sizeof(SEQENTRY));
+				k_add_head_nolock(store, st_item);
+			}
+			u++;
+			seqentry++;
+		}
+
+		// 2nd loop isn't needed, we've already covered the full range
+		if (top == seqdata->maxseq)
+			continue;
+
+		u = zero + seqdata->size;
+		seqentry = &(seqdata->entry[0]);
+		while (u <= seqdata->maxseq) {
+			if (ENTRYONLYMIS(seqentry) &&
+			    tvdiff(now, &(seqentry->time)) > seqdata->timelimit) {
+				ENTRYSETTRANS(seqentry);
+				seqdata->trans++;
+				seqset->trans++;
+				// N.B. lock inside lock
+				K_WLOCK(seqtrans_free);
+				st_item = k_unlink_head(seqtrans_free);
+				K_WUNLOCK(seqtrans_free);
+				DATA_SEQTRANS(seqtrans, st_item);
+				seqtrans->seq = seq;
+				seqtrans->seqnum = u;
+				memcpy(&(seqtrans->entry), seqentry, sizeof(SEQENTRY));
+				k_add_head_nolock(store, st_item);
+			}
+			u++;
+			seqentry++;
+		}
+	}
+}
+
+static void trans_seq(tv_t *now)
+{
+	char t_buf[DATE_BUFSIZ], t_buf2[DATE_BUFSIZ];
+	K_STORE *store;
+	SEQSET *seqset = NULL;
+	K_ITEM *item = NULL, *lastitem = NULL;
+	SEQTRANS *seqtrans;
+	K_ITEM *st_item;
+	uint64_t seqstt = 0, seqpid = 0;
+	bool more = true;
+	int i, j;
+
+	store = k_new_store(seqtrans_free);
+	for (i = 0; more; i++) {
+		SEQLOCK();
+		if (seqset_store->count <= i)
+			more = false;
+		else {
+			item = STORE_RHEAD(seqset_store);
+			for (j = 0; item && j < 0; j++)
+				item = item->next;
+			if (!item)
+				more = false;
+			else {
+				/* Avoid wasting time reprocessing the item
+				 *  if a new set was added outside the lock
+				 *  and pushed the sets along one */
+				if (item != lastitem) {
+					DATA_SEQSET(seqset, item);
+					seqstt = seqset->seqstt;
+					seqpid = seqset->seqpid;
+					if (seqstt)
+						trans_process(seqset, now, store);
+					else
+						more = false;
+				}
+				lastitem = item;
+			}
+		}
+		if (seqset_store->count <= (i + 1))
+			more = false;
+		SEQUNLOCK();
+
+		st_item = STORE_TAIL_NOLOCK(store);
+		while (st_item) {
+			DATA_SEQTRANS(seqtrans, st_item);
+			btu64_to_buf(&seqstt, t_buf, sizeof(t_buf));
+			bt_to_buf(&(seqtrans->entry.time.tv_sec), t_buf2,
+				  sizeof(t_buf2));
+			LOGWARNING("Seq trans %s %"PRIu64" set:%d/%"PRIu64
+				   "=%s/%"PRIu64" %s/%s",
+				   seqnam[seqtrans->seq], seqtrans->seqnum,
+				   i, seqstt, t_buf, seqpid,
+				   t_buf2, seqtrans->entry.code);
+			st_item = st_item->prev;
+		}
+		if (store->count) {
+			K_WLOCK(seqtrans_free);
+			k_list_transfer_to_head(store, seqtrans_free);
+			if (seqtrans_free->count == seqtrans_free->total &&
+			    seqtrans_free->total >= ALLOC_SEQTRANS * CULL_SEQTRANS)
+				k_cull_list(seqtrans_free);
+			K_WUNLOCK(seqtrans_free);
+		}
+	}
+	store = k_free_store(store);
+}
+
+/* Only called once just before flagging reload as finished
+ * Set all the reloadmax variables in all seqdata */
+static void seq_reloadmax()
+{
+	K_ITEM *seqset_item;
+	SEQSET *seqset;
+	SEQDATA *seqdata;
+	int i;
+
+	SEQLOCK();
+	if (seqset_store->count > 0) {
+		seqset_item = STORE_WHEAD(seqset_store);
+		while (seqset_item) {
+			DATA_SEQSET(seqset, seqset_item);
+			if (seqset->seqstt) {
+				seqdata = seqset->seqdata;
+				for (i = 0; i < SEQ_MAX; i++) {
+					if (seqdata->SEQINUSE)
+						seqdata->reloadmax = seqdata->maxseq;
+					seqdata++;
+				}
+			}
+			seqset_item = seqset_item->next;
+		}
+	}
+	SEQUNLOCK();
+}
+
+/* Most of the extra message logic in here is to avoid putting too many
+ *  messages or incorrect messages on the console when errors occur
+ * It wont lose msglines from the reload or the queue, since if there is any
+ *  problem with any msgline, it will be processed rather than skipped
+ * Only valid duplicates, with all 4 sequence numbers (all, cmd, stt, pid)
+ *  matching a previous msgline, are flagged DUP to be skipped by the
+ *  sequence code */
+static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
+			uint64_t n_seqstt, uint64_t n_seqpid,
+			char *nam, tv_t *now, tv_t *cd, char *code,
+			int seqentryflags, char *msg)
+{
+	char t_buf[DATE_BUFSIZ], t_buf2[DATE_BUFSIZ], *st = NULL;
+	bool firstseq, newseq, expseq, gothigh, okhi, gotstale, gotstalestart;
+	SEQSET *seqset = NULL, *seqset0 = NULL, seqset_pre = { 0 };
+	SEQSET seqset_exp = { 0 }, seqset_copy = { 0 };
+	bool dup, wastrans, doitem, dotime, gotrecover;
+	SEQDATA *seqdata;
+	SEQENTRY *seqentry, seqentry_copy, *u_entry;
+	K_ITEM *seqset_item = NULL, *st_item = NULL, *stl_item = NULL;
+	SEQTRANS *seqtrans = NULL, *seqtrans2 = NULL;
+	size_t siz, end;
+	void *off0, *offn;
+	uint64_t u;
+	int set = -1, expset = -1, highlimit, i;
+	K_STORE *lost = NULL;
+
+	LOGDEBUG("%s() SQ %c:%d/%s/%"PRIu64"/%"PRIu64"/%"PRIu64"/%s '%.80s...",
+		 __func__, SECHR(seqentryflags), seq, nam, n_seqcmd, n_seqstt,
+		 n_seqpid, code, st = safe_text(msg));
+	FREENULL(st);
+
+	firstseq = newseq = expseq = gothigh = okhi = gotstale =
+	gotstalestart = dup = wastrans = gotrecover = false;
+	SEQLOCK();
+	// Get the seqset
+	if (seqset_store->count == 0)
+		firstseq = true;
+	else {
+		// Normal processing is: count=1 and head is current
+		seqset_item = STORE_WHEAD(seqset_store);
+		DATA_SEQSET(seqset, seqset_item);
+		set = 0;
+		if (n_seqstt == seqset->seqstt && n_seqpid == seqset->seqpid)
+			goto gotseqset;
+		// It's not the current set, check the older ones
+		while ((seqset_item = seqset_item->next)) {
+			DATA_SEQSET(seqset, seqset_item);
+			set++;
+			if (seqset->seqstt && n_seqstt == seqset->seqstt &&
+			    n_seqpid == seqset->seqpid) {
+				goto gotseqset;
+			}
+		}
+	} 
+
+	// Need to setup a new seqset
+	newseq = true;
+	if (!firstseq) {
+		// If !STORE_WHEAD(seqset_store) (i.e. a bug) this will quit()
+		DATA_SEQSET(seqset0, STORE_WHEAD(seqset_store));
+		// The current seqset (may become the previous)
+		memcpy(&seqset_pre, seqset0, sizeof(seqset_pre));
+	}
+	seqset_item = k_unlink_head_zero(seqset_free);
+	if (seqset_item) {
+		// Setup a new set - everything is already zero
+		DATA_SEQSET(seqset, seqset_item);
+		seqset->seqstt = n_seqstt;
+		seqset->seqpid = n_seqpid;
+		for (i = 0; i < SEQ_MAX; i++) {
+			// Unnecessary - but as a reminder
+			seqset->seqdata[i].SEQINUSE = 0;
+			switch (i) {
+			    case SEQ_ALL:
+			    case SEQ_SHARES:
+				seqset->seqdata[i].size = SEQ_LARGE_SIZ;
+				seqset->seqdata[i].timelimit = SEQ_LARGE_TRANS_LIM;
+				break;
+			    case SEQ_WORKERSTAT:
+			    case SEQ_AUTH:
+			    case SEQ_ADDRAUTH:
+				seqset->seqdata[i].size = SEQ_MEDIUM_SIZ;
+				seqset->seqdata[i].timelimit = SEQ_MEDIUM_TRANS_LIM;
+				break;
+			    default:
+				seqset->seqdata[i].size = SEQ_SMALL_SIZ;
+				seqset->seqdata[i].timelimit = SEQ_SMALL_TRANS_LIM;
+				break;
+			}
+			siz = seqset->seqdata[i].size;
+			if (siz < BASE_SIZ || (siz & (siz-1))) {
+				// On the first ever seq record
+				quithere(1, "seqdata[%d] size %d (0x%x) is %s %d",
+					    i, (int)siz, (int)siz,
+					    (siz < BASE_SIZ) ?
+						"too small, must be >=" :
+						"not a power of",
+					    (siz < BASE_SIZ) ? BASE_SIZ : 2);
+			}
+			highlimit = siz >> HIGH_SHIFT;
+			if (highlimit < HIGH_MIN) {
+				// On the first ever seq record
+				quithere(1, "seqdata[%d] highlimit %d (0x%x) "
+					    "is too small, must be >= %d",
+					    i, highlimit, highlimit, HIGH_MIN);
+			}
+			seqset->seqdata[i].highlimit = highlimit;
+			seqset->seqdata[i].entry = calloc(siz, sizeof(SEQENTRY));
+			end = siz * sizeof(SEQENTRY);
+			off0 = &(seqset->seqdata[i].entry[0]);
+			offn = &(seqset->seqdata[i].entry[siz]);
+			if ((int)end != (offn - off0)) {
+				// On the first ever seq record
+				quithere(1, "memory size (%d) != structure "
+					    "offset (%d) - your cc sux",
+					    (int)end, (int)(offn - off0));
+			}
+			LIST_MEM_ADD_SIZ(seqset_free, end);
+		}
+	} else {
+		/* Expire the oldest set and overwrite it
+		 * If this happens during a reload and the expired set is in
+		 *  the queue, then this will most likely end up spitting out
+		 *  lots of errors since this will cause a chain reaction,
+		 *  after the reload completes, of expiring the last set, that
+		 *  is ahead in the unprocessed queue, each time the queue
+		 *  advances to the next set
+		 * This can only happen if the pool restarts SEQ_MAX times
+		 *  during the reload ... so it's extremely unlikely but
+		 *  also will be obvious in the console log if it happens
+		 * The (very unlikely) side effect would be that it could miss
+		 *  spotting lost sequence numbers: between the maxseq of a set
+		 *  in the reload, and the base of the same set in the queue
+		 * The fix is simply to stop ckdb immediately if ckpool is
+		 *  constantly failing (SEQ_MAX times during the reload) and
+		 *  restart ckdb when ckpool isn't aborting, or if ckpool is
+		 *  in a problematic state, start ckdb while ckpool isn't
+		 *  running, then start ckpool when ckdb completes it's full
+		 *  startup */
+		K_ITEM *ss_item;
+		SEQSET *ss = NULL;
+		int s = 0;
+		seqset = NULL;
+		seqset_item = NULL;
+		ss_item = STORE_WHEAD(seqset_store);
+		while (ss_item) {
+			DATA_SEQSET(ss, ss_item);
+			if (!seqset) {
+				seqset = ss;
+				seqset_item = ss_item;
+				expset = s;
+			} else {
+				// choose the last match
+				if (ss->seqstt >= seqset->seqstt) {
+					seqset = ss;
+					seqset_item = ss_item;
+					expset = s;
+				}
+			}
+			ss_item = ss_item->next;
+			s++;
+		}
+		// If !seqset_item (i.e. a bug) k_unlink_item() will quit()
+		k_unlink_item(seqset_store, seqset_item);
+		DATA_SEQSET(seqset, seqset_item);
+		memcpy(&seqset_exp, seqset, sizeof(seqset_exp));
+		expseq = true;
+		RESETSET(seqset, n_seqstt, n_seqpid);
+	}
+	/* To avoid putting an old set as first in the list, if they are out
+	 *  of order, each new set is added depending upon the value of seqstt
+	 *  so the current pool is first, to minimise searching seqset_store
+	 * The order of the rest isn't as important
+	 * N.B. a new set is only created once per ckpool start */
+	if (firstseq) {
+		k_add_head(seqset_store, seqset_item);
+		set = 0;
+	} else {
+		// seqset0 already is the head
+		if (n_seqstt >= seqset0->seqstt) {
+			// if new set is >= head then make it the head
+			k_add_head(seqset_store, seqset_item);
+			set = 0;
+		} else {
+			// put it next after the head
+			k_insert_after(seqset_store, seqset_item,
+					STORE_WHEAD(seqset_store));
+			set = 1;
+		}
+	}
+
+gotseqset:
+	doitem = dotime = false;
+
+	seqdata = &(seqset->seqdata[seq]);
+	seqentry = &(seqdata->entry[n_seqcmd & (seqdata->size - 1)]);
+	if (seqdata->SEQINUSE == 0) {
+		// First n_seqcmd for the given seq
+		copy_tv(&(seqdata->firsttime), now);
+		copy_tv(&(seqdata->lasttime), now);
+		copy_tv(&(seqdata->firstcd), cd); // In use
+		copy_tv(&(seqdata->lastcd), cd);
+		seqdata->minseq = seqdata->maxseq =
+		seqdata->seqbase = n_seqcmd;
+		doitem = true;
+		goto setitemdata;
+		// TODO: add a check/message if minseq!=0 and
+		//	 it's a 2nd or later set
+	}
+
+	if (n_seqcmd > seqdata->maxseq) {
+		/* New seq above maxseq */
+		if ((n_seqcmd - seqdata->maxseq) > seqdata->highlimit) {
+			/* During a reload there may be missing data/gaps if
+			 *  there was some problem with the reload data
+			 * When we switch from the reload data to the queue
+			 *  data, it is also flagged ok since it may also be
+			 *  due to lost data at the end, or missing reload files
+			 * In both these cases the message will be 'OKHI'
+			 *  instead of 'HIGH'
+			 * If however this is caused by a corrupt seq number
+			 *  then the result will be a large range of lost
+			 *  msglines followed by continuous stale msglines
+			 *  until it catches up to the corrupt seq number
+			 *  Currently the only fix to get rid of the console
+			 *   messages is to fix/remove the corrupt high
+			 *   msgline from the reload data and restart ckdb
+			 *   You would have to stop ckdb first if it is in the
+			 *    current hour reload file
+			 *  Note of course if it came from the queue it will
+			 *   be in the reload data when you restart ckdb */
+			if ((seqentryflags & SE_RELOAD) ||
+			    (seqdata->maxseq == seqdata->reloadmax))
+				okhi = true;
+
+			seqdata->high++;
+			seqset->high++;
+			memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+			gothigh = true;
+		}
+		for (u = seqdata->maxseq + 1; u <= n_seqcmd; u++) {
+			if ((u - seqdata->seqbase) < seqdata->size) {
+				// u is unused
+				if (u < n_seqcmd) {
+					// Flag skipped ones as missing
+					DATASETMIS(seqdata, u, now);
+					seqdata->missing++;
+					seqset->missing++;
+				}
+			} else {
+				// u is used by (u-size)
+				u_entry = &(seqdata->entry[u & (seqdata->size - 1)]);
+				if (ENTRYISMIS(u_entry)) {
+					/* (u-size) was missing
+					 * N.B. lock inside lock */
+					K_WLOCK(seqtrans_free);
+					st_item = k_unlink_head(seqtrans_free);
+					if (u_entry->flags & SE_RELOAD)
+						stl_item = k_unlink_head(seqtrans_free);
+					K_WUNLOCK(seqtrans_free);
+					DATA_SEQTRANS(seqtrans, st_item);
+					seqtrans->seqnum = u - seqdata->size;
+					memcpy(&(seqtrans->entry), u_entry,
+						sizeof(SEQENTRY));
+					if (!lost)
+						lost = k_new_store(seqtrans_free);
+					k_add_tail_nolock(lost, st_item);
+					seqdata->lost++;
+					seqset->lost++;
+					if (ENTRYISTRANS(u_entry)) {
+						// no longer trans
+						seqdata->trans--;
+						seqset->trans--;
+					}
+					if (u == n_seqcmd) {
+						// new wont be missing
+						seqdata->missing--;
+						seqset->missing--;
+					} else {
+						// new will also be missing
+						ENTRYSETMIS(u_entry, now);
+					}
+
+					/* Store stale reload entries so we can
+					 *  check against any stale queue
+					 *  entries and flag them as recovered
+					 *  or DUP */
+					if (u_entry->flags & SE_RELOAD) {
+						DATA_SEQTRANS(seqtrans, stl_item);
+						seqtrans->seqnum = u - seqdata->size;
+						memcpy(&(seqtrans->entry), u_entry,
+							sizeof(SEQENTRY));
+						if (!seqdata->reload_lost) {
+							seqdata->reload_lost = k_new_store(seqtrans_free);
+							seqdata_reload_lost = true;
+						}
+						k_add_tail_nolock(seqdata->reload_lost, stl_item);
+					}
+				} else {
+					// (u-size) wasn't missing
+					if (u < n_seqcmd) {
+						// Flag skipped as missing
+						DATASETMIS(seqdata, u, now);
+						seqdata->missing++;
+						seqset->missing++;
+					}
+				}
+				seqdata->seqbase++;
+			} 
+			seqdata->maxseq++;
+		}
+		// store n_seqcmd
+		doitem = true;
+		dotime = true;
+	} else if (n_seqcmd >= seqdata->seqbase) {
+		/* It's within the range thus DUP or missing */
+		if (!ENTRYISMIS(seqentry)) {
+			dup = true;
+			memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+			memcpy(&seqentry_copy, seqentry, sizeof(seqentry_copy));
+		} else {
+			// Found a missing one
+			seqdata->missing--;
+			seqset->missing--;
+			if (ENTRYISTRANS(seqentry)) {
+				seqdata->trans--;
+				seqset->trans--;
+				wastrans = true;
+			}
+			doitem = true;
+			dotime = true;
+		}
+	} else if (n_seqcmd < seqdata->minseq) {
+		/* This would be early during startup, less than minseq
+		 * This requires lowering minseq if there's space to lower it
+		 *  to n_seqcmd */
+		if ((n_seqcmd + seqdata->size) > seqdata->maxseq) {
+			// Set all after n_seqcmd but before minseq as missing
+			for (u = seqdata->minseq - 1; u > n_seqcmd; u--) {
+				DATASETMIS(seqdata, u, now);
+				seqdata->minseq--;
+				seqdata->seqbase--;
+				seqset->missing++;
+				seqdata->missing++;
+			}
+			seqdata->minseq--;
+			seqdata->seqbase--;
+			doitem = true;
+			dotime = true;
+		} else {
+			// Can't go back that far, so it's stale
+			seqdata->stale++;
+			seqset->stale++;
+			memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+			gotstalestart = true;
+		}
+	} else {
+		/* >=minseq but <seqbase means it's stale
+		 * However we want to flag it as a DUP if it is a queued
+		 *  msgline that was already processed during the reload
+		 *  This can happen if the reload finish seq numbers is
+		 *   greater than the first queue seq number + siz
+		 *   i.e. a long reload where the queue gets large enough
+		 *	  to cause this */
+		st_item = NULL;
+		if (seqdata->reload_lost) {
+			st_item = STORE_WHEAD(seqdata->reload_lost);
+			// seqnum order is not guaranteed
+			while (st_item) {
+				DATA_SEQTRANS(seqtrans, st_item);
+				if (seqtrans->seqnum == n_seqcmd)
+					break;
+				st_item = st_item->next;
+			}
+		}
+		if (st_item) {
+			// recovered a lost entry
+			k_unlink_item_nolock(seqdata->reload_lost, st_item);
+			K_WLOCK(seqtrans_free);
+			k_add_head(seqtrans_free, st_item);
+			K_WUNLOCK(seqtrans_free);
+			seqdata->lost--;
+			seqset->lost--;
+			seqdata->recovered++;
+			seqset->recovered++;
+			seqdata->ok++;
+			seqset->ok++;
+			memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+			gotrecover = true;
+			goto setitemdata;
+		}
+
+		/* Reload will still have all the lost entries
+		 *  thus since it's not lost/recovered, it must be a DUP */
+		if (seqentryflags & SE_RELOAD) {
+			memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+			dup = true;
+			goto setitemdata;
+		}
+
+		/* Before we've synced up the queue and still not discarded
+		 *  the reload lost list, if it's not lost/recovered but
+		 *  still in the reload range, it must be a DUP */
+		if (seqentryflags & SE_EARLYSOCK && n_seqcmd <= seqdata->reloadmax) {
+			memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+			dup = true;
+			goto setitemdata;
+		}
+
+		// Reload lost list is gone or it's after the reload range
+		seqdata->stale++;
+		seqset->stale++;
+		memcpy(&seqset_copy, seqset, sizeof(seqset_copy));
+		gotstale = true;
+	}
+
+setitemdata:
+	// Store the new seq if flagged to do so
+	if (doitem) {
+		seqentry->flags = seqentryflags;
+		copy_tv(&(seqentry->time), now);
+		copy_tv(&(seqentry->cd), cd);
+		STRNCPY(seqentry->code, code);
+		seqdata->ok++;
+		seqset->ok++;
+	}
+	if (dotime) {
+		if (tv_newer(now, &(seqdata->firsttime)))
+			copy_tv(&(seqdata->firsttime), now);
+		if (tv_newer(&(seqdata->lasttime), now))
+			copy_tv(&(seqdata->lasttime), now);
+		if (tv_newer(cd, &(seqdata->firstcd)))
+			copy_tv(&(seqdata->firstcd), cd);
+		if (tv_newer(&(seqdata->lastcd), cd))
+			copy_tv(&(seqdata->lastcd), cd);
+	}
+
+	SEQUNLOCK();
+
+	if (firstseq) {
+		// The first ever SEQ_ALL
+		btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
+		LOGWARNING("Seq first init: %s:%"PRIu64" "
+			   SEQSTT":%"PRIu64"=%s "SEQPID":%"PRIu64,
+			   nam, n_seqcmd, n_seqstt, t_buf, n_seqpid);
+	} else {
+		if (newseq) {
+			if (set == 0)
+				SEQSETMSG(0, &seqset_pre, "previous", EMPTY);
+			else
+				SEQSETMSG(0, &seqset_pre, "current", EMPTY);
+		}
+		if (expseq) {
+			SEQSETMSG(expset, &seqset_exp, "discarded old", " for:");
+		}
+		if (newseq || expseq) {
+			btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
+			LOGWARNING("Seq created new: set:%d %s:%"PRIu64" "
+				   SEQSTT":%"PRIu64"=%s "SEQPID":%"PRIu64,
+				   set, nam, n_seqcmd, n_seqstt, t_buf,
+				   n_seqpid);
+		}
+	}
+
+	if (dup) {
+		int level = LOG_WARNING;
+		/* If one is SE_RELOAD and the other is SE_EARLYSOCK or
+		 *  SE_SOCKET then it's not unexpected, so only use LOG_DEBUG
+		 * Technically SE_SOCKET is unexpected, except that at the end
+		 *  of the reload sync there may still be pool messages that
+		 *  haven't got into the queue yet - it wouldn't be expected
+		 *  for there to be many since it would be ckdb emptying the
+		 *  queue faster than it is filling due to the reload delay -
+		 *  but either way they don't need to be reported */
+		if (((seqentry_copy.flags | seqentryflags) & SE_RELOAD) &&
+		    ((seqentry_copy.flags | seqentryflags) & (SE_EARLYSOCK | SE_SOCKET)))
+			level = LOG_DEBUG;
+		btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
+		bt_to_buf(&(cd->tv_sec), t_buf2, sizeof(t_buf2));
+		LOGMSG(level, "SEQ dup%s %c:%c %s %"PRIu64" set:%d/%"PRIu64
+				"=%s/%"PRIu64" %s/%s -vs- v%"PRIu64"/^%"PRIu64
+				"/M%"PRIu64"/T%"PRIu64"/L%"PRIu64"/S%"PRIu64
+				"/H%"PRIu64"/OK%"PRIu64" cmd=%.42s...",
+				(level == LOG_DEBUG) ? "*" : EMPTY,
+				SECHR(seqentryflags), SECHR(seqentry_copy.flags),
+				nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
+				t_buf2, code,
+				seqset_copy.seqdata[seq].minseq,
+				seqset_copy.seqdata[seq].maxseq,
+				seqset_copy.seqdata[seq].missing,
+				seqset_copy.seqdata[seq].trans,
+				seqset_copy.seqdata[seq].lost,
+				seqset_copy.seqdata[seq].stale,
+				seqset_copy.seqdata[seq].high,
+				seqset_copy.seqdata[seq].ok,
+				st = safe_text(msg));
+		FREENULL(st);
+	}
+
+	if (wastrans || gotrecover) {
+		btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
+		bt_to_buf(&(cd->tv_sec), t_buf2, sizeof(t_buf2));
+		LOGWARNING("%s %s %"PRIu64" set:%d/%"PRIu64"=%s/%"PRIu64
+			   " %s/%s",
+			   gotrecover ? "SEQ recovered" : "Seq found trans",
+			   nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
+			   t_buf2, code);
+	}
+
+	if (gotstale || gotstalestart || gothigh) {
+		btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
+		bt_to_buf(&(cd->tv_sec), t_buf2, sizeof(t_buf2));
+		LOGWARNING("SEQ %s %s%s %"PRIu64" set:%d/%"PRIu64"=%s/%"PRIu64
+			   " %s/%s v%"PRIu64"/^%"PRIu64"/M%"PRIu64"/T%"PRIu64
+			   "/L%"PRIu64"/S%"PRIu64"/H%"PRIu64"/OK%"PRIu64
+			   " cmd=%.42s...",
+			   gothigh ? (okhi ? "OKHI" : "HIGH") : "stale",
+			   gotstalestart ? "STARTUP " : EMPTY,
+			   nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
+			   t_buf2, code,
+			   seqset_copy.seqdata[seq].minseq,
+			   seqset_copy.seqdata[seq].maxseq,
+			   seqset_copy.seqdata[seq].missing,
+			   seqset_copy.seqdata[seq].trans,
+			   seqset_copy.seqdata[seq].lost,
+			   seqset_copy.seqdata[seq].stale,
+			   seqset_copy.seqdata[seq].high,
+			   seqset_copy.seqdata[seq].ok,
+			   st = safe_text(msg));
+		FREENULL(st);
+	}
+	if (reload_queue_complete && TRANCHKSEQOK(seq)) {
+		if (last_trancheck.tv_sec == 0)
+			setnow(&last_trancheck);
+		else {
+			if (tvdiff(now, &last_trancheck) > TRANCHECKLIMIT) {
+				trans_seq(now);
+				setnow(&last_trancheck);
+			}
+		}
+	}
+
+	if (lost && lost->count) {
+		int tran = 0, miss = 0;
+		uint64_t prev = 0;
+		char range_buf[256];
+		bool isrange = false;
+		st_item = STORE_HEAD_NOLOCK(lost);
+		while (st_item) {
+			DATA_SEQTRANS(seqtrans, st_item);
+			st_item = st_item->next;
+			DATA_SEQTRANS_NULL(seqtrans2, st_item);
+
+			if (ENTRYISTRANS(&(seqtrans->entry)))
+				tran++;
+			else
+				miss++;
+
+			// Output the messages as ranges if they are
+			if (st_item && seqtrans2->seqnum == (seqtrans->seqnum+1)) {
+				if (!prev)
+					prev = seqtrans->seqnum;
+				continue;
+			}
+			if (prev) {
+				isrange = true;
+				snprintf(range_buf, sizeof(range_buf),
+					 "RANGE %d tran %d miss %"PRIu64
+					 "-%"PRIu64,
+					 tran, miss, prev,
+					 seqtrans->seqnum);
+				prev = 0;
+			} else {
+				isrange = false;
+				snprintf(range_buf, sizeof(range_buf),
+					 "%s %"PRIu64,
+					 ENTRYISTRANS(&(seqtrans->entry)) ?
+					 "tran" : "miss",
+					 seqtrans->seqnum);
+			}
+			// consumed
+			tran = miss = 0;
+
+			btu64_to_buf(&n_seqstt, t_buf, sizeof(t_buf));
+			bt_to_buf(&(seqtrans->entry.time.tv_sec), t_buf2,
+				   sizeof(t_buf2));
+			LOGWARNING("SEQ lost %s %s set:%d/%"PRIu64"=%s/%"PRIu64
+				   " %s%s/%s",
+				   seqnam[seq], range_buf, set,
+				   n_seqstt, t_buf, n_seqpid,
+				   isrange ? "last: " : EMPTY,
+				   t_buf2, seqtrans->entry.code);
+		}
+		K_WLOCK(seqtrans_free);
+		k_list_transfer_to_head(lost, seqtrans_free);
+		if (seqtrans_free->count == seqtrans_free->total &&
+		    seqtrans_free->total >= ALLOC_SEQTRANS * CULL_SEQTRANS)
+			k_cull_list(seqtrans_free);
+		K_WUNLOCK(seqtrans_free);
+	}
+
+	if (lost)
+		lost = k_free_store(lost);
+
+	return dup;
+}
+
+static enum cmd_values process_seq(MSGLINE *msgline)
+{
+	bool dupall, dupcmd;
+	char *st = NULL;
+
+	dupall = update_seq(SEQ_ALL, msgline->n_seqall, msgline->n_seqstt,
+			    msgline->n_seqpid, SEQALL, &(msgline->now),
+			    &(msgline->cd), msgline->code,
+			    msgline->seqentryflags, msgline->msg);
+	dupcmd = update_seq(ckdb_cmds[msgline->which_cmds].seq,
+			    msgline->n_seqcmd, msgline->n_seqstt,
+			    msgline->n_seqpid, msgline->seqcmdnam,
+			    &(msgline->now), &(msgline->cd), msgline->code,
+			    msgline->seqentryflags, msgline->msg);
+
+	if (dupall != dupcmd) {
+		// Bad/corrupt data or a code bug
+		LOGEMERG("SEQ INIMICAL %s/%"PRIu64"=%s %s/%"PRIu64"=%s "
+			 "cmd=%.32s...",
+			 seqnam[SEQ_ALL], msgline->n_seqall,
+			 dupall ? "DUP" : "notdup",
+			 msgline->seqcmdnam, msgline->n_seqcmd,
+			 dupcmd ? "DUP" : "notdup",
+			 st = safe_text_nonull(msgline->msg));
+		FREENULL(st);
+	}
+
+	/* The norm is: neither is a dup, so reply with ok to process
+	 * If only one is a dup then that's a corrupt message or a bug
+	 *  so simply try to process it as normal */
+	if (!dupall || !dupcmd)
+		return ckdb_cmds[msgline->which_cmds].cmd_val;
+
+	/* It's a dup */
+	return CMD_DUPSEQ;
+}
+
+static void setup_seq(K_ITEM *seqall, MSGLINE *msgline)
+{
+	K_ITEM *seqstt, *seqpid, *seqcmd, *i_code;
+	char *err = NULL, *st = NULL;
+	size_t len, off;
+
+	msgline->n_seqall = atol(transfer_data(seqall));
+	if ((seqstt = find_transfer(msgline->trf_root, SEQSTT)))
+		msgline->n_seqstt = atol(transfer_data(seqstt));
+
+	/* Ignore SEQSTTIGN sequence information
+	 * This allows us to manually generate ckpool data and send it
+	 *  to ckdb using ckpmsg - if SEQSTT == SEQSTTIGN
+	 * SEQALL must exist but the value is ignored
+	 * SEQPID and SEQcmd don't need to exist and are ignored */
+	if (msgline->n_seqstt == SEQSTTIGN) {
+		LOGWARNING("%s(): SEQIGN in %.42s...",
+			   __func__, st = safe_text(msgline->msg));
+		FREENULL(st);
+		return;
+	}
+
+	if ((seqpid = find_transfer(msgline->trf_root, SEQPID)))
+		msgline->n_seqpid = atol(transfer_data(seqpid));
+	msgline->seqcmdnam = seqnam[ckdb_cmds[msgline->which_cmds].seq];
+	if ((seqcmd = find_transfer(msgline->trf_root, msgline->seqcmdnam)))
+		msgline->n_seqcmd = atol(transfer_data(seqcmd));
+
+	/* Make one message with the initial seq missing/value problems ...
+	 *  that should never happen if seqall is present */
+	if (!seqstt || !seqpid || !seqcmd ||
+	    (seqstt && msgline->n_seqstt < DATE_BEGIN) ||
+	    (seqpid && msgline->n_seqpid <= 0)) {
+		APPEND_REALLOC_INIT(err, off, len);
+		APPEND_REALLOC(err, off, len, "SEQ ERROR: command ");
+		APPEND_REALLOC(err, off, len, msgline->cmd);
+		if (!seqstt || !seqpid || !seqcmd) {
+			APPEND_REALLOC(err, off, len, " - missing");
+			if (!seqstt)
+				APPEND_REALLOC(err, off, len, BLANK SEQSTT);
+			if (!seqpid)
+				APPEND_REALLOC(err, off, len, BLANK SEQPID);
+			if (!seqcmd) {
+				APPEND_REALLOC(err, off, len, BLANK);
+				APPEND_REALLOC(err, off, len,
+						msgline->seqcmdnam);
+			}
+		}
+		if (seqstt && msgline->n_seqstt < DATE_BEGIN) {
+			APPEND_REALLOC(err, off, len, " - invalid "SEQSTT":'");
+			st = safe_text_nonull(transfer_data(seqstt));
+			APPEND_REALLOC(err, off, len, st);
+			FREENULL(st);
+			APPEND_REALLOC(err, off, len, "'");
+		}
+		if (seqpid && msgline->n_seqpid <= 0) {
+			APPEND_REALLOC(err, off, len, " - invalid "SEQPID":'");
+			st = safe_text_nonull(transfer_data(seqpid));
+			APPEND_REALLOC(err, off, len, st);
+			FREENULL(st);
+			APPEND_REALLOC(err, off, len, "'");
+		}
+		APPEND_REALLOC(err, off, len, " - msg='");
+		APPEND_REALLOC(err, off, len, msgline->msg);
+		APPEND_REALLOC(err, off, len, "'");
+		LOGMSGBUF(LOG_EMERG, err);
+		FREENULL(err);
+
+		return;
+	}
+
+	msgline->hasseq = true;
+
+	if ((i_code = find_transfer(msgline->trf_root, CODETRF))) {
+		msgline->code = transfer_data(i_code);
+		if (!(*(msgline->code)))
+			msgline->code = NULL;
+	}
+	if (!(msgline->code)) {
+		if ((i_code = find_transfer(msgline->trf_root, BYTRF)))
+			msgline->code = transfer_data(i_code);
+		else
+			msgline->code = EMPTY;
+	}
+}
+
+static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
+				 int seqentryflags)
 {
 	char reply[1024] = "";
 	TRANSFER *transfer;
 	K_TREE_CTX ctx[1];
-	K_ITEM *item = NULL;
+	MSGLINE *msgline;
+	K_ITEM *t_item = NULL, *cd_item = NULL, *seqall;
 	char *cmdptr, *idptr, *next, *eq, *end, *was;
-	char *data = NULL, *tmp;
+	char *data = NULL, *st = NULL, *st2 = NULL;
 	bool noid = false;
 	size_t siz;
 
-	*trf_root = NULL;
-	*trf_store = NULL;
-	*which_cmds = CMD_UNSET;
-	*cmd = *id = '\0';
-	copy_tv(cd, now); // default cd to 'now'
+	K_WLOCK(msgline_free);
+	*ml_item = k_unlink_head_zero(msgline_free);
+	K_WUNLOCK(msgline_free);
+	DATA_MSGLINE(msgline, *ml_item);
+	msgline->which_cmds = CMD_UNSET;
+	copy_tv(&(msgline->now), now);
+	copy_tv(&(msgline->cd), now); // default cd to 'now'
+	msgline->msg = strdup(buf);
+	msgline->seqentryflags = seqentryflags;
 
 	cmdptr = strdup(buf);
 	idptr = strchr(cmdptr, '.');
@@ -1275,36 +2668,46 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 		data = strchr(idptr, '.');
 		if (data)
 			*(data++) = '\0';
-		STRNCPYSIZ(id, idptr, ID_SIZ);
+		STRNCPY(msgline->id, idptr);
 	}
 
-	STRNCPYSIZ(cmd, cmdptr, CMD_SIZ);
-	for (*which_cmds = 0; ckdb_cmds[*which_cmds].cmd_val != CMD_END; (*which_cmds)++) {
-		if (strcasecmp(cmd, ckdb_cmds[*which_cmds].cmd_str) == 0)
+	STRNCPY(msgline->cmd, cmdptr);
+	for (msgline->which_cmds = 0;
+	     ckdb_cmds[msgline->which_cmds].cmd_val != CMD_END;
+	     (msgline->which_cmds)++) {
+		if (strcasecmp(msgline->cmd,
+				ckdb_cmds[msgline->which_cmds].cmd_str) == 0)
 			break;
 	}
 
-	if (ckdb_cmds[*which_cmds].cmd_val == CMD_END) {
-		LOGERR("Listener received unknown command: '%s'", buf);
-		free(cmdptr);
-		return CMD_REPLY;
+	if (ckdb_cmds[msgline->which_cmds].cmd_val == CMD_END) {
+		LOGQUE(buf, false);
+		LOGERR("Listener received unknown command: '%.42s...",
+			st2 = safe_text(buf));
+		FREENULL(st2);
+		goto nogood;
 	}
+
+	if (ckdb_cmds[msgline->which_cmds].access & ACCESS_POOL)
+		LOGQUE(buf, true);
+	else
+		LOGQUE(buf, false);
 
 	if (noid) {
-		if (ckdb_cmds[*which_cmds].noid) {
-			*id = '\0';
+		if (ckdb_cmds[msgline->which_cmds].noid) {
 			free(cmdptr);
-			return ckdb_cmds[*which_cmds].cmd_val;
+			return ckdb_cmds[msgline->which_cmds].cmd_val;
 		}
 
-		STRNCPYSIZ(id, cmdptr, ID_SIZ);
-		LOGERR("Listener received invalid (noid) message: '%s'", buf);
-		free(cmdptr);
-		return CMD_REPLY;
+		LOGERR("Listener received invalid (noid) message: '%.42s...",
+			st2 = safe_text(buf));
+		FREENULL(st2);
+		goto nogood;
 	}
 
-	*trf_root = new_ktree();
-	*trf_store = k_new_store(transfer_free);
+	// N.B. these aren't shared so they use _nolock, below
+	msgline->trf_root = new_ktree_auto("MsgTrf", cmp_transfer, transfer_free);
+	msgline->trf_store = k_new_store(transfer_free);
 	next = data;
 	if (next && strncmp(next, JSON_TRANSFER, JSON_TRANSFER_LEN) == 0) {
 		// It's json
@@ -1313,11 +2716,12 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 		while (*next == ' ')
 			next++;
 		if (*next != JSON_BEGIN) {
-			LOGERR("JSON_BEGIN '%c' was: %.32s...",
-				JSON_BEGIN, tmp = safe_text(was));
-			free(tmp);
-			free(cmdptr);
-			return CMD_REPLY;
+			LOGERR("JSON_BEGIN '%c' was:%.32s... buf=%.32s...",
+				JSON_BEGIN, st = safe_text(was),
+				st2 = safe_text(buf));
+			FREENULL(st);
+			FREENULL(st2);
+			goto nogood;
 		}
 		next++;
 		// while we have a new quoted name
@@ -1330,39 +2734,42 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 					end++;
 			}
 			if (!*end) {
-				LOGERR("JSON name no trailing '%c' was: %.32s...",
-					JSON_STR, tmp = safe_text(was));
-				free(tmp);
-				free(cmdptr);
-				return CMD_REPLY;
+				LOGERR("JSON name no trailing '%c' "
+					"was:%.32s... buf=%.32s...",
+					JSON_STR, st = safe_text(was),
+					st2 = safe_text(buf));
+				FREENULL(st);
+				FREENULL(st2);
+				goto nogood;
 			}
 			if (next == end) {
-				LOGERR("JSON zero length name was: %.32s...",
-					tmp = safe_text(was));
-				free(tmp);
-				free(cmdptr);
-				return CMD_REPLY;
+				LOGERR("JSON zero length name was:%.32s..."
+					" buf=%.32s...",
+					st = safe_text(was),
+					st2 = safe_text(buf));
+				FREENULL(st);
+				FREENULL(st2);
+				goto nogood;
 			}
 			*(end++) = '\0';
 			K_WLOCK(transfer_free);
-			item = k_unlink_head(transfer_free);
+			t_item = k_unlink_head(transfer_free);
 			K_WUNLOCK(transfer_free);
-			DATA_TRANSFER(transfer, item);
+			DATA_TRANSFER(transfer, t_item);
 			STRNCPY(transfer->name, next);
 			was = next = end;
 			while (*next == ' ')
 				next++;
 			// we have a name, now expect a value after it
 			if (*next != JSON_VALUE) {
-				LOGERR("JSON_VALUE '%c' '%s' was: %.32s...",
+				LOGERR("JSON_VALUE '%c' '%s' was:%.32s..."
+					" buf=%.32s...",
 					JSON_VALUE, transfer->name,
-					tmp = safe_text(was));
-				free(tmp);
-				free(cmdptr);
-				K_WLOCK(transfer_free);
-				k_add_head(transfer_free, item);
-				K_WUNLOCK(transfer_free);
-				return CMD_REPLY;
+					st = safe_text(was),
+					st2 = safe_text(buf));
+				FREENULL(st);
+				FREENULL(st2);
+				goto nogood;
 			}
 			was = ++next;
 			while (*next == ' ')
@@ -1375,28 +2782,26 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 						end++;
 				}
 				if (!*end) {
-					LOGERR("JSON '%s' value was: %.32s...",
+					LOGERR("JSON '%s' value was:%.32s..."
+						" buf=%.32s...",
 						transfer->name,
-						tmp = safe_text(was));
-					free(tmp);
-					free(cmdptr);
-					K_WLOCK(transfer_free);
-					k_add_head(transfer_free, item);
-					K_WUNLOCK(transfer_free);
-					return CMD_REPLY;
+						st = safe_text(was),
+						st2 = safe_text(buf));
+					FREENULL(st);
+					FREENULL(st2);
+					goto nogood;
 				}
 				siz = end - next;
 				end++;
 			} else if (*next == JSON_ARRAY) {
 				// Only merklehash for now
 				if (strcmp(transfer->name, "merklehash")) {
-					LOGERR("JSON '%s' can't be an array",
-						transfer->name);
-					free(cmdptr);
-					K_WLOCK(transfer_free);
-					k_add_head(transfer_free, item);
-					K_WUNLOCK(transfer_free);
-					return CMD_REPLY;
+					LOGERR("JSON '%s' can't be an array"
+						" buf=%.32s...",
+						transfer->name,
+						st2 = safe_text(buf));
+					FREENULL(st2);
+					goto nogood;
 				}
 				end = ++next;
 				/* No structure testing for now since we
@@ -1406,16 +2811,13 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 				while (*end && *end != JSON_ARRAY_END)
 					end++;
 				if (end < next+1) {
-					LOGERR("JSON '%s' zero length value "
-						"was: %.32s...",
+					LOGWARNING("JSON '%s' zero length array"
+						" was:%.32s... buf=%.32s...",
 						transfer->name,
-						tmp = safe_text(was));
-					free(tmp);
-					free(cmdptr);
-					K_WLOCK(transfer_free);
-					k_add_head(transfer_free, item);
-					K_WUNLOCK(transfer_free);
-					return CMD_REPLY;
+						st = safe_text(was),
+						st2 = safe_text(buf));
+					FREENULL(st);
+					FREENULL(st2);
 				}
 				siz = end - next;
 				end++;
@@ -1427,27 +2829,23 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 						end++;
 				}
 				if (!*end) {
-					LOGERR("JSON '%s' value was: %.32s...",
+					LOGERR("JSON '%s' value was:%.32s..."
+						" buf=%.32s...",
 						transfer->name,
-						tmp = safe_text(was));
-					free(tmp);
-					free(cmdptr);
-					K_WLOCK(transfer_free);
-					k_add_head(transfer_free, item);
-					K_WUNLOCK(transfer_free);
-					return CMD_REPLY;
+						st = safe_text(was),
+						st2 = safe_text(buf));
+					FREENULL(st);
+					FREENULL(st2);
+					goto nogood;
 				}
 				if (next == end) {
-					LOGERR("JSON '%s' zero length value "
-						"was: %.32s...",
+					LOGWARNING("JSON '%s' zero length value"
+						" was:%.32s... buf=%.32s...",
 						transfer->name,
-						tmp = safe_text(was));
-					free(tmp);
-					free(cmdptr);
-					K_WLOCK(transfer_free);
-					k_add_head(transfer_free, item);
-					K_WUNLOCK(transfer_free);
-					return CMD_REPLY;
+						st = safe_text(was),
+						st2 = safe_text(buf));
+					FREENULL(st);
+					FREENULL(st2);
 				}
 				siz = end - next;
 			}
@@ -1458,8 +2856,9 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 				STRNCPYSIZ(transfer->svalue, next, siz+1);
 				transfer->mvalue = transfer->svalue;
 			}
-			*trf_root = add_to_ktree(*trf_root, item, cmp_transfer);
-			k_add_head(*trf_store, item);
+			add_to_ktree_nolock(msgline->trf_root, t_item);
+			k_add_head_nolock(msgline->trf_store, t_item);
+			t_item = NULL;
 
 			// find the separator then move to the next name
 			next = end;
@@ -1472,19 +2871,14 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 			}
 		}
 		if (*next != JSON_END) {
-			LOGERR("JSON_END '%c' was: %.32s...",
-				JSON_END, tmp = safe_text(next));
-			free(tmp);
-			free(cmdptr);
-			if (item) {
-				K_WLOCK(transfer_free);
-				k_add_head(transfer_free, item);
-				K_WUNLOCK(transfer_free);
-			}
-			return CMD_REPLY;
+			LOGERR("JSON_END '%c' was:%.32s... buf=%.32s...",
+				JSON_END, st = safe_text(next),
+				st2 = safe_text(buf));
+			FREENULL(st);
+			FREENULL(st2);
+			goto nogood;
 		}
 	} else {
-		K_WLOCK(transfer_free);
 		while (next && *next) {
 			data = next;
 			next = strchr(data, FLDSEP);
@@ -1497,43 +2891,83 @@ static enum cmd_values breakdown(K_TREE **trf_root, K_STORE **trf_store,
 			else
 				*(eq++) = '\0';
 
-			item = k_unlink_head(transfer_free);
-			DATA_TRANSFER(transfer, item);
+			K_WLOCK(transfer_free);
+			t_item = k_unlink_head(transfer_free);
+			K_WUNLOCK(transfer_free);
+			DATA_TRANSFER(transfer, t_item);
 			STRNCPY(transfer->name, data);
 			STRNCPY(transfer->svalue, eq);
 			transfer->mvalue = transfer->svalue;
 
-			if (find_in_ktree(*trf_root, item, cmp_transfer, ctx)) {
+			// Discard duplicates
+			if (find_in_ktree_nolock(msgline->trf_root, t_item, ctx)) {
 				if (transfer->mvalue != transfer->svalue)
 					FREENULL(transfer->mvalue);
-				k_add_head(transfer_free, item);
+				K_WLOCK(transfer_free);
+				k_add_head(transfer_free, t_item);
+				K_WUNLOCK(transfer_free);
 			} else {
-				*trf_root = add_to_ktree(*trf_root, item, cmp_transfer);
-				k_add_head(*trf_store, item);
+				add_to_ktree_nolock(msgline->trf_root, t_item);
+				k_add_head_nolock(msgline->trf_store, t_item);
 			}
 		}
-		K_WUNLOCK(transfer_free);
 	}
-	if (ckdb_cmds[*which_cmds].createdate) {
-		item = require_name(*trf_root, "createdate", 10, NULL, reply, sizeof(reply));
-		if (!item) {
-			free(cmdptr);
-			return CMD_REPLY;
-		}
 
-		DATA_TRANSFER(transfer, item);
-		txt_to_ctv("createdate", transfer->mvalue, cd, sizeof(*cd));
-		if (cd->tv_sec == 0) {
-			LOGERR("%s(): failed, %s has invalid createdate '%s'",
+	seqall = find_transfer(msgline->trf_root, SEQALL);
+	if (ckdb_cmds[msgline->which_cmds].createdate) {
+		cd_item = require_name(msgline->trf_root, CDTRF, 10, NULL,
+					reply, sizeof(reply));
+		if (!cd_item)
+			goto nogood;
+
+		DATA_TRANSFER(transfer, cd_item);
+		txt_to_ctv(CDTRF, transfer->mvalue, &(msgline->cd),
+			   sizeof(msgline->cd));
+		if (msgline->cd.tv_sec == 0) {
+			LOGERR("%s(): failed, %s has invalid "CDTRF" '%s'",
 				__func__, cmdptr, transfer->mvalue);
-			free(cmdptr);
-			return CMD_REPLY;
+			goto nogood;
 		}
 		if (confirm_check_createdate)
-			check_createdate_ccl(cmd, cd);
+			check_createdate_ccl(msgline->cmd, &(msgline->cd));
+		if (seqall) {
+			setup_seq(seqall, msgline);
+			free(cmdptr);
+			return ckdb_cmds[msgline->which_cmds].cmd_val;
+		} else {
+			/* It's OK to load old data from the CCLs
+			 *  but socket data must contain SEQALL ...
+			 *  even in manually generated data */
+			if (startup_complete) {
+				LOGEMERG("%s(): *** ckpool needs upgrading? - "
+					 "missing "SEQALL" from '%s' ckpool "
+					 "data in '%s'",
+					 __func__, cmdptr,
+					 st = safe_text_nonull(buf));
+				FREENULL(st);
+			}
+		}
+	} else {
+		/* Bug somewhere or createdate flag missing
+		 * This ignores/discards all seq info */
+		if (seqall) {
+			LOGWARNING("%s(): msg '%s' shouldn't contain "SEQALL
+				   " in '%s'",
+				   __func__, cmdptr,
+				   st = safe_text_nonull(buf));
+			FREENULL(st);
+		}
 	}
 	free(cmdptr);
-	return ckdb_cmds[*which_cmds].cmd_val;
+	return ckdb_cmds[msgline->which_cmds].cmd_val;
+nogood:
+	if (t_item) {
+		K_WLOCK(transfer_free);
+		k_add_head(transfer_free, t_item);
+		K_WUNLOCK(transfer_free);
+	}
+	free(cmdptr);
+	return CMD_REPLY;
 }
 
 static void check_blocks()
@@ -1543,12 +2977,14 @@ static void check_blocks()
 	BLOCKS *blocks;
 
 	K_RLOCK(blocks_free);
-	// Find the oldest block BLOCKS_NEW or BLOCKS_CONFIRM
+	/* Find the oldest block BLOCKS_NEW or BLOCKS_CONFIRM
+	 * ... that's summarised, so processing order is correct */
 	b_item = first_in_ktree(blocks_root, ctx);
 	while (b_item) {
 		DATA_BLOCKS(blocks, b_item);
 		if (!blocks->ignore &&
 		    CURRENT(&(blocks->expirydate)) &&
+		    blocks->statsconfirmed[0] != BLOCKS_STATSPENDING &&
 		    (blocks->confirmed[0] == BLOCKS_NEW ||
 		     blocks->confirmed[0] == BLOCKS_CONFIRM))
 			break;
@@ -1585,7 +3021,7 @@ static void summarise_blocks()
 	double diffacc, diffinv, shareacc, shareinv;
 	tv_t now, elapsed_start, elapsed_finish;
 	int64_t elapsed, wi_start, wi_finish;
-	BLOCKS *blocks, *prev_blocks;
+	BLOCKS *blocks = NULL, *prev_blocks;
 	WORKINFO *prev_workinfo;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKMARKERS lookworkmarkers, *workmarkers;
@@ -1618,7 +3054,7 @@ static void summarise_blocks()
 	if (workinfo_current) {
 		WORKINFO *wic;
 		DATA_WORKINFO(wic, workinfo_current);
-		hi = coinbase1height(wic->coinbase1);
+		hi = wic->height;
 	}
 	K_RUNLOCK(workinfo_free);
 
@@ -1629,11 +3065,11 @@ static void summarise_blocks()
 	diffacc = diffinv = shareacc = shareinv = 0;
 	elapsed = 0;
 	K_RLOCK(blocks_free);
-	b_prev = find_prev_blocks(blocks->height);
+	b_prev = find_prev_blocks(blocks->height, NULL);
 	K_RUNLOCK(blocks_free);
 	if (!b_prev) {
 		wi_start = 0;
-		elapsed_start.tv_sec = elapsed_start.tv_usec = 0L;
+		DATE_ZERO(&elapsed_start);
 		prev_hi = 0;
 	} else {
 		DATA_BLOCKS(prev_blocks, b_prev);
@@ -1652,7 +3088,7 @@ static void summarise_blocks()
 		copy_tv(&elapsed_start, &(prev_workinfo->createdate));
 		prev_hi = prev_blocks->height;
 	}
-	elapsed_finish.tv_sec = elapsed_finish.tv_usec = 0L;
+	DATE_ZERO(&elapsed_finish);
 
 	// Add up the sharesummaries, abort if any SUMMARY_NEW
 	looksharesummary.workinfoid = wi_finish;
@@ -1661,29 +3097,36 @@ static void summarise_blocks()
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 
+	// We don't want them in an indeterminate state due to pplns
+	K_WLOCK(process_pplns_free);
+
 	// For now, just lock all 3
 	K_RLOCK(sharesummary_free);
-	K_RLOCK(workmarkers_free);
 	K_RLOCK(markersummary_free);
+	K_RLOCK(workmarkers_free);
 
 	ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
-					cmp_sharesummary_workinfoid, ss_ctx);
+					ss_ctx);
 	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	while (ss_item && sharesummary->workinfoid > wi_start) {
 		if (sharesummary->complete[0] == SUMMARY_NEW) {
 			// Not aged yet
-			K_RUNLOCK(markersummary_free);
 			K_RUNLOCK(workmarkers_free);
+			K_RUNLOCK(markersummary_free);
 			K_RUNLOCK(sharesummary_free);
+
+			K_WUNLOCK(process_pplns_free);
 			return;
 		}
 		has_ss = true;
-		if (elapsed_start.tv_sec == 0 ||
-		    !tv_newer(&elapsed_start, &(sharesummary->firstshare))) {
-			copy_tv(&elapsed_start, &(sharesummary->firstshare));
+		if (sharesummary->diffacc > 0) {
+			if (elapsed_start.tv_sec == 0 ||
+			    !tv_newer(&elapsed_start, &(sharesummary->firstshareacc))) {
+				copy_tv(&elapsed_start, &(sharesummary->firstshareacc));
+			}
+			if (tv_newer(&elapsed_finish, &(sharesummary->lastshareacc)))
+				copy_tv(&elapsed_finish, &(sharesummary->lastshareacc));
 		}
-		if (tv_newer(&elapsed_finish, &(sharesummary->lastshare)))
-			copy_tv(&elapsed_finish, &(sharesummary->lastshare));
 
 		diffacc += sharesummary->diffacc;
 		diffinv += sharesummary->diffsta + sharesummary->diffdup +
@@ -1703,7 +3146,7 @@ static void summarise_blocks()
 	INIT_WORKMARKERS(&wm_look);
 	wm_look.data = (void *)(&lookworkmarkers);
 	wm_item = find_before_in_ktree(workmarkers_workinfoid_root, &wm_look,
-				       cmp_workmarkers_workinfoid, ctx);
+				       ctx);
 	DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 	while (wm_item &&
 	       CURRENT(&(workmarkers->expirydate)) &&
@@ -1727,16 +3170,18 @@ static void summarise_blocks()
 			INIT_MARKERSUMMARY(&ms_look);
 			ms_look.data = (void *)(&lookmarkersummary);
 			ms_item = find_before_in_ktree(markersummary_root, &ms_look,
-						       cmp_markersummary, ms_ctx);
+						       ms_ctx);
 			DATA_MARKERSUMMARY_NULL(markersummary, ms_item);
 			while (ms_item && markersummary->markerid == workmarkers->markerid) {
 				has_ms = true;
-				if (elapsed_start.tv_sec == 0 ||
-				    !tv_newer(&elapsed_start, &(markersummary->firstshare))) {
-					copy_tv(&elapsed_start, &(markersummary->firstshare));
+				if (markersummary->diffacc > 0) {
+					if (elapsed_start.tv_sec == 0 ||
+					    !tv_newer(&elapsed_start, &(markersummary->firstshareacc))) {
+						copy_tv(&elapsed_start, &(markersummary->firstshareacc));
+					}
+					if (tv_newer(&elapsed_finish, &(markersummary->lastshareacc)))
+						copy_tv(&elapsed_finish, &(markersummary->lastshareacc));
 				}
-				if (tv_newer(&elapsed_finish, &(markersummary->lastshare)))
-					copy_tv(&elapsed_finish, &(markersummary->lastshare));
 
 				diffacc += markersummary->diffacc;
 				diffinv += markersummary->diffsta + markersummary->diffdup +
@@ -1753,9 +3198,11 @@ static void summarise_blocks()
 		DATA_WORKMARKERS_NULL(workmarkers, wm_item);
 	}
 
-	K_RUNLOCK(markersummary_free);
 	K_RUNLOCK(workmarkers_free);
+	K_RUNLOCK(markersummary_free);
 	K_RUNLOCK(sharesummary_free);
+
+	K_WUNLOCK(process_pplns_free);
 
 	if (!has_ss && !has_ms) {
 		// This will repeat each call here until fixed ...
@@ -1778,7 +3225,12 @@ static void summarise_blocks()
 			   diffacc, diffinv, shareacc, shareinv, elapsed);
 
 		// Now the summarisation is confirmed, generate the payout data
-		pplns_block(blocks);
+		if (genpayout_auto)
+			pplns_block(blocks);
+		else {
+			LOGWARNING("%s() Auto payout generation disabled",
+				   __func__);
+		}
 	} else {
 		LOGERR("%s() block %d, failed to confirm stats",
 			__func__, blocks->height);
@@ -1791,12 +3243,26 @@ static void *summariser(__maybe_unused void *arg)
 
 	pthread_detach(pthread_self());
 
+	LOCK_INIT("db_summariser");
 	rename_proc("db_summariser");
 
-	while (!everyone_die && !startup_complete)
+	/* Don't do any summarisation until the reload queue completes coz:
+	 * 1) It locks/accesses a lot of data - workinfo/markersummary that
+	 *    can slow down the reload
+	 * 2) If you stop and restart ckdb this wont affect the restart point
+	 *    Thus it's OK to do it later
+	 * 3) It does I/O to bitcoind which is slow ...
+	 * 4) It triggers the payout generation which also accesses a lot of
+	 *    data - workinfo/markersummary - but it wont affect a later
+	 *    restart point if it hasn't been done. Thus it's OK to do it later
+	 */
+	while (!everyone_die && !reload_queue_complete)
 		cksleep_ms(42);
 
-	summariser_using_data = true;
+	if (!everyone_die) {
+		LOGWARNING("%s() Start processing...", __func__);
+		summariser_using_data = true;
+	}
 
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
@@ -1850,7 +3316,7 @@ static char *shift_words[] =
 	"quinn",
 	"rika",
 	"sena",
-	"tsubasa",
+	"tenshi",
 	"ur",
 	"valentina",
 	"winry",
@@ -1865,6 +3331,12 @@ ASSERT4((sizeof(shift_words) == (sizeof(char *) * SHIFT_WORDS)));
 // Number of workinfoids per shift
 #define WID_PER_SHIFT 100
 
+// A diff change will end the current shift if it occurs after this block
+#define SHIFT_DIFF_BLOCK 376500
+
+// optioncontrol name to override the SHIFT_DIFF_BLOCK value
+#define SHIFT_DIFF_BLOCK_STR "ShiftDiffBlock"
+
 static void make_a_shift_mark()
 {
 	K_TREE_CTX ss_ctx[1], m_ctx[1], wi_ctx[1], b_ctx[1];
@@ -1876,9 +3348,69 @@ static void make_a_shift_mark()
 	BLOCKS *blocks = NULL;
 	MARKS *marks = NULL, *sh_marks = NULL;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
-	bool was_block = false, ok;
-	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ];
+	int64_t shiftdiffblock = SHIFT_DIFF_BLOCK;
+	char wi_bits[TXT_SML+1];
+	bool was_block = false, ok, oc_look = true;
+	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ], cd_buf3[DATE_BUFSIZ];
 	int used_wid;
+
+	/* If there are no CURRENT marks, make the first one by
+	 *  finding the first CURRENT workinfo and use that
+	 *  to create a MARKTYPE_OTHER_BEGIN for the pool
+	 * This will keep being checked when the pool first starts
+	 *  until the first workinfo is created, but once the first
+	 *  marks has been created it will skip over the if code
+	 *  forever after that */
+	K_RLOCK(marks_free);
+	m_item = last_in_ktree(marks_root, m_ctx);
+	K_RUNLOCK(marks_free);
+	DATA_MARKS_NULL(marks, m_item);
+	// Mark sorting means all CURRENT will be on the end
+	if (!m_item || !CURRENT(&(marks->expirydate))) {
+		K_RLOCK(workinfo_free);
+		wi_item = first_in_ktree(workinfo_root, wi_ctx);
+		DATA_WORKINFO_NULL(workinfo, wi_item);
+		if (!wi_item) {
+			K_RUNLOCK(workinfo_free);
+			LOGWARNING("%s() ckdb workinfo:'%s' marks:'%s' ..."
+				   " start ckpool!", __func__,
+				   "none", m_item ? "expired" : "none");
+			return;
+		}
+		while (wi_item && !CURRENT(&(workinfo->expirydate))) {
+			wi_item = next_in_ktree(wi_ctx);
+			DATA_WORKINFO_NULL(workinfo, wi_item);
+		}
+		if (!wi_item) {
+			K_RUNLOCK(workinfo_free);
+			LOGWARNING("%s() ckdb workinfo:'%s' marks:'%s' ..."
+				   " start ckpool!", __func__,
+				   "expired", m_item ? "expired" : "none");
+			return;
+		}
+		K_RUNLOCK(workinfo_free);
+		char description[TXT_BIG+1];
+		tv_t now;
+		ok = marks_description(description, sizeof(description),
+					MARKTYPE_OTHER_BEGIN_STR, 0, NULL,
+					"Pool Start");
+		if (!ok)
+			return;
+
+		setnow(&now);
+		ok = marks_process(NULL, true, EMPTY, workinfo->workinfoid,
+				   description, EMPTY, MARKTYPE_OTHER_BEGIN_STR,
+				   MARK_USED_STR, (char *)by_default,
+				   (char *)__func__, (char *)inet_default,
+				   &now, NULL);
+		if (ok) {
+			LOGWARNING("%s() FIRST mark %"PRId64"/%s/%s/%s/",
+				   __func__, workinfo->workinfoid,
+				   MARKTYPE_OTHER_BEGIN_STR, MARK_USED_STR,
+				   description);
+		}
+		return;
+	}
 
 	/* Find the last !new sharesummary workinfoid
 	 * If the shift needs to go beyond this, then it's not ready yet */
@@ -1895,12 +3427,13 @@ static void make_a_shift_mark()
 	}
 	K_RUNLOCK(sharesummary_free);
 	if (ss_item) {
-		tv_to_buf(&(sharesummary->lastshare), cd_buf, sizeof(cd_buf));
-		tv_to_buf(&(sharesummary->createdate), cd_buf2, sizeof(cd_buf2));
-		LOGDEBUG("%s() last sharesummary %s/%s/%"PRId64"/%s/%s",
+		tv_to_buf(&(sharesummary->lastshareacc), cd_buf, sizeof(cd_buf));
+		tv_to_buf(&(sharesummary->lastshare), cd_buf2, sizeof(cd_buf2));
+		tv_to_buf(&(sharesummary->createdate), cd_buf3, sizeof(cd_buf3));
+		LOGDEBUG("%s() last sharesummary %s/%s/%"PRId64"/%s/%s/%s",
 			 __func__, sharesummary->complete,
 			 sharesummary->workername,
-			 ss_age_wid, cd_buf, cd_buf2);
+			 ss_age_wid, cd_buf, cd_buf2, cd_buf3);
 	}
 	LOGDEBUG("%s() age sharesummary limit wid %"PRId64, __func__, ss_age_wid);
 
@@ -2024,11 +3557,12 @@ static void make_a_shift_mark()
 	lookworkinfo.expirydate.tv_usec = default_expiry.tv_usec;
 	wi_look.data = (void *)(&lookworkinfo);
 	K_RLOCK(workinfo_free);
-	wi_item = find_after_in_ktree(workinfo_root, &wi_look, cmp_workinfo, wi_ctx);
+	wi_item = find_after_in_ktree(workinfo_root, &wi_look, wi_ctx);
 	K_RUNLOCK(workinfo_free);
 	marks_wid = 0;
 	used_wid = 0;
 	prev_wid = 0;
+	wi_bits[0] = '\0';
 	while (wi_item) {
 		DATA_WORKINFO(workinfo, wi_item);
 		if (CURRENT(&(workinfo->expirydate))) {
@@ -2039,6 +3573,45 @@ static void make_a_shift_mark()
 				LOGDEBUG("%s() not enough aged workinfos (%d)",
 					 __func__, used_wid);
 				return;
+			}
+			if (wi_bits[0] == '\0')
+				STRNCPY(wi_bits, workinfo->bits);
+			else {
+				/* Make sure you set the SHIFT_DIFF_BLOCK_STR
+				 *  optioncontrol if you changed ckdb to V1.323
+				 *  before the diff change, before the block=
+				 *  SHIFT_DIFF_BLOCK default value
+				 * This however, would only affect a reload
+				 *  after that if the reload crossed the
+				 *  previous diff change and the shifts had not
+				 *  already been stored in the DB (i.e. next to
+				 *  zero probability)
+				 * However a DB rollback and reload across that
+				 *  diff change would be affected */
+				if (oc_look) {
+					shiftdiffblock = sys_setting(SHIFT_DIFF_BLOCK_STR,
+								     SHIFT_DIFF_BLOCK,
+								     &date_eot);
+					oc_look = false;
+				}
+				/* Did difficulty change?
+				 * Stop at the last workinfo, before the diff
+				 *  changed */
+				if (strcmp(wi_bits, workinfo->bits) != 0) {
+					if (workinfo->height > (int32_t)shiftdiffblock) {
+						LOGDEBUG("%s() OK shift stops at diff"
+							 " change '%s->%s' %"PRId64
+							 "->%"PRId64" height %"PRId32
+							 " limit %"PRId64,
+							 __func__, wi_bits,
+							 workinfo->bits, prev_wid,
+							 workinfo->workinfoid,
+							 workinfo->height,
+							 shiftdiffblock);
+						marks_wid = prev_wid;
+						break;
+					}
+				}
 			}
 			/* Did we find a pool restart? i.e. a wid skip
 			 * These will usually be a much larger jump,
@@ -2068,8 +3641,8 @@ static void make_a_shift_mark()
 			looksharesummary.workername = EMPTY;
 			ss_look.data = (void *)(&looksharesummary);
 			K_RLOCK(sharesummary_free);
-			ss_item = find_before_in_ktree(sharesummary_workinfoid_root, &ss_look,
-							cmp_sharesummary_workinfoid, ss_ctx);
+			ss_item = find_before_in_ktree(sharesummary_workinfoid_root,
+							&ss_look, ss_ctx);
 			K_RUNLOCK(sharesummary_free);
 			DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 			if (ss_item &&
@@ -2077,16 +3650,18 @@ static void make_a_shift_mark()
 				/* Not aged = shift not complete
 				 * Though, it shouldn't happen */
 				if (sharesummary->complete[0] == SUMMARY_NEW) {
-					tv_to_buf(&(sharesummary->lastshare),
+					tv_to_buf(&(sharesummary->lastshareacc),
 						  cd_buf, sizeof(cd_buf));
-					tv_to_buf(&(sharesummary->createdate),
+					tv_to_buf(&(sharesummary->lastshare),
 						  cd_buf2, sizeof(cd_buf2));
+					tv_to_buf(&(sharesummary->createdate),
+						  cd_buf3, sizeof(cd_buf3));
 					LOGEMERG("%s() ERR unaged sharesummary "
-						 "%s/%s/%"PRId64"/%s/%s",
+						 "%s/%s/%"PRId64"/%s/%s/%s",
 						 __func__, sharesummary->complete,
 						 sharesummary->workername,
 						 sharesummary->workinfoid,
-						 cd_buf, cd_buf2);
+						 cd_buf, cd_buf2, cd_buf3);
 					return;
 				}
 			}
@@ -2225,9 +3800,16 @@ static void *marker(__maybe_unused void *arg)
 
 	pthread_detach(pthread_self());
 
+	LOCK_INIT("db_marker");
 	rename_proc("db_marker");
 
-	while (!everyone_die && !startup_complete)
+	/* We want this to start during the CCL reload so that if we run a
+	 *  large reload and it fails at some point, the next reload will not
+	 *  always have to go back to the same reload point as before due to
+	 *  no new workmarkers being completed/processed
+	 * However, don't start during the first N reload files so that a
+	 *  normal ckdb restart reload won't slow down */
+	while (!everyone_die && !reloaded_N_files && !reload_queue_complete)
 		cksleep_ms(42);
 
 	if (sharesummary_marks_limit) {
@@ -2236,17 +3818,10 @@ static void *marker(__maybe_unused void *arg)
 		return NULL;
 	}
 
-	marker_using_data = true;
-
-/* TODO: trigger this every workinfo change?
- *  note that history catch up would also mean the tigger would
- *  catch up at most 100 missing marks per shift
- *  however, also, a workinfo change means a sharesummary DB update,
- *  so would be best to (usually) wait until that is done
- * OR: avoid writing the sharesummaries to the DB at all
- *  and only write the markersummaries? - since 100 workinfoid shifts
- *  will usually mean that markersummaries are less than every hour
- *  (and a reload processes more than an hour) */
+	if (!everyone_die) {
+		LOGWARNING("%s() Start processing...", __func__);
+		marker_using_data = true;
+	}
 
 	while (!everyone_die) {
 		for (i = 0; i < 5; i++) {
@@ -2255,8 +3830,10 @@ static void *marker(__maybe_unused void *arg)
 		}
 		if (everyone_die)
 			break;
-		else
-			make_a_shift_mark();
+		else {
+			if (markersummary_auto)
+				make_a_shift_mark();
+		}
 
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
@@ -2264,8 +3841,10 @@ static void *marker(__maybe_unused void *arg)
 		}
 		if (everyone_die)
 			break;
-		else
-			make_a_workmarker();
+		else {
+			if (markersummary_auto)
+				make_a_workmarker();
+		}
 
 		for (i = 0; i < 4; i++) {
 			if (!everyone_die)
@@ -2295,14 +3874,17 @@ static void *logger(__maybe_unused void *arg)
 	pthread_detach(pthread_self());
 
 	snprintf(buf, sizeof(buf), "db%s_logger", dbcode);
+	LOCK_INIT(buf);
 	rename_proc(buf);
 
+	LOGWARNING("%s() Start processing...", __func__);
 	logger_using_data = true;
 
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstart.%ld,%ld",
 				   now.tv_sec, now.tv_usec);
-	LOGFILE(buf);
+	LOGFILE(buf, logname_db);
+	LOGFILE(buf, logname_io);
 
 	while (!everyone_die) {
 		K_WLOCK(logqueue_free);
@@ -2310,7 +3892,10 @@ static void *logger(__maybe_unused void *arg)
 		K_WUNLOCK(logqueue_free);
 		while (lq_item) {
 			DATA_LOGQUEUE(lq, lq_item);
-			LOGFILE(lq->msg);
+			if (lq->db)
+				LOGFILE(lq->msg, logname_db);
+			else
+				LOGFILE(lq->msg, logname_io);
 			FREENULL(lq->msg);
 
 			K_WLOCK(logqueue_free);
@@ -2329,14 +3914,18 @@ static void *logger(__maybe_unused void *arg)
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstopping.%d.%ld,%ld",
 				   count, now.tv_sec, now.tv_usec);
-	LOGFILE(buf);
+	LOGFILE(buf, logname_db);
+	LOGFILE(buf, logname_io);
 	if (count)
 		LOGERR("%s", buf);
-	lq_item = logqueue_store->head;
+	lq_item = STORE_WHEAD(logqueue_store);
 	copy_tv(&then, &now);
 	while (lq_item) {
 		DATA_LOGQUEUE(lq, lq_item);
-		LOGFILE(lq->msg);
+		if (lq->db)
+			LOGFILE(lq->msg, logname_db);
+		else
+			LOGFILE(lq->msg, logname_io);
 		FREENULL(lq->msg);
 		count--;
 		setnow(&now);
@@ -2354,61 +3943,172 @@ static void *logger(__maybe_unused void *arg)
 	setnow(&now);
 	snprintf(buf, sizeof(buf), "logstop.%ld,%ld",
 				   now.tv_sec, now.tv_usec);
-	LOGFILE(buf);
+	LOGFILE(buf, logname_db);
+	LOGFILE(buf, logname_io);
 	LOGWARNING("%s", buf);
 
 	return NULL;
 }
 
-#define STORELASTREPLY(_cmd) do { \
-		if (last_ ## _cmd) \
-			free(last_ ## _cmd); \
-		last_ ## _cmd = buf; \
-		buf = NULL; \
-		if (reply_ ## _cmd) \
-			free(reply_ ## _cmd); \
-		reply_ ## _cmd = rep; \
-	} while (0)
+static void process_sockd(PGconn *conn, K_ITEM *wq_item)
+{
+	WORKQUEUE *workqueue;
+	MSGLINE *msgline;
+	K_ITEM *ml_item;
+	char *ans, *rep;
+	size_t siz;
+
+	DATA_WORKQUEUE(workqueue, wq_item);
+	ml_item = workqueue->msgline_item;
+	DATA_MSGLINE(msgline, ml_item);
+
+	ans = ckdb_cmds[msgline->which_cmds].func(conn,
+						  msgline->cmd,
+						  msgline->id,
+						  &(msgline->now),
+						  workqueue->by,
+						  workqueue->code,
+						  workqueue->inet,
+						  &(msgline->cd),
+						  msgline->trf_root);
+	siz = strlen(ans) + strlen(msgline->id) + 32;
+	rep = malloc(siz);
+	snprintf(rep, siz, "%s.%ld.%s",
+		 msgline->id,
+		 msgline->now.tv_sec, ans);
+	send_unix_msg(msgline->sockd, rep);
+	close(msgline->sockd);
+	FREENULL(ans);
+	FREENULL(rep);
+
+	free_msgline_data(ml_item, true, true);
+	K_WLOCK(msgline_free);
+	k_add_head(msgline_free, ml_item);
+	K_WUNLOCK(msgline_free);
+
+	K_WLOCK(workqueue_free);
+	k_add_head(workqueue_free, wq_item);
+	if (workqueue_free->count == workqueue_free->total &&
+	    workqueue_free->total >= ALLOC_WORKQUEUE * CULL_WORKQUEUE)
+		k_cull_list(workqueue_free);
+	K_WUNLOCK(workqueue_free);
+}
+
+static void *clistener(__maybe_unused void *arg)
+{
+	PGconn *conn = NULL;
+	K_ITEM *wq_item;
+	time_t now;
+
+	LOCK_INIT("db_clistener");
+	rename_proc("db_clistener");
+
+	clistener_using_data = true;
+
+	conn = dbconnect();
+	now = time(NULL);
+
+	while (!everyone_die) {
+		K_WLOCK(workqueue_free);
+		wq_item = k_unlink_head(cmd_workqueue_store);
+		K_WUNLOCK(workqueue_free);
+
+		// Don't keep a connection for more than ~10s
+		if ((time(NULL) - now) > 10) {
+			PQfinish(conn);
+			conn = dbconnect();
+			now = time(NULL);
+		}
+
+		if (wq_item) {
+			process_sockd(conn, wq_item);
+			tick();
+		} else
+			cksleep_ms(42);
+	}
+
+	clistener_using_data = false;
+
+	if (conn)
+		PQfinish(conn);
+
+	return NULL;
+}
+
+static void *blistener(__maybe_unused void *arg)
+{
+	PGconn *conn = NULL;
+	K_ITEM *wq_item;
+	time_t now;
+
+	LOCK_INIT("db_blistener");
+	rename_proc("db_blistener");
+
+	blistener_using_data = true;
+
+	conn = dbconnect();
+	now = time(NULL);
+
+	while (!everyone_die) {
+		K_WLOCK(workqueue_free);
+		wq_item = k_unlink_head(btc_workqueue_store);
+		K_WUNLOCK(workqueue_free);
+
+		// Don't keep a connection for more than ~10s
+		if ((time(NULL) - now) > 10) {
+			PQfinish(conn);
+			conn = dbconnect();
+			now = time(NULL);
+		}
+
+		if (wq_item) {
+			process_sockd(conn, wq_item);
+			tick();
+		} else 
+			cksleep_ms(142);
+	}
+
+	blistener_using_data = false;
+
+	if (conn)
+		PQfinish(conn);
+
+	return NULL;
+}
 
 static void *socketer(__maybe_unused void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
+	pthread_t clis_pt, blis_pt;
 	unixsock_t *us = &pi->us;
-	char *end, *ans = NULL, *rep = NULL, *buf = NULL, *dot;
-	char cmd[CMD_SIZ+1], id[ID_SIZ+1], reply[1024+1];
-	char *last_auth = NULL, *reply_auth = NULL;
-	char *last_addrauth = NULL, *reply_addrauth = NULL;
-	char *last_chkpass = NULL, *reply_chkpass = NULL;
-	char *last_adduser = NULL, *reply_adduser = NULL;
-	char *last_newpass = NULL, *reply_newpass = NULL;
-	char *last_userset = NULL, *reply_userset = NULL;
-	char *last_workerset = NULL, *reply_workerset = NULL;
-	char *last_newid = NULL, *reply_newid = NULL;
-	char *last_setatts = NULL, *reply_setatts = NULL;
-	char *last_setopts = NULL, *reply_setopts = NULL;
-	char *last_userstatus = NULL, *reply_userstatus = NULL;
-	char *last_web = NULL, *reply_web = NULL;
-	char *reply_last, duptype[CMD_SIZ+1];
+	char *end, *ans = NULL, *rep = NULL, *buf = NULL;
 	enum cmd_values cmdnum;
-	int sockd, which_cmds;
+	int sockd;
+	K_ITEM *wq_item = NULL, *ml_item = NULL;
 	WORKQUEUE *workqueue;
-	TRANSFER *transfer;
-	K_STORE *trf_store;
-	K_TREE *trf_root;
-	K_ITEM *item;
+	MSGLINE *msgline;
+	char reply[1024+1];
 	size_t siz;
-	tv_t now, cd;
-	bool dup, want_first, show_dup;
+	tv_t now;
+	bool want_first, replied, btc;
 	int loglevel, oldloglevel;
 
 	pthread_detach(pthread_self());
 
+	LOCK_INIT("db_socketer");
 	rename_proc("db_socketer");
 
 	while (!everyone_die && !db_users_complete)
 		cksem_mswait(&socketer_sem, 420);
 
-	socketer_using_data = true;
+	if (!everyone_die) {
+		LOGWARNING("%s() Start processing...", __func__);
+		socketer_using_data = true;
+
+		create_pthread(&clis_pt, clistener, NULL);
+
+		create_pthread(&blis_pt, blistener, NULL);
+	}
 
 	want_first = true;
 	while (!everyone_die) {
@@ -2416,15 +4116,13 @@ static void *socketer(__maybe_unused void *arg)
 			dealloc(buf);
 		sockd = accept(us->sockd, NULL, NULL);
 		if (sockd < 0) {
-			LOGERR("Failed to accept on socket in listener");
+			LOGERR("%s() Failed to accept on socket", __func__);
 			break;
 		}
 
 		cmdnum = CMD_UNSET;
-		trf_root = NULL;
-		trf_store = NULL;
 
-		buf = recv_unix_msg(sockd);
+		buf = recv_unix_msg_tmo2(sockd, RECV_UNIX_TIMEOUT1, RECV_UNIX_TIMEOUT2);
 		// Once we've read the message
 		setnow(&now);
 		if (buf) {
@@ -2436,392 +4134,309 @@ static void *socketer(__maybe_unused void *arg)
 		if (!buf || !*buf) {
 			// An empty message wont get a reply
 			if (!buf)
-				LOGWARNING("Failed to get message in listener");
+				LOGWARNING("%s() Failed to get message", __func__);
 			else
-				LOGWARNING("Empty message in listener");
+				LOGWARNING("%s() Empty message", __func__);
 		} else {
-			/* For duplicates:
-			 *  Queued pool messages are handled by the queue code
-			 *   but since they reply ok.queued that message can
-			 *   be returned every time here
-			 *  System: repeat process them
-			 *  Web: current php web sends a timestamp of seconds
-			 *	 so duplicate code will only trigger if the same
-			 *	 message is sent within the same second and thus
-			 *	 will effectively reduce the processing load for
-			 *	 sequential duplicates
-			 *   As per the 'if' list below,
-			 *    remember individual last messages and replies and
-			 *    repeat the reply without reprocessing the message
-			 *   The rest are remembered in the same buffer 'web'
-			 *    so a duplicate will not be seen if another 'web'
-			 *    command arrived between two duplicate commands
-			 */
-			dup = false;
-			show_dup = true;
-			// These are ordered approximately most likely first
-			if (last_auth && strcmp(last_auth, buf) == 0) {
-				reply_last = reply_auth;
-				dup = true;
-			} else if (last_chkpass && strcmp(last_chkpass, buf) == 0) {
-				reply_last = reply_chkpass;
-				dup = true;
-			} else if (last_adduser && strcmp(last_adduser, buf) == 0) {
-				reply_last = reply_adduser;
-				dup = true;
-			} else if (last_newpass && strcmp(last_newpass, buf) == 0) {
-				reply_last = reply_newpass;
-				dup = true;
-			} else if (last_newid && strcmp(last_newid, buf) == 0) {
-				reply_last = reply_newid;
-				dup = true;
-			} else if (last_addrauth && strcmp(last_addrauth, buf) == 0) {
-				reply_last = reply_addrauth;
-				dup = true;
-			} else if (last_userset && strcmp(last_userset, buf) == 0) {
-				reply_last = reply_userset;
-				dup = true;
-			} else if (last_workerset && strcmp(last_workerset, buf) == 0) {
-				reply_last = reply_workerset;
-				dup = true;
-			} else if (last_setatts && strcmp(last_setatts, buf) == 0) {
-				reply_last = reply_setatts;
-				dup = true;
-			} else if (last_setopts && strcmp(last_setopts, buf) == 0) {
-				reply_last = reply_setopts;
-				dup = true;
-			} else if (last_userstatus && strcmp(last_userstatus, buf) == 0) {
-				reply_last = reply_userstatus;
-				dup = true;
-			} else if (last_web && strcmp(last_web, buf) == 0) {
-				reply_last = reply_web;
-				dup = true;
-				show_dup = false;
-			}
-			if (dup) {
-				send_unix_msg(sockd, reply_last);
-				STRNCPY(duptype, buf);
-				dot = strchr(duptype, '.');
-				if (dot)
-					*dot = '\0';
-				snprintf(reply, sizeof(reply), "%s%ld,%ld.%s",
-					 LOGDUP, now.tv_sec, now.tv_usec, duptype);
-				LOGQUE(reply);
-				if (show_dup)
-					LOGWARNING("Duplicate '%s' message received", duptype);
-				else
-					LOGDEBUG("Duplicate '%s' message received", duptype);
-			} else {
-				LOGQUE(buf);
-				cmdnum = breakdown(&trf_root, &trf_store, buf, &which_cmds, cmd, id, &now, &cd);
-				switch (cmdnum) {
-					case CMD_REPLY:
-						snprintf(reply, sizeof(reply), "%s.%ld.?.", id, now.tv_sec);
-						send_unix_msg(sockd, reply);
-						break;
-					case CMD_SHUTDOWN:
-						LOGWARNING("Listener received shutdown message, terminating ckdb");
-						snprintf(reply, sizeof(reply), "%s.%ld.ok.exiting", id, now.tv_sec);
-						send_unix_msg(sockd, reply);
-						everyone_die = true;
-						break;
-					case CMD_PING:
-						LOGDEBUG("Listener received ping request");
-						snprintf(reply, sizeof(reply), "%s.%ld.ok.pong", id, now.tv_sec);
-						send_unix_msg(sockd, reply);
-						break;
-					case CMD_VERSION:
-						LOGDEBUG("Listener received version request");
+			int seqentryflags = SE_SOCKET;
+			if (!reload_queue_complete)
+				seqentryflags = SE_EARLYSOCK;
+			cmdnum = breakdown(&ml_item, buf, &now, seqentryflags);
+			DATA_MSGLINE(msgline, ml_item);
+			replied = btc = false;
+			switch (cmdnum) {
+				case CMD_REPLY:
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.?.",
+						 msgline->id,
+						 now.tv_sec);
+					send_unix_msg(sockd, reply);
+					break;
+				case CMD_TERMINATE:
+					LOGWARNING("Listener received"
+						   " terminate message,"
+						   " terminating ckdb");
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.ok.exiting",
+						 msgline->id,
+						 now.tv_sec);
+					send_unix_msg(sockd, reply);
+					everyone_die = true;
+					break;
+				case CMD_PING:
+					LOGDEBUG("Listener received ping"
+						 " request");
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.ok.pong",
+						 msgline->id,
+						 now.tv_sec);
+					send_unix_msg(sockd, reply);
+					break;
+				case CMD_VERSION:
+					LOGDEBUG("Listener received"
+						 " version request");
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.ok.CKDB V%s",
+						 msgline->id,
+						 now.tv_sec,
+						 CKDB_VERSION);
+					send_unix_msg(sockd, reply);
+					break;
+				case CMD_LOGLEVEL:
+					if (!*(msgline->id)) {
+						LOGDEBUG("Listener received"
+							 " loglevel, currently %d",
+							 pi->ckp->loglevel);
 						snprintf(reply, sizeof(reply),
-							 "%s.%ld.ok.CKDB V%s",
-							 id, now.tv_sec, CKDB_VERSION);
-						send_unix_msg(sockd, reply);
-						break;
-					case CMD_LOGLEVEL:
-						if (!*id) {
-							LOGDEBUG("Listener received loglevel, currently %d",
-								 pi->ckp->loglevel);
+							 "%s.%ld.ok.loglevel"
+							 " currently %d",
+							 msgline->id,
+							 now.tv_sec,
+							 pi->ckp->loglevel);
+					} else {
+						oldloglevel = pi->ckp->loglevel;
+						loglevel = atoi(msgline->id);
+						LOGDEBUG("Listener received loglevel"
+							 " %d currently %d A",
+							 loglevel, oldloglevel);
+						if (loglevel < LOG_EMERG ||
+						    loglevel > LOG_DEBUG) {
 							snprintf(reply, sizeof(reply),
-								 "%s.%ld.ok.loglevel currently %d",
-								 id, now.tv_sec,
-								 pi->ckp->loglevel);
+								 "%s.%ld.ERR.invalid"
+								 " loglevel %d"
+								 " - currently %d",
+								 msgline->id,
+								 now.tv_sec,
+								 loglevel,
+								 oldloglevel);
 						} else {
-							oldloglevel = pi->ckp->loglevel;
-							loglevel = atoi(id);
-							LOGDEBUG("Listener received loglevel %d currently %d A",
-								 loglevel, oldloglevel);
-							if (loglevel < LOG_EMERG || loglevel > LOG_DEBUG) {
-								snprintf(reply, sizeof(reply),
-									 "%s.%ld.ERR.invalid loglevel %d"
-									 " - currently %d",
-									 id, now.tv_sec,
-									 loglevel, oldloglevel);
-							} else {
-								pi->ckp->loglevel = loglevel;
-								snprintf(reply, sizeof(reply),
-									 "%s.%ld.ok.loglevel now %d - was %d",
-									 id, now.tv_sec,
-									 pi->ckp->loglevel, oldloglevel);
-							}
-							// Do this twice since the loglevel may have changed
-							LOGDEBUG("Listener received loglevel %d currently %d B",
-								 loglevel, oldloglevel);
+							pi->ckp->loglevel = loglevel;
+							snprintf(reply, sizeof(reply),
+								 "%s.%ld.ok.loglevel"
+								 " now %d - was %d",
+								 msgline->id,
+								 now.tv_sec,
+								 pi->ckp->loglevel,
+								 oldloglevel);
 						}
-						send_unix_msg(sockd, reply);
-						break;
-					case CMD_FLUSH:
-						LOGDEBUG("Listener received flush request");
+						// Do this twice since the loglevel may have changed
+						LOGDEBUG("Listener received loglevel"
+							 " %d currently %d B",
+							 loglevel, oldloglevel);
+					}
+					send_unix_msg(sockd, reply);
+					break;
+				case CMD_FLUSH:
+					LOGDEBUG("Listener received"
+						 " flush request");
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.ok.splash",
+						 msgline->id, now.tv_sec);
+					send_unix_msg(sockd, reply);
+					fflush(stdout);
+					fflush(stderr);
+					if (global_ckp && global_ckp->logfd)
+						fflush(global_ckp->logfp);
+					break;
+				case CMD_USERSET:
+				case CMD_BTCSET:
+					btc = true;
+				case CMD_CHKPASS:
+				case CMD_2FA:
+				case CMD_ADDUSER:
+				case CMD_NEWPASS:
+				case CMD_WORKERSET:
+				case CMD_GETATTS:
+				case CMD_SETATTS:
+				case CMD_EXPATTS:
+				case CMD_GETOPTS:
+				case CMD_SETOPTS:
+				case CMD_BLOCKLIST:
+				case CMD_NEWID:
+				case CMD_STATS:
+				case CMD_USERSTATUS:
+				case CMD_SHSTA:
+				case CMD_USERINFO:
+				case CMD_LOCKS:
+					msgline->sockd = sockd;
+					sockd = -1;
+					K_WLOCK(workqueue_free);
+					wq_item = k_unlink_head(workqueue_free);
+					DATA_WORKQUEUE(workqueue, wq_item);
+					workqueue->msgline_item = ml_item;
+					workqueue->by = by_default;
+					workqueue->code =  (char *)__func__;
+					workqueue->inet = inet_default;
+					if (btc)
+						k_add_tail(btc_workqueue_store, wq_item);
+					else
+						k_add_tail(cmd_workqueue_store, wq_item);
+					K_WUNLOCK(workqueue_free);
+					wq_item = ml_item = NULL;
+					break;
+				// Process, but reject (loading) until startup_complete
+				case CMD_HOMEPAGE:
+				case CMD_ALLUSERS:
+				case CMD_WORKERS:
+				case CMD_PAYMENTS:
+				case CMD_PPLNS:
+				case CMD_PPLNS2:
+				case CMD_PAYOUTS:
+				case CMD_MPAYOUTS:
+				case CMD_SHIFTS:
+				case CMD_PSHIFT:
+				case CMD_DSP:
+				case CMD_BLOCKSTATUS:
+				case CMD_MARKS:
+				case CMD_QUERY:
+					if (!startup_complete) {
 						snprintf(reply, sizeof(reply),
-							 "%s.%ld.ok.splash",
-							 id, now.tv_sec);
+							 "%s.%ld.loading.%s",
+							 msgline->id,
+							 now.tv_sec,
+							 msgline->cmd);
 						send_unix_msg(sockd, reply);
-						fflush(stdout);
-						fflush(stderr);
-						if (global_ckp && global_ckp->logfd)
-							fflush(global_ckp->logfp);
-						break;
-					// Always process immediately:
-					case CMD_AUTH:
-					case CMD_ADDRAUTH:
-					case CMD_HEARTBEAT:
+					} else {
+						msgline->sockd = sockd;
+						sockd = -1;
+						K_WLOCK(workqueue_free);
+						wq_item = k_unlink_head(workqueue_free);
+						DATA_WORKQUEUE(workqueue, wq_item);
+						workqueue->msgline_item = ml_item;
+						workqueue->by = by_default;
+						workqueue->code =  (char *)__func__;
+						workqueue->inet = inet_default;
+						if (btc)
+							k_add_tail(btc_workqueue_store, wq_item);
+						else
+							k_add_tail(cmd_workqueue_store, wq_item);
+						K_WUNLOCK(workqueue_free);
+						wq_item = ml_item = NULL;
+					}
+					break;
+				// Always process immediately:
+				case CMD_AUTH:
+				case CMD_ADDRAUTH:
+				case CMD_HEARTBEAT:
+					// First message from the pool
+					if (want_first) {
+						want_first = false;
+						ck_wlock(&fpm_lock);
+						first_pool_message = strdup(buf);
+						ck_wunlock(&fpm_lock);
+					}
+					DATA_MSGLINE(msgline, ml_item);
+					ans = ckdb_cmds[msgline->which_cmds].func(NULL,
+							msgline->cmd,
+							msgline->id,
+							&(msgline->now),
+							by_default,
+							(char *)__func__,
+							inet_default,
+							&(msgline->cd),
+							msgline->trf_root);
+					siz = strlen(ans) + strlen(msgline->id) + 32;
+					rep = malloc(siz);
+					snprintf(rep, siz, "%s.%ld.%s",
+						 msgline->id,
+						 now.tv_sec, ans);
+					send_unix_msg(sockd, rep);
+					FREENULL(ans);
+					replied = true;
+				// Always queue (ok.queued)
+				case CMD_SHARELOG:
+				case CMD_POOLSTAT:
+				case CMD_USERSTAT:
+				case CMD_WORKERSTAT:
+				case CMD_BLOCK:
+					if (!replied) {
 						// First message from the pool
 						if (want_first) {
+							want_first = false;
 							ck_wlock(&fpm_lock);
 							first_pool_message = strdup(buf);
 							ck_wunlock(&fpm_lock);
-							want_first = false;
 						}
-					case CMD_CHKPASS:
-					case CMD_ADDUSER:
-					case CMD_NEWPASS:
-					case CMD_USERSET:
-					case CMD_WORKERSET:
-					case CMD_GETATTS:
-					case CMD_SETATTS:
-					case CMD_EXPATTS:
-					case CMD_GETOPTS:
-					case CMD_SETOPTS:
-					case CMD_BLOCKLIST:
-					case CMD_NEWID:
-					case CMD_STATS:
-					case CMD_USERSTATUS:
-						ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
-										 by_default,
-										 (char *)__func__,
-										 inet_default,
-										 &cd, trf_root);
-						siz = strlen(ans) + strlen(id) + 32;
-						rep = malloc(siz);
-						snprintf(rep, siz, "%s.%ld.%s", id, now.tv_sec, ans);
-						send_unix_msg(sockd, rep);
-						FREENULL(ans);
-						switch (cmdnum) {
-							case CMD_AUTH:
-								STORELASTREPLY(auth);
-								break;
-							case CMD_ADDRAUTH:
-								STORELASTREPLY(addrauth);
-								break;
-							case CMD_CHKPASS:
-								STORELASTREPLY(chkpass);
-								break;
-							case CMD_ADDUSER:
-								STORELASTREPLY(adduser);
-								break;
-							case CMD_NEWPASS:
-								STORELASTREPLY(newpass);
-								break;
-							case CMD_USERSET:
-								STORELASTREPLY(userset);
-								break;
-							case CMD_WORKERSET:
-								STORELASTREPLY(workerset);
-								break;
-							case CMD_NEWID:
-								STORELASTREPLY(newid);
-								break;
-							case CMD_SETATTS:
-								STORELASTREPLY(setatts);
-								break;
-							case CMD_SETOPTS:
-								STORELASTREPLY(setopts);
-								break;
-							case CMD_USERSTATUS:
-								STORELASTREPLY(userstatus);
-								break;
-							// The rest
-							default:
-								free(rep);
-						}
-						rep = NULL;
-						break;
-					// Process, but reject (loading) until startup_complete
-					case CMD_HOMEPAGE:
-					case CMD_ALLUSERS:
-					case CMD_WORKERS:
-					case CMD_PAYMENTS:
-					case CMD_PPLNS:
-					case CMD_PPLNS2:
-					case CMD_PAYOUTS:
-					case CMD_DSP:
-					case CMD_BLOCKSTATUS:
-						if (!startup_complete) {
-							snprintf(reply, sizeof(reply),
-								 "%s.%ld.loading.%s",
-								 id, now.tv_sec, cmd);
-							send_unix_msg(sockd, reply);
-						} else {
-							ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
-											 by_default,
-											 (char *)__func__,
-											 inet_default,
-											 &cd, trf_root);
-							siz = strlen(ans) + strlen(id) + 32;
-							rep = malloc(siz);
-							snprintf(rep, siz, "%s.%ld.%s", id, now.tv_sec, ans);
-							send_unix_msg(sockd, rep);
-							FREENULL(ans);
-							if (cmdnum == CMD_DSP)
-								free(rep);
-							else {
-								if (last_web)
-									free(last_web);
-								last_web = buf;
-								buf = NULL;
-								if (reply_web)
-									free(reply_web);
-								reply_web = rep;
-							}
-							rep = NULL;
-						}
-						break;
-					/* Process, but reject (loading) until startup_complete
-					 * and don't test for duplicates */
-					case CMD_MARKS:
-						if (!startup_complete) {
-							snprintf(reply, sizeof(reply),
-								 "%s.%ld.loading.%s",
-								 id, now.tv_sec, cmd);
-							send_unix_msg(sockd, reply);
-						} else {
-							ans = ckdb_cmds[which_cmds].func(NULL, cmd, id, &now,
-											 by_default,
-											 (char *)__func__,
-											 inet_default,
-											 &cd, trf_root);
-							siz = strlen(ans) + strlen(id) + 32;
-							rep = malloc(siz);
-							snprintf(rep, siz, "%s.%ld.%s", id, now.tv_sec, ans);
-							send_unix_msg(sockd, rep);
-							FREENULL(ans);
-							FREENULL(rep);
-						}
-						break;
-					// Always queue (ok.queued)
-					case CMD_SHARELOG:
-					case CMD_POOLSTAT:
-					case CMD_USERSTAT:
-					case CMD_WORKERSTAT:
-					case CMD_BLOCK:
-						// First message from the pool
-						if (want_first) {
-							ck_wlock(&fpm_lock);
-							first_pool_message = strdup(buf);
-							ck_wunlock(&fpm_lock);
-							want_first = false;
-						}
-
 						snprintf(reply, sizeof(reply),
 							 "%s.%ld.ok.queued",
-							 id, now.tv_sec);
+							 msgline->id,
+							 now.tv_sec);
 						send_unix_msg(sockd, reply);
+					}
 
-						K_WLOCK(workqueue_free);
-						item = k_unlink_head(workqueue_free);
+					K_WLOCK(workqueue_free);
+					wq_item = k_unlink_head(workqueue_free);
+					DATA_WORKQUEUE(workqueue, wq_item);
+					workqueue->msgline_item = ml_item;
+					workqueue->by = by_default;
+					workqueue->code =  (char *)__func__;
+					workqueue->inet = inet_default;
+					k_add_tail(pool_workqueue_store, wq_item);
+					/* Stop the reload queue from growing too big
+					 * Use a size that should be big enough */
+					if (reloading && pool_workqueue_store->count > 250000) {
+						K_ITEM *wq2_item = k_unlink_head(pool_workqueue_store);
 						K_WUNLOCK(workqueue_free);
-
-						DATA_WORKQUEUE(workqueue, item);
-						workqueue->buf = buf;
-						buf = NULL;
-						workqueue->which_cmds = which_cmds;
-						workqueue->cmdnum = cmdnum;
-						STRNCPY(workqueue->cmd, cmd);
-						STRNCPY(workqueue->id, id);
-						copy_tv(&(workqueue->now), &now);
-						STRNCPY(workqueue->by, by_default);
-						STRNCPY(workqueue->code, __func__);
-						STRNCPY(workqueue->inet, inet_default);
-						copy_tv(&(workqueue->cd), &cd);
-						workqueue->trf_root = trf_root;
-						trf_root = NULL;
-						workqueue->trf_store = trf_store;
-						trf_store = NULL;
-
+						WORKQUEUE *wq;
+						DATA_WORKQUEUE(wq, wq2_item);
+						K_ITEM *ml_item = wq->msgline_item;
+						free_msgline_data(ml_item, true, false);
+						K_WLOCK(msgline_free);
+						k_add_head(msgline_free, ml_item);
+						K_WUNLOCK(msgline_free);
 						K_WLOCK(workqueue_free);
-						k_add_tail(workqueue_store, item);
-						K_WUNLOCK(workqueue_free);
-						mutex_lock(&wq_waitlock);
-						pthread_cond_signal(&wq_waitcond);
-						mutex_unlock(&wq_waitlock);
-						break;
-					// Code error
-					default:
-						LOGEMERG("%s() CODE ERROR unhandled message %d %.32s...",
-							 __func__, cmdnum, buf);
-						snprintf(reply, sizeof(reply),
-							 "%s.%ld.failed.code",
-							 id, now.tv_sec);
-						send_unix_msg(sockd, reply);
-						break;
-				}
+						k_add_head(workqueue_free, wq2_item);
+					}
+					K_WUNLOCK(workqueue_free);
+					wq_item = ml_item = NULL;
+					mutex_lock(&wq_waitlock);
+					pthread_cond_signal(&wq_waitcond);
+					mutex_unlock(&wq_waitlock);
+					break;
+				// Code error
+				default:
+					LOGEMERG("%s() CODE ERROR unhandled"
+						 " message %d %.32s...",
+						 __func__, cmdnum, buf);
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.failed.code",
+						 msgline->id,
+						 now.tv_sec);
+					send_unix_msg(sockd, reply);
+					break;
 			}
 		}
-		close(sockd);
+		if (sockd >= 0)
+			close(sockd);
+
+		if (ml_item) {
+			free_msgline_data(ml_item, true, true);
+			K_WLOCK(msgline_free);
+			k_add_head(msgline_free, ml_item);
+			K_WUNLOCK(msgline_free);
+			ml_item = NULL;
+		}
 
 		tick();
-
-		if (trf_root)
-			trf_root = free_ktree(trf_root, NULL);
-		if (trf_store) {
-			item = trf_store->head;
-			while (item) {
-				DATA_TRANSFER(transfer, item);
-				if (transfer->mvalue != transfer->svalue)
-					FREENULL(transfer->mvalue);
-				item = item->next;
-			}
-			K_WLOCK(transfer_free);
-			k_list_transfer_to_head(trf_store, transfer_free);
-			trf_store = k_free_store(trf_store);
-			if (transfer_free->count == transfer_free->total &&
-			    transfer_free->total > ALLOC_TRANSFER * CULL_TRANSFER)
-				k_cull_list(transfer_free);
-			K_WUNLOCK(transfer_free);
-		}
 	}
 
 	socketer_using_data = false;
 
 	if (buf)
 		dealloc(buf);
-	// TODO: if anyone cares, free all the dup buffers :P
 	close_unix_socket(us->sockd, us->path);
 
 	return NULL;
 }
 
-static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
+static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 {
-	char cmd[CMD_SIZ+1], id[ID_SIZ+1];
 	enum cmd_values cmdnum;
-	char *end, *ans;
-	int which_cmds;
-	K_STORE *trf_store = NULL;
-	K_TREE *trf_root = NULL;
-	TRANSFER *transfer;
-	K_ITEM *item;
-	tv_t now, cd;
-	bool finished;
+	char *end, *ans, *st = NULL;
+	MSGLINE *msgline;
+	K_ITEM *ml_item;
+	tv_t now;
+	bool matched;
 
 	// Once we've read the message
 	setnow(&now);
@@ -2832,29 +4447,36 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			*(end--) = '\0';
 	}
 	if (!buf || !*buf) {
-		if (!buf)
-			LOGERR("%s() NULL message line %"PRIu64, __func__, count);
-		else
-			LOGERR("%s() Empty message line %"PRIu64, __func__, count);
+		if (!buf) {
+			LOGERR("%s() NULL message line %"PRIu64,
+				__func__, count);
+		} else {
+			LOGERR("%s() Empty message line %"PRIu64,
+				__func__, count);
+		}
 	} else {
-		finished = false;
+		matched = false;
 		ck_wlock(&fpm_lock);
-		if (first_pool_message && strcmp(first_pool_message, buf) == 0)
-			finished = true;
+		if (first_pool_message &&
+		    strcmp(first_pool_message, buf) == 0) {
+			matched = true;
+			FREENULL(first_pool_message);
+		}
 		ck_wunlock(&fpm_lock);
-		if (finished) {
-			LOGERR("%s() reload completed, ckpool queue match at line %"PRIu64, __func__, count);
-			return true;
+		if (matched) {
+			LOGERR("%s() reload ckpool queue match at line %"PRIu64,
+				__func__, count);
 		}
 
-		LOGQUE(buf);
-		cmdnum = breakdown(&trf_root, &trf_store, buf, &which_cmds, cmd, id, &now, &cd);
+		// ml_item is set for all but CMD_REPLY
+		cmdnum = breakdown(&ml_item, buf, &now, SE_RELOAD);
+		DATA_MSGLINE(msgline, ml_item);
 		switch (cmdnum) {
 			// Ignore
 			case CMD_REPLY:
 				break;
 			// Shouldn't be there
-			case CMD_SHUTDOWN:
+			case CMD_TERMINATE:
 			case CMD_PING:
 			case CMD_VERSION:
 			case CMD_LOGLEVEL:
@@ -2863,6 +4485,7 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_ADDUSER:
 			case CMD_NEWPASS:
 			case CMD_CHKPASS:
+			case CMD_2FA:
 			case CMD_USERSET:
 			case CMD_WORKERSET:
 			case CMD_BLOCKLIST:
@@ -2882,10 +4505,21 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_PPLNS:
 			case CMD_PPLNS2:
 			case CMD_PAYOUTS:
+			case CMD_MPAYOUTS:
+			case CMD_SHIFTS:
 			case CMD_USERSTATUS:
 			case CMD_MARKS:
-				LOGERR("%s() Message line %"PRIu64" '%s' - invalid - ignored",
-					__func__, count, cmd);
+			case CMD_PSHIFT:
+			case CMD_SHSTA:
+			case CMD_USERINFO:
+			case CMD_BTCSET:
+			case CMD_QUERY:
+			case CMD_LOCKS:
+				LOGERR("%s() INVALID message line %"PRIu64
+					" ignored '%.42s...",
+					__func__, count,
+					st = safe_text(msgline->msg));
+				FREENULL(st);
 				break;
 			case CMD_AUTH:
 			case CMD_ADDRAUTH:
@@ -2897,41 +4531,42 @@ static bool reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 				if (confirm_sharesummary)
 					break;
 			case CMD_SHARELOG:
-				ans = ckdb_cmds[which_cmds].func(conn, cmd, id, &now,
-								 by_default,
-								 (char *)__func__,
-								 inet_default,
-								 &cd, trf_root);
-				if (ans)
-					free(ans);
+				// This will return the same cmdnum or DUP
+				cmdnum = process_seq(msgline);
+				if (cmdnum != CMD_DUPSEQ) {
+					ans = ckdb_cmds[msgline->which_cmds].func(conn,
+							msgline->cmd,
+							msgline->id,
+							&(msgline->now),
+							by_default,
+							(char *)__func__,
+							inet_default,
+							&(msgline->cd),
+							msgline->trf_root);
+					FREENULL(ans);
+				}
 				break;
 			default:
 				// Force this switch to be updated if new cmds are added
-				quithere(1, "%s line %"PRIu64" '%s' - not handled by reload",
-					 filename, count, cmd);
+				quithere(1, "%s line %"PRIu64" '%s' - not "
+					 "handled by reload",
+					 filename, count,
+					 st = safe_text_nonull(msgline->cmd));
+				// Won't get here ...
+				FREENULL(st);
 				break;
 		}
 
-		if (trf_root)
-			trf_root = free_ktree(trf_root, NULL);
-		if (trf_store) {
-			item = trf_store->head;
-			while (item) {
-				DATA_TRANSFER(transfer, item);
-				if (transfer->mvalue != transfer->svalue)
-					FREENULL(transfer->mvalue);
-				item = item->next;
-			}
-			K_WLOCK(transfer_free);
-			k_list_transfer_to_head(trf_store, transfer_free);
-			K_WUNLOCK(transfer_free);
-			trf_store = k_free_store(trf_store);
+		if (ml_item) {
+			free_msgline_data(ml_item, true, true);
+			K_WLOCK(msgline_free);
+			k_add_head(msgline_free, ml_item);
+			K_WUNLOCK(msgline_free);
+			ml_item = NULL;
 		}
 	}
 
 	tick();
-
-	return false;
 }
 
 // 10Mb for now - transactiontree can be large
@@ -3005,6 +4640,14 @@ static bool logopen(char **filename, FILE **fp, bool *apipe)
 	return false;
 }
 
+// How many files need to be processed before flagging reloaded_N_files
+#define RELOAD_N_FILES 2
+// optioncontrol name to override the above value
+#define RELOAD_N_FILES_STR "ReloadNFiles"
+
+// How many lines in a reload file required to count it
+#define RELOAD_N_COUNT 1000
+
 /* If the reload start file is missing and -r was specified correctly:
  *	touch the filename reported in "Failed to open 'filename'",
  *	if ckdb aborts at the beginning of the reload, then start again */
@@ -3013,23 +4656,28 @@ static bool reload_from(tv_t *start)
 	PGconn *conn = NULL;
 	char buf[DATE_BUFSIZ+1], run[DATE_BUFSIZ+1];
 	size_t rflen = strlen(restorefrom);
-	char *missingfirst = NULL, *missinglast = NULL;
+	char *missingfirst = NULL, *missinglast = NULL, *st = NULL;
 	int missing_count;
 	int processing;
-	bool finished = false, matched = false, ret = true, ok, apipe = false;
+	bool finished = false, ret = true, ok, apipe = false;
 	char *filename = NULL;
 	uint64_t count, total;
 	tv_t now, begin;
 	double diff;
 	FILE *fp = NULL;
+	int file_N_limit;
 
 	reload_buf = malloc(MAX_READ);
 	if (!reload_buf)
 		quithere(1, "(%d) OOM", MAX_READ);
 
+	file_N_limit = (int)sys_setting(RELOAD_N_FILES_STR, RELOAD_N_FILES,
+					&date_eot);
+
 	reloading = true;
 
 	copy_tv(&reload_timestamp, start);
+	// Go back further - one reload file
 	reload_timestamp.tv_sec -= reload_timestamp.tv_sec % ROLL_S;
 
 	tv_to_buf(start, buf, sizeof(buf));
@@ -3044,7 +4692,8 @@ static bool reload_from(tv_t *start)
 	copy_tv(&begin, &now);
 	tvs_to_buf(&now, run, sizeof(run));
 	snprintf(reload_buf, MAX_READ, "reload.%s.s0", run);
-	LOGQUE(reload_buf);
+	LOGQUE(reload_buf, true);
+	LOGQUE(reload_buf, false);
 
 	conn = dbconnect();
 
@@ -3055,13 +4704,19 @@ static bool reload_from(tv_t *start)
 		processing++;
 		count = 0;
 
-		while (!everyone_die && !matched &&
-			logline(reload_buf, MAX_READ, fp, filename))
-				matched = reload_line(conn, filename, ++count, reload_buf);
+		/* Don't abort when matched since breakdown() will remove
+		 *  the matching message sequence numbers queued from ckpool
+		 * Also since ckpool messages are not in order, we could be
+		 *  aborting early and not get the few slightly later out of
+		 *  order messages in the log file */
+		while (!everyone_die && 
+			logline(reload_buf, MAX_READ, fp, filename)) {
+				reload_line(conn, filename, ++count, reload_buf);
+		}
 
 		LOGWARNING("%s(): %sread %"PRIu64" line%s from %s",
 			   __func__,
-			   everyone_die ? "Shutdown, aborting - " : "",
+			   everyone_die ? "Terminate, aborting - " : "",
 			   count, count == 1 ? "" : "s",
 			   filename);
 		total += count;
@@ -3075,13 +4730,21 @@ static bool reload_from(tv_t *start)
 		} else
 			fclose(fp);
 		free(filename);
-		if (everyone_die || matched)
+		if (everyone_die)
 			break;
 		reload_timestamp.tv_sec += ROLL_S;
 		if (confirm_sharesummary && tv_newer(&confirm_finish, &reload_timestamp)) {
 			LOGWARNING("%s(): confirm range complete", __func__);
 			break;
 		}
+
+		/* Used by marker() to start mark generation during a longer
+		 *  than normal reload */
+		if (count > RELOAD_N_COUNT) {
+			if (file_N_limit-- < 1)
+				reloaded_N_files = true;
+		}
+
 		filename = rotating_filename(restorefrom, reload_timestamp.tv_sec);
 		ok = logopen(&filename, &fp, &apipe);
 		if (!ok) {
@@ -3131,7 +4794,8 @@ static bool reload_from(tv_t *start)
 		diff = 1;
 
 	snprintf(reload_buf, MAX_READ, "reload.%s.%"PRIu64, run, total);
-	LOGQUE(reload_buf);
+	LOGQUE(reload_buf, true);
+	LOGQUE(reload_buf, false);
 	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s %.2f/s",
 		   __func__,
 		   processing, processing == 1 ? "" : "s",
@@ -3140,16 +4804,16 @@ static bool reload_from(tv_t *start)
 	if (everyone_die)
 		return true;
 
-	if (!matched) {
-		ck_wlock(&fpm_lock);
-		if (first_pool_message) {
-			LOGERR("%s() reload completed without finding ckpool queue match '%.32s'...",
-				__func__, first_pool_message);
-			LOGERR("%s() restart ckdb to resolve this", __func__);
-			ret = false;
-		}
-		ck_wunlock(&fpm_lock);
+	ck_wlock(&fpm_lock);
+	if (first_pool_message) {
+		LOGERR("%s() reload didn't find the first ckpool queue '%.32s...",
+			__func__, st = safe_text(first_pool_message));
+		FREENULL(st);
+		FREENULL(first_pool_message);
 	}
+	ck_wunlock(&fpm_lock);
+
+	seq_reloadmax();
 
 	reloading = false;
 	FREENULL(reload_buf);
@@ -3158,46 +4822,64 @@ static bool reload_from(tv_t *start)
 
 static void process_queued(PGconn *conn, K_ITEM *wq_item)
 {
-	static char *last_buf = NULL;
+	enum cmd_values cmdnum;
 	WORKQUEUE *workqueue;
-	TRANSFER *transfer;
-	K_ITEM *item;
+	MSGLINE *msgline;
+	K_ITEM *ml_item;
 	char *ans;
 
 	DATA_WORKQUEUE(workqueue, wq_item);
+	ml_item = workqueue->msgline_item;
+	DATA_MSGLINE(msgline, ml_item);
 
-	// Simply ignore the (very rare) duplicates
-	if (!last_buf || strcmp(workqueue->buf, last_buf)) {
-		ans = ckdb_cmds[workqueue->which_cmds].func(conn, workqueue->cmd, workqueue->id,
-							    &(workqueue->now), workqueue->by,
-							    workqueue->code, workqueue->inet,
-							    &(workqueue->cd), workqueue->trf_root);
-		free(ans);
+	/* Queued messages haven't had their seq number check yet
+	 * This will return the entries cmdnum or DUP */
+	cmdnum = process_seq(msgline);
+	switch (cmdnum) {
+		case CMD_DUPSEQ:
+		// Already replied
+		case CMD_AUTH:
+		case CMD_ADDRAUTH:
+		case CMD_HEARTBEAT:
+			break;
+		default:
+			ans = ckdb_cmds[msgline->which_cmds].func(conn,
+					msgline->cmd,
+					msgline->id,
+					&(msgline->now),
+					workqueue->by,
+					workqueue->code,
+					workqueue->inet,
+					&(msgline->cd),
+					msgline->trf_root);
+			FREENULL(ans);
+			break;
 	}
 
-	if (last_buf)
-		free(last_buf);
-	last_buf = workqueue->buf;
-
-	workqueue->trf_root = free_ktree(workqueue->trf_root, NULL);
-	item = workqueue->trf_store->head;
-	while (item) {
-		DATA_TRANSFER(transfer, item);
-		if (transfer->mvalue != transfer->svalue)
-			FREENULL(transfer->mvalue);
-		item = item->next;
-	}
-	K_WLOCK(transfer_free);
-	k_list_transfer_to_head(workqueue->trf_store, transfer_free);
-	K_WUNLOCK(transfer_free);
-	workqueue->trf_store = k_free_store(workqueue->trf_store);
+	free_msgline_data(ml_item, true, true);
+	K_WLOCK(msgline_free);
+	k_add_head(msgline_free, ml_item);
+	K_WUNLOCK(msgline_free);
 
 	K_WLOCK(workqueue_free);
 	k_add_head(workqueue_free, wq_item);
 	if (workqueue_free->count == workqueue_free->total &&
-	    workqueue_free->total > ALLOC_WORKQUEUE * CULL_WORKQUEUE)
+	    workqueue_free->total >= ALLOC_WORKQUEUE * CULL_WORKQUEUE)
 		k_cull_list(workqueue_free);
 	K_WUNLOCK(workqueue_free);
+}
+
+static void free_lost(SEQDATA *seqdata)
+{
+	if (seqdata->reload_lost) {
+		K_WLOCK(seqtrans_free);
+		k_list_transfer_to_head(seqdata->reload_lost, seqtrans_free);
+		if (seqtrans_free->count == seqtrans_free->total &&
+		    seqtrans_free->total >= ALLOC_SEQTRANS * CULL_SEQTRANS)
+			k_cull_list(seqtrans_free);
+		K_WUNLOCK(seqtrans_free);
+		seqdata->reload_lost = NULL;
+	}
 }
 
 // TODO: equivalent of api_allow
@@ -3211,10 +4893,25 @@ static void *listener(void *arg)
 	K_ITEM *wq_item;
 	time_t now;
 	int wqcount, wqgot;
+	char ooo_buf[256];
+	tv_t wq_stt, wq_fin;
+	double min, sec;
+	int left;
+	SEQSET *seqset = NULL;
+	SEQDATA *seqdata;
+	K_ITEM *ss_item;
+	int i;
+
+	LOCK_INIT("db_plistener");
+	rename_proc("db_plistener");
 
 	logqueue_free = k_new_list("LogQueue", sizeof(LOGQUEUE),
 					ALLOC_LOGQUEUE, LIMIT_LOGQUEUE, true);
 	logqueue_store = k_new_store(logqueue_free);
+
+#if LOCK_CHECK
+	DLPRIO(logqueue, 94);
+#endif
 
 	create_pthread(&log_pt, logger, NULL);
 
@@ -3224,22 +4921,23 @@ static void *listener(void *arg)
 
 	create_pthread(&mark_pt, marker, NULL);
 
-	rename_proc("db_listener");
-
-	listener_using_data = true;
+	plistener_using_data = true;
 
 	if (!setup_data()) {
 		if (!everyone_die) {
 			LOGEMERG("ABORTING");
 			everyone_die = true;
 		}
-		return NULL;
+		goto sayonara;
 	}
 
 	if (!everyone_die) {
-		K_RLOCK(workqueue_store);
-		wqcount = workqueue_store->count;
-		K_RUNLOCK(workqueue_store);
+		K_RLOCK(workqueue_free);
+		wqcount = pool_workqueue_store->count;
+		K_RUNLOCK(workqueue_free);
+
+		LOGWARNING("reload shares OoO %s", ooo_status(ooo_buf, sizeof(ooo_buf)));
+		sequence_report(true);
 
 		LOGWARNING("%s(): ckdb ready, queue %d", __func__, wqcount);
 
@@ -3250,20 +4948,28 @@ static void *listener(void *arg)
 		setnow(&last_heartbeat);
 		copy_tv(&last_workinfo, &last_heartbeat);
 		copy_tv(&last_share, &last_heartbeat);
+		copy_tv(&last_share_acc, &last_heartbeat);
+		copy_tv(&last_share_inv, &last_heartbeat);
 		copy_tv(&last_auth, &last_heartbeat);
 		ck_wunlock(&last_lock);
 
 		startup_complete = true;
+
+		setnow(&wq_stt);
+		conn = dbconnect();
+		now = time(NULL);
+		wqgot = 0;
 	}
 
 	// Process queued work
-	conn = dbconnect();
-	now = time(NULL);
-	wqgot = 0;
 	while (!everyone_die) {
-		K_WLOCK(workqueue_store);
-		wq_item = k_unlink_head(workqueue_store);
-		K_WUNLOCK(workqueue_store);
+		K_WLOCK(workqueue_free);
+		wq_item = k_unlink_head(pool_workqueue_store);
+		left = pool_workqueue_store->count;
+		K_WUNLOCK(workqueue_free);
+
+		if (left == 0 && wq_stt.tv_sec != 0L)
+			setnow(&wq_fin);
 
 		/* Don't keep a connection for more than ~10s or ~10000 items
 		 *  but always have a connection open */
@@ -3278,7 +4984,46 @@ static void *listener(void *arg)
 			wqgot++;
 			process_queued(conn, wq_item);
 			tick();
-		} else {
+		}
+
+		if (left == 0 && wq_stt.tv_sec != 0L) {
+			sec = tvdiff(&wq_fin, &wq_stt);
+			min = floor(sec / 60.0);
+			sec -= min * 60.0;
+			LOGWARNING("reload queue completed %.0fm %.3fs", min, sec);
+			// Used as the flag to display the message once
+			wq_stt.tv_sec = 0L;
+			reload_queue_complete = true;
+		}
+
+		/* Checked outside lock but only changed under lock
+		 * This avoids taking out the lock repeatedly and the cleanup
+		 *  code is ok if there is nothing to clean up
+		 * This would normally only ever be done once */
+		if (seqdata_reload_lost && reload_queue_complete) {
+			/* Cleanup all the reload_lost stores since
+			 *  they should no longer be needed and the ram
+			 *  they use should be freed by the next cull */
+			SEQLOCK();
+			if (seqset_store->count > 0) {
+				ss_item = STORE_WHEAD(seqset_store);
+				while (ss_item) {
+					DATA_SEQSET(seqset, ss_item);
+					if (seqset->seqstt) {
+						seqdata = &(seqset->seqdata[0]);
+						for (i = 0; i < SEQ_MAX; i++) {
+							free_lost(seqdata);
+							seqdata++;
+						}
+					}
+					ss_item = ss_item->next;
+				}
+			}
+			seqdata_reload_lost = false;
+			SEQUNLOCK();
+		}
+
+		if (!wq_item) {
 			const ts_t tsdiff = {0, 420000000};
 			tv_t now;
 			ts_t abs;
@@ -3293,7 +5038,9 @@ static void *listener(void *arg)
 		}
 	}
 
-	listener_using_data = false;
+sayonara:
+
+	plistener_using_data = false;
 
 	if (conn)
 		PQfinish(conn);
@@ -3301,6 +5048,7 @@ static void *listener(void *arg)
 	return NULL;
 }
 
+#if 0
 /* TODO: This will be way faster traversing both trees simultaneously
  *  rather than traversing one and searching the other, then repeating
  *  in reverse. Will change it later */
@@ -3327,7 +5075,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 	look.data = (void *)(&looksharesummary);
 
 	total = ok = missing = diff = 0;
-	lss = find_after_in_ktree(leftsum, &look, cmp_sharesummary_workinfoid, ctxl);
+	lss = find_after_in_ktree(leftsum, &look, ctxl);
 	while (lss) {
 		DATA_SHARESUMMARY(l_ss, lss);
 		if (l_ss->workinfoid > confirm_last_workinfoid)
@@ -3339,7 +5087,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 			first_used = l_ss->workinfoid;
 		last_used = l_ss->workinfoid;
 
-		rss = find_in_ktree(rightsum, lss, cmp_sharesummary_workinfoid, ctxr);
+		rss = find_in_ktree(rightsum, lss, ctxr);
 		DATA_SHARESUMMARY_NULL(r_ss, rss);
 		if (!rss) {
 			missing++;
@@ -3404,6 +5152,7 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
 			diff_first, diff_last, cd_buf1, cd_buf2);
 	}
 }
+#endif
 
 /* TODO: have a seperate option to find/store missing workinfo/shares/etc
  *  from the reload files, in a supplied UTC time range
@@ -3416,6 +5165,9 @@ static void compare_summaries(K_TREE *leftsum, char *leftname,
  *  and the payment is now wrong */
 static void confirm_reload()
 {
+#if 0
+	TODO: redo this using workmarkers
+
 	K_TREE *sharesummary_workinfoid_save;
 	__maybe_unused K_TREE *sharesummary_save;
 	__maybe_unused K_TREE *workinfo_save;
@@ -3544,7 +5296,7 @@ static void confirm_reload()
 				lookblocks.height = confirm_block;
 				lookblocks.blockhash[0] = '\0';
 				b_look.data = (void *)(&lookblocks);
-				b_end_item = find_after_in_ktree(blocks_root, &b_look, cmp_blocks, ctx);
+				b_end_item = find_after_in_ktree(blocks_root, &b_look, ctx);
 				if (!b_end_item) {
 					LOGWARNING("%s(): no DB block height found matching or after %d",
 						   __func__, confirm_block);
@@ -3557,7 +5309,7 @@ static void confirm_reload()
 				lookblocks.height = e_blocks->height;
 				lookblocks.blockhash[0] = '\0';
 				b_look.data = (void *)(&lookblocks);
-				b_begin_item = find_before_in_ktree(blocks_root, &b_look, cmp_blocks, ctx);
+				b_begin_item = find_before_in_ktree(blocks_root, &b_look, ctx);
 				if (!b_begin_item)
 					confirm_first_workinfoid = 0;
 				else {
@@ -3566,7 +5318,7 @@ static void confirm_reload()
 					lookblocks.height = b_blocks->height;
 					lookblocks.blockhash[0] = '\0';
 					b_look.data = (void *)(&lookblocks);
-					b_begin_item = find_after_in_ktree(blocks_root, &b_look, cmp_blocks, ctx);
+					b_begin_item = find_after_in_ktree(blocks_root, &b_look, ctx);
 					// Not possible
 					if (!b_begin_item)
 						confirm_first_workinfoid = 0;
@@ -3618,7 +5370,7 @@ static void confirm_reload()
 	lookworkinfo.expirydate.tv_sec = date_begin.tv_sec;
 	lookworkinfo.expirydate.tv_usec = date_begin.tv_usec;
 	wi_look.data = (void *)(&lookworkinfo);
-	wi_item = find_before_in_ktree(workinfo_root, &wi_look, cmp_workinfo, ctx);
+	wi_item = find_before_in_ktree(workinfo_root, &wi_look, ctx);
 	if (wi_item) {
 		DATA_WORKINFO(workinfo, wi_item);
 		copy_tv(&start, &(workinfo->createdate));
@@ -3628,7 +5380,7 @@ static void confirm_reload()
 		}
 	} else {
 		if (confirm_first_workinfoid == 0) {
-			start.tv_sec = start.tv_usec = 0;
+			DATE_ZERO(&start);
 			LOGWARNING("%s() no start workinfo found ... "
 				   "using time 0", __func__);
 		} else {
@@ -3646,7 +5398,7 @@ static void confirm_reload()
 	lookworkinfo.expirydate.tv_sec = date_eot.tv_sec;
 	lookworkinfo.expirydate.tv_usec = date_eot.tv_usec;
 	wi_look.data = (void *)(&lookworkinfo);
-	wi_item = find_after_in_ktree(workinfo_root, &wi_look, cmp_workinfo, ctx);
+	wi_item = find_after_in_ktree(workinfo_root, &wi_look, ctx);
 	if (wi_item) {
 		DATA_WORKINFO(workinfo, wi_item);
 		/* Now find the one after the one we found to determine the
@@ -3655,7 +5407,7 @@ static void confirm_reload()
 		lookworkinfo.expirydate.tv_sec = date_eot.tv_sec;
 		lookworkinfo.expirydate.tv_usec = date_eot.tv_usec;
 		wi_look.data = (void *)(&lookworkinfo);
-		wi_item = find_after_in_ktree(workinfo_root, &wi_look, cmp_workinfo, ctx);
+		wi_item = find_after_in_ktree(workinfo_root, &wi_look, ctx);
 		if (wi_item) {
 			DATA_WORKINFO(workinfo, wi_item);
 			copy_tv(&confirm_finish, &(workinfo->createdate));
@@ -3686,9 +5438,9 @@ static void confirm_reload()
 	sharesummary_save = sharesummary_root;
 	workinfo_save = workinfo_root;
 
-	sharesummary_workinfoid_root = new_ktree();
-	sharesummary_root = new_ktree();
-	workinfo_root = new_ktree();
+	sharesummary_workinfoid_root = new_ktree(cmp_sharesummary_workinfoid);
+	sharesummary_root = new_ktree(cmp_sharesummary);
+	workinfo_root = new_ktree(cmp_workinfo);
 
 	if (start.tv_sec < DATE_BEGIN) {
 		start.tv_sec = DATE_BEGIN;
@@ -3730,6 +5482,7 @@ static void confirm_reload()
 	compare_summaries(sharesummary_workinfoid_root, "ReLoad",
 			  sharesummary_workinfoid_save, "DB",
 			  true, false);
+#endif
 }
 
 // TODO: handle workmarkers/markersummaries
@@ -3815,8 +5568,13 @@ static void confirm_summaries()
 					ALLOC_LOGQUEUE, LIMIT_LOGQUEUE, true);
 	logqueue_store = k_new_store(logqueue_free);
 
+#if LOCK_CHECK
+	DLPRIO(logqueue, 94);
+#endif
+
 	create_pthread(&log_pt, logger, NULL);
 
+	LOCK_INIT("dby_confirmer");
 	rename_proc("dby_confirmer");
 
 	alloc_storage();
@@ -3867,11 +5625,15 @@ static void check_restore_dir(char *name)
 static struct option long_options[] = {
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
+	{ "free",		required_argument,	0,	'f' },
+	// generate = enable payout pplns auto generation
+	{ "generate",		no_argument,		0,	'g' },
 	{ "help",		no_argument,		0,	'h' },
 	{ "killold",		no_argument,		0,	'k' },
 	{ "loglevel",		required_argument,	0,	'l' },
-	// markersummary = enable markersummary auto generation
-	{ "markersummary",	no_argument,		0,	'm' },
+	// marker = enable mark/workmarker/markersummary auto generation
+	{ "marker",		no_argument,		0,	'm' },
+	{ "markstart",		required_argument,	0,	'M' },
 	{ "name",		required_argument,	0,	'n' },
 	{ "dbpass",		required_argument,	0,	'p' },
 	{ "btc-pass",		required_argument,	0,	'P' },
@@ -3916,7 +5678,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:hkl:mn:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:d:ghkl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'c':
 				ckp.config = strdup(optarg);
@@ -3926,6 +5688,24 @@ int main(int argc, char **argv)
 				kill = optarg;
 				while (*kill)
 					*(kill++) = ' ';
+				break;
+			case 'f':
+				if (strcasecmp(optarg, FREE_MODE_ALL_STR) == 0)
+					free_mode = FREE_MODE_ALL;
+				else if (strcasecmp(optarg, FREE_MODE_NONE_STR) == 0)
+					free_mode = FREE_MODE_NONE;
+				else if (strcasecmp(optarg, FREE_MODE_FAST_STR) == 0)
+					free_mode = FREE_MODE_FAST;
+				else {
+					quit(1, "Invalid free '%s' must be: "
+						FREE_MODE_ALL_STR", "
+						FREE_MODE_NONE_STR" or "
+						FREE_MODE_FAST_STR,
+						optarg);
+				}
+				break;
+			case 'g':
+				genpayout_auto = true;
 				break;
 			case 'h':
 				for (j = 0; long_options[j].val; j++) {
@@ -3956,6 +5736,9 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				markersummary_auto = true;
+				break;
+			case 'M':
+				mark_start = strdup(optarg);
 				break;
 			case 'n':
 				ckp.name = strdup(optarg);
@@ -4052,7 +5835,9 @@ int main(int argc, char **argv)
 	if (!ckp.name)
 		ckp.name = "ckdb";
 	snprintf(buf, 15, "%s%s", ckp.name, dbcode);
+	FIRST_LOCK_INIT(buf);
 	prctl(PR_SET_NAME, buf, 0, 0, 0);
+
 	memset(buf, 0, 15);
 
 	check_restore_dir(ckp.name);
@@ -4093,7 +5878,11 @@ int main(int argc, char **argv)
 		quit(1, "Failed to open log file %s", buf);
 	ckp.logfd = fileno(ckp.logfp);
 
-	snprintf(logname, sizeof(logname), "%s%s-db%s-",
+	// -db is ckpool messages
+	snprintf(logname_db, sizeof(logname_db), "%s%s-db%s-",
+				ckp.logdir, ckp.name, dbcode);
+	// -io is everything else
+	snprintf(logname_io, sizeof(logname_io), "%s%s-io%s-",
 				ckp.logdir, ckp.name, dbcode);
 
 	setnow(&now);
@@ -4103,7 +5892,16 @@ int main(int argc, char **argv)
 	ckp.main.processname = strdup("main");
 
 	cklock_init(&last_lock);
-	cklock_init(&process_pplns_lock);
+	cklock_init(&btc_lock);
+
+	// Emulate a list for lock checking
+	process_pplns_free = k_lock_only_list("ProcessPPLNS");
+	workers_db_free = k_lock_only_list("WorkersDB");
+
+#if LOCK_CHECK
+	DLPRIO(process_pplns, 99);
+	DLPRIO(workers_db, 98);
+#endif
 
 	if (confirm_sharesummary) {
 		// TODO: add a system lock to stop running 2 at once?
@@ -4122,7 +5920,7 @@ int main(int argc, char **argv)
 		sigaction(SIGTERM, &handler, NULL);
 		sigaction(SIGINT, &handler, NULL);
 
-		/* Shutdown from here if the listener is sent a shutdown message */
+		/* Terminate from here if the listener is sent a terminate message */
 		join_pthread(ckp.pth_listener);
 	}
 
@@ -4131,25 +5929,28 @@ int main(int argc, char **argv)
 
 	trigger = start = time(NULL);
 	while (socketer_using_data || summariser_using_data ||
-		logger_using_data || listener_using_data ||
+		logger_using_data || plistener_using_data ||
+		clistener_using_data || blistener_using_data ||
 		marker_using_data) {
 		msg = NULL;
 		curr = time(NULL);
 		if (curr - start > 4) {
 			if (curr - trigger > 4) {
-				msg = "Shutdown initial delay";
+				msg = "Terminate initial delay";
 			} else if (curr - trigger > 2) {
-				msg = "Shutdown delay";
+				msg = "Terminate delay";
 			}
 		}
 		if (msg) {
 			trigger = curr;
-			printf("%s %ds due to%s%s%s%s%s\n",
+			printf("%s %ds due to%s%s%s%s%s%s%s\n",
 				msg, (int)(curr - start),
 				socketer_using_data ? " socketer" : EMPTY,
 				summariser_using_data ? " summariser" : EMPTY,
 				logger_using_data ? " logger" : EMPTY,
-				listener_using_data ? " listener" : EMPTY,
+				plistener_using_data ? " plistener" : EMPTY,
+				clistener_using_data ? " clistener" : EMPTY,
+				blistener_using_data ? " blistener" : EMPTY,
 				marker_using_data ? " marker" : EMPTY);
 			fflush(stdout);
 		}

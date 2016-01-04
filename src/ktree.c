@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2014 Andrew Smith
+ * Copyright 1995-2015 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -15,7 +15,7 @@ static const int dbg = 0;
 #define FAIL(fmt, ...) do \
 	{ \
 		quithere(1, fmt KTREE_FFL, ##__VA_ARGS__, KTREE_FFL_PASS); \
-	} while (0);
+	} while (0)
 
 #define RED_RED         true
 #define RED_BLACK       false
@@ -23,42 +23,90 @@ static const int dbg = 0;
 #define Yo true
 #define No false
 
-static K_TREE nil[1] = { { Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 } };
+static K_NODE nil[1] = { { NULL, Yo, RED_BLACK, NULL, NULL, NULL, NULL, 0 } };
 
-K_TREE *_new_ktree(KTREE_FFL_ARGS)
+static K_NODE *_new_knode(K_TREE *tree, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
-	K_TREE *ktree = (K_TREE *)malloc(sizeof(*ktree));
+	K_ITEM *kitem;
+	K_NODE *knode;
 
-	if (ktree == NULL)
-		FAIL("%s", "OOM");
+	// master protects the tree's node list
+	_TREE_WRITE(tree, chklock, file, func, line);
+	kitem = k_unlink_head_nolock(tree->node_free);
+	if (!kitem)
+		FAIL("%s", "node list OOM");
+	k_add_head_nolock(tree->node_store, kitem);
+	knode = (K_NODE *)(kitem->data);
 
-	ktree->isNil = Yo;
-	ktree->red = RED_BLACK;
-	ktree->parent = nil;
-	ktree->left = nil;
-	ktree->right = nil;
-	ktree->data = NULL;
-	ktree->test = 0;
+	knode->kitem = kitem;
+	knode->isNil = Yo;
+	knode->red = RED_BLACK;
+	knode->parent = nil;
+	knode->left = nil;
+	knode->right = nil;
+	knode->data = NULL;
+	knode->test = 0;
 
-	return ktree;
+	return knode;
 }
 
-static K_TREE *new_data(K_ITEM *data, KTREE_FFL_ARGS)
+K_TREE *_new_ktree(const char *name, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *),
+		   K_LIST *master, int alloc, int limit, bool local_tree,
+		   KTREE_FFL_ARGS)
 {
-	K_TREE *ktree = (K_TREE *)malloc(sizeof(*ktree));
+	K_TREE *tree = (K_TREE *)malloc(sizeof(*tree));
 
-	if (ktree == NULL)
-		FAIL("%s", "OOM");
+	if (tree == NULL)
+		FAIL("%s", "tree OOM");
 
-	ktree->isNil = No;
-	ktree->red = RED_RED;
-	ktree->parent = nil;
-	ktree->left = nil;
-	ktree->right = nil;
-	ktree->data = data;
-	ktree->test = 0;
+	if (name == NULL)
+		tree->name = master->name;
+	else
+		tree->name = name;
 
-	return ktree;
+	/* A unique "name" isn't needed since it can't use the wrong list
+	 *  and thus we can also identify all tree node lists */
+	tree->node_free = k_new_tree_list(tree_node_list_name, sizeof(K_NODE),
+					  alloc, limit, true, local_tree,
+					  tree->name);
+#if LOCK_CHECK
+	DLPRIO(tree->node, PRIO_TERMINAL);
+#endif
+	tree->node_store = k_new_store(tree->node_free);
+
+	// A new tree's list doesn't need to be locked during creation
+	tree->root = _new_knode(tree, false, KTREE_FFL_PASS);
+
+	tree->cmp_funct = cmp_funct;
+
+	tree->master = master;
+
+	return tree;
+}
+
+static K_NODE *new_data(K_TREE *tree, K_ITEM *data, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
+{
+	K_ITEM *kitem;
+	K_NODE *knode;
+
+	// master protects the tree's node list
+	_TREE_WRITE(tree, chklock, file, func, line);
+	kitem = k_unlink_head_nolock(tree->node_free);
+	if (!kitem)
+		FAIL("%s", "node list OOM");
+	k_add_head_nolock(tree->node_store, kitem);
+	knode = (K_NODE *)(kitem->data);
+
+	knode->kitem = kitem;
+	knode->isNil = No;
+	knode->red = RED_RED;
+	knode->parent = nil;
+	knode->left = nil;
+	knode->right = nil;
+	knode->data = data;
+	knode->test = 0;
+
+	return knode;
 }
 
 static int bCount = 0;
@@ -73,58 +121,56 @@ static long getTestValue()
 	return ++testValue;
 }
 
-static void show_ktree(K_TREE *root, char *path, int pos, char *(*dsp_funct)(K_ITEM *))
+static void show_ktree(K_NODE *node, char *path, int pos, char *(*dsp_funct)(K_ITEM *))
 {
 	char col;
 
-	if (root->isNil == Yo)
+	if (node->isNil == Yo)
 		return;
 
-	if (root->left->isNil == No)
+	if (node->left->isNil == No)
 	{
 		path[pos] = 'L';
 		path[pos+1] = '\0';
-		show_ktree(root->left, path, pos+1, dsp_funct);
+		show_ktree(node->left, path, pos+1, dsp_funct);
 	}
 
 	path[pos] = '\0';
 
-	switch(root->red)
-	{
-	case RED_RED:
+	if (node->red == RED_RED)
 		col = 'R';
-		break;
-	case RED_BLACK:
+	else
+	// if (node->red == RED_BLACK)
 		col = 'B';
-		break;
-	}
 
-	printf(" %c %s=%s\n", col, path, dsp_funct(root->data));
+	printf(" %c %s=%s\n", col, path, dsp_funct(node->data));
 
-	if (root->right->isNil == No)
+	if (node->right->isNil == No)
 	{
 		path[pos] = 'R';
 		path[pos+1] = '\0';
-		show_ktree(root->right, path, pos+1, dsp_funct);
+		show_ktree(node->right, path, pos+1, dsp_funct);
 	}
 }
 
-void _dump_ktree(K_TREE *root, char *(*dsp_funct)(K_ITEM *), KTREE_FFL_ARGS)
+void _dump_ktree(K_TREE *tree, char *(*dsp_funct)(K_ITEM *), KTREE_FFL_ARGS)
 {
 	char buf[42424];
 
+	_TREE_READ(tree, true, file, func, line);
+
 	printf("dump:\n");
-	if (root->isNil == No)
+	if (tree->root->isNil == No)
 	{
 		buf[0] = 'T';
 		buf[1] = '\0';
-		show_ktree(root, buf, 1, dsp_funct);
+		show_ktree(tree->root, buf, 1, dsp_funct);
 	}
 	else
-		printf(" Empty ktree\n");
+		printf(" Empty tree\n");
 }
 
-void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL_ARGS)
+void _dsp_ktree(K_TREE *tree, char *filename, char *msg, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *item;
@@ -133,8 +179,10 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL
 	time_t now_t;
 	char stamp[128];
 
-	if (!list->dsp_func)
-		FAIL("%s", "NULLDSP NULL dsp_func");
+	if (!(tree->master->dsp_func))
+		FAIL("NULLDSP NULL dsp_func in %s", tree->master->name);
+
+	_TREE_READ(tree, true, file, func, line);
 
 	now_t = time(NULL);
 	localtime_r(&now_t, &tm);
@@ -158,14 +206,14 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL
 	if (msg)
 		fprintf(stream, "%s %s\n", stamp, msg);
 	else
-		fprintf(stream, "%s Dump of ktree '%s':\n", stamp, list->name);
+		fprintf(stream, "%s Dump of tree '%s':\n", stamp, tree->master->name);
 
-	if (root->isNil == No)
+	if (tree->root->isNil == No)
 	{
-		item = first_in_ktree(root, ctx);
+		item = first_in_ktree(tree, ctx);
 		while (item)
 		{
-			list->dsp_func(item, stream);
+			tree->master->dsp_func(item, stream);
 			item = next_in_ktree(ctx);
 		}
 		fprintf(stream, "End\n\n");
@@ -176,7 +224,7 @@ void _dsp_ktree(K_LIST *list, K_TREE *root, char *filename, char *msg, KTREE_FFL
 	fclose(stream);
 }
 
-static int nilTest(K_TREE *node, char *msg, int depth, int count, K_TREE *nil2, KTREE_FFL_ARGS)
+static int nilTest(K_NODE *node, char *msg, int depth, int count, K_NODE *nil2, KTREE_FFL_ARGS)
 {
 	if (node->isNil == Yo || node == nil2)
 	{
@@ -235,7 +283,7 @@ static int nilTest(K_TREE *node, char *msg, int depth, int count, K_TREE *nil2, 
 	return(count);
 }
 
-static void bTest(K_TREE *root, K_TREE *cur, char *msg, int count, KTREE_FFL_ARGS)
+static void bTest(K_NODE *cur, char *msg, int count, KTREE_FFL_ARGS)
 {
 	if (cur->red != RED_RED)
 		count++;
@@ -263,108 +311,127 @@ static void bTest(K_TREE *root, K_TREE *cur, char *msg, int count, KTREE_FFL_ARG
 		else
 			FAIL("BTESTVALUE '%s' count=%d", msg, count);
 
-		bTest(root, cur->left, msg, count, KTREE_FFL_PASS);
-		bTest(root, cur->right, msg, count, KTREE_FFL_PASS);
+		bTest(cur->left, msg, count, KTREE_FFL_PASS);
+		bTest(cur->right, msg, count, KTREE_FFL_PASS);
 	}
 }
 
-static void bTestInit(K_TREE *root, char *msg, KTREE_FFL_ARGS)
+static void bTestInit(K_TREE *tree, char *msg, KTREE_FFL_ARGS)
 {
 	bCount = 0;
 	bTestValue = getTestValue();
-	bTest(root, root, msg, 0, KTREE_FFL_PASS);
+	bTest(tree->root, msg, 0, KTREE_FFL_PASS);
 }
 
-static void lrpTest(K_TREE *top, char *msg, KTREE_FFL_ARGS)
+static void lrpTest(K_NODE *node, char *msg, KTREE_FFL_ARGS)
 {
-	if (top->test != lrpTestValue)
-		top->test = lrpTestValue;
+	if (node->test != lrpTestValue)
+		node->test = lrpTestValue;
 	else
 		FAIL("LRPTESTVALUE '%s'", msg);
 
-	if (top->left->isNil == No)
+	if (node->left->isNil == No)
 	{
-		if (top->left->parent != top)
+		if (node->left->parent != node)
 			FAIL("LRPTESTL '%s'", msg);
 
-		lrpTest(top->left, msg, KTREE_FFL_PASS);
+		lrpTest(node->left, msg, KTREE_FFL_PASS);
 	}
 
-	if (top->right->isNil == No)
+	if (node->right->isNil == No)
 	{
-		if (top->right->parent != top)
+		if (node->right->parent != node)
 			FAIL("LRPTESTR '%s'", msg);
 
-		lrpTest(top->right, msg, KTREE_FFL_PASS);
+		lrpTest(node->right, msg, KTREE_FFL_PASS);
 	}
 }
 
-static __maybe_unused void check_ktree(K_TREE *root, char *msg, K_TREE *nil2, int debugNil, int debugLRP, int debugColor, KTREE_FFL_ARGS)
+static __maybe_unused void check_ktree(K_TREE *tree, char *msg, K_NODE *nil2, int debugNil, int debugLRP, int debugColor, KTREE_FFL_ARGS)
 {
-	if (root->isNil == Yo)
+	if (tree->root->isNil == Yo)
 		return;
 
 	if (debugNil)
 	{
 		nilTestValue = getTestValue();
-		nilTest(root, msg, 1, 0, nil2, KTREE_FFL_PASS);
+		nilTest(tree->root, msg, 1, 0, nil2, KTREE_FFL_PASS);
 	}
 
-	if (debugLRP && root->isNil == No)
+	if (debugLRP && tree->root->isNil == No)
 	{
 		lrpTestValue = getTestValue();
-		lrpTest(root, msg, KTREE_FFL_PASS);
+		lrpTest(tree->root, msg, KTREE_FFL_PASS);
 	}
 
-	if (debugColor && root->isNil == No)
-		bTestInit(root, msg, KTREE_FFL_PASS);
+	if (debugColor && tree->root->isNil == No)
+		bTestInit(tree, msg, KTREE_FFL_PASS);
 }
 
-K_ITEM *_first_in_ktree(K_TREE *root, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+static K_ITEM *_first_in_knode(K_NODE *node, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
-	if (root->isNil == No)
+	if (node->isNil == No)
 	{
-		while (root->left->isNil == No)
-			root = root->left;
+		while (node->left->isNil == No)
+			node = node->left;
 
-		*ctx = root;
-		return(root->data);
+		*ctx = node;
+		return(node->data);
 	}
 
 	*ctx = NULL;
 	return(NULL);
 }
 
-K_ITEM *_last_in_ktree(K_TREE *root, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+K_ITEM *_first_in_ktree(K_TREE *tree, K_TREE_CTX *ctx, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
-	if (root->isNil == No)
-	{
-		while (root->right->isNil == No)
-			root = root->right;
+	_TREE_READ(tree, chklock, file, func, line);
 
-		*ctx = root;
-		return(root->data);
+	return _first_in_knode(tree->root, ctx, KTREE_FFL_PASS);
+}
+
+static K_ITEM *_last_in_knode(K_NODE *node, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+{
+	if (node->isNil == No)
+	{
+		while (node->right->isNil == No)
+			node = node->right;
+
+		*ctx = node;
+		return(node->data);
 	}
 
 	*ctx = NULL;
 	return(NULL);
 }
 
+K_ITEM *_last_in_ktree(K_TREE *tree, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+{
+	_TREE_READ(tree, true, file, func, line);
+
+	return _last_in_knode(tree->root, ctx, KTREE_FFL_PASS);
+}
+
+/* TODO: change ctx to a structure of tree and node then can test _TREE_READ
+ * However, next/prev is never called before a first/last/find so it's less
+ *  likely to see an error i.e. if code was missing a lock it would be seen
+ *  by first/last/find - here would only see coding errors e.g. looping
+ *  outside the lock */
 K_ITEM *_next_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
-	K_TREE *parent;
-	K_TREE *ktree = (K_TREE *)(*ctx);
+	K_NODE *parent;
+	K_NODE *knode = (K_NODE *)(*ctx);
 
-	if (ktree->isNil == No)
+	if (knode->isNil == No)
 	{
-		if (ktree->right->isNil == No)
-			return(first_in_ktree(ktree->right, ctx));
+		if (knode->right->isNil == No)
+			return(_first_in_knode(knode->right, ctx, KTREE_FFL_PASS));
 		else
 		{
-			parent = ktree->parent;
-			while (parent->isNil == No && ktree == parent->right)
+			parent = knode->parent;
+			while (parent->isNil == No && knode == parent->right)
 			{
-				ktree = parent;
+				knode = parent;
 				parent = parent->parent;
 			}
 			if (parent->isNil == No)
@@ -381,19 +448,19 @@ K_ITEM *_next_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 
 K_ITEM *_prev_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
-	K_TREE *parent;
-	K_TREE *ktree = (K_TREE *)(*ctx);
+	K_NODE *parent;
+	K_NODE *knode = (K_NODE *)(*ctx);
 
-	if (ktree->isNil == No)
+	if (knode->isNil == No)
 	{
-		if (ktree->left->isNil == No)
-			return(last_in_ktree(ktree->left, ctx));
+		if (knode->left->isNil == No)
+			return(_last_in_knode(knode->left, ctx, KTREE_FFL_PASS));
 		else
 		{
-			parent = ktree->parent;
-			while (parent->isNil == No && ktree == parent->left)
+			parent = knode->parent;
+			while (parent->isNil == No && knode == parent->left)
 			{
-				ktree = parent;
+				knode = parent;
 				parent = parent->parent;
 			}
 			if (parent->isNil == No)
@@ -408,9 +475,9 @@ K_ITEM *_prev_in_ktree(K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 	return(NULL);
 }
 
-static K_TREE *left_rotate(K_TREE *root, K_TREE *about)
+static K_NODE *left_rotate(K_NODE *root, K_NODE *about)
 {
-	K_TREE *rotate;
+	K_NODE *rotate;
 
 	rotate = about->right;
 	about->right = rotate->left;
@@ -436,9 +503,9 @@ static K_TREE *left_rotate(K_TREE *root, K_TREE *about)
 	return(root);
 }
 
-static K_TREE *right_rotate(K_TREE *root, K_TREE *about)
+static K_NODE *right_rotate(K_NODE *root, K_NODE *about)
 {
-	K_TREE *rotate;
+	K_NODE *rotate;
 
 	rotate = about->left;
 	about->left = rotate->right;
@@ -462,50 +529,56 @@ static K_TREE *right_rotate(K_TREE *root, K_TREE *about)
 	return(root);
 }
 
-K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS)
+void _add_to_ktree(K_TREE *tree, K_ITEM *data, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
-	K_TREE *ktree;
-	K_TREE *x, *y;
-	K_TREE *pp;
+	K_NODE *knode;
+	K_NODE *x, *y;
+	K_NODE *pp;
 	cmp_t cmp;
 
-	if (root == NULL)
-		FAIL("%s", "ADDNULL add ktree is NULL");
+	if (tree == NULL)
+		FAIL("%s", "ADDNULL add tree is NULL");
 
-//check_ktree(root, ">add", NULL, 1, 1, 1, KTREE_FFL_PASS);
+//check_ktree(tree, ">add", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
-	if (root->parent != nil && root->parent != NULL)
-		FAIL("%s", "ADDROOT add root isn't the root");
+	if (tree->root->parent != nil && tree->root->parent != NULL)
+		FAIL("%s", "ADDROOT add tree->root isn't the root");
 
-	ktree = new_data(data, KTREE_FFL_PASS);
+	_TREE_WRITE(tree, chklock, file, func, line);
 
-	if (root->isNil == Yo)
+	// chklock is false since we've already tested it
+	knode = new_data(tree, data, false, KTREE_FFL_PASS);
+
+	if (tree->root->isNil == Yo)
 	{
-		if (root != nil)
-			free(root);
-
-		root = ktree;
+		if (tree->root != nil)
+		{
+			// _nolock since we've already tested it if necessary
+			k_unlink_item_nolock(tree->node_store, tree->root->kitem);
+			k_add_head_nolock(tree->node_free, tree->root->kitem);
+		}
+		tree->root = knode;
 	}
 	else
 	{
-		x = root;
+		x = tree->root;
 		y = nil;
 		while (x->isNil == No)
 		{
 			y = x;
-			if ((cmp = (*cmp_funct)(ktree->data, x->data)) < 0)
+			if ((cmp = tree->cmp_funct(knode->data, x->data)) < 0)
 				x = x->left;
 			else
 				x = x->right;
 		}
-		ktree->parent = y;
+		knode->parent = y;
 		if (cmp < 0)
-			y->left = ktree;
+			y->left = knode;
 		else
-			y->right = ktree;
+			y->right = knode;
 
-		x = ktree;
-		while (x != root && x->parent->red == RED_RED)
+		x = knode;
+		while (x != tree->root && x->parent->red == RED_RED)
 		{
 			pp = x->parent->parent;
 			if (x->parent == pp->left)
@@ -523,12 +596,12 @@ K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K
 					if (x == x->parent->right)
 					{
 						x = x->parent;
-						root = left_rotate(root, x);
+						tree->root = left_rotate(tree->root, x);
 						pp = x->parent->parent;
 					}
 					x->parent->red = RED_BLACK;
 					pp->red = RED_RED;
-					root = right_rotate(root, pp);
+					tree->root = right_rotate(tree->root, pp);
 				}
 			}
 			else
@@ -546,45 +619,54 @@ K_TREE *_add_to_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K
 					if (x == x->parent->left)
 					{
 						x = x->parent;
-						root = right_rotate(root, x);
+						tree->root = right_rotate(tree->root, x);
 						pp = x->parent->parent;
 					}
 					x->parent->red = RED_BLACK;
 					pp->red = RED_RED;
-					root = left_rotate(root, pp);
+					tree->root = left_rotate(tree->root, pp);
 				}
 			}
 		}
 	}
-	root->red = RED_BLACK;
+	tree->root->red = RED_BLACK;
 
-//check_ktree(root, "<add", NULL, 1, 1, 1, KTREE_FFL_PASS);
-
-	return(root);
+//check_ktree(tree, "<add", NULL, 1, 1, 1, KTREE_FFL_PASS);
 }
 
-K_ITEM *_find_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+K_ITEM *_find_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, bool chklock, KTREE_FFL_ARGS)
 {
+	K_NODE *knode;
 	cmp_t cmp = -1;
 
-	if (ktree == NULL)
-		FAIL("%s", "FINDNULL find ktree is NULL");
+	if (tree == NULL)
+		FAIL("%s", "FINDNULL find tree is NULL");
 
-	while (ktree->isNil == No && cmp != 0)
+	if (tree->root == NULL)
+		FAIL("%s", "FINDNULL find tree->root is NULL");
+
+	if (chklock)
 	{
-		if ((cmp = (*cmp_funct)(ktree->data, data)))
+		_TREE_READ(tree, true, file, func, line);
+	}
+
+	knode = tree->root;
+
+	while (knode->isNil == No && cmp != 0)
+	{
+		if ((cmp = tree->cmp_funct(knode->data, data)))
 		{
 			if (cmp > 0)
-				ktree = ktree->left;
+				knode = knode->left;
 			else
-				ktree = ktree->right;
+				knode = knode->right;
 		}
 	}
 
-	if (ktree->isNil == No)
+	if (knode->isNil == No)
 	{
-		*ctx = ktree;
-		return(ktree->data);
+		*ctx = knode;
+		return(knode->data);
 	}
 	else
 	{
@@ -593,30 +675,38 @@ K_ITEM *_find_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *,
 	}
 }
 
-K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+// First item after data
+K_ITEM *_find_after_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
-	K_TREE *old = NULL;
+	K_NODE *knode, *old = NULL;
 	cmp_t cmp = -1, oldcmp = -1;
 
-	if (ktree == NULL)
-		FAIL("%s", "FINDNULL find_after ktree is NULL");
+	if (tree == NULL)
+		FAIL("%s", "FINDNULL find_after tree is NULL");
 
-	while (ktree->isNil == No && cmp != 0)
+	if (tree->root == NULL)
+		FAIL("%s", "FINDNULL find_after tree->root is NULL");
+
+	_TREE_READ(tree, chklock, file, func, line);
+
+	knode = tree->root;
+
+	while (knode->isNil == No && cmp != 0)
 	{
-		if ((cmp = (*cmp_funct)(ktree->data, data)))
+		if ((cmp = tree->cmp_funct(knode->data, data)))
 		{
-			old = ktree;
+			old = knode;
 			oldcmp = cmp;
 			if (cmp > 0)
-				ktree = ktree->left;
+				knode = knode->left;
 			else
-				ktree = ktree->right;
+				knode = knode->right;
 		}
 	}
 
-	if (ktree->isNil == No)
+	if (knode->isNil == No)
 	{
-		*ctx = ktree;
+		*ctx = knode;
 		return next_in_ktree(ctx);
 	}
 	else
@@ -638,30 +728,38 @@ K_ITEM *_find_after_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_I
 	}
 }
 
-K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+// Last item before data
+K_ITEM *_find_before_in_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, KTREE_FFL_ARGS)
 {
-	K_TREE *old = NULL;
+	K_NODE *knode, *old = NULL;
 	cmp_t cmp = 1, oldcmp = 1;
 
-	if (ktree == NULL)
-		FAIL("%s", "FINDNULL find_before ktree is NULL");
+	if (tree == NULL)
+		FAIL("%s", "FINDNULL find_before tree is NULL");
 
-	while (ktree->isNil == No && cmp != 0)
+	if (tree->root == NULL)
+		FAIL("%s", "FINDNULL find_before tree->root is NULL");
+
+	_TREE_READ(tree, true, file, func, line);
+
+	knode = tree->root;
+
+	while (knode->isNil == No && cmp != 0)
 	{
-		if ((cmp = (*cmp_funct)(ktree->data, data)))
+		if ((cmp = tree->cmp_funct(knode->data, data)))
 		{
-			old = ktree;
+			old = knode;
 			oldcmp = cmp;
 			if (cmp > 0)
-				ktree = ktree->left;
+				knode = knode->left;
 			else
-				ktree = ktree->right;
+				knode = knode->right;
 		}
 	}
 
-	if (ktree->isNil == No)
+	if (knode->isNil == No)
 	{
-		*ctx = ktree;
+		*ctx = knode;
 		return prev_in_ktree(ctx);
 	}
 	else
@@ -683,9 +781,9 @@ K_ITEM *_find_before_in_ktree(K_TREE *ktree, K_ITEM *data, cmp_t (*cmp_funct)(K_
 	}
 }
 
-static K_TREE *removeFixup(K_TREE *root, K_TREE *fix)
+static K_NODE *removeFixup(K_NODE *root, K_NODE *fix)
 {
-	K_TREE *w = NULL;
+	K_NODE *w = NULL;
 
 	while (fix != root && fix->red != RED_RED)
 	{
@@ -762,37 +860,42 @@ static K_TREE *removeFixup(K_TREE *root, K_TREE *fix)
 	return root;
 }
 
-// Does this work OK when you remove the last element in the ktree?
+// Does this work OK when you remove the last element in the tree?
 // It should return the root as 'nil'
-K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), K_TREE_CTX *ctx, KTREE_FFL_ARGS)
+void _remove_from_ktree(K_TREE *tree, K_ITEM *data, K_TREE_CTX *ctx, LOCK_MAYBE bool chklock, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX tmpctx[1];
-	K_TREE *found;
+	K_NODE *found;
 	K_ITEM *fdata;
-	K_TREE *x, *y, *nil2;
+	K_NODE *x, *y, *nil2;
 	// cmp_t cmp;
 	int yred;
 
-//check_ktree(root, ">remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
+//check_ktree(tree, ">remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
-	if (root == NULL)
-		FAIL("%s", "REMNULL remove ktree is NULL");
+	if (tree == NULL)
+		FAIL("%s", "REMNULL remove tree is NULL");
 
-	if (root->isNil == Yo)
+	if (tree->root == NULL)
+		FAIL("%s", "REMNULL remove tree->root is NULL");
+
+	_TREE_WRITE(tree, chklock, file, func, line);
+
+	if (tree->root->isNil == Yo)
 	{
 		*ctx = NULL;
-		return(root);
+		return;
 	}
 
-	if (root->parent->isNil == No)
-		FAIL("%s", "REMROOT remove root isn't the root");
+	if (tree->root->parent->isNil == No)
+		FAIL("%s", "REMROOT remove tree->root isn't the root");
 
-	fdata = find_in_ktree(root, data, cmp_funct, ctx);
+	fdata = find_in_ktree(tree, data, ctx);
 
 	if (fdata == NULL)
-		return(root);
+		return;
 
-	if (cmp_funct(fdata, data) != 0)
+	if (tree->cmp_funct(fdata, data) != 0)
 		FAIL("%s", "BADFIND cmp(found, remove) != 0");
 
 	found = *ctx;
@@ -823,14 +926,15 @@ K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM
 		nil2 = NULL;
 	else
 	{
-		nil2 = new_ktree();
+		// chklock is false since we've already tested it
+		nil2 = _new_knode(tree, false, KTREE_FFL_PASS);
 		x = nil2;
 	}
 
 	x->parent = y->parent;
 
 	if (x->parent->isNil == Yo)
-		root = x;
+		tree->root = x;
 	else
 	{
 		if (x->parent->left == y)
@@ -841,8 +945,8 @@ K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM
 
 	if (y != found)
 	{
-		if (root == found)
-			root = y;
+		if (tree->root == found)
+			tree->root = y;
 
 		if (x == found)
 			x = y;
@@ -868,7 +972,7 @@ K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM
 	}
 
 	if (yred != RED_RED)
-		root = removeFixup(root, x);
+		tree->root = removeFixup(tree->root, x);
 
 	if (nil2 != NULL)
 	{
@@ -878,8 +982,8 @@ K_TREE *_remove_from_ktree(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM
 		if (nil2->parent->isNil == No && nil2->parent->right == nil2)
 			nil2->parent->right = nil;
 
-		if (root == nil2)
-			root = nil;
+		if (tree->root == nil2)
+			tree->root = nil;
 
 /*
 if (dbg != 0)
@@ -893,41 +997,43 @@ DBG("@remove nil2->left wasn't nil!!!\n");
 DBG("@remove nil2->right wasn't nil!!!\n");
  }
  cmp = 0;
- fdata = first_in_ktree(root, tmpctx);;
+ fdata = first_in_ktree(tree, tmpctx);;
  while (fdata != NULL)
  {
 	cmp++;
 	x = *tmpctx;
 	if (x == nil2)
 	{
-DBG("@remove found nil2 in ktree %f!!!\n", cmp);
+DBG("@remove found nil2 in ktree %d!!!\n", (int)cmp);
 	}
 	else
 		if (x->left == nil2)
 		{
-DBG("@remove found nil2 in ktree(left) %f!!!\n", cmp);
+DBG("@remove found nil2 in ktree(left) %d!!!\n", (int)cmp);
 		}
 		else
 			if (x->right == nil2)
 			{
-DBG("@remove found nil2 in ktree(right) %f!!!\n", cmp);
+DBG("@remove found nil2 in ktree(right) %d!!!\n", (int)cmp);
 			}
 
 	fdata = next_in_ktree(tmpctx);;
  }
 }
 */
-		free(nil2);
+		// _nolock since we've already tested it if necessary
+		k_unlink_item_nolock(tree->node_store, nil2->kitem);
+		k_add_head_nolock(tree->node_free, nil2->kitem);
 	}
 
 /*
 if (dbg != 0)
 {
  cmp = 0;
- fdata = first_in_ktree(root, tmpctx);;
+ fdata = first_in_ktree(tree, tmpctx);;
  while (fdata != NULL)
  {
-	if (cmp_funct(fdata, root->data) < 0)
+	if (tree->cmp_funct(fdata, tree->root->data) < 0)
 		cmp--;
 	else
 		cmp++;
@@ -936,52 +1042,59 @@ if (dbg != 0)
  }
  if (cmp < -10 || cmp > 10)
  {
-DBG("@remove after balance=%f :(\n", cmp);
+DBG("@remove after balance=%d :(\n", (int)cmp);
  }
 }
 */
 
 
-//check_ktree(root, "<remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
+//check_ktree(tree, "<remove", NULL, 1, 1, 1, KTREE_FFL_PASS);
 
-	return root;
+	return;
 }
 
-K_TREE *_remove_from_ktree_free(K_TREE *root, K_ITEM *data, cmp_t (*cmp_funct)(K_ITEM *, K_ITEM *), KTREE_FFL_ARGS)
+void _remove_from_ktree_free(K_TREE *tree, K_ITEM *data, bool chklock, KTREE_FFL_ARGS)
 {
 	K_TREE_CTX ctx[1];
+	K_NODE *knode;
+	K_ITEM *kitem;
 
-	root = _remove_from_ktree(root, data, cmp_funct, ctx, KTREE_FFL_PASS);
+	_remove_from_ktree(tree, data, ctx, chklock, KTREE_FFL_PASS);
 
-	if (*ctx)
-		free(*ctx);
-
-	return root;
-}
-
-static void free_ktree_sub(K_TREE *ktree, void (*free_funct)(void *))
-{
-	if (ktree != NULL && ktree != nil)
-	{
-		if (ktree->data != NULL && free_funct)
-			(*free_funct)(ktree->data);
-
-		free_ktree_sub(ktree->left, free_funct);
-		free_ktree_sub(ktree->right, free_funct);
-
-		free(ktree);
+	if (ctx[0]) {
+		knode = (K_NODE *)(ctx[0]);
+		kitem = knode->kitem;
+		// _nolock since _remove_from_ktree() already tested it
+		k_unlink_item_nolock(tree->node_store, kitem);
+		k_add_head_nolock(tree->node_free, kitem);
 	}
 }
 
-K_TREE *_free_ktree(K_TREE *ktree, void (*free_funct)(void *), KTREE_FFL_ARGS)
+static void free_ktree_sub(K_NODE *knode, void (*free_funct)(void *))
 {
-	if (ktree == NULL)
-		FAIL("%s", "FREENULL free NULL ktree");
+	if (knode != NULL && knode != nil)
+	{
+		if (knode->data != NULL && free_funct)
+			free_funct(knode->data);
 
-	if (ktree->parent != NULL && ktree->parent != nil)
-		FAIL("%s", "FREENOTROOT free ktree not root");
+		free_ktree_sub(knode->left, free_funct);
+		free_ktree_sub(knode->right, free_funct);
+	}
+}
 
-	free_ktree_sub(ktree, free_funct);
+/* TODO: remove free_funct, it's not the tree's job to free the item data
+ *	 that should be done when freeing the data list itself */
+void _free_ktree(K_TREE *tree, void (*free_funct)(void *), KTREE_FFL_ARGS)
+{
+	if (tree == NULL)
+		FAIL("%s", "FREENULL free NULL tree");
 
-	return(nil);
+	if (tree->root->parent != NULL && tree->root->parent != nil)
+		FAIL("%s", "FREENOTROOT free tree->root not root");
+
+	if (free_funct)
+		free_ktree_sub(tree->root, free_funct);
+
+	tree->node_store = k_free_store(tree->node_store);
+	tree->node_free = k_free_list(tree->node_free);
 }

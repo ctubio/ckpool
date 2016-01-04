@@ -16,6 +16,7 @@
 #else
 #include <sys/un.h>
 #endif
+#include <sys/epoll.h>
 #include <sys/file.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -337,25 +338,6 @@ void _ck_rlock(cklock_t *lock, const char *file, const char *func, const int lin
 	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
-/* Intermediate variant of cklock - behaves as a read lock but can be promoted
- * to a write lock or demoted to read lock. */
-void _ck_ilock(cklock_t *lock, const char *file, const char *func, const int line)
-{
-	_mutex_lock(&lock->mutex, file, func, line);
-}
-
-/* Unlock intermediate variant without changing to read or write version */
-void _ck_uilock(cklock_t *lock, const char *file, const char *func, const int line)
-{
-	_mutex_unlock(&lock->mutex, file, func, line);
-}
-
-/* Upgrade intermediate variant to a write lock */
-void _ck_ulock(cklock_t *lock, const char *file, const char *func, const int line)
-{
-	_wr_lock(&lock->rwlock, file, func, line);
-}
-
 /* Write lock variant of cklock */
 void _ck_wlock(cklock_t *lock, const char *file, const char *func, const int line)
 {
@@ -375,13 +357,6 @@ void _ck_dwlock(cklock_t *lock, const char *file, const char *func, const int li
 void _ck_dwilock(cklock_t *lock, const char *file, const char *func, const int line)
 {
 	_wr_unlock(&lock->rwlock, file, func, line);
-}
-
-/* Downgrade intermediate variant to a read lock */
-void _ck_dlock(cklock_t *lock, const char *file, const char *func, const int line)
-{
-	_rd_lock(&lock->rwlock, file, func, line);
-	_mutex_unlock(&lock->mutex, file, func, line);
 }
 
 void _ck_runlock(cklock_t *lock, const char *file, const char *func, const int line)
@@ -596,14 +571,15 @@ out:
  * INET6_ADDRSTRLEN size, port at least a string of 6 bytes */
 bool url_from_socket(const int sockd, char *url, char *port)
 {
-	socklen_t addrlen = sizeof(struct sockaddr);
-	struct sockaddr addr;
+	struct sockaddr_storage storage;
+	socklen_t addrlen = sizeof(struct sockaddr_storage);
+	struct sockaddr *addr = (struct sockaddr *)&storage;
 
 	if (sockd < 1)
 		return false;
-	if (getsockname(sockd, &addr, &addrlen))
+	if (getsockname(sockd, addr, &addrlen))
 		return false;
-	if (!url_from_sockaddr(&addr, url, port))
+	if (!url_from_sockaddr(addr, url, port))
 		return false;
 	return true;
 }
@@ -645,13 +621,17 @@ void block_socket(int fd)
 
 void _close(int *fd, const char *file, const char *func, const int line)
 {
+	int sockd;
+
 	if (*fd < 0)
 		return;
-	LOGDEBUG("Closing file handle %d", *fd);
-	if (unlikely(close(*fd)))
-		LOGWARNING("Close of fd %d failed with errno %d:%s from %s %s:%d",
-			   *fd, errno, strerror(errno), file, func, line);
+	sockd = *fd;
+	LOGDEBUG("Closing file handle %d", sockd);
 	*fd = -1;
+	if (unlikely(close(sockd))) {
+		LOGWARNING("Close of fd %d failed with errno %d:%s from %s %s:%d",
+			   sockd, errno, strerror(errno), file, func, line);
+	}
 }
 
 int bind_socket(char *url, char *port)
@@ -767,29 +747,27 @@ int write_socket(int fd, const void *buf, size_t nbyte)
 		if (!ret)
 			LOGNOTICE("Select timed out in write_socket");
 		else
-			LOGERR("Select failed in write_socket");
+			LOGNOTICE("Select failed in write_socket");
 		goto out;
 	}
 	ret = write_length(fd, buf, nbyte);
 	if (ret < 0)
-		LOGWARNING("Failed to write in write_socket");
+		LOGNOTICE("Failed to write in write_socket");
 out:
 	return ret;
 }
 
 void empty_socket(int fd)
 {
+	char buf[PAGESIZE];
 	int ret;
 
 	if (fd < 1)
 		return;
 
 	do {
-		char buf[PAGESIZE];
-
-		ret = wait_read_select(fd, 0);
+		ret = recv(fd, buf, PAGESIZE - 1, MSG_DONTWAIT);
 		if (ret > 0) {
-			ret = recv(fd, buf, PAGESIZE - 1, 0);
 			buf[ret] = 0;
 			LOGDEBUG("Discarding: %s", buf);
 		}
@@ -919,27 +897,28 @@ int wait_close(int sockd, int timeout)
 	if (unlikely(sockd < 0))
 		return -1;
 	sfd.fd = sockd;
-	sfd.events = POLLIN;
+	sfd.events = POLLRDHUP;
 	sfd.revents = 0;
 	timeout *= 1000;
 	ret = poll(&sfd, 1, timeout);
 	if (ret < 1)
 		return 0;
-	return sfd.revents & POLLHUP;
+	return sfd.revents & (POLLHUP | POLLRDHUP | POLLERR);
 }
 
-/* Emulate a select read wait for high fds that select doesn't support */
-int wait_read_select(int sockd, int timeout)
+/* Emulate a select read wait for high fds that select doesn't support. */
+int wait_read_select(int sockd, float timeout)
 {
-	struct pollfd sfd;
+	struct epoll_event event;
+	int epfd, ret;
 
-	if (unlikely(sockd < 0))
-		return -1;
-	sfd.fd = sockd;
-	sfd.events = POLLIN;
-	sfd.revents = 0;
+	epfd = epoll_create1(EPOLL_CLOEXEC);
+	event.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+	epoll_ctl(epfd, EPOLL_CTL_ADD, sockd, &event);
 	timeout *= 1000;
-	return poll(&sfd, 1, timeout);
+	ret = epoll_wait(epfd, &event, 1, timeout);
+	close(epfd);
+	return ret;
 }
 
 int read_length(int sockd, void *buf, int len)
@@ -969,17 +948,19 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 {
 	char *buf = NULL;
 	uint32_t msglen;
-	int ret;
+	int ret, ern;
 
 	ret = wait_read_select(sockd, timeout1);
 	if (unlikely(ret < 1)) {
-		LOGERR("Select1 failed in recv_unix_msg");
+		ern = errno;
+		LOGERR("Select1 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
 	/* Get message length */
 	ret = read_length(sockd, &msglen, 4);
 	if (unlikely(ret < 4)) {
-		LOGERR("Failed to read 4 byte length in recv_unix_msg");
+		ern = errno;
+		LOGERR("Failed to read 4 byte length in recv_unix_msg (%d?)", ern);
 		goto out;
 	}
 	msglen = le32toh(msglen);
@@ -989,13 +970,15 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 	}
 	ret = wait_read_select(sockd, timeout2);
 	if (unlikely(ret < 1)) {
-		LOGERR("Select2 failed in recv_unix_msg");
+		ern = errno;
+		LOGERR("Select2 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
 	buf = ckzalloc(msglen + 1);
 	ret = read_length(sockd, buf, msglen);
 	if (unlikely(ret < (int)msglen)) {
-		LOGERR("Failed to read %u bytes in recv_unix_msg", msglen);
+		ern = errno;
+		LOGERR("Failed to read %u bytes in recv_unix_msg (%d?)", msglen, ern);
 		dealloc(buf);
 	}
 out:
@@ -1006,40 +989,50 @@ out:
 }
 
 /* Emulate a select write wait for high fds that select doesn't support */
-int wait_write_select(int sockd, int timeout)
+int wait_write_select(int sockd, float timeout)
 {
-	struct pollfd sfd;
+	struct epoll_event event;
+	int epfd, ret;
 
-	if (unlikely(sockd < 0))
-		return -1;
-	sfd.fd = sockd;
-	sfd.events = POLLOUT;
-	sfd.revents = 0;
+	epfd = epoll_create1(EPOLL_CLOEXEC);
+	event.events = EPOLLOUT | EPOLLRDHUP | EPOLLONESHOT;
+	epoll_ctl(epfd, EPOLL_CTL_ADD, sockd, &event);
 	timeout *= 1000;
-	return poll(&sfd, 1, timeout);
+	ret = epoll_wait(epfd, &event, 1, timeout);
+	close(epfd);
+	return ret;
 }
 
-int write_length(int sockd, const void *buf, int len)
+int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line)
 {
-	int ret, ofs = 0;
+	int ret, ofs = 0, ern;
 
 	if (unlikely(len < 1)) {
-		LOGWARNING("Invalid write length of %d requested in write_length", len);
+		LOGWARNING("Invalid write length of %d requested in write_length from %s %s:%d",
+			   len, file, func, line);
 		return -1;
 	}
-	if (unlikely(sockd < 0))
+	if (unlikely(sockd < 0)) {
+		ern = errno;
+		LOGWARNING("Attempt to write to invalidated sock in write_length from %s %s:%d",
+			   file, func, line);
 		return -1;
+	}
 	while (len) {
 		ret = write(sockd, buf + ofs, len);
-		if (unlikely(ret < 0))
+		if (unlikely(ret < 0)) {
+			ern = errno;
+			LOGERR("Failed to write %d bytes in write_length (%d) from %s %s:%d",
+			       len, ern, file, func, line);
 			return -1;
+		}
 		ofs += ret;
 		len -= ret;
 	}
 	return ofs;
 }
 
-bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *func, const int line)
+bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line)
 {
 	uint32_t msglen, len;
 	bool retval = false;
@@ -1059,28 +1052,26 @@ bool _send_unix_msg(int sockd, const char *buf, const char *file, const char *fu
 		goto out;
 	}
 	msglen = htole32(len);
-	ret = wait_write_select(sockd, 5);
+	ret = wait_write_select(sockd, timeout);
 	if (unlikely(ret < 1)) {
 		ern = errno;
 		LOGERR("Select1 failed in send_unix_msg (%d)", ern);
 		goto out;
 	}
-	ret = write_length(sockd, &msglen, 4);
+	ret = _write_length(sockd, &msglen, 4, file, func, line);
 	if (unlikely(ret < 4)) {
-		ern = errno;
-		LOGERR("Failed to write 4 byte length in send_unix_msg (%d)", ern);
+		LOGERR("Failed to write 4 byte length in send_unix_msg");
 		goto out;
 	}
-	ret = wait_write_select(sockd, 5);
+	ret = wait_write_select(sockd, timeout);
 	if (unlikely(ret < 1)) {
 		ern = errno;
 		LOGERR("Select2 failed in send_unix_msg (%d)", ern);
 		goto out;
 	}
-	ret = write_length(sockd, buf, len);
+	ret = _write_length(sockd, buf, len, file, func, line);
 	if (unlikely(ret < 0)) {
-		ern = errno;
-		LOGERR("Failed to write %d bytes in send_unix_msg (%d)", len, ern);
+		LOGERR("Failed to write %d bytes in send_unix_msg", len);
 		goto out;
 	}
 	retval = true;
@@ -1100,7 +1091,7 @@ bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, cons
 		LOGWARNING("Null message sent to send_unix_data");
 		goto out;
 	}
-	ret = wait_write_select(sockd, 5);
+	ret = wait_write_select(sockd, UNIX_WRITE_TIMEOUT);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in send_unix_data");
 		goto out;
@@ -1123,7 +1114,7 @@ bool _recv_unix_data(int sockd, struct msghdr *msg, const char *file, const char
 	bool retval = false;
 	int ret;
 
-	ret = wait_read_select(sockd, 5);
+	ret = wait_read_select(sockd, UNIX_READ_TIMEOUT);
 	if (unlikely(ret < 1)) {
 		LOGERR("Select1 failed in recv_unix_data");
 		goto out;
@@ -1398,6 +1389,18 @@ void *_ckzalloc(size_t len, const char *file, const char *func, const int line)
 	return ptr;
 }
 
+/* Round up to the nearest page size for efficient malloc */
+size_t round_up_page(size_t len)
+{
+	int rem = len % PAGESIZE;
+
+	if (rem)
+		len += PAGESIZE - rem;
+	return len;
+}
+
+
+
 /* Adequate size s==len*2 + 1 must be alloced to use this variant */
 void __bin2hex(void *vs, const void *vp, size_t len)
 {
@@ -1635,9 +1638,8 @@ char *http_base64(const char *src)
 
 void address_to_pubkeytxn(char *pkh, const char *addr)
 {
-	char b58bin[25];
+	char b58bin[25] = {};
 
-	memset(b58bin, 0, 25);
 	b58tobin(b58bin, addr);
 	pkh[0] = 0x76;
 	pkh[1] = 0xa9;
@@ -1645,6 +1647,17 @@ void address_to_pubkeytxn(char *pkh, const char *addr)
 	memcpy(&pkh[3], &b58bin[1], 20);
 	pkh[23] = 0x88;
 	pkh[24] = 0xac;
+}
+
+void address_to_scripttxn(char *pkh, const char *addr)
+{
+	char b58bin[25] = {};
+
+	b58tobin(b58bin, addr);
+	pkh[0] = 0xa9;
+	pkh[1] = 0x14;
+	memcpy(&pkh[2], &b58bin[1], 20);
+	pkh[22] = 0x87;
 }
 
 /*  For encoding nHeight into coinbase, return how many bytes were used */
@@ -1972,8 +1985,13 @@ double diff_from_nbits(char *nbits)
 
 	pow = nbits[0];
 	powdiff = (8 * (0x1d - 3)) - (8 * (pow - 3));
+	if (powdiff < 8)
+		powdiff = 8;
 	diff32 = be32toh(*((uint32_t *)nbits)) & 0x00FFFFFF;
-	numerator = 0xFFFFULL << powdiff;
+	if (likely(powdiff > 0))
+		numerator = 0xFFFFULL << powdiff;
+	else
+		numerator = 0xFFFFULL >> -powdiff;
 	return numerator / (double)diff32;
 }
 

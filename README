@@ -80,11 +80,14 @@ sudo apt-get install build-essential
 make
 
 
-Building with ckdb requires installation of the postgresql development library.
+Building with ckdb requires installation of the postgresql, gsl and ssl
+development libraries.
 
-sudo apt-get install build-essential libpq-dev
+sudo apt-get install build-essential libpq-dev libgsl0ldbl libgsl0-dev
 ./configure
 make
+
+N.B. ckdb also requires libssl-dev but libpq-dev depends on it and installs it
 
 
 Building from git also requires autoconf and automake
@@ -131,8 +134,10 @@ ckpool supports the following options:
 -n NAME | --name NAME
 -P | --passthrough
 -p | --proxy
+-R | --redirector
 -S CKDB-SOCKDIR | --ckdb-sockdir CKDB-SOCKDIR
 -s SOCKDIR | --sockdir SOCKDIR
+-u | --userproxy
 
 
 -A Standalone mode tells ckpool not to try to communicate with ckdb or log any
@@ -141,8 +146,9 @@ are automatically accepted without any attempt to authorise users in any way.
 This option is explicitly enabled when built without ckdb support.
 
 -c <CONFIG> tells ckpool to override its default configuration filename and
-load the specified one. If -c is not specified, ckpool looks for ckpool.conf
-whereas in proxy or passthrough modes it will look for ckproxy.conf
+load the specified one. If -c is not specified, ckpool looks for ckpool.conf,
+in proxy mode it looks for ckproxy.conf, in passthrough mode for
+ckpassthrough.conf and in redirector mode for ckredirector.conf
 
 -d <CKDB-NAME> tells ckpool what the name of the ckdb process is that it should
 speak to, otherwise it will look for ckdb.
@@ -166,8 +172,14 @@ and then workbase.
 -l <LOGLEVEL will change the log level to that specified. Default is 5 and
 maximum debug is level 7.
 
+-N will start ckpool in passthrough node mode where it behaves like a
+passthrough but requires a locally running bitcoind and can submit blocks
+itself in addition to passing the shares back to the upstream pool. It also
+monitors hashrate and requires more resources than a simple passthrough.
+
 -n <NAME> will change the ckpool process name to that specified, allowing
-multiple different named instances to be running.
+multiple different named instances to be running. By default the variant
+names are used: ckpool, ckproxy, ckpassthrough, ckredirector, cknode.
 
 -P will start ckpool in passthrough proxy mode where it collates all incoming
 connections and streams all information on a single connection to an upstream
@@ -179,12 +191,25 @@ clients as separate entities while presenting shares as a single user to the
 upstream pool specified. Note that the upstream pool needs to be a ckpool for
 it to scale to large hashrates. Standalone mode is Optional.
 
+-R will start ckpool in a variant of passthrough mode. It is designed to be a
+front end to filter out users that never contribute any shares. Once an
+accepted share from the upstream pool is detected, it will issue a redirect to
+one of the redirecturl entries in the configuration file. It will cycle over
+entries if multiple exist, but try to keep all clients from the same IP
+redirecting to the same pool.
+
 -S <CKDB-SOCKDIR> tells ckpool which directory to look for the ckdb socket to
 talk to.
 This option does not exist when built without ckdb support.
 
 -s <SOCKDIR> tells ckpool which directory to place its own communication
 sockets (/tmp by default)
+
+-u Userproxy mode will start ckpool in proxy mode as per the -p option above,
+but in addition it will accept username/passwords from the stratum connects
+and try to open additional connections with those credentials to the upstream
+pool specified in the configuration file and then reconnect miners to mine with
+their chosen username/password to the upstream pool.
 
 
 ckdb takes the following options:
@@ -255,6 +280,9 @@ will attempt to bind to all interfaces in port 3333 by default in pool mode
 and 3334 in proxy mode. Multiple entries can be specified as an array by
 either IP or resolvable domain name but the executable must be able to bind to
 all of them and ports up to 1024 usually require privileged access.
+
+"redirecturl" : This is an array of URLs that ckpool will redirect active
+miners to in redirector mode. They must be valid resolvable URLs+ports.
 
 "mindiff" : Minimum diff that vardiff will allow miners to drop to. Default 1
 

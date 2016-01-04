@@ -20,6 +20,7 @@
 #include <getopt.h>
 #include <grp.h>
 #include <jansson.h>
+#include <zlib.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,7 @@
 #include "generator.h"
 #include "stratifier.h"
 #include "connector.h"
+#include "api.h"
 
 ckpool_t *global_ckp;
 
@@ -64,7 +66,8 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		int logfd = global_ckp->logfd;
 		char *buf = NULL;
 		struct tm tm;
-		time_t now_t;
+		tv_t now_tv;
+		int ms;
 		va_list ap;
 		char stamp[128];
 
@@ -72,16 +75,18 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		VASPRINTF(&buf, fmt, ap);
 		va_end(ap);
 
-		now_t = time(NULL);
-		localtime_r(&now_t, &tm);
-		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d]",
+		tv_time(&now_tv);
+		ms = (int)(now_tv.tv_usec / 1000);
+		localtime_r(&(now_tv.tv_sec), &tm);
+		sprintf(stamp, "[%d-%02d-%02d %02d:%02d:%02d.%03d]",
 				tm.tm_year + 1900,
 				tm.tm_mon + 1,
 				tm.tm_mday,
 				tm.tm_hour,
 				tm.tm_min,
-				tm.tm_sec);
-		if (loglevel <= LOG_WARNING) {\
+				tm.tm_sec, ms);
+		if (loglevel <= LOG_WARNING) {
+			fprintf(stderr, "\33[2K\r");
 			if (loglevel <= LOG_ERR && errno != 0)
 				fprintf(stderr, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
 			else
@@ -175,7 +180,7 @@ ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, cons
 }
 
 /* Generic function for adding messages to a ckmsgq linked list and signal the
- * ckmsgq parsing thread to wake up and process it. */
+ * ckmsgq parsing thread(s) to wake up and process it. */
 void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 {
 	ckmsg_t *msg = ckalloc(sizeof(ckmsg_t));
@@ -185,7 +190,7 @@ void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
 	mutex_lock(ckmsgq->lock);
 	ckmsgq->messages++;
 	DL_APPEND(ckmsgq->msgs, msg);
-	pthread_cond_signal(ckmsgq->cond);
+	pthread_cond_broadcast(ckmsgq->cond);
 	mutex_unlock(ckmsgq->lock);
 }
 
@@ -200,6 +205,84 @@ bool ckmsgq_empty(ckmsgq_t *ckmsgq)
 	mutex_unlock(ckmsgq->lock);
 
 	return ret;
+}
+
+/* Create a standalone thread that queues received unix messages for a proc
+ * instance and adds them to linked list of received messages with their
+ * associated receive socket, then signal the associated rmsg_cond for the
+ * process to know we have more queued messages. The unix_msg_t ram must be
+ * freed by the code that removes the entry from the list. */
+static void *unix_receiver(void *arg)
+{
+	proc_instance_t *pi = (proc_instance_t *)arg;
+	int rsockd = pi->us.sockd, sockd;
+	char qname[16];
+
+	sprintf(qname, "%cunixrq", pi->processname[0]);
+	rename_proc(qname);
+	pthread_detach(pthread_self());
+
+	while (42) {
+		unix_msg_t *umsg;
+		char *buf;
+
+		sockd = accept(rsockd, NULL, NULL);
+		if (unlikely(sockd < 0)) {
+			LOGEMERG("Failed to accept on %s socket, exiting", qname);
+			childsighandler(15);
+			break;
+		}
+		buf = recv_unix_msg(sockd);
+		if (unlikely(!buf)) {
+			Close(sockd);
+			LOGWARNING("Failed to get message on %s socket", qname);
+			continue;
+		}
+		umsg = ckalloc(sizeof(unix_msg_t));
+		umsg->sockd = sockd;
+		umsg->buf = buf;
+
+		mutex_lock(&pi->rmsg_lock);
+		DL_APPEND(pi->unix_msgs, umsg);
+		pthread_cond_signal(&pi->rmsg_cond);
+		mutex_unlock(&pi->rmsg_lock);
+	}
+
+	return NULL;
+}
+
+/* Get the next message in the receive queue, or wait up to 5 seconds for
+ * the next message, returning NULL if no message is received in that time. */
+unix_msg_t *get_unix_msg(proc_instance_t *pi)
+{
+	unix_msg_t *umsg;
+
+	mutex_lock(&pi->rmsg_lock);
+	if (!pi->unix_msgs) {
+		tv_t now;
+		ts_t abs;
+
+		tv_time(&now);
+		tv_to_ts(&abs, &now);
+		abs.tv_sec += 5;
+		cond_timedwait(&pi->rmsg_cond, &pi->rmsg_lock, &abs);
+	}
+	umsg = pi->unix_msgs;
+	if (umsg)
+		DL_DELETE(pi->unix_msgs, umsg);
+	mutex_unlock(&pi->rmsg_lock);
+
+	return umsg;
+}
+
+void create_unix_receiver(proc_instance_t *pi)
+{
+	pthread_t pth;
+
+	mutex_init(&pi->rmsg_lock);
+	cond_init(&pi->rmsg_cond);
+
+	create_pthread(&pth, unix_receiver, pi);
 }
 
 static void broadcast_proc(ckpool_t *ckp, const char *buf)
@@ -281,7 +364,7 @@ static int send_procmsg(proc_instance_t *pi, const char *buf)
 	}
 	sockd = open_unix_client(path);
 	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
+		LOGWARNING("Failed to open socket %s in send_procmsg", path);
 		goto out;
 	}
 	if (unlikely(!send_unix_msg(sockd, buf)))
@@ -292,6 +375,17 @@ out:
 	if (unlikely(ret == -1))
 		LOGERR("Failure in send_procmsg");
 	return ret;
+}
+
+static void api_message(ckpool_t *ckp, char **buf, int *sockd)
+{
+	apimsg_t *apimsg = ckalloc(sizeof(apimsg_t));
+
+	apimsg->buf = *buf;
+	*buf = NULL;
+	apimsg->sockd = *sockd;
+	*sockd = -1;
+	ckmsgq_add(ckp->ckpapi, apimsg);
 }
 
 /* Listen for incoming global requests. Always returns a response if possible */
@@ -316,6 +410,9 @@ retry:
 	if (!buf) {
 		LOGWARNING("Failed to get message in listener");
 		send_unix_msg(sockd, "failed");
+	} else if (buf[0] == '{') {
+		/* Any JSON messages received are for the RPC API to handle */
+		api_message(ckp, &buf, &sockd);
 	} else if (cmdmatch(buf, "shutdown")) {
 		LOGWARNING("Listener received shutdown message, terminating ckpool");
 		send_unix_msg(sockd, "exiting");
@@ -411,21 +508,13 @@ bool ping_main(ckpool_t *ckp)
 
 void empty_buffer(connsock_t *cs)
 {
+	if (cs->buf)
+		cs->buf[0] = '\0';
 	cs->buflen = cs->bufofs = 0;
 }
 
-/* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
- * and storing how much extra data we've received, to be moved to the beginning
- * of the buffer for use on the next receive. */
-int read_socket_line(connsock_t *cs, const int timeout)
+static void clear_bufline(connsock_t *cs)
 {
-	int fd = cs->fd, ret = -1;
-	char *eom = NULL;
-	size_t buflen;
-
-	if (unlikely(fd < 0))
-		goto out;
-
 	if (unlikely(!cs->buf))
 		cs->buf = ckzalloc(PAGESIZE);
 	else if (cs->buflen) {
@@ -434,57 +523,88 @@ int read_socket_line(connsock_t *cs, const int timeout)
 		cs->bufofs = cs->buflen;
 		cs->buflen = 0;
 		cs->buf[cs->bufofs] = '\0';
-		eom = strchr(cs->buf, '\n');
-	}
+	} else
+		cs->bufofs = 0;
+}
 
+static void add_bufline(connsock_t *cs, const char *readbuf, const int len)
+{
+	int backoff = 1;
+	size_t buflen;
+	char *newbuf;
+
+	buflen = round_up_page(cs->bufofs + len + 1);
 	while (42) {
-		char readbuf[PAGESIZE] = {};
-		int backoff = 1;
-		char *newbuf;
+		newbuf = realloc(cs->buf, buflen);
+		if (likely(newbuf))
+			break;
+		if (backoff == 1)
+			fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
+		cksleep_ms(backoff);
+		backoff <<= 1;
+	}
+	cs->buf = newbuf;
+	if (unlikely(!cs->buf))
+		quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
+	memcpy(cs->buf + cs->bufofs, readbuf, len);
+	cs->bufofs += len;
+	cs->buf[cs->bufofs] = '\0';
+}
 
-		ret = wait_read_select(fd, eom ? 0 : timeout);
-		if (ret < 1) {
-			if (eom)
-				break;
-			if (!ret)
-				LOGDEBUG("Select timed out in read_socket_line");
-			else {
-				if (cs->ckp->proxy)
-					LOGNOTICE("Select failed in read_socket_line");
-				else
-					LOGERR("Select failed in read_socket_line");
-			}
+/* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
+ * and storing how much extra data we've received, to be moved to the beginning
+ * of the buffer for use on the next receive. */
+int read_socket_line(connsock_t *cs, float *timeout)
+{
+	char *eom = NULL;
+	tv_t start, now;
+	int ret = -1;
+	float diff;
+
+	if (unlikely(cs->fd < 0))
+		goto out;
+
+	clear_bufline(cs);
+	eom = strchr(cs->buf, '\n');
+
+	tv_time(&start);
+
+	while (!eom) {
+		char readbuf[PAGESIZE];
+
+		if (*timeout < 0) {
+			if (cs->ckp->proxy)
+				LOGINFO("Timed out in read_socket_line");
+			else
+				LOGERR("Timed out in read_socket_line");
+			ret = 0;
 			goto out;
 		}
-		ret = recv(fd, readbuf, PAGESIZE - 4, 0);
+		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1) {
-			/* Closed socket after valid message */
-			if (eom)
-				break;
 			if (cs->ckp->proxy)
-				LOGNOTICE("Failed to recv in read_socket_line");
+				LOGINFO("Select %s in read_socket_line", !ret ? "timed out" : "failed");
+			else
+				LOGERR("Select %s in read_socket_line", !ret ? "timed out" : "failed");
+			goto out;
+		}
+		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
+		if (ret < 1) {
+			/* If we have done wait_read_select there should be
+			 * something to read and if we get nothing it means the
+			 * socket is closed. */
+			if (cs->ckp->proxy)
+				LOGINFO("Failed to recv in read_socket_line");
 			else
 				LOGERR("Failed to recv in read_socket_line");
-			ret = -1;
 			goto out;
 		}
-		buflen = cs->bufofs + ret + 1;
-		while (42) {
-			newbuf = realloc(cs->buf, buflen);
-			if (likely(newbuf))
-				break;
-			if (backoff == 1)
-				fprintf(stderr, "Failed to realloc %d in read_socket_line, retrying\n", (int)buflen);
-			cksleep_ms(backoff);
-			backoff <<= 1;
-		}
-		cs->buf = newbuf;
-		if (unlikely(!cs->buf))
-			quit(1, "Failed to alloc buf of %d bytes in read_socket_line", (int)buflen);
-		memcpy(cs->buf + cs->bufofs, readbuf, ret);
-		cs->bufofs += ret;
-		cs->buf[cs->bufofs] = '\0';
+		add_bufline(cs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
 	}
 	ret = eom - cs->buf;
 
@@ -498,50 +618,35 @@ out:
 	if (ret < 0) {
 		empty_buffer(cs);
 		dealloc(cs->buf);
-		Close(cs->fd);
 	}
 	return ret;
 }
 
-static void childsighandler(const int sig);
-
-struct proc_message {
-	proc_instance_t *pi;
-	char *msg;
-	const char *file;
-	const char *func;
-	int line;
-};
-
-/* Send all one way messages asynchronously so we can wait till the receiving
- * end closes the socket to ensure all messages are received but no deadlocks
- * can occur with 2 processes waiting for each other's socket closure. */
-void *async_send_proc(void *arg)
+/* Send a single message to a process instance when there will be no response,
+ * closing the socket immediately. */
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	struct proc_message *pm = (struct proc_message *)arg;
-	proc_instance_t *pi = pm->pi;
-	char *msg = pm->msg;
-	const char *file = pm->file;
-	const char *func = pm->func;
-	int line = pm->line;
-
 	char *path = pi->us.path;
 	bool ret = false;
 	int sockd;
 
-	pthread_detach(pthread_self());
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
+		return;
+	}
 
 	if (unlikely(!path || !strlen(path))) {
 		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
 		goto out;
 	}
+
 	/* At startup the pid fields are not set up before some processes are
 	 * forked so they never inherit them. */
 	if (unlikely(!pi->pid)) {
 		pi->pid = get_proc_pid(pi);
 		if (!pi->pid) {
 			LOGALERT("Attempting to send message %s to non existent process %s", msg, pi->processname);
-			goto out_nofail;
+			return;
 		}
 	}
 	if (unlikely(kill_pid(pi->pid, 0))) {
@@ -558,43 +663,16 @@ void *async_send_proc(void *arg)
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		ret = true;
-	if (!wait_close(sockd, 5))
-		LOGWARNING("send_proc %s did not detect close from %s %s:%d", msg, file, func, line);
 	Close(sockd);
 out:
-	if (unlikely(!ret)) {
+	if (unlikely(!ret))
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
-		childsighandler(15);
-	}
-out_nofail:
-	free(msg);
-	free(pm);
-	return NULL;
-}
-
-/* Send a single message to a process instance when there will be no response,
- * closing the socket immediately. */
-void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
-{
-	struct proc_message *pm;
-	pthread_t pth;
-
-	if (unlikely(!msg || !strlen(msg))) {
-		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
-		return;
-	}
-	pm = ckalloc(sizeof(struct proc_message));
-	pm->pi = pi;
-	pm->msg = strdup(msg);
-	pm->file = file;
-	pm->func = func;
-	pm->line = line;
-	create_pthread(&pth, async_send_proc, pm);
 }
 
 /* Send a single message to a process instance and retrieve the response, then
  * close the socket. */
-char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+char *_send_recv_proc(proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,
+		      const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path, *buf = NULL;
 	int sockd;
@@ -624,10 +702,10 @@ char *_send_recv_proc(proc_instance_t *pi, const char *msg, const char *file, co
 		LOGWARNING("Failed to open socket %s in send_recv_proc", path);
 		goto out;
 	}
-	if (unlikely(!send_unix_msg(sockd, msg)))
+	if (unlikely(!_send_unix_msg(sockd, msg, writetimeout, file, func, line)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
-		buf = recv_unix_msg(sockd);
+		buf = _recv_unix_msg(sockd, readtimedout, readtimedout, file, func, line);
 	Close(sockd);
 out:
 	if (unlikely(!buf))
@@ -678,36 +756,52 @@ char *_ckdb_msg_call(const ckpool_t *ckp, const char *msg,  const char *file, co
 	return buf;
 }
 
+static const char *rpc_method(const char *rpc_req)
+{
+	const char *ptr = strchr(rpc_req, ':');
+	if (ptr)
+		return ptr+1;
+	return rpc_req;
+}
+
+/* All of these calls are made to bitcoind which prefers open/close instead
+ * of persistent connections so cs->fd is always invalid. */
 json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 {
+	float timeout = RPC_TIMEOUT;
 	char *http_req = NULL;
 	json_error_t err_val;
 	json_t *val = NULL;
+	tv_t stt_tv, fin_tv;
+	double elapsed;
 	int len, ret;
 
+	/* Serialise all calls in case we use cs from multiple threads */
+	cksem_wait(&cs->sem);
+	cs->fd = connect_socket(cs->url, cs->port);
 	if (unlikely(cs->fd < 0)) {
-		LOGWARNING("FD %d invalid in json_rpc_call", cs->fd);
+		LOGWARNING("Unable to connect socket to %s:%s in %s", cs->url, cs->port, __func__);
 		goto out;
 	}
 	if (unlikely(!cs->url)) {
-		LOGWARNING("No URL in json_rpc_call");
+		LOGWARNING("No URL in %s", __func__);
 		goto out;
 	}
 	if (unlikely(!cs->port)) {
-		LOGWARNING("No port in json_rpc_call");
+		LOGWARNING("No port in %s", __func__);
 		goto out;
 	}
 	if (unlikely(!cs->auth)) {
-		LOGWARNING("No auth in json_rpc_call");
+		LOGWARNING("No auth in %s", __func__);
 		goto out;
 	}
 	if (unlikely(!rpc_req)) {
-		LOGWARNING("Null rpc_req passed to json_rpc_call");
+		LOGWARNING("Null rpc_req passed to %s", __func__);
 		goto out;
 	}
 	len = strlen(rpc_req);
 	if (unlikely(!len)) {
-		LOGWARNING("Zero length rpc_req passed to json_rpc_call");
+		LOGWARNING("Zero length rpc_req passed to %s", __func__);
 		goto out;
 	}
 	http_req = ckalloc(len + 256); // Leave room for headers
@@ -720,44 +814,60 @@ json_t *json_rpc_call(connsock_t *cs, const char *rpc_req)
 		 cs->auth, cs->url, cs->port, len, rpc_req);
 
 	len = strlen(http_req);
+	tv_time(&stt_tv);
 	ret = write_socket(cs->fd, http_req, len);
 	if (ret != len) {
-		LOGWARNING("Failed to write to socket in json_rpc_call");
+		tv_time(&fin_tv);
+		elapsed = tvdiff(&fin_tv, &stt_tv);
+		LOGWARNING("Failed to write to socket in %s (%.10s...) %.3fs",
+			   __func__, rpc_method(rpc_req), elapsed);
 		goto out_empty;
 	}
-	ret = read_socket_line(cs, 5);
+	ret = read_socket_line(cs, &timeout);
 	if (ret < 1) {
-		LOGWARNING("Failed to read socket line in json_rpc_call");
+		tv_time(&fin_tv);
+		elapsed = tvdiff(&fin_tv, &stt_tv);
+		LOGWARNING("Failed to read socket line in %s (%.10s...) %.3fs",
+			   __func__, rpc_method(rpc_req), elapsed);
 		goto out_empty;
 	}
 	if (strncasecmp(cs->buf, "HTTP/1.1 200 OK", 15)) {
-		LOGWARNING("HTTP response not ok: %s", cs->buf);
+		tv_time(&fin_tv);
+		elapsed = tvdiff(&fin_tv, &stt_tv);
+		LOGWARNING("HTTP response to (%.10s...) %.3fs not ok: %s",
+			   rpc_method(rpc_req), elapsed, cs->buf);
 		goto out_empty;
 	}
 	do {
-		ret = read_socket_line(cs, 5);
+		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
-			LOGWARNING("Failed to read http socket lines in json_rpc_call");
+			tv_time(&fin_tv);
+			elapsed = tvdiff(&fin_tv, &stt_tv);
+			LOGWARNING("Failed to read http socket lines in %s (%.10s...) %.3fs",
+				   __func__, rpc_method(rpc_req), elapsed);
 			goto out_empty;
 		}
 	} while (strncmp(cs->buf, "{", 1));
+	tv_time(&fin_tv);
+	elapsed = tvdiff(&fin_tv, &stt_tv);
+	if (elapsed > 5.0) {
+		LOGWARNING("HTTP socket read+write took %.3fs in %s (%.10s...)",
+			   elapsed, __func__, rpc_method(rpc_req));
+	}
 
 	val = json_loads(cs->buf, 0, &err_val);
-	if (!val)
-		LOGWARNING("JSON decode failed(%d): %s", err_val.line, err_val.text);
+	if (!val) {
+		LOGWARNING("JSON decode (%.10s...) failed(%d): %s",
+			   rpc_method(rpc_req), err_val.line, err_val.text);
+	}
 out_empty:
 	empty_socket(cs->fd);
 	empty_buffer(cs);
-	if (!val) {
-		/* Assume that a failed request means the socket will be closed
-		 * and reopen it */
-		LOGWARNING("Reopening socket to %s:%s", cs->url, cs->port);
-		Close(cs->fd);
-		cs->fd = connect_socket(cs->url, cs->port);
-	}
 out:
+	Close(cs->fd);
 	free(http_req);
 	dealloc(cs->buf);
+	cksem_post(&cs->sem);
 	return val;
 }
 
@@ -775,7 +885,7 @@ static void terminate_oldpid(const ckpool_t *ckp, proc_instance_t *pi, const pid
 		return;
 	LOGWARNING("Old process %s pid %d failed to respond to terminate request, killing",
 			pi->processname, oldpid);
-	if (kill_pid(oldpid, 9) || !pid_wait(oldpid, 500))
+	if (kill_pid(oldpid, 9) || !pid_wait(oldpid, 3000))
 		quit(1, "Unable to kill old process %s pid %d", pi->processname, oldpid);
 }
 
@@ -846,7 +956,7 @@ static void rm_namepid(const proc_instance_t *pi)
 
 /* Disable signal handlers for child processes, but simply pass them onto the
  * parent process to shut down cleanly. */
-static void childsighandler(const int sig)
+void childsighandler(const int sig)
 {
 	signal(sig, SIG_IGN);
 	signal(SIGTERM, SIG_IGN);
@@ -1040,7 +1150,7 @@ bool json_get_int64(int64_t *store, const json_t *val, const char *res)
 		goto out;
 	}
 	if (!json_is_integer(entry)) {
-		LOGWARNING("Json entry %s is not an integer", res);
+		LOGINFO("Json entry %s is not an integer", res);
 		goto out;
 	}
 	*store = json_integer_value(entry);
@@ -1100,13 +1210,33 @@ bool json_get_bool(bool *store, const json_t *val, const char *res)
 		goto out;
 	}
 	if (!json_is_boolean(entry)) {
-		LOGWARNING("Json entry %s is not a boolean", res);
+		LOGINFO("Json entry %s is not a boolean", res);
 		goto out;
 	}
 	*store = json_is_true(entry);
 	LOGDEBUG("Json found entry %s: %s", res, *store ? "true" : "false");
 	ret = true;
 out:
+	return ret;
+}
+
+bool json_getdel_int(int *store, json_t *val, const char *res)
+{
+	bool ret;
+
+	ret = json_get_int(store, val, res);
+	if (ret)
+		json_object_del(val, res);
+	return ret;
+}
+
+bool json_getdel_int64(int64_t *store, json_t *val, const char *res)
+{
+	bool ret;
+
+	ret = json_get_int64(store, val, res);
+	if (ret)
+		json_object_del(val, res);
 	return ret;
 }
 
@@ -1175,6 +1305,43 @@ out:
 	return ret;
 }
 
+static bool parse_redirecturls(ckpool_t *ckp, const json_t *arr_val)
+{
+	bool ret = false;
+	int arr_size, i;
+	char *redirecturl, url[INET6_ADDRSTRLEN], port[8];
+	redirecturl = alloca(INET6_ADDRSTRLEN);
+
+	if (!arr_val)
+		goto out;
+	if (!json_is_array(arr_val)) {
+		LOGNOTICE("Unable to parse redirecturl entries as an array");
+		goto out;
+	}
+	arr_size = json_array_size(arr_val);
+	if (!arr_size) {
+		LOGWARNING("redirecturl array empty");
+		goto out;
+	}
+	ckp->redirecturls = arr_size;
+	ckp->redirecturl = ckalloc(sizeof(char *) * arr_size);
+	ckp->redirectport = ckalloc(sizeof(char *) * arr_size);
+	for (i = 0; i < arr_size; i++) {
+		json_t *val = json_array_get(arr_val, i);
+
+		strncpy(redirecturl, json_string_value(val), INET6_ADDRSTRLEN - 1);
+		/* See that the url properly resolves */
+		if (!url_from_serverurl(redirecturl, url, port))
+			quit(1, "Invalid redirecturl entry %d %s", i, redirecturl);
+		ckp->redirecturl[i] = strdup(strsep(&redirecturl, ":"));
+		ckp->redirectport[i] = strdup(port);
+	}
+	ret = true;
+out:
+	return ret;
+}
+
+
 static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
@@ -1224,7 +1391,10 @@ static void parse_config(ckpool_t *ckp)
 		if (arr_size)
 			parse_proxies(ckp, arr_val, arr_size);
 	}
-	json_get_bool(&ckp->clientsvspeed, json_conf, "clientsvspeed");
+	arr_val = json_object_get(json_conf, "redirecturl");
+	if (arr_val)
+		parse_redirecturls(ckp, arr_val);
+
 	json_decref(json_conf);
 }
 
@@ -1350,10 +1520,13 @@ static struct option long_options[] = {
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"redirector",	no_argument,		0,	'R'},
 	{"ckdb-sockdir",required_argument,	0,	'S'},
 	{"sockdir",	required_argument,	0,	's'},
+	{"userproxy",	no_argument,		0,	'u'},
 	{0, 0, 0, 0}
 };
 #else
@@ -1367,9 +1540,12 @@ static struct option long_options[] = {
 	{"log-shares",	no_argument,		0,	'L'},
 	{"loglevel",	required_argument,	0,	'l'},
 	{"name",	required_argument,	0,	'n'},
+	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"redirector",	no_argument,		0,	'R'},
 	{"sockdir",	required_argument,	0,	's'},
+	{"userproxy",	no_argument,		0,	'u'},
 	{0, 0, 0, 0}
 };
 #endif
@@ -1386,7 +1562,8 @@ static bool send_recv_path(const char *path, const char *msg)
 		ret = true;
 		LOGWARNING("Received: %s in response to %s request", response, msg);
 		dealloc(response);
-	}
+	} else
+		LOGWARNING("Received not response to %s request", msg);
 	Close(sockd);
 	return ret;
 }
@@ -1399,18 +1576,20 @@ int main(int argc, char **argv)
 	ckpool_t ckp;
 
 	/* Make significant floating point errors fatal to avoid subtle bugs being missed */
-	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW );
+	feenableexcept(FE_DIVBYZERO | FE_INVALID);
 	json_set_alloc_funcs(json_ckalloc, free);
 
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
+	ckp.starttime = time(NULL);
+	ckp.startpid = getpid();
 	ckp.loglevel = LOG_NOTICE;
 	ckp.initial_args = ckalloc(sizeof(char *) * (argc + 2)); /* Leave room for extra -H */
 	for (ckp.args = 0; ckp.args < argc; ckp.args++)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:n:PpS:s:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:Nn:PpRS:s:u", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1461,18 +1640,28 @@ int main(int argc, char **argv)
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
 				break;
+			case 'N':
+				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.passthrough)
+					quit(1, "Cannot set another proxy type or redirector and node mode");
+				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.node = true;
+				break;
 			case 'n':
 				ckp.name = optarg;
 				break;
 			case 'P':
-				if (ckp.proxy)
-					quit(1, "Cannot set both proxy and passthrough mode");
+				if (ckp.proxy || ckp.redirector || ckp.userproxy || ckp.node)
+					quit(1, "Cannot set another proxy type or redirector and passthrough mode");
 				ckp.standalone = ckp.proxy = ckp.passthrough = true;
 				break;
 			case 'p':
-				if (ckp.passthrough)
-					quit(1, "Cannot set both passthrough and proxy mode");
+				if (ckp.passthrough || ckp.redirector || ckp.userproxy || ckp.node)
+					quit(1, "Cannot set another proxy type or redirector and proxy mode");
 				ckp.proxy = true;
+				break;
+			case 'R':
+				if (ckp.proxy || ckp.passthrough || ckp.userproxy || ckp.node)
+					quit(1, "Cannot set a proxy type or passthrough and redirector modes");
+				ckp.standalone = ckp.proxy = ckp.passthrough = ckp.redirector = true;
 				break;
 			case 'S':
 				ckp.ckdb_sockdir = strdup(optarg);
@@ -1480,11 +1669,22 @@ int main(int argc, char **argv)
 			case 's':
 				ckp.socket_dir = strdup(optarg);
 				break;
+			case 'u':
+				if (ckp.proxy || ckp.redirector || ckp.passthrough || ckp.node)
+					quit(1, "Cannot set both userproxy and another proxy type or redirector");
+				ckp.userproxy = ckp.proxy = true;
+				break;
 		}
 	}
 
 	if (!ckp.name) {
-		if (ckp.proxy)
+		if (ckp.node)
+			ckp.name = "cknode";
+		else if (ckp.redirector)
+			ckp.name = "ckredirector";
+		else if (ckp.passthrough)
+			ckp.name = "ckpassthrough";
+		else if (ckp.proxy)
 			ckp.name = "ckproxy";
 		else
 			ckp.name = "ckpool";
@@ -1538,7 +1738,7 @@ int main(int argc, char **argv)
 
 	parse_config(&ckp);
 	/* Set defaults if not found in config file */
-	if (!ckp.btcds && !ckp.proxy) {
+	if (!ckp.btcds) {
 		ckp.btcds = 1;
 		ckp.btcdurl = ckzalloc(sizeof(char *));
 		ckp.btcdauth = ckzalloc(sizeof(char *));
@@ -1581,6 +1781,8 @@ int main(int argc, char **argv)
 		ckp.serverurl = ckzalloc(sizeof(char *));
 	if (ckp.proxy && !ckp.proxies)
 		quit(0, "No proxy entries found in config file %s", ckp.config);
+	if (ckp.redirector && !ckp.redirecturls)
+		quit(0, "No redirect entries found in config file %s", ckp.config);
 
 	/* Create the log directory */
 	trail_slash(&ckp.logdir);
@@ -1624,6 +1826,7 @@ int main(int argc, char **argv)
 
 		if (send_recv_path(path, "ping")) {
 			for (i = 0; i < ckp.serverurls; i++) {
+				char oldurl[INET6_ADDRSTRLEN], oldport[8];
 				char getfd[16];
 				int sockd;
 
@@ -1635,10 +1838,16 @@ int main(int argc, char **argv)
 					break;
 				ckp.oldconnfd[i] = get_fd(sockd);
 				Close(sockd);
-				if (!ckp.oldconnfd[i])
+				sockd = ckp.oldconnfd[i];
+				if (!sockd)
 					break;
-				LOGWARNING("Inherited old server socket %d with new file descriptor %d!",
-					   i, ckp.oldconnfd[i]);
+				if (url_from_socket(sockd, oldurl, oldport)) {
+					LOGWARNING("Inherited old server socket %d url %s:%s !",
+						   i, oldurl, oldport);
+				} else {
+					LOGWARNING("Inherited old server socket %d with new file descriptor %d!",
+						   i, ckp.oldconnfd[i]);
+				}
 			}
 			send_recv_path(path, "reject");
 			send_recv_path(path, "reconnect");
@@ -1665,6 +1874,7 @@ int main(int argc, char **argv)
 	launch_logger(&ckp.main);
 	ckp.logfd = fileno(ckp.logfp);
 
+	ckp.ckpapi = create_ckmsgq(&ckp, "api", &ckpool_api);
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	/* Launch separate processes from here */

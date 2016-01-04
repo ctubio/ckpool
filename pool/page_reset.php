@@ -20,10 +20,12 @@ function allow_reset($error)
  <td class=dl><input type=password name=pass></td></tr>
 <tr><td class=dr>Retype Password:</td>
  <td class=dl><input type=password name=pass2></td></tr>
+<tr><td class=dr><span class=st1>*</span>2nd Authentication:</td>
+ <td class=dl><input type=password name=2fa size=10></td></tr>
+<tr><td colspan=2 class=dc><br><font size=-1><span class=st1>*</span>
+ Leave blank if you haven't enabled it</font></td></tr>
 <tr><td>&nbsp;</td>
  <td class=dl><input type=submit name=Update value=Update></td></tr>
-<tr><td colspan=2 class=dc><br><font size=-1><span class=st1>*</span>
- All fields are required</font></td></tr>
 </table>
 </form>";
 
@@ -61,6 +63,7 @@ function dbreset()
 
  $pass = getparam('pass', true);
  $pass2 = getparam('pass2', true);
+ $twofa = getparam('2fa', true);
 
  if (nuem($pass) || nuem($pass2))
 	return allow_reset('Enter both passwords');
@@ -85,9 +88,9 @@ function dbreset()
  if ($emailinfo['STATUS'] != 'ok')
 	syserror();
 
- $ans = resetPass($user, $pass);
+ $ans = resetPass($user, $pass, $twofa);
  if ($ans['STATUS'] != 'ok')
-	syserror();
+	return resetfail();
 
  unset($_SESSION['reset_user']);
  unset($_SESSION['reset_hash']);

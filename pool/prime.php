@@ -1,7 +1,10 @@
 <?php
 #
 global $stt;
-$stt = microtime();
+$stt = microtime(true);
+#
+global $loginfailed;
+$loginfailed = false;
 #
 include_once('param.php');
 include_once('base.php');
@@ -67,17 +70,24 @@ function check()
 		'Home' => ''
 	),
 	'Account' => array(
+		'Rewards' => 'mpayouts',
 		'Payments' => 'payments',
 		'Settings' => 'settings',
-		'User Settings' => 'userset'
+		'User Settings' => 'userset',
+		'2FA Settings' => '2fa'
 	),
 	'Workers' => array(
-		'Workers ' => 'workers',
-		'Management' => 'workmgt',
+		'Shifts' => 'shifts',
+		'Shift Graph' => 'usperf',
+		'Workers' => 'workers',
+		'Management' => 'workmgt'
 	),
 	'Pool' => array(
 		'Stats' => 'stats',
-		'Blocks' => 'blocks'
+		'Blocks' => 'blocks',
+		'Graph' => 'psperf',
+		'Acclaim' => 'userinfo',
+		'Luck' => 'luck'
 	),
 	'Admin' => NULL,
 	'gap' => array( # options not shown
@@ -97,7 +107,7 @@ function check()
 		showPage(NULL, 'reset', $dmenu, '', $who);
 	else
 	{
-		if (requestRegister() == true)
+		if (requestLoginRegReset() == true)
 			showPage(NULL, 'reg', $dmenu, '', $who);
 		else
 		{
