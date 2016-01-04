@@ -176,7 +176,9 @@ maximum debug is level 7.
 -N will start ckpool in passthrough node mode where it behaves like a
 passthrough but requires a locally running bitcoind and can submit blocks
 itself in addition to passing the shares back to the upstream pool. It also
-monitors hashrate and requires more resources than a simple passthrough.
+monitors hashrate and requires more resources than a simple passthrough. Be
+aware that upstream pools must specify dedicated IPs/ports that accept
+incoming node requests with the nodeserver directive described below.
 
 -n <NAME> will change the ckpool process name to that specified, allowing
 multiple different named instances to be running. By default the variant
@@ -265,6 +267,11 @@ blocks.
 new network blocks and is 100 by default. It is intended to be a backup only
 for when the notifier is not set up and only polls if the "notify" field is
 not set on a btcd.
+
+"nodeserver" : This takes the same format as the serverurl array and specifies
+additional IPs/ports to bind to that will accept incoming requests for mining
+node communications. It is recommended to selectively isolate this address
+to minimise unnecessary communications with unauthorised nodes.
 
 "nonce1length" : This is optional allowing the extranonce1 length to be chosen
 from 2 to 8. Default 4

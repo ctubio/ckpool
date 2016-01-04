@@ -226,6 +226,8 @@ struct ckpool_instance {
 	server_instance_t **servers;
 	char **serverurl; // Array of URLs to bind our server/proxy to
 	int serverurls; // Number of server bindings
+	bool *nodeserver; // If this server URL serves node information
+
 	int update_interval; // Seconds between stratum updates
 
 	/* Proxy options */

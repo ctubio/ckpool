@@ -5174,7 +5174,7 @@ static void init_client(sdata_t *sdata, const stratum_instance_t *client, const 
 	stratum_send_update(sdata, client_id, true);
 }
 
-static void add_mining_node(sdata_t *sdata, stratum_instance_t *client)
+static void add_mining_node(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client)
 {
 	client->node = true;
 
@@ -5182,7 +5182,8 @@ static void add_mining_node(sdata_t *sdata, stratum_instance_t *client)
 	DL_APPEND(sdata->node_instances, client);
 	ck_wunlock(&sdata->instance_lock);
 
-	LOGWARNING("Added client %"PRId64" %s as mining node!", client->id, client->address);
+	LOGWARNING("Added client %"PRId64" %s as mining node on server %d:%s", client->id,
+		   client->address, client->server, ckp->serverurl[client->server]);
 }
 
 /* Enter with client holding ref count */
@@ -5238,9 +5239,16 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 
 		/* Add this client as a passthrough in the connector and
 		 * add it to the list of mining nodes in the stratifier */
-		add_mining_node(sdata, client);
-		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
-		send_proc(ckp->connector, buf);
+		if (!ckp->nodeserver[client->server]) {
+			LOGNOTICE("Dropping client %"PRId64" %s trying to authorise as node on non node server %d",
+				  client_id, client->address, client->server);
+			connector_drop_client(ckp, client_id);
+			drop_client(ckp, sdata, client_id);
+		} else {
+			add_mining_node(ckp, sdata, client);
+			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+			send_proc(ckp->connector, buf);
+		}
 		return;
 	}
 
