@@ -598,6 +598,7 @@ int read_socket_line(connsock_t *cs, float *timeout)
 				LOGINFO("Failed to recv in read_socket_line");
 			else
 				LOGERR("Failed to recv in read_socket_line");
+			ret = -1;
 			goto out;
 		}
 		add_bufline(cs, readbuf, ret);
