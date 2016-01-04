@@ -40,7 +40,6 @@ AC_CHECK_HEADERS(stdint.h netinet/in.h netinet/tcp.h sys/ioctl.h getopt.h)
 AC_CHECK_HEADERS(sys/epoll.h libpq-fe.h postgresql/libpq-fe.h grp.h)
 AC_CHECK_HEADERS(gsl/gsl_math.h gsl/gsl_cdf.h)
 AC_CHECK_HEADERS(openssl/x509.h openssl/hmac.h)
-AC_CHECK_HEADERS(zlib.h)
 
 AC_CHECK_PROG(YASM, yasm, yes)
 AM_CONDITIONAL([HAVE_YASM], [test x$YASM = xyes])
