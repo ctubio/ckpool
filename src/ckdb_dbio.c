@@ -1585,7 +1585,7 @@ bool workers_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_ITEM *item = NULL;
 	int n, t, i;
 	WORKERS *row;
 	char *field;
@@ -2220,7 +2220,7 @@ bool payments_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_ITEM *item = NULL;
 	PAYMENTS *row;
 	int n, t, i;
 	char *field;
@@ -2880,7 +2880,7 @@ bool workinfo_fill(PGconn *conn)
 	char ndiffbin[TXT_SML+1];
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_ITEM *item = NULL;
 	WORKINFO *row;
 	char *params[3];
 	int n, t, i, par = 0;
@@ -5437,7 +5437,7 @@ bool miningpayouts_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item;
+	K_ITEM *item = NULL;
 	MININGPAYOUTS *row;
 	int n, t, i;
 	char *field;
@@ -6767,7 +6767,7 @@ bool markersummary_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item, *p_item;
+	K_ITEM *item = NULL, *p_item;
 	int n, t, i, p_n;
 	MARKERSUMMARY *row, *p_row;
 	char *params[1];
