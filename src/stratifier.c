@@ -27,7 +27,6 @@
 #include "stratifier.h"
 #include "uthash.h"
 #include "utlist.h"
-#include "api.h"
 
 #define MIN1	60
 #define MIN5	300

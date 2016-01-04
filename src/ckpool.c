@@ -32,7 +32,6 @@
 #include "generator.h"
 #include "stratifier.h"
 #include "connector.h"
-#include "api.h"
 
 ckpool_t *global_ckp;
 

@@ -21,7 +21,6 @@
 #include "bitcoin.h"
 #include "uthash.h"
 #include "utlist.h"
-#include "api.h"
 
 struct notify_instance {
 	/* Hash table data */

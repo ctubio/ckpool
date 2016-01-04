@@ -324,4 +324,18 @@ bool json_get_bool(bool *store, const json_t *val, const char *res);
 bool json_getdel_int(int *store, json_t *val, const char *res);
 bool json_getdel_int64(int64_t *store, json_t *val, const char *res);
 
+
+/* API Placeholders for future API implementation */
+typedef struct apimsg apimsg_t;
+
+struct apimsg {
+	char *buf;
+	int sockd;
+};
+
+static inline void ckpool_api(ckpool_t __maybe_unused *ckp, apimsg_t __maybe_unused *apimsg) {};
+static inline json_t *json_encode_errormsg(json_error_t __maybe_unused *err_val) { return NULL; };
+static inline json_t *json_errormsg(const char __maybe_unused *fmt, ...) { return NULL; };
+static inline void send_api_response(json_t __maybe_unused *val, const int __maybe_unused sockd) {};
+
 #endif /* CKPOOL_H */
