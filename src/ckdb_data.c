@@ -4622,7 +4622,7 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
 {
 	K_ITEM look, *wi_stt_item, *wi_fin_item, *old_wm_item;
 	WORKMARKERS *old_wm;
-	WORKINFO workinfo, *wi_stt = NULL, *wi_fin;
+	WORKINFO workinfo, *wi_stt = NULL, *wi_fin = NULL;
 	K_TREE_CTX ctx[1];
 	char description[TXT_BIG+1];
 	bool ok;
