@@ -131,6 +131,7 @@ ckpool supports the following options:
 -k | --killold
 -L | --log-shares
 -l LOGLEVEL | --loglevel LOGLEVEL
+-N | --node
 -n NAME | --name NAME
 -P | --passthrough
 -p | --proxy
