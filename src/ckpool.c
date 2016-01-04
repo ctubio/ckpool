@@ -560,9 +560,6 @@ int read_socket_line(connsock_t *cs, float *timeout)
 	int ret = -1;
 	float diff;
 
-	if (unlikely(cs->fd < 0))
-		goto out;
-
 	clear_bufline(cs);
 	eom = strchr(cs->buf, '\n');
 
@@ -570,6 +567,11 @@ int read_socket_line(connsock_t *cs, float *timeout)
 
 	while (!eom) {
 		char readbuf[PAGESIZE];
+
+		if (unlikely(cs->fd < 0)) {
+			ret = -1;
+			goto out;
+		}
 
 		if (*timeout < 0) {
 			if (cs->ckp->proxy)
