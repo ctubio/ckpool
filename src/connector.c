@@ -932,6 +932,8 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			json_t *val = json_loads(buf, 0, NULL);
 			char *msg;
 
+			if (!val) // Can happen if client sent invalid json message
+				goto out;
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 			json_object_set_new_nocheck(val, "server", json_integer(client->server));
@@ -943,7 +945,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 		if (ckp->redirector && !client->redirected)
 			test_redirector_shares(ckp, client, buf);
 	}
-
+out:
 	sender_send = ckzalloc(sizeof(sender_send_t));
 	sender_send->client = client;
 	sender_send->buf = buf;
