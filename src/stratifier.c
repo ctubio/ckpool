@@ -5370,6 +5370,8 @@ out:
 			ret = SM_AUTH;
 		else if (cmdmatch(method, "mining.get"))
 			ret = SM_TXNS;
+		else if (cmdmatch(method, "mining.suggest_difficulty"))
+			ret = SM_SUGGESTDIFF;
 	}
 	return ret;
 }

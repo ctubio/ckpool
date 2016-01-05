@@ -261,6 +261,7 @@ enum stratum_msgtype {
 	SM_TXNSRESULT,
 	SM_PING,
 	SM_WORKINFO,
+	SM_SUGGESTDIFF,
 	SM_NONE
 };
 
@@ -280,6 +281,7 @@ static const char __maybe_unused *stratum_msgs[] = {
 	"txns.result",
 	"ping",
 	"workinfo",
+	"suggestdiff",
 	""
 };
 
