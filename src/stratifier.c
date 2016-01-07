@@ -4973,10 +4973,15 @@ out:
 		/* Is this the first in a run of invalids? */
 		if (client->first_invalid < client->last_share.tv_sec || !client->first_invalid)
 			client->first_invalid = now_t;
-		else if (client->first_invalid && client->first_invalid < now_t - 120) {
-			LOGNOTICE("Client %"PRId64" rejecting for 120s, disconnecting", client->id);
+		else if (client->first_invalid && client->first_invalid < now_t - 180) {
+			LOGNOTICE("Client %"PRId64" rejecting for 180s, disconnecting", client->id);
 			stratum_send_message(sdata, client, "Disconnecting for continuous invalid shares");
+			client->reject = 3;
+		} else if (client->first_invalid && client->first_invalid < now_t - 120) {
+			LOGNOTICE("Client %"PRId64" rejecting for 120s, reconnecting", client->id);
+			stratum_send_message(sdata, client, "Reconnecting for continuous invalid shares");
 			client->reject = 2;
+			reconnect_client(sdata, client);
 		} else if (client->first_invalid && client->first_invalid < now_t - 60) {
 			if (!client->reject) {
 				LOGINFO("Client %"PRId64" rejecting for 60s, sending update", client->id);
@@ -5448,7 +5453,7 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 	int64_t client_id = msg->client_id;
 	int delays = 0;
 
-	if (client->reject == 2) {
+	if (client->reject == 3) {
 		LOGINFO("Dropping client %"PRId64" %s tagged for lazy invalidation",
 			client_id, client->address);
 		connector_drop_client(ckp, client_id);
