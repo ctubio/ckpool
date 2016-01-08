@@ -6580,14 +6580,10 @@ int stratifier(proc_instance_t *pi)
 
 	mutex_init(&sdata->ckdb_lock);
 	mutex_init(&sdata->ckdb_msg_lock);
-	/* Create half as many share processing threads as there are CPUs */
+	/* Create half as many share processing and receiving threads as there
+	 * are CPUs */
 	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
 	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
-	/* Create 1/4 as many stratum processing threads as there are CPUs */
-	if (ckp->node)
-		threads = 1;
-	else
-		threads = threads / 2 ? : 1;
 	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
