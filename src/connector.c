@@ -1004,6 +1004,20 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 	json_decref(json_msg);
 }
 
+/* Send the passthrough the terminate node.method */
+static void drop_passthrough_client(cdata_t *cdata, const int64_t id)
+{
+	int64_t client_id;
+	char *msg;
+
+	LOGINFO("Asked to drop passthrough client %"PRId64", forwarding to passthrough", id);
+	client_id = id & 0xffffffffll;
+	/* We have a direct connection to the passthrough's connector so we
+	 * can send it any regular commands. */
+	ASPRINTF(&msg, "dropclient=%"PRId64, client_id);
+	send_client(cdata, id, msg);
+}
+
 static char *connector_stats(cdata_t *cdata, const int runtime)
 {
 	json_t *val = json_object(), *subval;
@@ -1108,9 +1122,11 @@ retry:
 			LOGDEBUG("Connector failed to parse dropclient command: %s", buf);
 			goto retry;
 		}
-		/* A passthrough client, we can't drop this yet */
-		if (client_id > 0xffffffffll)
+		/* A passthrough client */
+		if (client_id > 0xffffffffll) {
+			drop_passthrough_client(cdata, client_id);
 			goto retry;
+		}
 		client = ref_client_by_id(cdata, client_id);
 		if (unlikely(!client)) {
 			LOGINFO("Connector failed to find client id %"PRId64" to drop", client_id);
