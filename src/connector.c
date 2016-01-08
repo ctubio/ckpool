@@ -373,9 +373,9 @@ static int invalidate_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *c
 	int ret;
 
 	ret = drop_client(cdata, client);
-	if (!ckp->passthrough && !client->passthrough)
+	if ((!ckp->passthrough || ckp->node) && !client->passthrough)
 		stratifier_drop_client(ckp, client);
-	else if (ckp->passthrough)
+	if (ckp->passthrough)
 		generator_drop_client(ckp, client);
 
 	/* Cull old unused clients lazily when there are no more reference
