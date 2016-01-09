@@ -285,6 +285,7 @@ struct stratum_instance {
 	char *useragent;
 	char *workername;
 	char *password;
+	bool messages; /* Is this a client that understands stratum messages */
 	int user_id;
 	int server; /* Which server is this instance bound to */
 
@@ -2314,6 +2315,11 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 
 		if (!client_active(client))
 			continue;
+
+		/* Only send messages to whitelisted clients */
+		if (msg_type == SM_MSG && !client->messages)
+			continue;
+
 		client_msg = ckalloc(sizeof(ckmsg_t));
 		msg = ckzalloc(sizeof(smsg_t));
 		if (passthrough_subclient(client->id))
@@ -3736,6 +3742,10 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	} else
 		client->useragent = ckzalloc(1);
 
+	/* Whitelist cgminer based clients to receive stratum messages */
+	if (strcasestr(client->useragent, "gminer"))
+		client->messages = true;
+
 	/* We got what we needed */
 	if (ckp->node)
 		return NULL;
@@ -4432,6 +4442,9 @@ static void stratum_send_message(sdata_t *sdata, const stratum_instance_t *clien
 {
 	json_t *json_msg;
 
+	/* Only send messages to whitelisted clients */
+	if (!client->messages)
+		return;
 	JSON_CPACK(json_msg, "{sosss[s]}", "id", json_null(), "method", "client.show_message",
 			     "params", msg);
 	stratum_add_send(sdata, json_msg, client->id, SM_MSG);
