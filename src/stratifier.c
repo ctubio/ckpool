@@ -4477,9 +4477,9 @@ static double time_bias(const double tdiff, const double period)
 static void upstream_shares(ckpool_t *ckp, const char *workername, const int64_t diff,
 			    const double sdiff)
 {
-	char buf[256];
+	char buf[512];
 
-	sprintf(buf, "upstream={\"method\":\"shares\",\"workername\":\"%s\",\"diff\":%"PRId64",\"sdiff\":%lf}\n",
+	snprintf(buf, 511, "upstream={\"method\":\"shares\",\"workername\":\"%s\",\"diff\":%"PRId64",\"sdiff\":%lf}\n",
 		workername, diff, sdiff);
 	send_proc(ckp->connector, buf);
 }
@@ -4806,7 +4806,7 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 static void check_best_diff(ckpool_t *ckp, sdata_t *sdata, user_instance_t *user,
 			    worker_instance_t *worker, const double sdiff, stratum_instance_t *client)
 {
-	char buf[256];
+	char buf[512];
 	bool best_worker = false, best_user = false;
 
 	if (sdiff > worker->best_diff) {
@@ -4819,10 +4819,7 @@ static void check_best_diff(ckpool_t *ckp, sdata_t *sdata, user_instance_t *user
 	}
 	if (likely(!CKP_STANDALONE(ckp) || (!best_user && !best_worker) || !client))
 		return;
-	if (best_user)
-		sprintf(buf, "New best share for user %s:%lf", user->username, sdiff);
-	else
-		sprintf(buf, "New best share for worker %s: %lf", worker->workername, sdiff);
+	snprintf(buf, 511, "New best share for %s: %lf", best_user ? "user" : "worker", sdiff);
 	stratum_send_message(sdata, client, buf);
 }
 
@@ -6310,7 +6307,7 @@ static void upstream_workers(ckpool_t *ckp, user_instance_t *user)
 {
 	char buf[256];
 
-	sprintf(buf, "upstream={\"method\":\"workers\",\"username\":\"%s\",\"workers\":%d}\n",
+	snprintf(buf, 255, "upstream={\"method\":\"workers\",\"username\":\"%s\",\"workers\":%d}\n",
 		user->username, user->workers);
 	send_proc(ckp->connector, buf);
 }
