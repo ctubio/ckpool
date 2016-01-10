@@ -4460,18 +4460,19 @@ static double time_bias(const double tdiff, const double period)
 	return 1.0 - 1.0 / exp(dexp);
 }
 
-static void upstream_shares(ckpool_t *ckp, const char *workername, const int64_t diff)
+static void upstream_shares(ckpool_t *ckp, const char *workername, const int64_t diff,
+			    const double sdiff)
 {
 	char buf[256];
 
-	sprintf(buf, "upstream={\"method\":\"shares\",\"workername\":\"%s\",\"diff\":%"PRId64"}\n",
-		workername, diff);
+	sprintf(buf, "upstream={\"method\":\"shares\",\"workername\":\"%s\",\"diff\":%"PRId64",\"sdiff\":%lf}\n",
+		workername, diff, sdiff);
 	send_proc(ckp->connector, buf);
 }
 
 /* Needs to be entered with client holding a ref count. */
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double diff, const bool valid,
-		       const bool submit)
+		       const bool submit, const double sdiff)
 {
 	sdata_t *ckp_sdata = ckp->data, *sdata = client->sdata;
 	worker_instance_t *worker = client->worker_instance;
@@ -4494,7 +4495,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 		user->shares += diff;
 		/* Send shares to the upstream pool in trusted remote node */
 		if (ckp->remote)
-			upstream_shares(ckp, worker->workername, diff);
+			upstream_shares(ckp, worker->workername, diff, sdiff);
 	} else if (!submit)
 		return;
 
@@ -4787,24 +4788,27 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	free(msg);
 }
 
-static void upstream_best_diff(ckpool_t *ckp, const char *workername, const double diff)
+static void check_best_diff(ckpool_t *ckp, sdata_t *sdata, user_instance_t *user,
+			    worker_instance_t *worker, const double sdiff, stratum_instance_t *client)
 {
 	char buf[256];
+	bool best_worker = false, best_user = false;
 
-	sprintf(buf, "upstream={\"method\":\"bestshare\",\"workername\":\"%s\",\"diff\":%lf}\n",
-		workername, diff);
-	send_proc(ckp->connector, buf);
-}
-
-static void set_best_diff(ckpool_t *ckp, user_instance_t *user, worker_instance_t *worker, const double sdiff)
-{
 	if (sdiff > worker->best_diff) {
 		worker->best_diff = sdiff;
-		if (ckp->remote)
-			upstream_best_diff(ckp, worker->workername, sdiff);
+		best_worker = true;
 	}
-	if (sdiff > user->best_diff)
+	if (sdiff > user->best_diff) {
 		user->best_diff = sdiff;
+		best_user = true;
+	}
+	if (likely(!CKP_STANDALONE(ckp) || (!best_user && !best_worker) || !client))
+		return;
+	if (best_user)
+		sprintf(buf, "New best share for user %s:%lf", user->username, sdiff);
+	else
+		sprintf(buf, "New best share for worker %s: %lf", worker->workername, sdiff);
+	stratum_send_message(sdata, client, buf);
 }
 
 #define JSON_ERR(err) json_string(SHARE_ERR(err))
@@ -4926,7 +4930,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		client->best_diff = sdiff;
 		LOGINFO("User %s worker %s client %"PRId64" new best diff %lf", user->username,
 			worker->workername, client->id, sdiff);
-		set_best_diff(ckp, user, worker, sdiff);
+		check_best_diff(ckp, sdata, user, worker, sdiff, client);
 	}
 	bswap_256(sharehash, hash);
 	__bin2hex(hexhash, sharehash, 32);
@@ -4985,7 +4989,7 @@ out_unlock:
 		submit_share(client, id, nonce2, ntime, nonce);
 	}
 
-	add_submit(ckp, client, diff, result, submit);
+	add_submit(ckp, client, diff, result, submit, sdiff);
 
 	/* Now write to the pool's sharelog. */
 	val = json_object();
@@ -5517,6 +5521,7 @@ static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, cons
 	worker_instance_t *worker;
 	const char *workername;
 	user_instance_t *user;
+	double sdiff = 0;
 	int64_t diff;
 	tv_t now_t;
 
@@ -5529,9 +5534,11 @@ static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, cons
 		LOGWARNING("Unable to parse valid diff from remote message %s", buf);
 		return;
 	}
+	json_get_double(&sdiff, val, "sdiff");
 	user = generate_remote_user(ckp, workername);
 	user->authorised = true;
 	worker = get_worker(sdata, user, workername);
+	check_best_diff(ckp, sdata, user, worker, sdiff, NULL);
 
 	mutex_lock(&sdata->stats_lock);
 	sdata->stats.unaccounted_shares++;
@@ -5550,31 +5557,6 @@ static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, cons
 	copy_tv(&user->last_share, &now_t);
 
 	LOGINFO("Added %"PRId64" remote shares to worker %s", diff, workername);
-}
-
-static void parse_best_remote(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
-{
-	json_t *workername_val = json_object_get(val, "workername");
-	worker_instance_t *worker;
-	const char *workername;
-	user_instance_t *user;
-	double diff;
-
-	workername = json_string_value(workername_val);
-	if (unlikely(!workername_val || !workername)) {
-		LOGWARNING("Failed to get workername from remote message %s", buf);
-		return;
-	}
-	if (unlikely(!json_get_double(&diff, val, "diff") || diff <= 0)) {
-		LOGWARNING("Unable to parse valid diff from remote message %s", buf);
-		return;
-	}
-	user = user_by_workername(sdata, workername);
-	user->authorised = true;
-	worker = get_worker(sdata, user, workername);
-
-	LOGINFO("Checking best diff of %lf for worker %s", diff, workername);
-	set_best_diff(ckp, user, worker, diff);
 }
 
 /* Get the remote worker count once per minute from all the remote servers */
@@ -5612,8 +5594,6 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const 
 	}
 	if (likely(!safecmp(method, "shares")))
 		parse_remote_shares(ckp, sdata, val, buf);
-	else if (!safecmp(method, "bestshare"))
-		parse_best_remote(ckp, sdata, val, buf);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
 	else
