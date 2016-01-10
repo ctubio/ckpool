@@ -2529,12 +2529,23 @@ static json_t *user_stats(const user_instance_t *user)
 	return val;
 }
 
+static void upstream_block(ckpool_t *ckp, const int height, const char *workername,
+			   const double diff)
+{
+	char buf[512];
+
+	snprintf(buf, 511, "upstream={\"method\":\"block\",\"workername\":\"%s\",\"diff\":%lf,\"height\":%d,\"name\":\"%s\"}\n",
+		 workername, diff, height, ckp->name);
+	send_proc(ckp->connector, buf);
+}
+
 static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
 	char *msg, *workername = NULL;
 	sdata_t *sdata = ckp->data;
 	char cdfield[64];
+	double diff = 0;
 	int height = 0;
 	ts_t ts_now;
 	json_t *val;
@@ -2576,6 +2587,7 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 	json_set_string(val, "createdate", cdfield);
 	json_set_string(val, "createcode", __func__);
 	json_get_int(&height, val, "height");
+	json_get_double(&diff, val, "diff");
 	ckdbq_add(ckp, ID_BLOCK, val);
 	free(found);
 
@@ -2610,6 +2622,8 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 	}
 	stratum_broadcast_message(sdata, msg);
 	free(msg);
+	if (ckp->remote)
+		upstream_block(ckp, height, workername, diff);
 
 	free(workername);
 
@@ -4672,6 +4686,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 			"createcode", __func__,
 			"createinet", ckp->serverurl[client->server]);
 	val_copy = json_deep_copy(val);
+	json_set_double(val_copy, "diff", diff);
 	block_ckmsg = ckalloc(sizeof(ckmsg_t));
 	block_ckmsg->data = val_copy;
 
@@ -5581,6 +5596,36 @@ static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
 	LOGDEBUG("Adding %d remote workers to user %s", workers, username);
 }
 
+static void parse_remote_block(sdata_t *sdata, json_t *val, const char *buf)
+{
+	json_t *workername_val = json_object_get(val, "workername"),
+		*name_val = json_object_get(val, "name");
+	const char *workername, *name;
+	double diff = 0;
+	int height = 0;
+	char *msg;
+
+	workername = json_string_value(workername_val);
+	if (unlikely(!workername_val || !workername)) {
+		LOGWARNING("Failed to get workername from remote message %s", buf);
+		workername = "";
+	}
+	name = json_string_value(name_val);
+	if (unlikely(!name_val || !name)) {
+		LOGWARNING("Failed to get name from remote message %s", buf);
+		name = "";
+	}
+	if (unlikely(!json_get_int(&height, val, "height")))
+		LOGWARNING("Failed to get height from remote message %s", buf);
+	if (unlikely(!json_get_double(&diff, val, "diff")))
+		LOGWARNING("Failed to get diff from remote message %s", buf);
+	ASPRINTF(&msg, "Block %d solved by %s @ %s!", height, workername, name);
+	LOGWARNING("%s", msg);
+	stratum_broadcast_message(sdata, msg);
+	free(msg);
+	reset_bestshares(sdata);
+}
+
 static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
 {
 	json_t *method_val = json_object_get(val, "method");
@@ -5596,6 +5641,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const 
 		parse_remote_shares(ckp, sdata, val, buf);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
+	else if (!safecmp(method, "block"))
+		parse_remote_block(sdata, val, buf);
 	else
 		LOGWARNING("unrecognised trusted message %s", buf);
 }
