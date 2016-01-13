@@ -279,6 +279,8 @@ struct stratum_instance {
 			 * or other problem and should be dropped lazily if
 			 * this is set to 2 */
 
+	int latency; /* Latency when on a mining node */
+
 	bool reconnect; /* This client really needs to reconnect */
 	time_t reconnect_request; /* The time we sent a reconnect message */
 
@@ -5427,16 +5429,38 @@ static void init_client(sdata_t *sdata, const stratum_instance_t *client, const 
 	stratum_send_update(sdata, client_id, true);
 }
 
+static void *set_node_latency(void *arg)
+{
+	stratum_instance_t *client = (stratum_instance_t *)arg;
+
+	pthread_detach(pthread_self());
+
+	client->latency = round_trip(client->address) / 2;
+	LOGNOTICE("Node client %"PRId64" %s latency set to %d", client->id,
+		  client->address, client->latency);
+	dec_instance_ref(client->sdata, client);
+	return NULL;
+}
+
+/* Create a thread to asynchronously set latency to the node to not
+ * block. Increment the ref count to prevent the client pointer
+ * dereferencing under us, allowing the thread to decrement it again when
+ * finished. */
 static void add_mining_node(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client)
 {
+	pthread_t pth;
+
 	client->node = true;
 
 	ck_wlock(&sdata->instance_lock);
 	DL_APPEND(sdata->node_instances, client);
+	__inc_instance_ref(client);
 	ck_wunlock(&sdata->instance_lock);
 
 	LOGWARNING("Added client %"PRId64" %s as mining node on server %d:%s", client->id,
 		   client->address, client->server, ckp->serverurl[client->server]);
+
+	create_pthread(&pth, set_node_latency, client);
 }
 
 /* Enter with client holding ref count */
