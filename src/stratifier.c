@@ -90,6 +90,7 @@ struct workbase {
 	char idstring[20];
 
 	ts_t gentime;
+	tv_t retired;
 
 	/* GBT/shared variables */
 	char target[68];
@@ -966,6 +967,8 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 		}
 	}
 	HASH_ADD_I64(sdata->workbases, id, wb);
+	if (sdata->current_workbase)
+		tv_time(&sdata->current_workbase->retired);
 	sdata->current_workbase = wb;
 	ck_wunlock(&sdata->workbase_lock);
 
@@ -5135,10 +5138,24 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	__bin2hex(hexhash, sharehash, 32);
 
 	if (id < sdata->blockchange_id) {
+		/* Accept shares if they're received on remote nodes before the
+		 * workbase was retired. */
+		if (client->latency) {
+			int latency;
+			tv_t now_tv;
+
+			ts_to_tv(&now_tv, &now);
+			latency = ms_tvdiff(&wb->retired, &now_tv);
+			if (latency < client->latency) {
+				LOGDEBUG("Accepting %dms late share from client %"PRId64, latency, client->id);
+				goto no_stale;
+			}
+		}
 		err = SE_STALE;
 		json_set_string(json_msg, "reject-reason", SHARE_ERR(err));
 		goto out_submit;
 	}
+no_stale:
 	/* Ntime cannot be less, but allow forward ntime rolling up to max */
 	if (ntime32 < wb->ntime32 || ntime32 > wb->ntime32 + 7000) {
 		err = SE_NTIME_INVALID;
