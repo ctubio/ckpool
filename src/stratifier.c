@@ -5145,7 +5145,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			tv_t now_tv;
 
 			ts_to_tv(&now_tv, &now);
-			latency = ms_tvdiff(&wb->retired, &now_tv);
+			latency = ms_tvdiff(&now_tv, &wb->retired);
 			if (latency < client->latency) {
 				LOGDEBUG("Accepting %dms late share from client %"PRId64, latency, client->id);
 				goto no_stale;
