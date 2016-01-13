@@ -491,6 +491,7 @@ void _close(int *fd, const char *file, const char *func, const int line);
 #define Close(FD) _close(&FD, __FILE__, __func__, __LINE__)
 int bind_socket(char *url, char *port);
 int connect_socket(char *url, char *port);
+int round_trip(char *url);
 int write_socket(int fd, const void *buf, size_t nbyte);
 void empty_socket(int fd);
 void _close_unix_socket(int *sockd, const char *server_path);
