@@ -5436,7 +5436,7 @@ static void *set_node_latency(void *arg)
 	pthread_detach(pthread_self());
 
 	client->latency = round_trip(client->address) / 2;
-	LOGNOTICE("Node client %"PRId64" %s latency set to %d", client->id,
+	LOGNOTICE("Node client %"PRId64" %s latency set to %dms", client->id,
 		  client->address, client->latency);
 	dec_instance_ref(client->sdata, client);
 	return NULL;

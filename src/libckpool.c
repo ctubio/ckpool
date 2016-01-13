@@ -784,7 +784,7 @@ int round_trip(char *url)
 			url, port, diff);
 		diff = 500;
 	}
-	LOGINFO("Minimum round trip to %s:%s calculated as %d", url, port, ret);
+	LOGINFO("Minimum round trip to %s:%s calculated as %dms", url, port, ret);
 out:
 	Close(sockd);
 	freeaddrinfo(p);
