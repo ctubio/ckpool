@@ -4702,28 +4702,27 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	ckdbq_add(ckp, ID_BLOCK, val);
 }
 
-/* Needs to be entered with client holding a ref count. */
-static double submission_diff(const stratum_instance_t *client, const workbase_t *wb, const char *nonce2,
-			      const uint32_t ntime32, const char *nonce, uchar *hash)
+/* Calculate share diff and fill in hash and swap */
+static double
+share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const char *nonce2,
+	   const uint32_t ntime32, const char *nonce, uchar *hash, uchar *swap, int *cblen)
 {
 	unsigned char merkle_root[32], merkle_sha[64];
 	uint32_t *data32, *swap32, benonce32;
-	char *coinbase, data[80];
-	uchar swap[80], hash1[32];
-	int cblen, i;
-	double ret;
+	uchar hash1[32];
+	char data[80];
+	int i;
 
-	coinbase = alloca(wb->coinb1len + wb->enonce1constlen + wb->enonce1varlen + wb->enonce2varlen + wb->coinb2len);
 	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
-	cblen = wb->coinb1len;
-	memcpy(coinbase + cblen, &client->enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
-	cblen += wb->enonce1constlen + wb->enonce1varlen;
-	hex2bin(coinbase + cblen, nonce2, wb->enonce2varlen);
-	cblen += wb->enonce2varlen;
-	memcpy(coinbase + cblen, wb->coinb2bin, wb->coinb2len);
-	cblen += wb->coinb2len;
+	*cblen = wb->coinb1len;
+	memcpy(coinbase + *cblen, enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
+	*cblen += wb->enonce1constlen + wb->enonce1varlen;
+	hex2bin(coinbase + *cblen, nonce2, wb->enonce2varlen);
+	*cblen += wb->enonce2varlen;
+	memcpy(coinbase + *cblen, wb->coinb2bin, wb->coinb2len);
+	*cblen += wb->coinb2len;
 
-	gen_hash((uchar *)coinbase, merkle_root, cblen);
+	gen_hash((uchar *)coinbase, merkle_root, *cblen);
 	memcpy(merkle_sha, merkle_root, 32);
 	for (i = 0; i < wb->merkles; i++) {
 		memcpy(merkle_sha + 32, &wb->merklebin[i], 32);
@@ -4755,10 +4754,27 @@ static double submission_diff(const stratum_instance_t *client, const workbase_t
 	sha256(hash1, 32, hash);
 
 	/* Calculate the diff of the share here */
-	ret = diff_from_target(hash);
+	return diff_from_target(hash);
+}
+
+/* Needs to be entered with client holding a ref count. */
+static double submission_diff(const stratum_instance_t *client, const workbase_t *wb, const char *nonce2,
+			      const uint32_t ntime32, const char *nonce, uchar *hash)
+{
+	char *coinbase;
+	uchar swap[80];
+	double ret;
+	int cblen;
+
+	coinbase = ckalloc(wb->coinb1len + wb->enonce1constlen + wb->enonce1varlen + wb->enonce2varlen + wb->coinb2len);
+
+	/* Calculate the diff of the share here */
+	ret = share_diff(coinbase, client->enonce1bin, wb, nonce2, ntime32, nonce, hash, swap, &cblen);
 
 	/* Test we haven't solved a block regardless of share status */
 	test_blocksolve(client, wb, swap, hash, ret, coinbase, cblen, nonce2, nonce);
+
+	free(coinbase);
 
 	return ret;
 }
