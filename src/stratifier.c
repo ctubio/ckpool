@@ -1257,6 +1257,7 @@ share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const 
 	return diff_from_target(hash);
 }
 
+/* Note recursive lock here - entered with workbase lock held, grabs instance lock */
 static void send_node_block(sdata_t *sdata, const char *enonce1, const char *nonce,
 			    const char *nonce2, const uint32_t ntime32, const int64_t jobid,
 			    const double diff)
