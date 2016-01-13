@@ -2435,6 +2435,12 @@ static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
 	return client;
 }
 
+/* passthrough subclients have client_ids in the high bits */
+static inline bool passthrough_subclient(const int64_t client_id)
+{
+	return (client_id > 0xffffffffll);
+}
+
 /* Enter with write instance_lock held */
 static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t id,
 						  const char *address, int server)
@@ -2458,6 +2464,17 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 	/* Points to ckp sdata in ckpool mode, but is changed later in proxy
 	 * mode . */
 	client->sdata = sdata;
+	if (passthrough_subclient(id)) {
+		stratum_instance_t *passthrough;
+		int64_t pass_id = id >> 32;
+
+		passthrough = __instance_by_id(sdata, pass_id);
+		if (passthrough && passthrough->node) {
+			client->latency = passthrough->latency;
+			LOGINFO("Client %"PRId64" inherited node latency of %d",
+				id, client->latency);
+		}
+	}
 	return client;
 }
 
@@ -2499,12 +2516,6 @@ static void connector_test_client(ckpool_t *ckp, const int64_t id)
 	LOGDEBUG("Stratifier requesting connector test client %"PRId64, id);
 	snprintf(buf, 255, "testclient=%"PRId64, id);
 	send_proc(ckp->connector, buf);
-}
-
-/* passthrough subclients have client_ids in the high bits */
-static inline bool passthrough_subclient(const int64_t client_id)
-{
-	return (client_id > 0xffffffffll);
 }
 
 /* For creating a list of sends without locking that can then be concatenated
