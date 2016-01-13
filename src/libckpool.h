@@ -374,6 +374,7 @@ static inline void _json_set_string(json_t *val, const char *key, const char *st
 }
 #define json_set_string(val, key, str) _json_set_string(val, key, str, __FILE__, __func__, __LINE__)
 
+/* Int is long long so will work for u32 and int64 */
 static inline void _json_set_int(json_t *val, const char *key, int64_t integer,
 				 const char *file, const char *func, const int line)
 {
@@ -381,6 +382,8 @@ static inline void _json_set_int(json_t *val, const char *key, int64_t integer,
 		LOGERR("Failed to set json int from %s %s:%d", file, func, line);
 }
 #define json_set_int(val, key, integer) _json_set_int(val, key, integer, __FILE__, __func__, __LINE__)
+#define json_set_uint32(val, key, u32) _json_set_int(val, key, u32, __FILE__, __func__, __LINE__)
+#define json_set_int64(val, key, i64) _json_set_int(val, key, i64, __FILE__, __func__, __LINE__)
 
 static inline void _json_set_double(json_t *val, const char *key, double real,
 				    const char *file, const char *func, const int line)
@@ -397,6 +400,7 @@ static inline void _json_set_bool(json_t *val, const char *key, bool boolean,
 		LOGERR("Failed to set json bool from %s %s:%d", file, func, line);
 }
 #define json_set_bool(val, key, boolean) _json_set_bool(val, key, boolean, __FILE__, __func__, __LINE__)
+
 
 static inline void _json_set_object(json_t *val, const char *key, json_t *object,
 				  const char *file, const char *func, const int line)

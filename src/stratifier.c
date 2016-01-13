@@ -1257,6 +1257,51 @@ share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const 
 	return diff_from_target(hash);
 }
 
+static void send_node_block(sdata_t *sdata, const char *enonce1, const char *nonce,
+			    const char *nonce2, const uint32_t ntime32, const int64_t jobid,
+			    const double diff)
+{
+	stratum_instance_t *client;
+	ckmsg_t *bulk_send = NULL;
+
+	ck_rlock(&sdata->instance_lock);
+	if (sdata->node_instances) {
+		json_t *val = json_object();
+
+		json_set_string(val, "node.method", stratum_msgs[SM_BLOCK]);
+		json_set_string(val, "enonce1", enonce1);
+		json_set_string(val, "nonce", nonce);
+		json_set_string(val, "nonce2", nonce2);
+		json_set_uint32(val, "ntime32", ntime32);
+		json_set_int64(val, "jobid", jobid);
+		json_set_double(val, "diff", diff);
+		DL_FOREACH(sdata->node_instances, client) {
+			ckmsg_t *client_msg;
+			smsg_t *msg;
+			json_t *json_msg = json_deep_copy(val);
+			client_msg = ckalloc(sizeof(ckmsg_t));
+			msg = ckzalloc(sizeof(smsg_t));
+			msg->json_msg = json_msg;
+			msg->client_id = client->id;
+			client_msg->data = msg;
+			DL_APPEND(bulk_send, client_msg);
+		}
+		json_decref(val);
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (bulk_send) {
+		ckmsgq_t *ssends = sdata->ssends;
+
+		LOGNOTICE("Sending block to mining nodes");
+
+		mutex_lock(ssends->lock);
+		DL_CONCAT(ssends->msgs, bulk_send);
+		pthread_cond_signal(ssends->cond);
+		mutex_unlock(ssends->lock);
+	}
+}
+
 static void
 process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const int cblen,
 	      const uchar *data, const uchar *hash, uchar *swap32, char *blockhash)
@@ -1294,6 +1339,8 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 		realloc_strcat(&gbt_block, wb->txn_data);
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
 	free(gbt_block);
+
+
 }
 
 static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
@@ -1302,10 +1349,10 @@ static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 	uchar *enonce1bin = NULL, hash[32], swap[80], swap32[32];
 	char blockhash[68], cdfield[64];
 	int enonce1len, cblen;
+	workbase_t *wb = NULL;
 	ckmsg_t *block_ckmsg;
 	json_t *bval = NULL;
 	uint32_t ntime32;
-	workbase_t *wb;
 	double diff;
 	ts_t ts_now;
 	int64_t id;
@@ -1334,6 +1381,8 @@ static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 		LOGWARNING("Failed to get diff from node method block");
 		goto out;
 	}
+
+	LOGWARNING("Possible upstream block solve diff %f !", diff);
 
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
@@ -1373,7 +1422,7 @@ out_unlock:
 		LOGWARNING("Failed to find workbase with jobid %"PRId64" in node method block", id);
 	else {
 		block_ckmsg = ckalloc(sizeof(ckmsg_t));
-		block_ckmsg->data = bval;
+		block_ckmsg->data = json_deep_copy(bval);
 
 		mutex_lock(&sdata->block_lock);
 		DL_APPEND(sdata->block_solves, block_ckmsg);
@@ -4806,7 +4855,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 static void
 test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uchar *data,
 		const uchar *hash, const double diff, const char *coinbase, int cblen,
-		const char *nonce2, const char *nonce)
+		const char *nonce2, const char *nonce, const uint32_t ntime32)
 {
 	char blockhash[68], cdfield[64];
 	sdata_t *sdata = client->sdata;
@@ -4829,6 +4878,8 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
 	process_block(ckp, wb, coinbase, cblen, data, hash, swap32, blockhash);
+
+	send_node_block(sdata, client->enonce1, nonce, nonce2, ntime32, wb->id, diff);
 
 	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
@@ -4873,7 +4924,7 @@ static double submission_diff(const stratum_instance_t *client, const workbase_t
 	ret = share_diff(coinbase, client->enonce1bin, wb, nonce2, ntime32, nonce, hash, swap, &cblen);
 
 	/* Test we haven't solved a block regardless of share status */
-	test_blocksolve(client, wb, swap, hash, ret, coinbase, cblen, nonce2, nonce);
+	test_blocksolve(client, wb, swap, hash, ret, coinbase, cblen, nonce2, nonce, ntime32);
 
 	free(coinbase);
 
