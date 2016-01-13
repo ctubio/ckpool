@@ -1274,6 +1274,26 @@ out:
 	return ret;
 }
 
+bool json_get_uint32(uint32_t *store, const json_t *val, const char *res)
+{
+	json_t *entry = json_object_get(val, res);
+	bool ret = false;
+
+	if (!entry) {
+		LOGDEBUG("Json did not find entry %s", res);
+		goto out;
+	}
+	if (!json_is_integer(entry)) {
+		LOGWARNING("Json entry %s is not an integer", res);
+		goto out;
+	}
+	*store = json_integer_value(entry);
+	LOGDEBUG("Json found entry %s: %u", res, *store);
+	ret = true;
+out:
+	return ret;
+}
+
 bool json_get_bool(bool *store, const json_t *val, const char *res)
 {
 	json_t *entry = json_object_get(val, res);

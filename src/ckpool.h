@@ -267,6 +267,7 @@ enum stratum_msgtype {
 	SM_PING,
 	SM_WORKINFO,
 	SM_SUGGESTDIFF,
+	SM_BLOCK,
 	SM_NONE
 };
 
@@ -287,6 +288,7 @@ static const char __maybe_unused *stratum_msgs[] = {
 	"ping",
 	"workinfo",
 	"suggestdiff",
+	"block",
 	""
 };
 
@@ -331,6 +333,7 @@ bool json_get_string(char **store, const json_t *val, const char *res);
 bool json_get_int64(int64_t *store, const json_t *val, const char *res);
 bool json_get_int(int *store, const json_t *val, const char *res);
 bool json_get_double(double *store, const json_t *val, const char *res);
+bool json_get_uint32(uint32_t *store, const json_t *val, const char *res);
 bool json_get_bool(bool *store, const json_t *val, const char *res);
 bool json_getdel_int(int *store, json_t *val, const char *res);
 bool json_getdel_int64(int64_t *store, json_t *val, const char *res);

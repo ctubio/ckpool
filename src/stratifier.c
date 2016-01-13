@@ -1202,6 +1202,193 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 }
 
+/* Calculate share diff and fill in hash and swap */
+static double
+share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const char *nonce2,
+	   const uint32_t ntime32, const char *nonce, uchar *hash, uchar *swap, int *cblen)
+{
+	unsigned char merkle_root[32], merkle_sha[64];
+	uint32_t *data32, *swap32, benonce32;
+	uchar hash1[32];
+	char data[80];
+	int i;
+
+	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
+	*cblen = wb->coinb1len;
+	memcpy(coinbase + *cblen, enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
+	*cblen += wb->enonce1constlen + wb->enonce1varlen;
+	hex2bin(coinbase + *cblen, nonce2, wb->enonce2varlen);
+	*cblen += wb->enonce2varlen;
+	memcpy(coinbase + *cblen, wb->coinb2bin, wb->coinb2len);
+	*cblen += wb->coinb2len;
+
+	gen_hash((uchar *)coinbase, merkle_root, *cblen);
+	memcpy(merkle_sha, merkle_root, 32);
+	for (i = 0; i < wb->merkles; i++) {
+		memcpy(merkle_sha + 32, &wb->merklebin[i], 32);
+		gen_hash(merkle_sha, merkle_root, 64);
+		memcpy(merkle_sha, merkle_root, 32);
+	}
+	data32 = (uint32_t *)merkle_sha;
+	swap32 = (uint32_t *)merkle_root;
+	flip_32(swap32, data32);
+
+	/* Copy the cached header binary and insert the merkle root */
+	memcpy(data, wb->headerbin, 80);
+	memcpy(data + 36, merkle_root, 32);
+
+	/* Insert the nonce value into the data */
+	hex2bin(&benonce32, nonce, 4);
+	data32 = (uint32_t *)(data + 64 + 12);
+	*data32 = benonce32;
+
+	/* Insert the ntime value into the data */
+	data32 = (uint32_t *)(data + 68);
+	*data32 = htobe32(ntime32);
+
+	/* Hash the share */
+	data32 = (uint32_t *)data;
+	swap32 = (uint32_t *)swap;
+	flip_80(swap32, data32);
+	sha256(swap, 80, hash1);
+	sha256(hash1, 32, hash);
+
+	/* Calculate the diff of the share here */
+	return diff_from_target(hash);
+}
+
+static void
+process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const int cblen,
+	      const uchar *data, const uchar *hash, uchar *swap32, char *blockhash)
+{
+	int transactions = wb->transactions + 1;
+	char *gbt_block, varint[12];
+	char hexcoinbase[1024];
+
+	gbt_block = ckalloc(1024);
+	flip_32(swap32, hash);
+	__bin2hex(blockhash, swap32, 32);
+
+	/* Message format: "submitblock:hash,data" */
+	sprintf(gbt_block, "submitblock:%s,", blockhash);
+	__bin2hex(gbt_block + 12 + 64 + 1, data, 80);
+	if (transactions < 0xfd) {
+		uint8_t val8 = transactions;
+
+		__bin2hex(varint, (const unsigned char *)&val8, 1);
+	} else if (transactions <= 0xffff) {
+		uint16_t val16 = htole16(transactions);
+
+		strcat(gbt_block, "fd");
+		__bin2hex(varint, (const unsigned char *)&val16, 2);
+	} else {
+		uint32_t val32 = htole32(transactions);
+
+		strcat(gbt_block, "fe");
+		__bin2hex(varint, (const unsigned char *)&val32, 4);
+	}
+	strcat(gbt_block, varint);
+	__bin2hex(hexcoinbase, coinbase, cblen);
+	strcat(gbt_block, hexcoinbase);
+	if (wb->transactions)
+		realloc_strcat(&gbt_block, wb->txn_data);
+	send_generator(ckp, gbt_block, GEN_PRIORITY);
+	free(gbt_block);
+}
+
+static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
+{
+	char *coinbase = NULL, *enonce1 = NULL, *nonce = NULL, *nonce2 = NULL;
+	uchar *enonce1bin = NULL, hash[32], swap[80], swap32[32];
+	char blockhash[68], cdfield[64];
+	int enonce1len, cblen;
+	ckmsg_t *block_ckmsg;
+	json_t *bval = NULL;
+	uint32_t ntime32;
+	workbase_t *wb;
+	double diff;
+	ts_t ts_now;
+	int64_t id;
+
+	if (unlikely(!json_get_string(&enonce1, val, "enonce1"))) {
+		LOGWARNING("Failed to get enonce1 from node method block");
+		goto out;
+	}
+	if (unlikely(!json_get_string(&nonce, val, "nonce"))) {
+		LOGWARNING("Failed to get nonce from node method block");
+		goto out;
+	}
+	if (unlikely(!json_get_string(&nonce2, val, "nonce2"))) {
+		LOGWARNING("Failed to get nonce2 from node method block");
+		goto out;
+	}
+	if (unlikely(!json_get_uint32(&ntime32, val, "ntime32"))) {
+		LOGWARNING("Failed to get ntime32 from node method block");
+		goto out;
+	}
+	if (unlikely(!json_get_int64(&id, val, "jobid"))) {
+		LOGWARNING("Failed to get jobid from node method block");
+		goto out;
+	}
+	if (unlikely(!json_get_double(&diff, val, "diff"))) {
+		LOGWARNING("Failed to get diff from node method block");
+		goto out;
+	}
+
+	ts_realtime(&ts_now);
+	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_FIND_I64(sdata->workbases, &id, wb);
+	if (unlikely(!wb))
+		goto out_unlock;
+	/* Now we have enough to assemble a block */
+	coinbase = ckalloc(wb->coinb1len + wb->enonce1constlen + wb->enonce1varlen + wb->enonce2varlen + wb->coinb2len);
+	enonce1len = wb->enonce1constlen + wb->enonce1varlen;
+	enonce1bin = ckalloc(enonce1len);
+	hex2bin(enonce1bin, enonce1, enonce1len);
+
+	/* Fill in the hashes */
+	share_diff(coinbase, enonce1bin, wb, nonce2, ntime32, nonce, hash, swap, &cblen);
+	process_block(ckp, wb, coinbase, cblen, swap, hash, swap32, blockhash);
+
+	JSON_CPACK(bval, "{si,ss,ss,sI,ss,ss,ss,sI,sf,ss,ss,ss,ss}",
+			 "height", wb->height,
+			 "blockhash", blockhash,
+			 "confirmed", "n",
+			 "workinfoid", wb->id,
+			 "enonce1", enonce1,
+			 "nonce2", nonce2,
+			 "nonce", nonce,
+			 "reward", wb->coinbasevalue,
+			 "diff", diff,
+			 "createdate", cdfield,
+			 "createby", "code",
+			 "createcode", __func__,
+			 "createinet", ckp->serverurl[0]);
+out_unlock:
+	ck_runlock(&sdata->workbase_lock);
+
+	if (unlikely(!wb))
+		LOGWARNING("Failed to find workbase with jobid %"PRId64" in node method block", id);
+	else {
+		block_ckmsg = ckalloc(sizeof(ckmsg_t));
+		block_ckmsg->data = bval;
+
+		mutex_lock(&sdata->block_lock);
+		DL_APPEND(sdata->block_solves, block_ckmsg);
+		mutex_unlock(&sdata->block_lock);
+
+		ckdbq_add(ckp, ID_BLOCK, bval);
+	}
+out:
+	free(enonce1bin);
+	free(coinbase);
+	free(nonce2);
+	free(nonce);
+	free(enonce1);
+}
+
 static void update_base(ckpool_t *ckp, const int prio)
 {
 	struct update_req *ur = ckalloc(sizeof(struct update_req));
@@ -4621,15 +4808,12 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 		const uchar *hash, const double diff, const char *coinbase, int cblen,
 		const char *nonce2, const char *nonce)
 {
-	int transactions = wb->transactions + 1;
-	char hexcoinbase[1024], blockhash[68];
+	char blockhash[68], cdfield[64];
 	sdata_t *sdata = client->sdata;
 	json_t *val = NULL, *val_copy;
-	char *gbt_block, varint[12];
 	ckpool_t *ckp = wb->ckp;
 	ckmsg_t *block_ckmsg;
-	char cdfield[64];
-	uchar swap[32];
+	uchar swap32[32];
 	ts_t ts_now;
 
 	/* Submit anything over 99.9% of the diff in case of rounding errors */
@@ -4644,35 +4828,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
-	gbt_block = ckalloc(1024);
-	flip_32(swap, hash);
-	__bin2hex(blockhash, swap, 32);
-
-	/* Message format: "submitblock:hash,data" */
-	sprintf(gbt_block, "submitblock:%s,", blockhash);
-	__bin2hex(gbt_block + 12 + 64 + 1, data, 80);
-	if (transactions < 0xfd) {
-		uint8_t val8 = transactions;
-
-		__bin2hex(varint, (const unsigned char *)&val8, 1);
-	} else if (transactions <= 0xffff) {
-		uint16_t val16 = htole16(transactions);
-
-		strcat(gbt_block, "fd");
-		__bin2hex(varint, (const unsigned char *)&val16, 2);
-	} else {
-		uint32_t val32 = htole32(transactions);
-
-		strcat(gbt_block, "fe");
-		__bin2hex(varint, (const unsigned char *)&val32, 4);
-	}
-	strcat(gbt_block, varint);
-	__bin2hex(hexcoinbase, coinbase, cblen);
-	strcat(gbt_block, hexcoinbase);
-	if (wb->transactions)
-		realloc_strcat(&gbt_block, wb->txn_data);
-	send_generator(ckp, gbt_block, GEN_PRIORITY);
-	free(gbt_block);
+	process_block(ckp, wb, coinbase, cblen, data, hash, swap32, blockhash);
 
 	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
@@ -4700,61 +4856,6 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	mutex_unlock(&sdata->block_lock);
 
 	ckdbq_add(ckp, ID_BLOCK, val);
-}
-
-/* Calculate share diff and fill in hash and swap */
-static double
-share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const char *nonce2,
-	   const uint32_t ntime32, const char *nonce, uchar *hash, uchar *swap, int *cblen)
-{
-	unsigned char merkle_root[32], merkle_sha[64];
-	uint32_t *data32, *swap32, benonce32;
-	uchar hash1[32];
-	char data[80];
-	int i;
-
-	memcpy(coinbase, wb->coinb1bin, wb->coinb1len);
-	*cblen = wb->coinb1len;
-	memcpy(coinbase + *cblen, enonce1bin, wb->enonce1constlen + wb->enonce1varlen);
-	*cblen += wb->enonce1constlen + wb->enonce1varlen;
-	hex2bin(coinbase + *cblen, nonce2, wb->enonce2varlen);
-	*cblen += wb->enonce2varlen;
-	memcpy(coinbase + *cblen, wb->coinb2bin, wb->coinb2len);
-	*cblen += wb->coinb2len;
-
-	gen_hash((uchar *)coinbase, merkle_root, *cblen);
-	memcpy(merkle_sha, merkle_root, 32);
-	for (i = 0; i < wb->merkles; i++) {
-		memcpy(merkle_sha + 32, &wb->merklebin[i], 32);
-		gen_hash(merkle_sha, merkle_root, 64);
-		memcpy(merkle_sha, merkle_root, 32);
-	}
-	data32 = (uint32_t *)merkle_sha;
-	swap32 = (uint32_t *)merkle_root;
-	flip_32(swap32, data32);
-
-	/* Copy the cached header binary and insert the merkle root */
-	memcpy(data, wb->headerbin, 80);
-	memcpy(data + 36, merkle_root, 32);
-
-	/* Insert the nonce value into the data */
-	hex2bin(&benonce32, nonce, 4);
-	data32 = (uint32_t *)(data + 64 + 12);
-	*data32 = benonce32;
-
-	/* Insert the ntime value into the data */
-	data32 = (uint32_t *)(data + 68);
-	*data32 = htobe32(ntime32);
-
-	/* Hash the share */
-	data32 = (uint32_t *)data;
-	swap32 = (uint32_t *)swap;
-	flip_80(swap32, data32);
-	sha256(swap, 80, hash1);
-	sha256(hash1, 32, hash);
-
-	/* Calculate the diff of the share here */
-	return diff_from_target(hash);
 }
 
 /* Needs to be entered with client holding a ref count. */
@@ -5711,7 +5812,7 @@ static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum
 	}
 }
 
-static void parse_node_msg(ckpool_t *ckp, json_t *val, const char *buf)
+static void parse_node_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
 {
 	int msg_type = node_msg_type(val);
 
@@ -5723,6 +5824,9 @@ static void parse_node_msg(ckpool_t *ckp, json_t *val, const char *buf)
 	switch (msg_type) {
 		case SM_WORKINFO:
 			add_node_base(ckp, val);
+			break;
+		case SM_BLOCK:
+			submit_node_block(ckp, sdata, val);
 			break;
 		default:
 			break;
@@ -5804,7 +5908,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	val = json_object_get(msg->json_msg, "client_id");
 	if (unlikely(!val)) {
 		if (ckp->node)
-			parse_node_msg(ckp, msg->json_msg, buf);
+			parse_node_msg(ckp, sdata, msg->json_msg, buf);
 		else
 			LOGWARNING("Failed to extract client_id from connector json smsg %s", buf);
 		json_decref(msg->json_msg);
