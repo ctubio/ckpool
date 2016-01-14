@@ -1262,13 +1262,27 @@ share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const 
 	return diff_from_target(hash);
 }
 
+/* passthrough subclients have client_ids in the high bits */
+static inline bool passthrough_subclient(const int64_t client_id)
+{
+	return (client_id > 0xffffffffll);
+}
+
 /* Note recursive lock here - entered with workbase lock held, grabs instance lock */
 static void send_node_block(sdata_t *sdata, const char *enonce1, const char *nonce,
 			    const char *nonce2, const uint32_t ntime32, const int64_t jobid,
-			    const double diff)
+			    const double diff, const int64_t client_id)
 {
 	stratum_instance_t *client;
 	ckmsg_t *bulk_send = NULL;
+	int64_t skip;
+
+	/* Don't send the block back to a remote node if that's where it was
+	 * found. */
+	if (passthrough_subclient(client_id))
+		skip = client_id >> 32;
+	else
+		skip = 0;
 
 	ck_rlock(&sdata->instance_lock);
 	if (sdata->node_instances) {
@@ -1283,8 +1297,12 @@ static void send_node_block(sdata_t *sdata, const char *enonce1, const char *non
 		json_set_double(val, "diff", diff);
 		DL_FOREACH(sdata->node_instances, client) {
 			ckmsg_t *client_msg;
+			json_t *json_msg;
 			smsg_t *msg;
-			json_t *json_msg = json_deep_copy(val);
+
+			if (client->id == skip)
+				continue;
+			json_msg = json_deep_copy(val);
 			client_msg = ckalloc(sizeof(ckmsg_t));
 			msg = ckzalloc(sizeof(smsg_t));
 			msg->json_msg = json_msg;
@@ -2436,12 +2454,6 @@ static stratum_instance_t *__recruit_stratum_instance(sdata_t *sdata)
 		sdata->stratum_generated++;
 	}
 	return client;
-}
-
-/* passthrough subclients have client_ids in the high bits */
-static inline bool passthrough_subclient(const int64_t client_id)
-{
-	return (client_id > 0xffffffffll);
 }
 
 /* Enter with write instance_lock held */
@@ -4896,7 +4908,8 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 
 	process_block(ckp, wb, coinbase, cblen, data, hash, swap32, blockhash);
 
-	send_node_block(sdata, client->enonce1, nonce, nonce2, ntime32, wb->id, diff);
+	send_node_block(sdata, client->enonce1, nonce, nonce2, ntime32, wb->id,
+			diff, client->id);
 
 	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
 			"height", wb->height,
