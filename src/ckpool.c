@@ -554,7 +554,7 @@ static void add_buflen(connsock_t *cs, const char *readbuf, const int len)
 }
 
 /* Receive as much data is currently available without blocking into a connsock
- * buffer. Returns length of read on success, -1 on failure */
+ * buffer. Returns total length of data read. */
 static int recv_available(connsock_t *cs)
 {
 	char readbuf[PAGESIZE];
@@ -565,8 +565,7 @@ static int recv_available(connsock_t *cs)
 		if (ret > 0) {
 			add_buflen(cs, readbuf, ret);
 			len += ret;
-		} else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			ret = 0;
+		}
 	} while (ret > 0);
 
 	return len;
@@ -586,14 +585,8 @@ int read_socket_line(connsock_t *cs, float *timeout)
 	int ret;
 
 	clear_bufline(cs);
-	ret = recv_available(cs);
+	recv_available(cs); // Intentionally ignore return value
 	eom = strchr(cs->buf, '\n');
-	if (unlikely((ret == -1 || cs->fd == -1) && !eom)) {
-		if (proxy)
-			LOGINFO("Failed to receive data in read_socket_line");
-		else
-			LOGERR("Failed to receive data in read_socket_line");
-	}
 
 	tv_time(&start);
 
