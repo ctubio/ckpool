@@ -550,31 +550,56 @@ static void add_buflen(connsock_t *cs, const char *readbuf, const int len)
 	cs->buf[cs->bufofs] = '\0';
 }
 
+/* Receive as much data is currently available without blocking into a connsock
+ * buffer. Returns length of read on success, -1 on failure */
+static int recv_available(connsock_t *cs)
+{
+	char readbuf[PAGESIZE];
+	int len = 0, ret;
+
+	do {
+		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
+		if (ret > 0) {
+			add_buflen(cs, readbuf, ret);
+			len += ret;
+		} else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			ret = 0;
+	} while (ret > 0);
+
+	return len;
+}
+
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. */
 int read_socket_line(connsock_t *cs, float *timeout)
 {
+	bool proxy = cs->ckp->proxy;
 	char *eom = NULL;
 	tv_t start, now;
-	int ret = -1;
 	float diff;
+	int ret;
 
 	clear_bufline(cs);
+	ret = recv_available(cs);
 	eom = strchr(cs->buf, '\n');
+	if (unlikely((ret == -1 || cs->fd == -1) && !eom)) {
+		if (proxy)
+			LOGINFO("Failed to receive data in read_socket_line");
+		else
+			LOGERR("Failed to receive data in read_socket_line");
+	}
 
 	tv_time(&start);
 
 	while (!eom) {
-		char readbuf[PAGESIZE];
-
 		if (unlikely(cs->fd < 0)) {
 			ret = -1;
 			goto out;
 		}
 
 		if (*timeout < 0) {
-			if (cs->ckp->proxy)
+			if (proxy)
 				LOGINFO("Timed out in read_socket_line");
 			else
 				LOGERR("Timed out in read_socket_line");
@@ -583,25 +608,24 @@ int read_socket_line(connsock_t *cs, float *timeout)
 		}
 		ret = wait_read_select(cs->fd, *timeout);
 		if (ret < 1) {
-			if (cs->ckp->proxy)
+			if (proxy)
 				LOGINFO("Select %s in read_socket_line", !ret ? "timed out" : "failed");
 			else
 				LOGERR("Select %s in read_socket_line", !ret ? "timed out" : "failed");
 			goto out;
 		}
-		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
+		ret = recv_available(cs);
 		if (ret < 1) {
 			/* If we have done wait_read_select there should be
 			 * something to read and if we get nothing it means the
 			 * socket is closed. */
-			if (cs->ckp->proxy)
+			if (proxy)
 				LOGINFO("Failed to recv in read_socket_line");
 			else
 				LOGERR("Failed to recv in read_socket_line");
 			ret = -1;
 			goto out;
 		}
-		add_buflen(cs, readbuf, ret);
 		eom = strchr(cs->buf, '\n');
 		tv_time(&now);
 		diff = tvdiff(&now, &start);
