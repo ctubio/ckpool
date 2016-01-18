@@ -986,7 +986,7 @@ static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 	send_client(cdata, client->id, buf);
 }
 
-static void remote_server(cdata_t *cdata, client_instance_t *client)
+static void remote_server(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
 {
 	char *buf;
 
@@ -995,6 +995,8 @@ static void remote_server(cdata_t *cdata, client_instance_t *client)
 	client->remote = true;
 	ASPRINTF(&buf, "{\"result\": true}\n");
 	send_client(cdata, client->id, buf);
+	if (!ckp->rmem_warn)
+		set_recvbufsize(ckp, client->fd, 1048576);
 }
 
 static bool connect_upstream(ckpool_t *ckp, connsock_t *cs)
@@ -1321,7 +1323,7 @@ retry:
 			LOGINFO("Connector failed to find client id %"PRId64" to add as remote", client_id);
 			goto retry;
 		}
-		remote_server(cdata, client);
+		remote_server(ckp, cdata, client);
 		dec_instance_ref(cdata, client);
 	} else if (cmdmatch(buf, "getxfd")) {
 		int fdno = -1;
