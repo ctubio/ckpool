@@ -82,7 +82,7 @@ struct connsock {
 	int buflen;
 	int bufsize;
 	int rcvbufsiz;
-	bool rcvbufsiz_setfail;
+	int sendbufsiz;
 
 	ckpool_t *ckp;
 	/* Semaphore used to serialise request/responses */
