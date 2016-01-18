@@ -976,7 +976,7 @@ static bool client_exists(cdata_t *cdata, const int64_t id)
 	return !!client;
 }
 
-static void passthrough_client(cdata_t *cdata, client_instance_t *client)
+static void passthrough_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
 {
 	char *buf;
 
@@ -984,6 +984,10 @@ static void passthrough_client(cdata_t *cdata, client_instance_t *client)
 	client->passthrough = true;
 	ASPRINTF(&buf, "{\"result\": true}\n");
 	send_client(cdata, client->id, buf);
+	if (!ckp->rmem_warn)
+		set_recvbufsize(ckp, client->fd, 1048576);
+	if (!ckp->wmem_warn)
+		set_sendbufsize(ckp, client->fd, 1048576);
 }
 
 static void remote_server(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
@@ -1308,7 +1312,7 @@ retry:
 			LOGINFO("Connector failed to find client id %"PRId64" to pass through", client_id);
 			goto retry;
 		}
-		passthrough_client(cdata, client);
+		passthrough_client(ckp, cdata, client);
 		dec_instance_ref(cdata, client);
 	} else if (cmdmatch(buf, "remote")) {
 		client_instance_t *client;
