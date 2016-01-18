@@ -156,9 +156,6 @@ struct connector_data {
 	/* Pending sends to the upstream server */
 	ckmsgq_t *upstream_sends;
 	connsock_t upstream_cs;
-
-	/* Have we given the warning about inability to raise sendbuf size */
-	bool wmem_warn;
 };
 
 typedef struct connector_data cdata_t;
@@ -681,32 +678,8 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 
 	/* Increase sendbufsize to match large messages sent to clients - this
 	 * usually only applies to clients as mining nodes. */
-	if (unlikely(sender_send->len > client->sendbufsize && !cdata->wmem_warn)) {
-		int opt, len = sender_send->len;
-		socklen_t optlen;
-
-		optlen = sizeof(opt);
-		opt = len * 4 / 3;
-		setsockopt(client->fd, SOL_SOCKET, SO_SNDBUF, &opt, optlen);
-		getsockopt(client->fd, SOL_SOCKET, SO_SNDBUF, &opt, &optlen);
-		opt /= 2;
-		if (opt < len) {
-			LOGDEBUG("Failed to set desired sendbufsize of %d unprivileged, only got %d",
-				 len, opt);
-			optlen = sizeof(opt);
-			opt = len * 4 / 3;
-			setsockopt(client->fd, SOL_SOCKET, SO_SNDBUFFORCE, &opt, optlen);
-			getsockopt(client->fd, SOL_SOCKET, SO_SNDBUF, &opt, &optlen);
-			opt /= 2;
-		}
-		client->sendbufsize = opt;
-		if (opt < len) {
-			LOGWARNING("Failed to increase sendbufsize to %d, increase wmem_max or start %s privileged",
-				   len, ckp->name);
-			cdata->wmem_warn = true;
-		} else
-			LOGDEBUG("Increased sendbufsize to %d of desired %d", opt, len);
-	}
+	if (unlikely(!ckp->wmem_warn && sender_send->len > client->sendbufsize))
+		client->sendbufsize = set_sendbufsize(ckp, client->fd, sender_send->len);
 
 	while (sender_send->len) {
 		int ret = write(client->fd, sender_send->buf + sender_send->ofs, sender_send->len);

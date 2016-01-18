@@ -209,6 +209,10 @@ struct ckpool_instance {
 	/* Should we daemonise the ckpool process */
 	bool daemon;
 
+	/* Have we given warnings about the inability to raise buf sizes */
+	bool wmem_warn;
+	bool rmem_warn;
+
 	/* Bitcoind data */
 	int btcds;
 	char **btcdurl;
@@ -316,6 +320,8 @@ ckpool_t *global_ckp;
 
 bool ping_main(ckpool_t *ckp);
 void empty_buffer(connsock_t *cs);
+int set_sendbufsize(ckpool_t *ckp, const int fd, const int len);
+int set_recvbufsize(ckpool_t *ckp, const int fd, const int len);
 int read_socket_line(connsock_t *cs, float *timeout);
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
 #define send_proc(pi, msg) _send_proc(pi, msg, __FILE__, __func__, __LINE__)

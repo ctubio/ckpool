@@ -512,6 +512,62 @@ void empty_buffer(connsock_t *cs)
 	cs->buflen = cs->bufofs = 0;
 }
 
+int set_sendbufsize(ckpool_t *ckp, const int fd, const int len)
+{
+	socklen_t optlen;
+	int opt;
+
+	optlen = sizeof(opt);
+	opt = len * 4 / 3;
+	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &opt, optlen);
+	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &opt, &optlen);
+	opt /= 2;
+	if (opt < len) {
+		LOGDEBUG("Failed to set desired sendbufsize of %d unprivileged, only got %d",
+			 len, opt);
+		optlen = sizeof(opt);
+		opt = len * 4 / 3;
+		setsockopt(fd, SOL_SOCKET, SO_SNDBUFFORCE, &opt, optlen);
+		getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &opt, &optlen);
+		opt /= 2;
+	}
+	if (opt < len) {
+		LOGWARNING("Failed to increase sendbufsize to %d, increase wmem_max or start %s privileged",
+			   len, ckp->name);
+		ckp->wmem_warn = true;
+	} else
+		LOGDEBUG("Increased sendbufsize to %d of desired %d", opt, len);
+	return opt;
+}
+
+int set_recvbufsize(ckpool_t *ckp, const int fd, const int len)
+{
+	socklen_t optlen;
+	int opt;
+
+	optlen = sizeof(opt);
+	opt = len * 4 / 3;
+	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &opt, optlen);
+	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &opt, &optlen);
+	opt /= 2;
+	if (opt < len) {
+		LOGDEBUG("Failed to set desired rcvbufsiz of %d unprivileged, only got %d",
+			 len, opt);
+		optlen = sizeof(opt);
+		opt = len * 4 / 3;
+		setsockopt(fd, SOL_SOCKET, SO_RCVBUFFORCE, &opt, optlen);
+		getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &opt, &optlen);
+		opt /= 2;
+	}
+	if (opt < len) {
+		LOGWARNING("Failed to increase rcvbufsiz to %d, increase rmem_max or start %s privileged",
+			   len, ckp->name);
+		ckp->rmem_warn = true;
+	} else
+		LOGDEBUG("Increased rcvbufsiz to %d of desired %d", opt, len);
+	return opt;
+}
+
 /* If there is any cs->buflen it implies a full line was received on the last
  * pass through read_socket_line and subsequently processed, leaving
  * unprocessed data beyond cs->bufofs. Otherwise a zero buflen means there is
@@ -535,7 +591,7 @@ static void clear_bufline(connsock_t *cs)
 	}
 }
 
-static void add_buflen(connsock_t *cs, const char *readbuf, const int len)
+static void add_buflen(ckpool_t *ckp, connsock_t *cs, const char *readbuf, const int len)
 {
 	int backoff = 1;
 	int buflen;
@@ -556,32 +612,9 @@ static void add_buflen(connsock_t *cs, const char *readbuf, const int len)
 	}
 	/* Increase receive buffer if possible to larger than the largest
 	 * message we're likely to buffer */
-	if (buflen > cs->rcvbufsiz && !cs->rcvbufsiz_setfail) {
-		socklen_t optlen;
-		int opt;
+	if (unlikely(!ckp->rmem_warn && buflen > cs->rcvbufsiz))
+		cs->rcvbufsiz = set_recvbufsize(ckp, cs->fd, buflen);
 
-		optlen = sizeof(opt);
-		opt = buflen * 4 / 3;
-		setsockopt(cs->fd, SOL_SOCKET, SO_RCVBUF, &opt, optlen);
-		getsockopt(cs->fd, SOL_SOCKET, SO_RCVBUF, &opt, &optlen);
-		opt /= 2;
-		if (opt < buflen) {
-			LOGDEBUG("Failed to set desired rcvbufsiz of %d unprivileged, only got %d",
-				 buflen, opt);
-			optlen = sizeof(opt);
-			opt = buflen * 4 / 3;
-			setsockopt(cs->fd, SOL_SOCKET, SO_RCVBUFFORCE, &opt, optlen);
-			getsockopt(cs->fd, SOL_SOCKET, SO_RCVBUF, &opt, &optlen);
-			opt /= 2;
-		}
-		cs->rcvbufsiz = opt;
-		if (opt < buflen) {
-			LOGWARNING("Failed to increase rcvbufsiz to %d, increase rmem_max or start %s privileged",
-				   buflen, cs->ckp->name);
-			cs->rcvbufsiz_setfail = true;
-		} else
-			LOGDEBUG("Increased rcvbufsiz to %d of desired %d", opt, buflen);
-	}
 	memcpy(cs->buf + cs->bufofs, readbuf, len);
 	cs->bufofs += len;
 	cs->buf[cs->bufofs] = '\0';
@@ -589,7 +622,7 @@ static void add_buflen(connsock_t *cs, const char *readbuf, const int len)
 
 /* Receive as much data is currently available without blocking into a connsock
  * buffer. Returns total length of data read. */
-static int recv_available(connsock_t *cs)
+static int recv_available(ckpool_t *ckp, connsock_t *cs)
 {
 	char readbuf[PAGESIZE];
 	int len = 0, ret;
@@ -597,7 +630,7 @@ static int recv_available(connsock_t *cs)
 	do {
 		ret = recv(cs->fd, readbuf, PAGESIZE - 4, MSG_DONTWAIT);
 		if (ret > 0) {
-			add_buflen(cs, readbuf, ret);
+			add_buflen(ckp, cs, readbuf, ret);
 			len += ret;
 		}
 	} while (ret > 0);
@@ -612,14 +645,15 @@ static int recv_available(connsock_t *cs)
  * and -1 on error. */
 int read_socket_line(connsock_t *cs, float *timeout)
 {
-	bool proxy = cs->ckp->proxy;
+	ckpool_t *ckp = cs->ckp;
+	bool proxy = ckp->proxy;
 	char *eom = NULL;
 	tv_t start, now;
 	float diff;
 	int ret;
 
 	clear_bufline(cs);
-	recv_available(cs); // Intentionally ignore return value
+	recv_available(ckp, cs); // Intentionally ignore return value
 	eom = strchr(cs->buf, '\n');
 
 	tv_time(&start);
@@ -646,7 +680,7 @@ int read_socket_line(connsock_t *cs, float *timeout)
 				LOGERR("Select %s in read_socket_line", !ret ? "timed out" : "failed");
 			goto out;
 		}
-		ret = recv_available(cs);
+		ret = recv_available(ckp, cs);
 		if (ret < 1) {
 			/* If we have done wait_read_select there should be
 			 * something to read and if we get nothing it means the
