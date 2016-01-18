@@ -997,7 +997,7 @@ static void remote_server(cdata_t *cdata, client_instance_t *client)
 	send_client(cdata, client->id, buf);
 }
 
-static bool connect_upstream(connsock_t *cs)
+static bool connect_upstream(ckpool_t *ckp, connsock_t *cs)
 {
 	json_t *req, *val = NULL, *res_val, *err_val;
 	bool res, ret = false;
@@ -1009,6 +1009,10 @@ static bool connect_upstream(connsock_t *cs)
 		goto out;
 	}
 	keep_sockalive(cs->fd);
+
+	/* We want large send buffers for upstreaming messages */
+	if (!ckp->wmem_warn)
+		cs->sendbufsiz = set_sendbufsize(ckp, cs->fd, 1048576);
 
 	JSON_CPACK(req, "{ss,s[s]}",
 			"method", "mining.remote",
@@ -1062,7 +1066,7 @@ static void usend_process(ckpool_t *ckp, char *buf)
 		}
 		do
 			sleep(5);
-		while (!connect_upstream(cs));
+		while (!connect_upstream(ckp, cs));
 	}
 out:
 	free(buf);
@@ -1084,7 +1088,7 @@ static bool setup_upstream(ckpool_t *ckp, cdata_t *cdata)
 	}
 
 	/* Must succeed on initial connect to upstream pool */
-	if (!connect_upstream(cs)) {
+	if (!connect_upstream(ckp, cs)) {
 		LOGEMERG("Failed initial connect to upstream server %s:%s", cs->url, cs->port);
 		goto out;
 	}
