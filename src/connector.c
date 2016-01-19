@@ -987,7 +987,7 @@ static void passthrough_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t 
 	if (!ckp->rmem_warn)
 		set_recvbufsize(ckp, client->fd, 1048576);
 	if (!ckp->wmem_warn)
-		set_sendbufsize(ckp, client->fd, 1048576);
+		client->sendbufsize = set_sendbufsize(ckp, client->fd, 1048576);
 }
 
 static void remote_server(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client)
