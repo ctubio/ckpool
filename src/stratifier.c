@@ -465,6 +465,7 @@ struct stratifier_data {
 	ckmsgq_t *sshareq;	// Stratum share sends
 	ckmsgq_t *sauthq;	// Stratum authorisations
 	ckmsgq_t *stxnq;	// Transaction requests
+	ckmsg_t *postponed;	// List of messages postponed till next update
 
 	int user_instance_id;
 
@@ -824,6 +825,32 @@ static void ssend_bulk_prepend(sdata_t *sdata, ckmsg_t *bulk_send, const int mes
 	mutex_unlock(ssends->lock);
 }
 
+/* List of messages we intentionally want to postpone till after the next bulk
+ * update - eg. workinfo which is large and we don't want to delay updates */
+static void ssend_bulk_postpone(sdata_t *sdata, ckmsg_t *bulk_send, const int messages)
+{
+	ckmsgq_t *ssends = sdata->ssends;
+
+	mutex_lock(ssends->lock);
+	DL_CONCAT(sdata->postponed, bulk_send);
+	ssends->messages += messages;
+	mutex_unlock(ssends->lock);
+}
+
+/* Send any postponed bulk messages */
+static void send_postponed(sdata_t *sdata)
+{
+	ckmsgq_t *ssends = sdata->ssends;
+
+	mutex_lock(ssends->lock);
+	if (sdata->postponed) {
+		DL_CONCAT(ssends->msgs, sdata->postponed);
+		sdata->postponed = NULL;
+		pthread_cond_signal(ssends->cond);
+	}
+	mutex_unlock(ssends->lock);
+}
+
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
 			     const int msg_type);
 
@@ -880,9 +907,15 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 	}
 	ck_runlock(&sdata->instance_lock);
 
+	/* We send workinfo postponed till after the stratum updates are sent
+	 * out to minimise any lag seen by clients getting updates. It means
+	 * the remote node will know about the block change later which will
+	 * make it think clients are sending invalid shares (which won't count)
+	 * and potentially not be able to submit a block locally if it doesn't
+	 * have the workinfo in time. */
 	if (bulk_send) {
 		LOGINFO("Sending workinfo to mining nodes");
-		ssend_bulk_append(sdata, bulk_send, messages);
+		ssend_bulk_postpone(sdata, bulk_send, messages);
 	}
 }
 
@@ -2623,10 +2656,10 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 
 	json_decref(val);
 
-	if (!bulk_send)
-		return;
-
-	ssend_bulk_append(sdata, bulk_send, messages);
+	if (likely(bulk_send))
+		ssend_bulk_append(sdata, bulk_send, messages);
+	if (msg_type == SM_UPDATE)
+		send_postponed(sdata);
 }
 
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
