@@ -2131,6 +2131,17 @@ int main(int argc, char **argv)
 	launch_logger(&ckp.main);
 	ckp.logfd = fileno(ckp.logfp);
 
+	ret = sysconf(_SC_OPEN_MAX);
+	if (ckp.maxclients > ret * 9 / 10) {
+		LOGWARNING("Cannot set maxclients to %d due to max open file limit of %d, reducing to %d",
+			   ckp.maxclients, ret, ret * 9 / 10);
+		ckp.maxclients = ret * 9 / 10;
+	} else if (!ckp.maxclients) {
+		LOGNOTICE("Setting maxclients to %d due to max open file limit of %d",
+			  ret * 9 / 10, ret);
+		ckp.maxclients = ret * 9 / 10;
+	}
+
 	ckp.ckpapi = create_ckmsgq(&ckp, "api", &ckpool_api);
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
