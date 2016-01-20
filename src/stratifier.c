@@ -5331,21 +5331,22 @@ out:
 	}
 
 	if (!share) {
-		val = json_object();
-		json_set_int(val, "clientid", client->id);
-		if (!CKP_STANDALONE(ckp))
+		if (!CKP_STANDALONE(ckp)) {
+			val = json_object();
+			json_set_int(val, "clientid", client->id);
 			json_set_string(val, "secondaryuserid", user->secondaryuserid);
-		json_set_string(val, "enonce1", client->enonce1);
-		json_set_int(val, "workinfoid", sdata->current_workbase->id);
-		json_set_string(val, "workername", client->workername);
-		json_set_string(val, "username", user->username);
-		json_object_set(val, "error", *err_val);
-		json_set_int(val, "errn", err);
-		json_set_string(val, "createdate", cdfield);
-		json_set_string(val, "createby", "code");
-		json_set_string(val, "createcode", __func__);
-		json_set_string(val, "createinet", ckp->serverurl[client->server]);
-		ckdbq_add(ckp, ID_SHAREERR, val);
+			json_set_string(val, "enonce1", client->enonce1);
+			json_set_int(val, "workinfoid", sdata->current_workbase->id);
+			json_set_string(val, "workername", client->workername);
+			json_set_string(val, "username", user->username);
+			json_object_set(val, "error", *err_val);
+			json_set_int(val, "errn", err);
+			json_set_string(val, "createdate", cdfield);
+			json_set_string(val, "createby", "code");
+			json_set_string(val, "createcode", __func__);
+			json_set_string(val, "createinet", ckp->serverurl[client->server]);
+			ckdbq_add(ckp, ID_SHAREERR, val);
+		}
 		LOGINFO("Invalid share from client %"PRId64": %s", client->id, client->workername);
 	}
 	free(fname);
