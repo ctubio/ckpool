@@ -5602,7 +5602,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 
 		/* Add this client as a trusted remote node in the connector and
 		 * drop the client in the stratifier */
-		if (!ckp->trusted[client->server]) {
+		if (!ckp->trusted[client->server] || ckp->proxy) {
 			LOGNOTICE("Dropping client %"PRId64" %s trying to authorise as remote node on non trusted server %d",
 				  client_id, client->address, client->server);
 			connector_drop_client(ckp, client_id);
@@ -5619,7 +5619,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 
 		/* Add this client as a passthrough in the connector and
 		 * add it to the list of mining nodes in the stratifier */
-		if (!ckp->nodeserver[client->server]) {
+		if (!ckp->nodeserver[client->server] || ckp->proxy) {
 			LOGNOTICE("Dropping client %"PRId64" %s trying to authorise as node on non node server %d",
 				  client_id, client->address, client->server);
 			connector_drop_client(ckp, client_id);
@@ -5635,14 +5635,21 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
 		char buf[256];
 
-		/* We need to inform the connector process that this client
-		 * is a passthrough and to manage its messages accordingly. No
-		 * data from this client id should ever come back to this
-		 * stratifier after this so drop the client in the stratifier. */
-		LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
-		snprintf(buf, 255, "passthrough=%"PRId64, client_id);
-		send_proc(ckp->connector, buf);
-		drop_client(ckp, sdata, client_id);
+		if (ckp->proxy) {
+			LOGNOTICE("Dropping client %"PRId64" %s trying to connect as passthrough on proxy server %d",
+				  client_id, client->address, client->server);
+			connector_drop_client(ckp, client_id);
+			drop_client(ckp, sdata, client_id);
+		} else {
+			/* We need to inform the connector process that this client
+			 * is a passthrough and to manage its messages accordingly. No
+			 * data from this client id should ever come back to this
+			 * stratifier after this so drop the client in the stratifier. */
+			LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
+			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
+			send_proc(ckp->connector, buf);
+			drop_client(ckp, sdata, client_id);
+		}
 		return;
 	}
 
