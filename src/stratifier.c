@@ -4828,9 +4828,6 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	} else if (!submit)
 		return;
 
-	if (ckp->node)
-		return;
-
 	tv_time(&now_t);
 
 	ck_rlock(&sdata->workbase_lock);
@@ -4856,6 +4853,11 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	decay_user(user, diff, &now_t);
 	copy_tv(&user->last_share, &now_t);
 	client->idle = false;
+
+	/* Once we've updated user/client statistics in node mode, we can't
+	 * alter diff ourselves. */
+	if (ckp->node)
+		return;
 
 	client->ssdc++;
 	bdiff = sane_tdiff(&now_t, &client->first_share);
