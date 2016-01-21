@@ -5750,10 +5750,16 @@ static void parse_subscribe_result(stratum_instance_t *client, json_t *val)
 	LOGINFO("Client %"PRId64" got enonce1 %lx string %s", client->id, client->enonce1_64, client->enonce1);
 }
 
-static void parse_authorise_result(stratum_instance_t *client, json_t *val)
+static void parse_authorise_result(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client,
+				   json_t *val)
 {
-	client->authorised = json_is_true(val);
-	LOGDEBUG("Client %"PRId64" is %sauthorised", client->id, client->authorised ? "" : "not ");
+	if (!json_is_true(val)) {
+		LOGNOTICE("Client %"PRId64" was not authorised upstream, dropping", client->id);
+		client->authorised = false;
+		connector_drop_client(ckp, client->id);
+		drop_client(ckp, sdata, client->id);
+	} else
+		LOGINFO("Client %"PRId64" was authorised upstream", client->id);
 }
 
 static int node_msg_type(json_t *val)
@@ -5975,7 +5981,7 @@ static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum
 			parse_authorise(client, params, &err_val, &errnum);
 			break;
 		case SM_AUTHRESULT:
-			parse_authorise_result(client, res_val);
+			parse_authorise_result(ckp, sdata, client, res_val);
 			break;
 		default:
 			break;
