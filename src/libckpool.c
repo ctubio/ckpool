@@ -1318,7 +1318,7 @@ void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *fi
 	msglen = le32toh(*lenptr);
 
 	/* Add $key+length+bin */
-	newlen = len + BKEY_LENLEN + hlen;
+	newlen = len + msglen + hlen;
 	*bkey = realloc(*bkey, round_up_page(newlen));
 
 	/* Append keyname */
