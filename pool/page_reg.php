@@ -35,7 +35,7 @@ Your miner password should be '<b>x</b>' and <b>must not</b> use your login pass
 
  $pg .= '<h1>Login</h1>';
  if (isset($data['data']['error']) && !isset($_POST['pass2']))
-	$pg .= "<br><b style='color:red'>".$data['data']['error']." - please try again</b><br><br>";
+	$pg .= "<br><span class=err>".$data['data']['error']." - please try again</span><br><br>";
  $pg .= makeForm('');
  $pg .= "
 <table>
@@ -56,7 +56,7 @@ Your miner password should be '<b>x</b>' and <b>must not</b> use your login pass
 
  $pg .= '<h1>Register</h1>';
  if (isset($data['data']['error']) && isset($_POST['pass2']))
-	$pg .= "<br><b style='color:red'>".$data['data']['error']." - please try again</b><br><br>";
+	$pg .= "<br><span class=err>".$data['data']['error']." - please try again</span><br><br>";
  $pg .= makeForm('');
  $pg .= "
 <table>
