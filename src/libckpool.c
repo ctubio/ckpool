@@ -1251,14 +1251,32 @@ out:
 }
 
 
+/* Bkey structure:
+ * "bkey\n\0"
+ * 32 bit LE encoded bkey length
+ * "$keyname\0"
+ * 32 bit LE encoded key length
+ * binary data for key
+ * append further key:len:data combinations
+ */
+
+#define BKEY_LENOFS 6
+#define BKEY_LENLEN 4
+
+static inline uint32_t *bkey_lenptr(char *bkey)
+{
+	return (uint32_t *)(bkey + BKEY_LENOFS);
+}
+
 /* Create an empty binary key object */
 char *bkey_object(void)
 {
-	char *bkey = ckzalloc(PAGESIZE);
+	char *bkey = ckalloc(PAGESIZE);
 	uint32_t *lenptr;
 
-	lenptr = (uint32_t *)bkey;
-	*lenptr = htole32(4);
+	sprintf(bkey, "bkey\n");
+	lenptr = bkey_lenptr(bkey);
+	*lenptr = htole32(BKEY_LENOFS + BKEY_LENLEN);
 	return bkey;
 }
 
@@ -1289,11 +1307,11 @@ void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *fi
 	len += 1;
 
 	/* Get current message length */
-	lenptr = (uint32_t *)*bkey;
+	lenptr = bkey_lenptr(*bkey);
 	msglen = le32toh(*lenptr);
 
 	/* Add $key+length+bin */
-	newlen = len + 4 + hlen;
+	newlen = len + BKEY_LENLEN + hlen;
 	*bkey = realloc(*bkey, round_up_page(newlen));
 
 	/* Append keyname */
@@ -1303,13 +1321,13 @@ void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *fi
 	/* Append bin length */
 	lenptr = (uint32_t *)(*bkey + msglen);
 	*lenptr = htole32(hlen);
-	msglen += 4;
+	msglen += BKEY_LENLEN;
 
 	/* Append binary data */
 	hex2bin(*bkey + msglen, hex, hlen);
 
 	/* Adjust message length header */
-	lenptr = (uint32_t *)*bkey;
+	lenptr = bkey_lenptr(*bkey);
 	*lenptr = htole32(newlen);
 }
 
