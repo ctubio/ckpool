@@ -1280,6 +1280,13 @@ char *bkey_object(void)
 	return bkey;
 }
 
+/* Extract bkey length */
+uint32_t bkey_len(char *bkey)
+{
+	uint32_t *lenptr = bkey_lenptr(bkey);
+	return le32toh(*lenptr);
+}
+
 /* Add binary from hex to a bkey message */
 void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *file, const char *func, const int line)
 {
