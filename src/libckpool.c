@@ -1251,6 +1251,117 @@ out:
 }
 
 
+/* Create an empty binary key object */
+char *bkey_object(void)
+{
+	char *bkey = ckzalloc(PAGESIZE);
+	uint32_t *lenptr;
+
+	lenptr = (uint32_t *)bkey;
+	*lenptr = htole32(4);
+	return bkey;
+}
+
+/* Add binary from hex to a bkey message */
+void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *file, const char *func, const int line)
+{
+	uint32_t msglen, *lenptr, newlen;
+	int hlen, len;
+
+	if (unlikely(!*bkey || !key || !hex)) {
+		 LOGEMERG("Null sent to bkey_add from %s %s:%d",
+			   file, func, line);
+		 return;
+	}
+	hlen = strlen(hex) / 2;
+	if (unlikely(!hlen)) {
+		 LOGERR("Zero length hex sent to bkey_add from %s %s:%d",
+			 file, func, line);
+		 return;
+	}
+	len = strlen(key);
+	if (unlikely(!len)) {
+		 LOGERR("Zero length key sent to bkey_add from %s %s:%d",
+			 file, func, line);
+		 return;
+	}
+	/* Null terminator */
+	len += 1;
+
+	/* Get current message length */
+	lenptr = (uint32_t *)*bkey;
+	msglen = le32toh(*lenptr);
+
+	/* Add $key+length+bin */
+	newlen = len + 4 + hlen;
+	*bkey = realloc(*bkey, round_up_page(newlen));
+
+	/* Append keyname */
+	sprintf(*bkey + msglen, "%s", key);
+	msglen += len;
+
+	/* Append bin length */
+	lenptr = (uint32_t *)(*bkey + msglen);
+	*lenptr = htole32(hlen);
+	msglen += 4;
+
+	/* Append binary data */
+	hex2bin(*bkey + msglen, hex, hlen);
+
+	/* Adjust message length header */
+	lenptr = (uint32_t *)*bkey;
+	*lenptr = htole32(newlen);
+}
+
+void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen, const char *file, const char *func, const int line)
+{	uint32_t msglen, *lenptr, newlen;
+	int len;
+
+	if (unlikely(!*bkey || !key || !bin)) {
+		 LOGEMERG("Null sent to bkey_add from %s %s:%d",
+			   file, func, line);
+		 return;
+	}
+	if (unlikely(!blen)) {
+		 LOGERR("Zero length bin sent to bkey_add from %s %s:%d",
+			 file, func, line);
+		 return;
+	}
+	len = strlen(key);
+	if (unlikely(!len)) {
+		 LOGERR("Zero length key sent to bkey_add from %s %s:%d",
+			 file, func, line);
+		 return;
+	}
+	/* Null terminator */
+	len += 1;
+
+	/* Get current message length */
+	lenptr = (uint32_t *)*bkey;
+	msglen = le32toh(*lenptr);
+
+	/* Add $key+length+bin */
+	newlen = len + 4 + blen;
+	*bkey = realloc(*bkey, round_up_page(newlen));
+
+	/* Append keyname */
+	sprintf(*bkey + msglen, "%s", key);
+	msglen += len;
+
+	/* Append bin length */
+	lenptr = (uint32_t *)(*bkey + msglen);
+	*lenptr = htole32(blen);
+	msglen += 4;
+
+	/* Append binary data */
+	memcpy(*bkey + msglen, bin, blen);
+
+	/* Adjust message length header */
+	lenptr = (uint32_t *)*bkey;
+	*lenptr = htole32(newlen);
+}
+
+
 void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line)
 {
 	if (likely(val))
