@@ -1139,7 +1139,7 @@ static void drop_passthrough_client(cdata_t *cdata, const int64_t id)
 	client_id = id & 0xffffffffll;
 	/* We have a direct connection to the passthrough's connector so we
 	 * can send it any regular commands. */
-	ASPRINTF(&msg, "dropclient=%"PRId64, client_id);
+	ASPRINTF(&msg, "dropclient=%"PRId64"\n", client_id);
 	send_client(cdata, id, msg);
 }
 
