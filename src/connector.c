@@ -1094,11 +1094,21 @@ static void parse_remote_submitblock(ckpool_t *ckp, const json_t *val, const cha
 	send_proc(ckp->generator, gbt_block);
 }
 
+static void ping_upstream(cdata_t *cdata)
+{
+	char *buf;
+
+	ASPRINTF(&buf, "{\"method\":\"ping\"}\n");
+	ckmsgq_add(cdata->upstream_sends, buf);
+}
+
 static void *urecv_process(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
 	cdata_t *cdata = ckp->data;
 	connsock_t *cs = &cdata->upstream_cs;
+	bool alive = true;
+
 	ckp->proxy = true;
 
 	rename_proc("ureceiver");
@@ -1114,12 +1124,16 @@ static void *urecv_process(void *arg)
 		cksem_wait(&cs->sem);
 		ret = read_socket_line(cs, &timeout);
 		if (ret < 1) {
-			if (likely(!ret))
+			ping_upstream(cdata);
+			if (likely(!ret)) {
 				LOGDEBUG("No message from upstream pool");
-			else
+			} else {
 				LOGNOTICE("Failed to read from upstream pool");
+				alive = false;
+			}
 			goto nomsg;
 		}
+		alive = true;
 		val = json_loads(cs->buf, 0, NULL);
 		if (unlikely(!val)) {
 			LOGWARNING("Received non-json msg from upstream pool %s",
@@ -1135,10 +1149,15 @@ static void *urecv_process(void *arg)
 		}
 		if (!safecmp(method, "submitblock"))
 			parse_remote_submitblock(ckp, val, cs->buf);
+		else if (!safecmp(method, "pong"))
+			LOGDEBUG("Received upstream pong");
 		else
 			LOGWARNING("Unrecognised upstream method %s", method);
 nomsg:
 		cksem_post(&cs->sem);
+
+		if (!alive)
+			sleep(5);
 	}
 	return NULL;
 }

@@ -5999,6 +5999,14 @@ static void parse_remote_block(sdata_t *sdata, json_t *val, const char *buf)
 	reset_bestshares(sdata);
 }
 
+static void send_remote_pong(sdata_t *sdata, stratum_instance_t *client)
+{
+	json_t *json_msg;
+
+	JSON_CPACK(json_msg, "{ss}", "method", "pong");
+	stratum_add_send(sdata, json_msg, client->id, SM_PONG);
+}
+
 static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf,
 			      stratum_instance_t *client)
 {
@@ -6019,6 +6027,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const 
 		parse_remote_blocksubmit(ckp, val, buf, client);
 	else if (!safecmp(method, "block"))
 		parse_remote_block(sdata, val, buf);
+	else if (!safecmp(method, "ping"))
+		send_remote_pong(sdata, client);
 	else
 		LOGWARNING("unrecognised trusted message %s", buf);
 }
