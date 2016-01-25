@@ -1104,17 +1104,26 @@ out:
 	return ret;
 }
 
-static void process_client_msg(cdata_t *cdata, const char *buf)
+static void process_client_msg(cdata_t *cdata, char *buf)
 {
+	char *msg, *bkey = NULL;
 	int64_t client_id;
 	json_t *json_msg;
-	char *msg;
+	int len;
 
+	len = strlen(buf);
+	if (len > 4 && !strncmp((buf + len - 4 - 1), "bkey", 4)) {
+		LOGWARNING("Bkey found in process_client_msg");
+		buf[len - 4 - 1] = '\0';
+		bkey = buf + len + 1;
+	}
 	json_msg = json_loads(buf, 0, NULL);
 	if (unlikely(!json_msg)) {
 		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
 		return;
 	}
+	if (unlikely(bkey))
+		json_append_bkeys(json_msg, bkey);
 
 	/* Extract the client id from the json message and remove its entry */
 	client_id = json_integer_value(json_object_get(json_msg, "client_id"));

@@ -1260,10 +1260,7 @@ out:
  * append further key:len:data combinations
  */
 
-#define BKEY_LENOFS 6
-#define BKEY_LENLEN 4
-
-static inline uint32_t *bkey_lenptr(char *bkey)
+static inline uint32_t *bkey_lenptr(const char *bkey)
 {
 	return (uint32_t *)(bkey + BKEY_LENOFS);
 }
@@ -1281,7 +1278,7 @@ char *bkey_object(void)
 }
 
 /* Extract bkey length */
-uint32_t bkey_len(char *bkey)
+uint32_t bkey_len(const char *bkey)
 {
 	uint32_t *lenptr = bkey_lenptr(bkey);
 	return le32toh(*lenptr);
@@ -1339,7 +1336,8 @@ void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *fi
 }
 
 void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen, const char *file, const char *func, const int line)
-{	uint32_t msglen, *lenptr, newlen;
+{
+	uint32_t msglen, *lenptr, newlen;
 	int len;
 
 	if (unlikely(!*bkey || !key || !bin)) {
@@ -1362,7 +1360,7 @@ void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen
 	len += 1;
 
 	/* Get current message length */
-	lenptr = (uint32_t *)*bkey;
+	lenptr = bkey_lenptr(*bkey);
 	msglen = le32toh(*lenptr);
 
 	/* Add $key+length+bin */
@@ -1382,8 +1380,39 @@ void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen
 	memcpy(*bkey + msglen, bin, blen);
 
 	/* Adjust message length header */
-	lenptr = (uint32_t *)*bkey;
+	lenptr = bkey_lenptr(*bkey);
 	*lenptr = htole32(newlen);
+}
+
+void _json_append_bkeys(json_t *val, const char *bkey, const char *file, const char *func, const int line)
+{
+	uint32_t ofs = BKEY_LENOFS + BKEY_LENLEN;
+	uint32_t msglen;
+
+	msglen = bkey_len(bkey);
+	if (unlikely(!msglen || msglen > 0x80000000)) {
+		LOGWARNING("Invalid msglen %u sent to json_append_bkey from %s %s:%d",
+			   msglen, file, func, line);
+		return;
+	}
+	while (ofs < msglen) {
+		uint32_t binlen, *lenptr;
+		const char *key;
+		char *hex;
+
+		key = bkey + ofs;
+		LOGWARNING("Found key %s", key);
+		ofs += strlen(key) + 1;
+		lenptr = (uint32_t *)(bkey + ofs);
+		binlen = le32toh(*lenptr);
+		ofs += BKEY_LENLEN;
+		LOGWARNING("Found binlen %u", binlen);
+		hex = bin2hex(bkey + ofs, binlen);
+		LOGWARNING("Found hex %s", hex);
+		json_set_string(val, key, hex);
+		free(hex);
+		ofs += binlen;
+	}
 }
 
 

@@ -319,12 +319,17 @@ struct unixsock {
 typedef struct unixsock unixsock_t;
 
 
+#define BKEY_LENOFS 6
+#define BKEY_LENLEN 4
+
 char *bkey_object(void);
-uint32_t bkey_len(char *bkey);
+uint32_t bkey_len(const char *bkey);
 void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *file, const char *func, const int line);
 #define bkey_add_hex(bkey, key, hex) _bkey_add_hex(&(bkey), key, hex, __FILE__, __func__, __LINE__)
 void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen, const char *file, const char *func, const int line);
 #define bkey_add_bin(bkey, key, bin) _bkey_add_bin(&(bkey), key, bin, __FILE__, __func__, __LINE__)
+void _json_append_bkeys(json_t *val, const char *bkey, const char *file, const char *func, const int line);
+#define json_append_bkeys(val, bkey) _json_append_bkeys(val, bkey, __FILE__, __func__, __LINE__)
 
 
 void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line);

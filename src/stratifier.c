@@ -154,6 +154,10 @@ typedef struct json_params json_params_t;
 struct smsg {
 	json_t *json_msg;
 	int64_t client_id;
+
+	/* bkey data if any */
+	char *bkey;
+	uint32_t bkeylen;
 };
 
 typedef struct smsg smsg_t;
@@ -863,31 +867,34 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 	ck_rlock(&sdata->instance_lock);
 	if (sdata->node_instances) {
 		json_t *wb_val = json_object();
+		char *bkey = bkey_object();
+		uint32_t bkeylen;
 
 		json_set_int(wb_val, "jobid", wb->id);
-		json_set_string(wb_val, "target", wb->target);
+		bkey_add_hex(bkey, "target", wb->target);
 		json_set_double(wb_val, "diff", wb->diff);
 		json_set_int(wb_val, "version", wb->version);
 		json_set_int(wb_val, "curtime", wb->curtime);
-		json_set_string(wb_val, "prevhash", wb->prevhash);
-		json_set_string(wb_val, "ntime", wb->ntime);
-		json_set_string(wb_val, "bbversion", wb->bbversion);
-		json_set_string(wb_val, "nbit", wb->nbit);
+		bkey_add_hex(bkey, "prevhash", wb->prevhash);
+		bkey_add_hex(bkey, "ntime", wb->ntime);
+		bkey_add_hex(bkey, "bbversion", wb->bbversion);
+		bkey_add_hex(bkey, "nbit", wb->nbit);
 		json_set_int(wb_val, "coinbasevalue", wb->coinbasevalue);
 		json_set_int(wb_val, "height", wb->height);
 		json_set_string(wb_val, "flags", wb->flags);
 		json_set_int(wb_val, "transactions", wb->transactions);
 		if (likely(wb->transactions))
-			json_set_string(wb_val, "txn_data", wb->txn_data);
+			bkey_add_hex(bkey, "txn_data", wb->txn_data);
 		/* We don't need txn_hashes */
 		json_set_int(wb_val, "merkles", wb->merkles);
 		json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
-		json_set_string(wb_val, "coinb1", wb->coinb1);
+		bkey_add_hex(bkey, "coinb1", wb->coinb1);
 		json_set_int(wb_val, "enonce1varlen", wb->enonce1varlen);
 		json_set_int(wb_val, "enonce2varlen", wb->enonce2varlen);
 		json_set_int(wb_val, "coinb1len", wb->coinb1len);
 		json_set_int(wb_val, "coinb2len", wb->coinb2len);
-		json_set_string(wb_val, "coinb2", wb->coinb2);
+		bkey_add_hex(bkey, "coinb2", wb->coinb2);
+		bkeylen = bkey_len(bkey);
 
 		DL_FOREACH(sdata->node_instances, client) {
 			ckmsg_t *client_msg;
@@ -899,11 +906,15 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 			msg = ckzalloc(sizeof(smsg_t));
 			msg->json_msg = json_msg;
 			msg->client_id = client->id;
+			msg->bkey = ckalloc(bkeylen);
+			memcpy(msg->bkey, bkey, bkeylen);
+			msg->bkeylen = bkeylen;
 			client_msg->data = msg;
 			DL_APPEND(bulk_send, client_msg);
 			messages++;
 		}
 		json_decref(wb_val);
+		free(bkey);
 	}
 	ck_runlock(&sdata->instance_lock);
 
@@ -6161,6 +6172,13 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
 	s = json_dumps(msg->json_msg, JSON_COMPACT);
+	if (msg->bkeylen) {
+		int len = strlen(s);
+
+		s = realloc(s, len + msg->bkeylen);
+		memcpy(s + len, msg->bkey, msg->bkeylen);
+		free(msg->bkey);
+	}
 	send_proc(ckp->connector, s);
 	free(s);
 	free_smsg(msg);
