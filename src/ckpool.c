@@ -718,7 +718,8 @@ out:
 
 /* Send a single message to a process instance when there will be no response,
  * closing the socket immediately. */
-void _send_proc_data(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+void _send_proc_data(proc_instance_t *pi, const char *msg, uint32_t len, const char *file,
+		     const char *func, const int line)
 {
 	char *path = pi->us.path;
 	bool ret = false;
@@ -748,7 +749,7 @@ void _send_proc_data(proc_instance_t *pi, const char *msg, const char *file, con
 		LOGWARNING("Failed to open socket %s", path);
 		goto out;
 	}
-	if (unlikely(!send_unix_msg(sockd, msg)))
+	if (unlikely(!send_unix(sockd, msg, len)))
 		LOGWARNING("Failed to send %s to socket %s", msg, path);
 	else
 		ret = true;
@@ -761,11 +762,13 @@ out:
 /* As per send_proc_data but must be a string */
 void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	if (unlikely(!msg || !strlen(msg))) {
+	uint32_t len;
+
+	if (unlikely(!msg || !(len = strlen(msg)))) {
 		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
 		return;
 	}
-	return _send_proc_data(pi, msg, file, func, line);
+	return _send_proc_data(pi, msg, len, file, func, line);
 }
 
 /* Send a single message to a process instance and retrieve the response, then

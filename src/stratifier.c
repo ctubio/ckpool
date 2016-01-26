@@ -6261,14 +6261,15 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
 	s = json_dumps(msg->json_msg, JSON_COMPACT);
-	if (msg->bkeylen) {
+	if (unlikely(msg->bkeylen)) {
 		int len = strlen(s);
 
 		s = realloc(s, len + msg->bkeylen);
 		memcpy(s + len, msg->bkey, msg->bkeylen);
 		free(msg->bkey);
-	}
-	send_proc(ckp->connector, s);
+		send_proc_data(ckp->connector, s, len + msg->bkeylen);
+	} else
+		send_proc(ckp->connector, s);
 	free(s);
 	free_smsg(msg);
 }

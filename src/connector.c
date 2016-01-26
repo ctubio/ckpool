@@ -1199,7 +1199,7 @@ out:
 	return ret;
 }
 
-static void process_client_msg(cdata_t *cdata, char *buf)
+static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 {
 	char *msg, *bkey = NULL;
 	int64_t client_id;
@@ -1207,18 +1207,20 @@ static void process_client_msg(cdata_t *cdata, char *buf)
 	int len;
 
 	len = strlen(buf);
-	if (len > 4 && !strncmp((buf + len - 4 - 1), "bkey", 4)) {
-		LOGWARNING("Bkey found in process_client_msg");
-		buf[len - 4 - 1] = '\0';
-		bkey = buf + len + 1;
+	if (likely(len > 4)) {
+		bkey = strstr(buf + len - 4 - 1, "bkey");
+		if (bkey)
+			LOGDEBUG("Bkey found in process_client_msg");
 	}
-	json_msg = json_loads(buf, 0, NULL);
+	json_msg = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 	if (unlikely(!json_msg)) {
 		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
 		return;
 	}
-	if (unlikely(bkey))
+	if (unlikely(bkey)) {
+		LOGWARNING("Bkey should be at %d, msglen %u", len + 1, msglen);
 		json_append_bkeys(json_msg, bkey);
+	}
 
 	/* Extract the client id from the json message and remove its entry */
 	client_id = json_integer_value(json_object_get(json_msg, "client_id"));
@@ -1342,7 +1344,7 @@ retry:
 	/* The bulk of the messages will be json messages to send to clients
 	 * so look for them first. */
 	if (likely(buf[0] == '{')) {
-		process_client_msg(cdata, buf);
+		process_client_msg(cdata, buf, umsg->msglen);
 	} else if (cmdmatch(buf, "upstream=")) {
 		char *msg = strdup(buf + 9);
 

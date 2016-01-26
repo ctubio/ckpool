@@ -1331,19 +1331,22 @@ void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *fi
 	msglen = le32toh(*lenptr);
 
 	/* Add $key+length+bin */
-	newlen = len + msglen + hlen;
+	newlen = msglen + len + BKEY_LENLEN + hlen;
 	*bkey = realloc(*bkey, round_up_page(newlen));
 
 	/* Append keyname */
+	LOGDEBUG("Adding key %s @ ofs %u", key, msglen);
 	sprintf(*bkey + msglen, "%s", key);
 	msglen += len;
 
 	/* Append bin length */
+	LOGDEBUG("Adding len %u @ ofs %u", hlen, msglen);
 	lenptr = (uint32_t *)(*bkey + msglen);
 	*lenptr = htole32(hlen);
 	msglen += BKEY_LENLEN;
 
 	/* Append binary data */
+	LOGDEBUG("Adding hex of len %u @ ofs %u %s", hlen, msglen, hex);
 	hex2bin(*bkey + msglen, hex, hlen);
 
 	/* Adjust message length header */
@@ -1380,19 +1383,22 @@ void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen
 	msglen = le32toh(*lenptr);
 
 	/* Add $key+length+bin */
-	newlen = len + 4 + blen;
+	newlen = msglen + len + BKEY_LENLEN + blen;
 	*bkey = realloc(*bkey, round_up_page(newlen));
 
 	/* Append keyname */
+	LOGDEBUG("Adding key %s @ ofs %u", key, msglen);
 	sprintf(*bkey + msglen, "%s", key);
 	msglen += len;
 
 	/* Append bin length */
+	LOGDEBUG("Adding len %u @ ofs %u", blen, msglen);
 	lenptr = (uint32_t *)(*bkey + msglen);
 	*lenptr = htole32(blen);
-	msglen += 4;
+	msglen += BKEY_LENLEN;
 
 	/* Append binary data */
+	LOGDEBUG("Adding bin of len %u @ ofs %u", blen, msglen);
 	memcpy(*bkey + msglen, bin, blen);
 
 	/* Adjust message length header */
@@ -1417,14 +1423,14 @@ void _json_append_bkeys(json_t *val, const char *bkey, const char *file, const c
 		char *hex;
 
 		key = bkey + ofs;
-		LOGWARNING("Found key %s", key);
+		LOGDEBUG("Found key %s @ ofs %u", key, ofs);
 		ofs += strlen(key) + 1;
 		lenptr = (uint32_t *)(bkey + ofs);
 		binlen = le32toh(*lenptr);
+		LOGDEBUG("Found binlen %u @ ofs %u", binlen, ofs);
 		ofs += BKEY_LENLEN;
-		LOGWARNING("Found binlen %u", binlen);
 		hex = bin2hex(bkey + ofs, binlen);
-		LOGWARNING("Found hex %s", hex);
+		LOGDEBUG("Found hex %s @ ofs %u", hex, ofs);
 		json_set_string(val, key, hex);
 		free(hex);
 		ofs += binlen;
