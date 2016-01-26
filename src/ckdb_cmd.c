@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2015 Andrew Smith
+ * Copyright 1995-2016 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -929,6 +929,11 @@ static char *cmd_poolstats_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!i_poolinstance)
 		return strdup(reply);
 
+	if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))) {
+		POOLINSTANCE_DATA_SET(poolstats, transfer_data(i_poolinstance));
+		return strdup(FAILED_PI);
+	}
+
 	i_elapsed = optional_name(trf_root, "elapsed", 1, NULL, reply, siz);
 	if (!i_elapsed)
 		i_elapsed = &poolstats_elapsed;
@@ -1041,6 +1046,11 @@ static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!i_poolinstance)
 		return strdup(reply);
 
+	if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))) {
+		POOLINSTANCE_DATA_SET(userstats, transfer_data(i_poolinstance));
+		return strdup(FAILED_PI);
+	}
+
 	i_elapsed = optional_name(trf_root, "elapsed", 1, NULL, reply, siz);
 	if (!i_elapsed)
 		i_elapsed = &userstats_elapsed;
@@ -1119,6 +1129,11 @@ static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
 	if (!i_poolinstance)
 		return strdup(reply);
+
+	if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))) {
+		POOLINSTANCE_DATA_SET(workerstats, transfer_data(i_poolinstance));
+		return strdup(FAILED_PI);
+	}
 
 	i_elapsed = require_name(trf_root, "elapsed", 1, NULL, reply, siz);
 	if (!i_elapsed)
@@ -2397,6 +2412,15 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		K_ITEM *i_ntime, *i_reward;
 		bool igndup = false;
 
+		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
+		if (!i_poolinstance)
+			return strdup(reply);
+
+		if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))){
+			POOLINSTANCE_DATA_SET(workinfo, transfer_data(i_poolinstance));
+			return strdup(FAILED_PI);
+		}
+
 		i_workinfoid = require_name(trf_root, "workinfoid", 1, NULL, reply, siz);
 		if (!i_workinfoid)
 			return strdup(reply);
@@ -2413,10 +2437,6 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 			    workinfoid > confirm_last_workinfoid)
 				goto wiconf;
 		}
-
-		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
-		if (!i_poolinstance)
-			return strdup(reply);
 
 		i_transactiontree = require_name(trf_root, "transactiontree", 0, NULL, reply, siz);
 		if (!i_transactiontree)
@@ -2661,6 +2681,15 @@ seconf:
 		tv_t ss_first, ss_last;
 		bool ok;
 
+		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
+		if (!i_poolinstance)
+			return strdup(reply);
+
+		if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))) {
+			POOLINSTANCE_DATA_SET(ageworkinfo, transfer_data(i_poolinstance));
+			return strdup(FAILED_PI);
+		}
+
 		i_workinfoid = require_name(trf_root, "workinfoid", 1, NULL, reply, siz);
 		if (!i_workinfoid)
 			return strdup(reply);
@@ -2680,10 +2709,6 @@ seconf:
 			    workinfoid > confirm_last_workinfoid)
 				goto awconf;
 		}
-
-		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
-		if (!i_poolinstance)
-			return strdup(reply);
 
 		ok = workinfo_age(workinfoid, transfer_data(i_poolinstance),
 				  by, code, inet, cd, &ss_first, &ss_last,
@@ -2848,6 +2873,8 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				char *code, char *inet, tv_t *cd,
 				K_TREE *trf_root)
 {
+	K_ITEM tmp_poolinstance_item;
+	TRANSFER tmp_poolinstance;
 	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -2865,8 +2892,24 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 
 	i_poolinstance = optional_name(trf_root, "poolinstance", 1, NULL,
 					reply, siz);
-	if (!i_poolinstance)
-		i_poolinstance = &auth_poolinstance;
+	if (!i_poolinstance) {
+		if (poolinstance) {
+			STRNCPY(tmp_poolinstance.name, "poolinstance");
+			STRNCPY(tmp_poolinstance.svalue, poolinstance);
+			tmp_poolinstance.mvalue = tmp_poolinstance.svalue;
+			tmp_poolinstance_item.name = Transfer;
+			tmp_poolinstance_item.prev = NULL;
+			tmp_poolinstance_item.next = NULL;
+			tmp_poolinstance_item.data = (void *)(&tmp_poolinstance);
+			i_poolinstance = &tmp_poolinstance_item;
+		} else
+			i_poolinstance = &auth_poolinstance;
+	} else {
+		if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))) {
+			POOLINSTANCE_DATA_SET(auth, transfer_data(i_poolinstance));
+			return strdup(FAILED_PI);
+		}
+	}
 
 	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
 	if (!i_username)
@@ -2978,6 +3021,8 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 				char *code, char *inet, tv_t *cd,
 				K_TREE *trf_root)
 {
+	K_ITEM tmp_poolinstance_item;
+	TRANSFER tmp_poolinstance;
 	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -2993,8 +3038,24 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 
 	i_poolinstance = optional_name(trf_root, "poolinstance", 1, NULL,
 					reply, siz);
-	if (!i_poolinstance)
-		i_poolinstance = &auth_poolinstance;
+	if (!i_poolinstance) {
+		if (poolinstance) {
+			STRNCPY(tmp_poolinstance.name, "poolinstance");
+			STRNCPY(tmp_poolinstance.svalue, poolinstance);
+			tmp_poolinstance.mvalue = tmp_poolinstance.svalue;
+			tmp_poolinstance_item.name = Transfer;
+			tmp_poolinstance_item.prev = NULL;
+			tmp_poolinstance_item.next = NULL;
+			tmp_poolinstance_item.data = (void *)(&tmp_poolinstance);
+			i_poolinstance = &tmp_poolinstance_item;
+		} else
+			i_poolinstance = &auth_poolinstance;
+	} else {
+		if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))) {
+			POOLINSTANCE_DATA_SET(addrauth, transfer_data(i_poolinstance));
+			return strdup(FAILED_PI);
+		}
+	}
 
 	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
 	if (!i_username)
@@ -5813,6 +5874,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 	K_ITEM *i_action, *i_workinfoid, *i_marktype, *i_description;
 	K_ITEM *i_height, *i_status, *i_extra, *m_item, *b_item, *w_item;
 	K_ITEM *wm_item, *wm_item_prev, *i_markerid;
+	WORKINFO *workinfo = NULL;
 	WORKMARKERS *workmarkers;
 	K_TREE_CTX ctx[1];
 	BLOCKS *blocks;
@@ -5937,9 +5999,10 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 				 workinfoid);
 			return strdup(reply);
 		}
-		ok = marks_process(conn, true, EMPTY, workinfoid, description,
-				   extra, marktype, status, by, code, inet, cd,
-				   trf_root);
+		DATA_WORKINFO(workinfo, w_item);
+		ok = marks_process(conn, true, workinfo->poolinstance,
+				   workinfoid, description, extra, marktype,
+				   status, by, code, inet, cd, trf_root);
 	} else if (strcasecmp(action, "expire") == 0) {
 		/* Expire the mark - effectively deletes it
 		 * Require workinfoid */
