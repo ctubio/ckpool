@@ -718,16 +718,11 @@ out:
 
 /* Send a single message to a process instance when there will be no response,
  * closing the socket immediately. */
-void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+void _send_proc_data(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
 	char *path = pi->us.path;
 	bool ret = false;
 	int sockd;
-
-	if (unlikely(!msg || !strlen(msg))) {
-		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
-		return;
-	}
 
 	if (unlikely(!path || !strlen(path))) {
 		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
@@ -761,6 +756,16 @@ void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const ch
 out:
 	if (unlikely(!ret))
 		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
+}
+
+/* As per send_proc_data but must be a string */
+void _send_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+{
+	if (unlikely(!msg || !strlen(msg))) {
+		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
+		return;
+	}
+	return _send_proc_data(pi, msg, file, func, line);
 }
 
 /* Send a single message to a process instance and retrieve the response, then
