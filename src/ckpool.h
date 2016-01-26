@@ -39,6 +39,7 @@ struct unix_msg {
 	unix_msg_t *prev;
 	int sockd;
 	char *buf;
+	uint32_t msglen;
 };
 
 struct ckmsgq {

@@ -997,12 +997,13 @@ int read_length(int sockd, void *buf, int len)
 /* Use a standard message across the unix sockets:
  * 4 byte length of message as little endian encoded uint32_t followed by the
  * string. Return NULL in case of failure. */
-char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, const char *func, const int line)
+char *_recv_unix(int sockd, uint32_t *msglen, int timeout1, int timeout2, const char *file,
+		 const char *func, const int line)
 {
 	char *buf = NULL;
-	uint32_t msglen;
 	int ret, ern;
 
+	*msglen = 0;
 	ret = wait_read_select(sockd, timeout1);
 	if (unlikely(ret < 1)) {
 		ern = errno;
@@ -1010,15 +1011,15 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 		goto out;
 	}
 	/* Get message length */
-	ret = read_length(sockd, &msglen, 4);
+	ret = read_length(sockd, msglen, 4);
 	if (unlikely(ret < 4)) {
 		ern = errno;
 		LOGERR("Failed to read 4 byte length in recv_unix_msg (%d?)", ern);
 		goto out;
 	}
-	msglen = le32toh(msglen);
-	if (unlikely(msglen < 1 || msglen > 0x80000000)) {
-		LOGWARNING("Invalid message length %u sent to recv_unix_msg", msglen);
+	*msglen = le32toh(*msglen);
+	if (unlikely(*msglen < 1 || *msglen > 0x80000000)) {
+		LOGWARNING("Invalid message length %u sent to recv_unix_msg", *msglen);
 		goto out;
 	}
 	ret = wait_read_select(sockd, timeout2);
@@ -1027,11 +1028,11 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 		LOGERR("Select2 failed in recv_unix_msg (%d)", ern);
 		goto out;
 	}
-	buf = ckzalloc(msglen + 1);
-	ret = read_length(sockd, buf, msglen);
-	if (unlikely(ret < (int)msglen)) {
+	buf = ckzalloc(*msglen + 1);
+	ret = read_length(sockd, buf, *msglen);
+	if (unlikely(ret < (int)*msglen)) {
 		ern = errno;
-		LOGERR("Failed to read %u bytes in recv_unix_msg (%d?)", msglen, ern);
+		LOGERR("Failed to read %u bytes in recv_unix_msg (%d?)", *msglen, ern);
 		dealloc(buf);
 	}
 out:
@@ -1039,6 +1040,13 @@ out:
 	if (unlikely(!buf))
 		LOGERR("Failure in recv_unix_msg from %s %s:%d", file, func, line);
 	return buf;
+}
+
+char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, const char *func, const int line)
+{
+	uint32_t msglen;
+
+	return _recv_unix(sockd, &msglen, timeout1, timeout2, file, func, line);
 }
 
 /* Emulate a select write wait for high fds that select doesn't support */

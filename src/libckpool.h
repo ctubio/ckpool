@@ -517,9 +517,12 @@ int _open_unix_client(const char *server_path, const char *file, const char *fun
 int wait_close(int sockd, int timeout);
 int wait_read_select(int sockd, float timeout);
 int read_length(int sockd, void *buf, int len);
+char *_recv_unix(int sockd, uint32_t *msglen, int timeout1, int timeout2, const char *file,
+		 const char *func, const int line);
 char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, const char *func, const int line);
 #define RECV_UNIX_TIMEOUT1 30
 #define RECV_UNIX_TIMEOUT2 5
+#define recv_unix(sockd, msglen) _recv_unix(sockd, msglen, UNIX_READ_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
 #define recv_unix_msg(sockd) _recv_unix_msg(sockd, UNIX_READ_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
 #define recv_unix_msg_tmo(sockd, tmo) _recv_unix_msg(sockd, tmo, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
 #define recv_unix_msg_tmo2(sockd, tmo1, tmo2) _recv_unix_msg(sockd, tmo1, tmo2, __FILE__, __func__, __LINE__)

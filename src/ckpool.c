@@ -223,6 +223,7 @@ static void *unix_receiver(void *arg)
 
 	while (42) {
 		unix_msg_t *umsg;
+		uint32_t msglen;
 		char *buf;
 
 		sockd = accept(rsockd, NULL, NULL);
@@ -231,7 +232,7 @@ static void *unix_receiver(void *arg)
 			childsighandler(15);
 			break;
 		}
-		buf = recv_unix_msg(sockd);
+		buf = recv_unix(sockd, &msglen);
 		if (unlikely(!buf)) {
 			Close(sockd);
 			LOGWARNING("Failed to get message on %s socket", qname);
@@ -240,6 +241,7 @@ static void *unix_receiver(void *arg)
 		umsg = ckalloc(sizeof(unix_msg_t));
 		umsg->sockd = sockd;
 		umsg->buf = buf;
+		umsg->msglen = msglen;
 
 		mutex_lock(&pi->rmsg_lock);
 		DL_APPEND(pi->unix_msgs, umsg);
