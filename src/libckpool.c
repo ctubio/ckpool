@@ -1093,54 +1093,62 @@ int _write_length(int sockd, const void *buf, int len, const char *file, const c
 	return ofs;
 }
 
-bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line)
+bool _send_unix(int sockd, const char *buf, uint32_t len, int timeout, const char *file,
+		const char *func, const int line)
 {
-	uint32_t msglen, len;
 	bool retval = false;
+	uint32_t msglen;
 	int ret, ern;
 
 	if (unlikely(sockd < 0)) {
 		LOGWARNING("Attempting to send unix message to invalidated sockd %d", sockd);
 		goto out;
 	}
-	if (unlikely(!buf)) {
-		LOGWARNING("Null message sent to send_unix_msg");
-		goto out;
-	}
-	len = strlen(buf);
-	if (unlikely(!len)) {
-		LOGWARNING("Zero length message sent to send_unix_msg");
-		goto out;
-	}
 	msglen = htole32(len);
 	ret = wait_write_select(sockd, timeout);
 	if (unlikely(ret < 1)) {
 		ern = errno;
-		LOGERR("Select1 failed in send_unix_msg (%d)", ern);
+		LOGERR("Select1 failed in send_unix (%d)", ern);
 		goto out;
 	}
 	ret = _write_length(sockd, &msglen, 4, file, func, line);
 	if (unlikely(ret < 4)) {
-		LOGERR("Failed to write 4 byte length in send_unix_msg");
+		LOGERR("Failed to write 4 byte length in send_unix");
 		goto out;
 	}
 	ret = wait_write_select(sockd, timeout);
 	if (unlikely(ret < 1)) {
 		ern = errno;
-		LOGERR("Select2 failed in send_unix_msg (%d)", ern);
+		LOGERR("Select2 failed in send_unix (%d)", ern);
 		goto out;
 	}
 	ret = _write_length(sockd, buf, len, file, func, line);
 	if (unlikely(ret < 0)) {
-		LOGERR("Failed to write %d bytes in send_unix_msg", len);
+		LOGERR("Failed to write %d bytes in send_unix", len);
 		goto out;
 	}
 	retval = true;
 out:
 	shutdown(sockd, SHUT_WR);
 	if (unlikely(!retval))
-		LOGERR("Failure in send_unix_msg from %s %s:%d", file, func, line);
+		LOGERR("Failure in send_unix from %s %s:%d", file, func, line);
 	return retval;
+}
+
+bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line)
+{
+	uint32_t len;
+
+	if (unlikely(!buf)) {
+		LOGWARNING("Null message sent to send_unix_msg");
+		return NULL;
+	}
+	len = strlen(buf);
+	if (unlikely(!len)) {
+		LOGWARNING("Zero length message sent to send_unix_msg");
+		return NULL;
+	}
+	return _send_unix(sockd, buf, len, timeout, file, func, line);
 }
 
 bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, const char *func, const int line)

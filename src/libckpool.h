@@ -529,6 +529,9 @@ char *_recv_unix_msg(int sockd, int timeout1, int timeout2, const char *file, co
 int wait_write_select(int sockd, float timeout);
 #define write_length(sockd, buf, len) _write_length(sockd, buf, len, __FILE__, __func__, __LINE__)
 int _write_length(int sockd, const void *buf, int len, const char *file, const char *func, const int line);
+bool _send_unix(int sockd, const char *buf, uint32_t len, int timeout, const char *file,
+		const char *func, const int line);
+#define send_unix(sockd, buf, len) _send_unix(sockd, buf, len, UNIX_WRITE_TIMEOUT, __FILE__, __func__, __LINE__)
 bool _send_unix_msg(int sockd, const char *buf, int timeout, const char *file, const char *func, const int line);
 #define send_unix_msg(sockd, buf) _send_unix_msg(sockd, buf, UNIX_WRITE_TIMEOUT, __FILE__, __func__, __LINE__)
 bool _send_unix_data(int sockd, const struct msghdr *msg, const char *file, const char *func, const int line);
