@@ -1204,7 +1204,7 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 	char *msg, *bkey = NULL;
 	int64_t client_id;
 	json_t *json_msg;
-	int len;
+	uint32_t len;
 
 	len = strlen(buf);
 	if (likely(len > 4)) {
@@ -1218,8 +1218,8 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 		return;
 	}
 	if (unlikely(bkey)) {
-		LOGWARNING("Bkey should be at %d, msglen %u", len + 1, msglen);
-		json_append_bkeys(json_msg, bkey);
+		len = msglen - (bkey - buf);
+		json_append_bkeys(json_msg, bkey, len);
 	}
 
 	/* Extract the client id from the json message and remove its entry */

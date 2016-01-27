@@ -328,8 +328,9 @@ void _bkey_add_hex(char **bkey, const char *key, const char *hex, const char *fi
 #define bkey_add_hex(bkey, key, hex) _bkey_add_hex(&(bkey), key, hex, __FILE__, __func__, __LINE__)
 void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen, const char *file, const char *func, const int line);
 #define bkey_add_bin(bkey, key, bin) _bkey_add_bin(&(bkey), key, bin, __FILE__, __func__, __LINE__)
-void _json_append_bkeys(json_t *val, const char *bkey, const char *file, const char *func, const int line);
-#define json_append_bkeys(val, bkey) _json_append_bkeys(val, bkey, __FILE__, __func__, __LINE__)
+bool _json_append_bkeys(json_t *val, const char *bkey, const uint32_t len, const char *file,
+			const char *func, const int line);
+#define json_append_bkeys(val, bkey, len) _json_append_bkeys(val, bkey, len, __FILE__, __func__, __LINE__)
 
 
 void _json_check(json_t *val, json_error_t *err, const char *file, const char *func, const int line);

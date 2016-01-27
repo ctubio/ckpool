@@ -1406,16 +1406,17 @@ void _bkey_add_bin(char **bkey, const char *key, const char *bin, const int blen
 	*lenptr = htole32(newlen);
 }
 
-void _json_append_bkeys(json_t *val, const char *bkey, const char *file, const char *func, const int line)
+bool _json_append_bkeys(json_t *val, const char *bkey, const uint32_t len, const char *file,
+			const char *func, const int line)
 {
 	uint32_t ofs = BKEY_LENOFS + BKEY_LENLEN;
 	uint32_t msglen;
 
 	msglen = bkey_len(bkey);
 	if (unlikely(!msglen || msglen > 0x80000000)) {
-		LOGWARNING("Invalid msglen %u sent to json_append_bkey from %s %s:%d",
-			   msglen, file, func, line);
-		return;
+		LOGDEBUG("Invalid msglen %u sent to json_append_bkey from %s %s:%d",
+			 msglen, file, func, line);
+		return false;
 	}
 	while (ofs < msglen) {
 		uint32_t binlen, *lenptr;
@@ -1425,16 +1426,32 @@ void _json_append_bkeys(json_t *val, const char *bkey, const char *file, const c
 		key = bkey + ofs;
 		LOGDEBUG("Found key %s @ ofs %u", key, ofs);
 		ofs += strlen(key) + 1;
+		if (unlikely(ofs >= len)) {
+			LOGDEBUG("Unable to seek to bkey offset %u beyond length %d",
+				 ofs, len);
+			return false;
+		}
 		lenptr = (uint32_t *)(bkey + ofs);
 		binlen = le32toh(*lenptr);
 		LOGDEBUG("Found binlen %u @ ofs %u", binlen, ofs);
 		ofs += BKEY_LENLEN;
+		if (unlikely(ofs >= len)) {
+			LOGDEBUG("Unable to seek to bkey offset %u beyond length %d",
+				 ofs, len);
+			return false;
+		}
 		hex = bin2hex(bkey + ofs, binlen);
 		LOGDEBUG("Found hex %s @ ofs %u", hex, ofs);
 		json_set_string(val, key, hex);
 		free(hex);
 		ofs += binlen;
+		if (unlikely(ofs >= len)) {
+			LOGDEBUG("Unable to seek to bkey offset %u beyond length %d",
+				 ofs, len);
+			return false;
+		}
 	}
+	return true;
 }
 
 
