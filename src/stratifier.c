@@ -5628,6 +5628,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			 json_t *params_val)
 {
 	const char *method;
+	char buf[256];
 
 	/* Random broken clients send something not an integer as the id so we
 	 * copy the json item for id_val as is for the response. By far the
@@ -5671,8 +5672,6 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	}
 
 	if (unlikely(cmdmatch(method, "mining.remote"))) {
-		char buf[256];
-
 		/* Add this client as a trusted remote node in the connector and
 		 * drop the client in the stratifier */
 		if (!ckp->trusted[client->server] || ckp->proxy) {
@@ -5688,8 +5687,6 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	}
 
 	if (unlikely(cmdmatch(method, "mining.node"))) {
-		char buf[256];
-
 		/* Add this client as a passthrough in the connector and
 		 * add it to the list of mining nodes in the stratifier */
 		if (!ckp->nodeserver[client->server] || ckp->proxy) {
@@ -5706,8 +5703,6 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	}
 
 	if (unlikely(cmdmatch(method, "mining.passthrough"))) {
-		char buf[256];
-
 		if (ckp->proxy) {
 			LOGNOTICE("Dropping client %"PRId64" %s trying to connect as passthrough on proxy server %d",
 				  client_id, client->address, client->server);
