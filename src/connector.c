@@ -924,7 +924,8 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, u
 				val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 				if (unlikely(!val)) {
 					LOGWARNING("No json in bkey appended message %s", buf);
-					goto out;
+					free(buf);
+					return;
 				}
 				json_append_bkeys(val, bkey, blen);
 				free(buf);
