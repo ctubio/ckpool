@@ -313,6 +313,7 @@ struct stratum_instance {
 	int subproxyid; /* Which subproxy */
 
 	bool remote; /* Is this a trusted remote server */
+	bool bkey; /* Does this client accept bkeys */
 };
 
 struct share {
@@ -5624,10 +5625,11 @@ static void add_remote_server(sdata_t *sdata, stratum_instance_t *client)
 
 /* Enter with client holding ref count */
 static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client,
-			 const int64_t client_id, json_t *id_val, json_t *method_val,
-			 json_t *params_val)
+			 const int64_t client_id, const json_t *val, json_t *id_val,
+			 json_t *method_val, json_t *params_val)
 {
 	const char *method;
+	json_t *bkey_val;
 	char buf[256];
 
 	/* Random broken clients send something not an integer as the id so we
@@ -5648,7 +5650,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	}
 
 	if (cmdmatch(method, "mining.subscribe")) {
-		json_t *val, *result_val;
+		json_t *sval, *result_val;
 
 		if (unlikely(client->subscribed)) {
 			LOGNOTICE("Client %"PRId64" %s trying to subscribe twice",
@@ -5661,11 +5663,11 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			LOGWARNING("parse_subscribe returned NULL result_val");
 			return;
 		}
-		val = json_object();
-		json_object_set_new_nocheck(val, "result", result_val);
-		json_object_set_nocheck(val, "id", id_val);
-		json_object_set_new_nocheck(val, "error", json_null());
-		stratum_add_send(sdata, val, client_id, SM_SUBSCRIBERESULT);
+		sval = json_object();
+		json_object_set_new_nocheck(sval, "result", result_val);
+		json_object_set_nocheck(sval, "id", id_val);
+		json_object_set_new_nocheck(sval, "error", json_null());
+		stratum_add_send(sdata, sval, client_id, SM_SUBSCRIBERESULT);
 		if (likely(client->subscribed))
 			init_client(sdata, client, client_id);
 		return;
@@ -5679,6 +5681,14 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 				  client_id, client->address, client->server);
 			connector_drop_client(ckp, client_id);
 		} else {
+			bkey_val = json_object_get(val, "bkey");
+			if (bkey_val) {
+				client->bkey = json_is_true(bkey_val);
+				if (client->bkey) {
+					snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
+					send_proc(ckp->connector, buf);
+				}
+			}
 			add_remote_server(sdata, client);
 			snprintf(buf, 255, "remote=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
@@ -5695,6 +5705,14 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			connector_drop_client(ckp, client_id);
 			drop_client(ckp, sdata, client_id);
 		} else {
+			bkey_val = json_object_get(val, "bkey");
+			if (bkey_val) {
+				client->bkey = json_is_true(bkey_val);
+				if (client->bkey) {
+					snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
+					send_proc(ckp->connector, buf);
+				}
+			}
 			add_mining_node(ckp, sdata, client);
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
@@ -5713,6 +5731,14 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			 * is a passthrough and to manage its messages accordingly. No
 			 * data from this client id should ever come back to this
 			 * stratifier after this so drop the client in the stratifier. */
+			bkey_val = json_object_get(val, "bkey");
+			if (bkey_val) {
+				client->bkey = json_is_true(bkey_val);
+				if (client->bkey) {
+					snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
+					send_proc(ckp->connector, buf);
+				}
+			}
 			LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
@@ -6158,7 +6184,7 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 		if (!(++delays % 50))
 			LOGWARNING("%d Second delay waiting for bitcoind at startup", delays / 10);
 	}
-	parse_method(ckp, sdata, client, client_id, id_val, method, params);
+	parse_method(ckp, sdata, client, client_id, val, id_val, method, params);
 }
 
 static void srecv_process(ckpool_t *ckp, char *buf)

@@ -78,6 +78,9 @@ struct client_instance {
 
 	/* The size of the socket send buffer */
 	int sendbufsize;
+
+	/* Does this client accept bkeys */
+	bool bkey;
 };
 
 struct sender_send {
@@ -989,7 +992,7 @@ static void passthrough_client(ckpool_t *ckp, cdata_t *cdata, client_instance_t 
 
 	LOGINFO("Connector adding passthrough client %"PRId64, client->id);
 	client->passthrough = true;
-	ASPRINTF(&buf, "{\"result\": true}\n");
+	ASPRINTF(&buf, "{\"result\":true,\"bkey\":true}\n");
 	send_client(cdata, client->id, buf);
 	if (!ckp->rmem_warn)
 		set_recvbufsize(ckp, client->fd, 1048576);
@@ -1004,7 +1007,7 @@ static void remote_server(ckpool_t *ckp, cdata_t *cdata, client_instance_t *clie
 	LOGWARNING("Connector adding client %"PRId64" %s as remote trusted server",
 		   client->id, client->address_name);
 	client->remote = true;
-	ASPRINTF(&buf, "{\"result\": true}\n");
+	ASPRINTF(&buf, "{\"result\":true,\"bkey\":true}\n");
 	send_client(cdata, client->id, buf);
 	if (!ckp->rmem_warn)
 		set_recvbufsize(ckp, client->fd, 1048576);
@@ -1028,8 +1031,9 @@ static bool connect_upstream(ckpool_t *ckp, connsock_t *cs)
 	if (!ckp->wmem_warn)
 		cs->sendbufsiz = set_sendbufsize(ckp, cs->fd, 1048576);
 
-	JSON_CPACK(req, "{ss,s[s]}",
+	JSON_CPACK(req, "{ss,sb,s[s]}",
 			"method", "mining.remote",
+			"bkey", true,
 			"params", PACKAGE"/"VERSION);
 	res = send_json_msg(cs, req);
 	json_decref(req);
@@ -1434,6 +1438,22 @@ retry:
 			goto retry;
 		}
 		remote_server(ckp, cdata, client);
+		dec_instance_ref(cdata, client);
+	} else if (cmdmatch(buf, "bkeyclient")) {
+		client_instance_t *client;
+
+		ret = sscanf(buf, "bkeyclient=%"PRId64, &client_id);
+		if (ret < 0) {
+			LOGDEBUG("Connector failed to parse bkeyclient command: %s", buf);
+			goto retry;
+		}
+		client = ref_client_by_id(cdata, client_id);
+		if (unlikely(!client)) {
+			LOGINFO("Connector failed to find client id %"PRId64" to set bkey", client_id);
+			goto retry;
+		}
+		LOGINFO("Set bkey on client %"PRId64, client_id);
+		client->bkey = true;
 		dec_instance_ref(cdata, client);
 	} else if (cmdmatch(buf, "getxfd")) {
 		int fdno = -1;

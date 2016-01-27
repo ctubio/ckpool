@@ -705,8 +705,9 @@ static bool passthrough_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	bool res, ret = false;
 	float timeout = 10;
 
-	JSON_CPACK(req, "{ss,s[s]}",
+	JSON_CPACK(req, "{ss,sb,s[s]}",
 			"method", "mining.passthrough",
+			"bkey", true,
 			"params", PACKAGE"/"VERSION);
 	res = send_json_msg(cs, req);
 	json_decref(req);
@@ -747,8 +748,9 @@ static bool node_stratum(connsock_t *cs, proxy_instance_t *proxi)
 	bool res, ret = false;
 	float timeout = 10;
 
-	JSON_CPACK(req, "{ss,s[s]}",
+	JSON_CPACK(req, "{ss,sb,s[s]}",
 			"method", "mining.node",
+			"bkey", true,
 			"params", PACKAGE"/"VERSION);
 
 	res = send_json_msg(cs, req);
