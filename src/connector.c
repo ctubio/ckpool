@@ -911,27 +911,25 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, u
 {
 	ckpool_t *ckp = cdata->ckp;
 	sender_send_t *sender_send;
+	uint32_t blen = len - slen;
 	client_instance_t *client;
 	char *bkey = NULL;
 	json_t *val;
 
+	if (unlikely(blen > 0))
+		bkey = strstr(buf + slen - 4 - 1, "bkey");
 	if (unlikely(ckp->node && !id)) {
-		uint32_t blen = slen - len;
-
-		if (blen > 0) {
-			bkey = strstr(buf + slen - 4 - 1, "bkey");
-			if (likely(bkey)) {
-				val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
-				if (unlikely(!val)) {
-					LOGWARNING("No json in bkey appended message %s", buf);
-					free(buf);
-					return;
-				}
-				json_append_bkeys(val, bkey, blen);
+		if (bkey) {
+			val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+			if (unlikely(!val)) {
+				LOGWARNING("No json in bkey appended message %s", buf);
 				free(buf);
-				buf = json_dumps(val, JSON_EOL | JSON_COMPACT);
-				json_decref(val);
+				return;
 			}
+			json_append_bkeys(val, bkey, blen);
+			free(buf);
+			buf = json_dumps(val, JSON_COMPACT);
+			json_decref(val);
 		}
 		LOGDEBUG("Message for node: %s", buf);
 		send_proc(ckp->stratifier, buf);
@@ -972,12 +970,17 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, u
 		if (ckp->node) {
 			char *msg;
 
-			val = json_loads(buf, 0, NULL);
-			if (!val) // Can happen if client sent invalid json message
+			val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+			if (!val) {
+				// Can happen if client sent invalid json message
+				len = slen;
 				goto out;
+			}
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 			json_object_set_new_nocheck(val, "server", json_integer(client->server));
+			if (bkey)
+				json_append_bkeys(val, bkey, blen);
 			msg = json_dumps(val, JSON_COMPACT);
 			json_decref(val);
 			send_proc(ckp->stratifier, msg);
@@ -985,6 +988,21 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, u
 		}
 		if (ckp->redirector && !client->redirected)
 			test_redirector_shares(ckp, client, buf);
+	}
+
+	/* Append bkeys as regular json for clients that can't decode them */
+	if (unlikely(bkey && !client->bkey)) {
+		val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+		if (unlikely(!val)) {
+			LOGERR("Failed to decode json in bkey encoded message %s", buf);
+			bkey = '\0';
+			len = strlen(buf);
+			goto out;
+		}
+		free(buf);
+		json_append_bkeys(val, bkey, blen);
+		buf = json_dumps(val, JSON_COMPACT);
+		json_decref(val);
 	}
 out:
 	sender_send = ckzalloc(sizeof(sender_send_t));

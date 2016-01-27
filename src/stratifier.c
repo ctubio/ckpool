@@ -6190,7 +6190,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	json_t *val;
 	int server;
 
-	val = json_loads(buf, 0, NULL);
+	val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 	if (unlikely(!val)) {
 		LOGWARNING("Received unrecognised non-json message: %s", buf);
 		goto out;
