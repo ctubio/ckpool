@@ -5623,13 +5623,27 @@ static void add_remote_server(sdata_t *sdata, stratum_instance_t *client)
 	ck_wunlock(&sdata->instance_lock);
 }
 
+static void set_client_bkey(ckpool_t *ckp, stratum_instance_t *client, const int64_t client_id,
+			    const json_t *val, char *buf)
+{
+	json_t *bkey_val = json_object_get(val, "bkey");
+
+	if (bkey_val) {
+		client->bkey = json_is_true(bkey_val);
+		if (client->bkey) {
+			snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
+			send_proc(ckp->connector, buf);
+		}
+	}
+
+}
+
 /* Enter with client holding ref count */
 static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client,
 			 const int64_t client_id, const json_t *val, json_t *id_val,
 			 json_t *method_val, json_t *params_val)
 {
 	const char *method;
-	json_t *bkey_val;
 	char buf[256];
 
 	/* Random broken clients send something not an integer as the id so we
@@ -5681,14 +5695,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 				  client_id, client->address, client->server);
 			connector_drop_client(ckp, client_id);
 		} else {
-			bkey_val = json_object_get(val, "bkey");
-			if (bkey_val) {
-				client->bkey = json_is_true(bkey_val);
-				if (client->bkey) {
-					snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
-					send_proc(ckp->connector, buf);
-				}
-			}
+			set_client_bkey(ckp, client, client_id, val, buf);
 			add_remote_server(sdata, client);
 			snprintf(buf, 255, "remote=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
@@ -5705,14 +5712,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			connector_drop_client(ckp, client_id);
 			drop_client(ckp, sdata, client_id);
 		} else {
-			bkey_val = json_object_get(val, "bkey");
-			if (bkey_val) {
-				client->bkey = json_is_true(bkey_val);
-				if (client->bkey) {
-					snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
-					send_proc(ckp->connector, buf);
-				}
-			}
+			set_client_bkey(ckp, client, client_id, val, buf);
 			add_mining_node(ckp, sdata, client);
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
@@ -5731,14 +5731,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			 * is a passthrough and to manage its messages accordingly. No
 			 * data from this client id should ever come back to this
 			 * stratifier after this so drop the client in the stratifier. */
-			bkey_val = json_object_get(val, "bkey");
-			if (bkey_val) {
-				client->bkey = json_is_true(bkey_val);
-				if (client->bkey) {
-					snprintf(buf, 255, "bkeyclient=%"PRId64, client_id);
-					send_proc(ckp->connector, buf);
-				}
-			}
+			set_client_bkey(ckp, client, client_id, val, buf);
 			LOGNOTICE("Adding passthrough client %"PRId64" %s", client_id, client->address);
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
