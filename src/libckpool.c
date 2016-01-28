@@ -1445,11 +1445,6 @@ bool _json_append_bkeys(json_t *val, const char *bkey, const uint32_t len, const
 		json_set_string(val, key, hex);
 		free(hex);
 		ofs += binlen;
-		if (unlikely(ofs >= len)) {
-			LOGDEBUG("Unable to seek to bkey offset %u beyond length %d",
-				 ofs, len);
-			return false;
-		}
 	}
 	return true;
 }
