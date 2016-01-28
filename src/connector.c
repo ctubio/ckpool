@@ -1272,8 +1272,10 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
 	slen = strlen(msg);
 	if (blen) {
-		msglen = slen + blen;
+		/* We're overwriting the EOL so remove it from msglen */
+		msglen = slen + blen - 1;
 		msg = realloc(msg, msglen);
+		/* Overwrite the EOL here */
 		memcpy(msg + slen - 1, bkey, blen);
 		send_client(cdata, client_id, msg, slen, msglen);
 	} else

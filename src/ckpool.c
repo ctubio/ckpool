@@ -579,6 +579,7 @@ static void clear_bufline(connsock_t *cs)
 	if (unlikely(!cs->buf)) {
 		socklen_t optlen = sizeof(cs->rcvbufsiz);
 
+		cs->bufofs = 0;
 		cs->buf = ckzalloc(PAGESIZE);
 		cs->bufsize = PAGESIZE;
 		getsockopt(cs->fd, SOL_SOCKET, SO_RCVBUF, &cs->rcvbufsiz, &optlen);
@@ -589,8 +590,8 @@ static void clear_bufline(connsock_t *cs)
 		memset(cs->buf + cs->buflen, 0, cs->bufofs);
 		cs->bufofs = cs->buflen;
 		cs->buflen = 0;
-		cs->buf[cs->bufofs] = '\0';
 	}
+	cs->buf[cs->bufofs] = '\0';
 }
 
 static void add_buflen(ckpool_t *ckp, connsock_t *cs, const char *readbuf, const int len)
