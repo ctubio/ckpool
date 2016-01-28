@@ -916,28 +916,19 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, i
 	char *bkey = NULL;
 	json_t *val;
 
-	if (unlikely(len > slen)) {
-		bkey = strstr(buf + slen - 4 - 1, "bkey");
-		if (bkey)
-			blen = len - (bkey - buf);
-	}
+	/* Node messages will have come from the generator which will have
+	 * already extracted any bkeys */
 	if (unlikely(ckp->node && !id)) {
-		if (bkey) {
-			val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
-			if (unlikely(!val)) {
-				LOGWARNING("No json in bkey appended message %s", buf);
-				free(buf);
-				return;
-			}
-			json_append_bkeys(val, bkey, blen);
-			free(buf);
-			buf = json_dumps(val, JSON_COMPACT);
-			json_decref(val);
-		}
 		LOGDEBUG("Message for node: %s", buf);
 		send_proc(ckp->stratifier, buf);
 		free(buf);
 		return;
+	}
+
+	if (unlikely(len > slen)) {
+		bkey = strstr(buf + slen - 4 - 1, "bkey");
+		if (bkey)
+			blen = len - (bkey - buf);
 	}
 
 	/* Grab a reference to this client until the sender_send has
