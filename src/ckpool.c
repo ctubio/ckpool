@@ -713,7 +713,7 @@ int read_socket_line(connsock_t *cs, float *timeout)
 
 	clear_bufline(cs);
 	recv_available(ckp, cs); // Intentionally ignore return value
-	eom = strchr(cs->buf, '\n');
+	eom = memchr(cs->buf, '\n', cs->bufofs);
 
 	tv_time(&start);
 
@@ -751,7 +751,7 @@ int read_socket_line(connsock_t *cs, float *timeout)
 			ret = -1;
 			goto out;
 		}
-		eom = strchr(cs->buf, '\n');
+		eom = memchr(cs->buf, '\n', cs->bufofs);
 		tv_time(&now);
 		diff = tvdiff(&now, &start);
 		copy_tv(&start, &now);
@@ -764,10 +764,10 @@ int read_socket_line(connsock_t *cs, float *timeout)
 		ret = eom - cs->buf;
 	} else
 		*eom = '\0';
-	cs->buflen = cs->buf + cs->bufofs - eom - 1;
-	if (cs->buflen)
-		cs->bufofs = eom - cs->buf + 1;
-	else
+	if (cs->bufofs > ret + 1) {
+		cs->buflen = cs->bufofs - ret - 1;
+		cs->bufofs = ret + 1;
+	} else
 		cs->bufofs = 0;
 out:
 	if (ret < 0) {
