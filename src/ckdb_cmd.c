@@ -2163,7 +2163,6 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 							w_hashrate24hr += userstats->hashrate24hr;
 							if (w_elapsed == -1 || w_elapsed > userstats->elapsed)
 								w_elapsed = userstats->elapsed;
-							w_instances += userstats->instances;
 							if (userstats->instances != NO_INSTANCE_DATA) {
 								if (w_instances == NO_INSTANCE_DATA)
 									w_instances = 0;
@@ -2327,11 +2326,17 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				STRNCPY(userstats_u->workername, userstats->workername);
 				userstats_u->hashrate5m = userstats->hashrate5m;
 				userstats_u->hashrate1hr = userstats->hashrate1hr;
+				userstats_u->instances = userstats->instances;
 
 				k_add_head(usu_store, usu_item);
 			} else {
 				userstats_u->hashrate5m += userstats->hashrate5m;
 				userstats_u->hashrate1hr += userstats->hashrate1hr;
+				if (userstats->instances != NO_INSTANCE_DATA) {
+					if ( userstats_u->instances == NO_INSTANCE_DATA)
+						userstats_u->instances = 0;
+					userstats_u->instances += userstats->instances;
+				}
 			}
 		}
 		us_item = next_in_ktree(us_ctx);
@@ -2370,6 +2375,10 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 			snprintf(tmp, sizeof(tmp), "u_hashrate1hr:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
+			int_to_buf(userstats_u->instances, reply, sizeof(reply));
+			snprintf(tmp, sizeof(tmp), "u_instances:%d=%s%c", rows, reply, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
 			rows++;
 		}
 		usu_item = usu_item->next;
@@ -2383,7 +2392,8 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "username,userid,u_hashrate5m,u_hashrate1hr", FLDSEP);
+		 "username,userid,u_hashrate5m,u_hashrate1hr,u_instances",
+		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Users", FLDSEP, "");
@@ -3231,6 +3241,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	BLOCKS *blocks;
 	USERS *users;
 	int64_t u_elapsed;
+	int u_instances;
 	K_TREE_CTX ctx[1];
 	size_t len, off;
 	bool has_uhr;
@@ -3432,6 +3443,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (p_item && u_item) {
 		u_hashrate5m = u_hashrate1hr = 0.0;
 		u_elapsed = -1;
+		u_instances = NO_INSTANCE_DATA;
 		/* find last matching userid record - before userid+1
 		 * Use 'before' in case there is (unexpectedly) a userstats
 		 *  with an empty workername */
@@ -3448,6 +3460,11 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 				u_hashrate1hr += userstats->hashrate1hr;
 				if (u_elapsed == -1 || u_elapsed > userstats->elapsed)
 					u_elapsed = userstats->elapsed;
+				if (userstats->instances != NO_INSTANCE_DATA) {
+					if (u_instances == NO_INSTANCE_DATA)
+						u_instances = 0;
+					u_instances += userstats->instances;
+				}
 				has_uhr = true;
 			}
 			us_item = prev_in_ktree(ctx);
@@ -3468,9 +3485,14 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		bigint_to_buf(u_elapsed, reply, siz);
 		snprintf(tmp, sizeof(tmp), "u_elapsed=%s", reply);
 		APPEND_REALLOC(buf, off, len, tmp);
+
+		int_to_buf(u_instances, reply, siz);
+		snprintf(tmp, sizeof(tmp), "u_instances=%s", reply);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
-		snprintf(tmp, sizeof(tmp), "u_hashrate5m=?%cu_hashrate1hr=?%cu_elapsed=?",
-					   FLDSEP, FLDSEP);
+		snprintf(tmp, sizeof(tmp),
+			 "u_hashrate5m=?%cu_hashrate1hr=?%cu_elapsed=?%cu_instances=?",
+			 FLDSEP, FLDSEP, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 

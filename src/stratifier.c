@@ -2669,6 +2669,11 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 		return;
 	}
 
+	if (ckp->node) {
+		json_decref(val);
+		return;
+	}
+
 	/* Use this locking as an opportunity to test other clients. */
 	ck_rlock(&ckp_sdata->instance_lock);
 	HASH_ITER(hh, ckp_sdata->stratum_instances, client, tmp) {
