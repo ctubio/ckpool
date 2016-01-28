@@ -640,6 +640,62 @@ static int recv_available(ckpool_t *ckp, connsock_t *cs)
 	return len;
 }
 
+static bool read_cs_length(ckpool_t *ckp, connsock_t *cs, float *timeout, int len)
+{
+	bool ret = false;
+	tv_t start;
+
+	tv_time(&start);
+
+	while (cs->bufofs < len) {
+		float diff;
+		tv_t now;
+		int res;
+
+		if (*timeout < 0) {
+			LOGDEBUG("Timed out in read_cs_length");
+			ret = 0;
+			goto out;
+		}
+		res = wait_read_select(cs->fd, *timeout);
+		if (res < 1)
+			goto out;
+		res = recv_available(ckp, cs);
+		if (res < 1)
+			goto out;
+		tv_time(&now);
+		diff = tvdiff(&now, &start);
+		copy_tv(&start, &now);
+		*timeout -= diff;
+	}
+	ret = true;
+out:
+	return ret;
+}
+
+static char *bkey_eom(ckpool_t *ckp, connsock_t *cs, char *bkey, float *timeout)
+{
+	int slen, msglen;
+	char *ret;
+
+	/* String length till bkey */
+	slen = bkey - cs->buf - 1;
+	if (!read_cs_length(ckp, cs, timeout, slen + BKEY_LENOFS + BKEY_LENLEN)) {
+		LOGWARNING("Failed to read cs bkey header");
+		ret = cs->buf + cs->bufofs;
+		goto out;
+	}
+	msglen = bkey_len(bkey);
+	if (!read_cs_length(ckp, cs, timeout, slen + msglen)) {
+		LOGWARNING("Failed to read cs bkey msg length %d", msglen);
+		ret = cs->buf + cs->bufofs;
+		goto out;
+	}
+	ret = cs->buf + slen + msglen;
+out:
+	return ret;
+}
+
 /* Read from a socket into cs->buf till we get an '\n', converting it to '\0'
  * and storing how much extra data we've received, to be moved to the beginning
  * of the buffer for use on the next receive. Returns length of the line if a
@@ -647,9 +703,9 @@ static int recv_available(ckpool_t *ckp, connsock_t *cs)
  * and -1 on error. */
 int read_socket_line(connsock_t *cs, float *timeout)
 {
+	char *eom = NULL, *bkey = NULL;
 	ckpool_t *ckp = cs->ckp;
 	bool proxy = ckp->proxy;
-	char *eom = NULL;
 	tv_t start, now;
 	float diff;
 	int ret;
@@ -700,8 +756,12 @@ int read_socket_line(connsock_t *cs, float *timeout)
 		copy_tv(&start, &now);
 		*timeout -= diff;
 	}
-	ret = eom - cs->buf;
 
+	ret = eom - cs->buf;
+	if (unlikely(ret > 5) && (bkey = strstr(cs->buf + ret - 5, "bkey"))) {
+		eom = bkey_eom(ckp, cs, bkey, timeout);
+		ret = eom - cs->buf;
+	}
 	cs->buflen = cs->buf + cs->bufofs - eom - 1;
 	if (cs->buflen)
 		cs->bufofs = eom - cs->buf + 1;
