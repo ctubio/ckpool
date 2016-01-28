@@ -931,7 +931,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, i
 			}
 			json_append_bkeys(val, bkey, blen);
 			free(buf);
-			buf = json_dumps(val, JSON_COMPACT | JSON_EOL);
+			buf = json_dumps(val, JSON_COMPACT);
 			json_decref(val);
 		}
 		LOGDEBUG("Message for node: %s", buf);
@@ -984,7 +984,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, i
 			json_object_set_new_nocheck(val, "server", json_integer(client->server));
 			if (bkey)
 				json_append_bkeys(val, bkey, blen);
-			msg = json_dumps(val, JSON_COMPACT | JSON_EOL);
+			msg = json_dumps(val, JSON_COMPACT);
 			json_decref(val);
 			send_proc(ckp->stratifier, msg);
 			free(msg);
@@ -1280,9 +1280,9 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
 	slen = strlen(msg);
 	if (blen) {
-		msglen = slen + 1 + blen;
+		msglen = slen + blen;
 		msg = realloc(msg, msglen);
-		memcpy(msg + slen, bkey, blen);
+		memcpy(msg + slen - 1, bkey, blen);
 		send_client(cdata, client_id, msg, slen, msglen);
 	} else
 		send_client(cdata, client_id, msg, slen, slen);
