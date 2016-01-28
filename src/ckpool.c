@@ -759,7 +759,7 @@ int read_socket_line(connsock_t *cs, float *timeout)
 	}
 
 	ret = eom - cs->buf;
-	if (unlikely(ret > 5) && (bkey = strstr(cs->buf + ret - 5, "bkey"))) {
+	if (unlikely(ret > 5 && (bkey = strstr(cs->buf + ret - 5, "bkey\n")))) {
 		eom = bkey_eom(ckp, cs, bkey, timeout);
 		ret = eom - cs->buf;
 	} else

@@ -926,7 +926,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, i
 	}
 
 	if (unlikely(len > slen)) {
-		bkey = strstr(buf + slen - 4 - 1, "bkey");
+		bkey = strstr(buf + slen - 5, "bkey\n");
 		if (bkey)
 			blen = len - (bkey - buf);
 	}
@@ -1249,7 +1249,7 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 
 	slen = strlen(buf);
 	if (likely(slen > 5)) {
-		bkey = strstr(buf + slen - 5, "bkey");
+		bkey = strstr(buf + slen - 5, "bkey\n");
 		if (bkey) {
 			LOGDEBUG("Bkey found in process_client_msg");
 			blen = msglen - (bkey - buf);
