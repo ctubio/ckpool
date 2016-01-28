@@ -1002,9 +1002,10 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, i
 			len = strlen(buf);
 			goto out;
 		}
-		free(buf);
 		json_append_bkeys(val, bkey, blen);
+		free(buf);
 		buf = json_dumps(val, JSON_COMPACT | JSON_EOL);
+		len = strlen(buf);
 		json_decref(val);
 	}
 out:
