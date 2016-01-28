@@ -1248,15 +1248,17 @@ out:
 static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 {
 	char *msg, *bkey = NULL;
+	uint32_t slen, blen = 0;
 	int64_t client_id;
 	json_t *json_msg;
-	uint32_t slen;
 
 	slen = strlen(buf);
 	if (likely(slen > 5)) {
 		bkey = strstr(buf + slen - 5, "bkey");
-		if (bkey)
+		if (bkey) {
 			LOGDEBUG("Bkey found in process_client_msg");
+			blen = msglen - (bkey - buf);
+		}
 	}
 	json_msg = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 	if (unlikely(!json_msg)) {
@@ -1273,7 +1275,14 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
 
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
-	send_client(cdata, client_id, msg, slen, msglen);
+	slen = strlen(msg);
+	if (blen) {
+		msglen = slen + 1 + blen;
+		msg = realloc(msg, msglen);
+		memcpy(msg + slen, bkey, blen);
+		send_client(cdata, client_id, msg, slen, msglen);
+	} else
+		send_client(cdata, client_id, msg, slen, slen);
 	json_decref(json_msg);
 }
 
