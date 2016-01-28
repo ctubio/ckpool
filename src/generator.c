@@ -1924,25 +1924,29 @@ static void reconnect_proxy(proxy_instance_t *proxi)
 
 static void forward_passthrough_msg(ckpool_t *ckp, char *buf, int len)
 {
-	int slen = strlen(buf), blen = len - slen;
+	int slen = strlen(buf);
 	char *bkey = NULL;
 
-	if (unlikely(blen > 0))
+	if (unlikely(len > slen)) {
 		bkey = strstr(buf + slen - 5, "bkey");
-	if (bkey) {
-		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+		if (bkey) {
+			json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+			int blen;
 
-		if (unlikely(!val)) {
-			LOGWARNING("No json in bkey appended message %s", buf);
-			goto out;
+			LOGDEBUG("Bkey found in forward_passthrough_msg");
+			blen = len - (bkey - buf);
+			if (unlikely(!val)) {
+				LOGWARNING("No json in bkey appended message %s", buf);
+				goto out;
+			}
+			json_append_bkeys(val, bkey, blen);
+			buf = json_dumps(val, JSON_COMPACT);
+			json_decref(val);
+			LOGDEBUG("Passthrough recv received upstream bkey msg: %s", buf);
+			send_proc(ckp->connector, buf);
+			free(buf);
+			return;
 		}
-		json_append_bkeys(val, bkey, blen);
-		buf = json_dumps(val, JSON_COMPACT);
-		json_decref(val);
-		LOGDEBUG("Passthrough recv received upstream bkey msg: %s", buf);
-		send_proc(ckp->connector, buf);
-		free(buf);
-		return;
 	}
 out:
 	LOGDEBUG("Passthrough recv received upstream msg: %s", buf);
