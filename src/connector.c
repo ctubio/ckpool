@@ -430,7 +430,7 @@ static void drop_all_clients(cdata_t *cdata)
 	ck_wunlock(&cdata->lock);
 }
 
-static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, uint32_t len);
+static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, int len);
 
 /* Look for shares being submitted via a redirector and add them to a linked
  * list for looking up the responses. */
@@ -907,17 +907,20 @@ out:
 
 /* Send a client by id a heap allocated buffer, allowing this function to
  * free the ram. */
-static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, uint32_t len)
+static void send_client(cdata_t *cdata, const int64_t id, char *buf, int slen, int len)
 {
 	ckpool_t *ckp = cdata->ckp;
 	sender_send_t *sender_send;
-	uint32_t blen = len - slen;
 	client_instance_t *client;
+	uint32_t blen = 0;
 	char *bkey = NULL;
 	json_t *val;
 
-	if (unlikely(blen > 0))
+	if (unlikely(len > slen)) {
 		bkey = strstr(buf + slen - 4 - 1, "bkey");
+		if (bkey)
+			blen = len - (bkey - buf);
+	}
 	if (unlikely(ckp->node && !id)) {
 		if (bkey) {
 			val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
