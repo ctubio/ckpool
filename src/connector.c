@@ -1253,8 +1253,8 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 	uint32_t slen;
 
 	slen = strlen(buf);
-	if (likely(slen > 4)) {
-		bkey = strstr(buf + slen - 4 - 1, "bkey");
+	if (likely(slen > 5)) {
+		bkey = strstr(buf + slen - 5, "bkey");
 		if (bkey)
 			LOGDEBUG("Bkey found in process_client_msg");
 	}
@@ -1263,12 +1263,6 @@ static void process_client_msg(cdata_t *cdata, char *buf, uint32_t msglen)
 		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
 		return;
 	}
-#if 0
-	if (unlikely(bkey))
-		msglen = msglen - (bkey - buf);
-	else
-		msglen = len;
-#endif
 
 	/* Extract the client id from the json message and remove its entry */
 	client_id = json_integer_value(json_object_get(json_msg, "client_id"));

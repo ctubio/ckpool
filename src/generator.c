@@ -1922,6 +1922,33 @@ static void reconnect_proxy(proxy_instance_t *proxi)
 	create_pthread(&pth, proxy_reconnect, proxi);
 }
 
+static void forward_passthrough_msg(ckpool_t *ckp, char *buf, int len)
+{
+	int slen = strlen(buf), blen = len - slen;
+	char *bkey = NULL;
+
+	if (unlikely(blen > 0))
+		bkey = strstr(buf + slen - 5, "bkey");
+	if (bkey) {
+		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+
+		if (unlikely(!val)) {
+			LOGWARNING("No json in bkey appended message %s", buf);
+			goto out;
+		}
+		json_append_bkeys(val, bkey, blen);
+		buf = json_dumps(val, JSON_COMPACT);
+		json_decref(val);
+		LOGDEBUG("Passthrough recv received upstream bkey msg: %s", buf);
+		send_proc(ckp->connector, buf);
+		free(buf);
+		return;
+	}
+out:
+	LOGDEBUG("Passthrough recv received upstream msg: %s", buf);
+	send_proc(ckp->connector, buf);
+}
+
 /* For receiving messages from an upstream pool to pass downstream. Responsible
  * for setting up the connection and testing pool is live. */
 static void *passthrough_recv(void *arg)
@@ -1956,10 +1983,9 @@ static void *passthrough_recv(void *arg)
 		/* Simply forward the message on, as is, to the connector to
 		 * process. Possibly parse parameters sent by upstream pool
 		 * here */
-		if (likely(ret > 0)) {
-			LOGDEBUG("Passthrough recv received upstream msg: %s", cs->buf);
-			send_proc(ckp->connector, cs->buf);
-		} else if (ret < 0) {
+		if (likely(ret > 0))
+			forward_passthrough_msg(ckp, cs->buf, ret);
+		else if (ret < 0) {
 			/* Read failure */
 			LOGWARNING("Passthrough %d:%s failed to read_socket_line in passthrough_recv, attempting reconnect",
 				   proxi->id, proxi->url);
