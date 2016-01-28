@@ -761,13 +761,13 @@ int read_socket_line(connsock_t *cs, float *timeout)
 	if (unlikely(ret > 5) && (bkey = strstr(cs->buf + ret - 5, "bkey"))) {
 		eom = bkey_eom(ckp, cs, bkey, timeout);
 		ret = eom - cs->buf;
-	}
+	} else
+		*eom = '\0';
 	cs->buflen = cs->buf + cs->bufofs - eom - 1;
 	if (cs->buflen)
 		cs->bufofs = eom - cs->buf + 1;
 	else
 		cs->bufofs = 0;
-	*eom = '\0';
 out:
 	if (ret < 0) {
 		empty_buffer(cs);
