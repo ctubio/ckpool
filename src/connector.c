@@ -528,7 +528,7 @@ reparse:
 		blen = bkey_len(bkey);
 		if (len < blen)
 			goto retry;
-		buflen = slen + blen;
+		buflen = slen + blen + 1;
 	} else
 		buflen = eol - client->buf + 1;
 
@@ -538,7 +538,6 @@ reparse:
 		invalidate_client(ckp, cdata, client);
 		return;
 	}
-
 	if (!(val = json_loads(client->buf, JSON_DISABLE_EOF_CHECK, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
@@ -549,8 +548,10 @@ reparse:
 	} else {
 		char *s;
 
-		if (unlikely(blen))
+		if (unlikely(blen)) {
 			json_append_bkeys(val, bkey, blen);
+			blen = 0;
+		}
 		if (client->passthrough) {
 			int64_t passthrough_id;
 
@@ -580,7 +581,8 @@ reparse:
 		json_decref(val);
 	}
 	client->bufofs -= buflen;
-	memmove(client->buf, client->buf + buflen, client->bufofs);
+	if (client->bufofs)
+		memmove(client->buf, client->buf + buflen, client->bufofs);
 	client->buf[client->bufofs] = '\0';
 
 	if (client->bufofs)
