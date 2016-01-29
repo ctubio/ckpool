@@ -489,7 +489,7 @@ static void parse_client_msg(cdata_t *cdata, client_instance_t *client)
 {
 	int buflen, ret, slen = 0, blen = 0;
 	ckpool_t *ckp = cdata->ckp;
-	char *msg, *eol, *bkey;
+	char *eol, *bkey = NULL;
 	json_t *val;
 
 retry:
@@ -539,26 +539,18 @@ reparse:
 		return;
 	}
 
-	msg = alloca(round_up_page(buflen + 1));
-	memcpy(msg, client->buf, buflen);
-	msg[buflen] = '\0';
-	client->bufofs -= buflen;
-	memmove(client->buf, client->buf + buflen, client->bufofs);
-	client->buf[client->bufofs] = '\0';
-	if (!(val = json_loads(msg, JSON_DISABLE_EOF_CHECK, NULL))) {
+	if (!(val = json_loads(client->buf, JSON_DISABLE_EOF_CHECK, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
-		LOGINFO("Client id %"PRId64" sent invalid json message %s", client->id, msg);
+		LOGINFO("Client id %"PRId64" sent invalid json message %s", client->id, client->buf);
 		send_client_msg(cdata, client->id, buf);
 		invalidate_client(ckp, cdata, client);
 		return;
 	} else {
 		char *s;
 
-		if (unlikely(blen)) {
-			bkey = msg + slen + 1;
+		if (unlikely(blen))
 			json_append_bkeys(val, bkey, blen);
-		}
 		if (client->passthrough) {
 			int64_t passthrough_id;
 
@@ -566,7 +558,7 @@ reparse:
 			passthrough_id = (client->id << 32) | passthrough_id;
 			json_object_set_new_nocheck(val, "client_id", json_integer(passthrough_id));
 		} else {
-			if (ckp->redirector && !client->redirected && strstr(msg, "mining.submit"))
+			if (ckp->redirector && !client->redirected && strstr(client->buf, "mining.submit"))
 				parse_redirector_share(client, val);
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
@@ -587,6 +579,9 @@ reparse:
 		free(s);
 		json_decref(val);
 	}
+	client->bufofs -= buflen;
+	memmove(client->buf, client->buf + buflen, client->bufofs);
+	client->buf[client->bufofs] = '\0';
 
 	if (client->bufofs)
 		goto reparse;
