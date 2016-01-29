@@ -1152,15 +1152,22 @@ out:
 
 static void parse_remote_submitblock(ckpool_t *ckp, const json_t *val, const char *buf)
 {
-	const char *gbt_block = json_string_value(json_object_get(val, "submitblock"));
+	json_t *hash_val, *data_val;
+	const char *hash, *data;
+	char *gbt_block;
 
-	if (unlikely(!gbt_block)) {
-		LOGWARNING("Failed to find submitblock data from upstream submitblock method %s",
-			   buf);
+	hash_val = json_object_get(val, "hash");
+	hash = json_string_value(hash_val);
+	data_val = json_object_get(val, "data");
+	data = json_string_value(data_val);
+	if (unlikely(!hash || !data)) {
+		LOGWARNING("Failed to extract hash and data from remote submitblock msg %s", buf);
 		return;
 	}
+	ASPRINTF(&gbt_block, "submitblock:%s,%s", hash, data);
 	LOGWARNING("Submitting possible upstream block!");
 	send_proc(ckp->generator, gbt_block);
+	free(gbt_block);
 }
 
 static void ping_upstream(cdata_t *cdata)

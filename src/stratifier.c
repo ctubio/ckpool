@@ -1408,7 +1408,8 @@ static void upstream_blocksubmit(ckpool_t *ckp, const char *hash, const char *da
 	free(buf);
 }
 
-static void downstream_blocksubmits(ckpool_t *ckp, const char *gbt_block, const stratum_instance_t *source)
+static void downstream_blocksubmits(ckpool_t *ckp, const char *hash, const char *data,
+				    const stratum_instance_t *source)
 {
 	stratum_instance_t *client;
 	sdata_t *sdata = ckp->data;
@@ -1418,10 +1419,14 @@ static void downstream_blocksubmits(ckpool_t *ckp, const char *gbt_block, const 
 	ck_rlock(&sdata->instance_lock);
 	if (sdata->remote_instances) {
 		json_t *val = json_object();
+		char *bkey = bkey_object();
+		uint32_t bkeylen;
 
-		JSON_CPACK(val, "{ss,ss}",
-			        "method", "submitblock",
-				"submitdata", gbt_block);
+		JSON_CPACK(val, "{ss}", "method", "submitblock");
+		bkey_add_hex(bkey, "hash", hash);
+		bkey_add_hex(bkey, "data", data);
+		bkeylen = bkey_len(bkey);
+
 		DL_FOREACH(sdata->remote_instances, client) {
 			ckmsg_t *client_msg;
 			smsg_t *msg;
@@ -1434,11 +1439,15 @@ static void downstream_blocksubmits(ckpool_t *ckp, const char *gbt_block, const 
 			msg = ckzalloc(sizeof(smsg_t));
 			msg->json_msg = json_msg;
 			msg->client_id = client->id;
+			msg->bkey = ckalloc(bkeylen);
+			memcpy(msg->bkey, bkey, bkeylen);
+			msg->bkeylen = bkeylen;
 			client_msg->data = msg;
 			DL_APPEND(bulk_send, client_msg);
 			messages++;
 		}
 		json_decref(val);
+		free(bkey);
 	}
 	ck_runlock(&sdata->instance_lock);
 
@@ -1487,7 +1496,7 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	if (ckp->remote)
 		upstream_blocksubmit(ckp, blockhash, gbt_block + 12 + 64 + 1);
 	else
-		downstream_blocksubmits(ckp, gbt_block, NULL);
+		downstream_blocksubmits(ckp, blockhash, gbt_block + 12 + 64 + 1, NULL);
 	free(gbt_block);
 }
 
@@ -6007,7 +6016,7 @@ static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf
 	ASPRINTF(&gbt_block, "submitblock:%s,%s", hash, data);
 	LOGWARNING("Submitting possible downstream block!");
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
-	downstream_blocksubmits(ckp, gbt_block, client);
+	downstream_blocksubmits(ckp, hash, data, client);
 	free(gbt_block);
 }
 
