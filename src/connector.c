@@ -525,7 +525,7 @@ reparse:
 	client->bufofs -= buflen;
 	memmove(client->buf, client->buf + buflen, client->bufofs);
 	client->buf[client->bufofs] = '\0';
-	if (!(val = json_loads(msg, 0, NULL))) {
+	if (!(val = json_loads(msg, JSON_DISABLE_EOF_CHECK, NULL))) {
 		char *buf = strdup("Invalid JSON, disconnecting\n");
 
 		LOGINFO("Client id %"PRId64" sent invalid json message %s", client->id, msg);
@@ -1150,6 +1150,38 @@ static void ping_upstream(cdata_t *cdata)
 	ckmsgq_add(cdata->upstream_sends, buf);
 }
 
+static json_t *urecv_loads(const char *buf, const int len)
+{
+	json_t *val = NULL;
+	char *bkey = NULL;
+	int slen;
+
+	slen = strlen(buf);
+	if (unlikely(!slen)) {
+		LOGWARNING("Received empty message from upstream pool");
+		goto out;
+	}
+	val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+	if (unlikely(!val)) {
+		LOGWARNING("Received non-json msg from upstream pool %s",
+			   buf);
+		goto out;
+	}
+	if (len == slen)
+		goto out;
+	bkey = strstr(buf + slen - 5, "bkey\n");
+	if (likely(bkey)) {
+		int blen;
+
+		LOGDEBUG("Bkey found in upstream pool msg");
+		blen = len - (bkey - buf);
+		json_append_bkeys(val, bkey, blen);
+	} else
+		LOGWARNING("Non-bkey extranous data from upstream pool msg %s", buf);
+out:
+	return val;
+}
+
 static void *urecv_process(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
@@ -1182,12 +1214,9 @@ static void *urecv_process(void *arg)
 			goto nomsg;
 		}
 		alive = true;
-		val = json_loads(cs->buf, 0, NULL);
-		if (unlikely(!val)) {
-			LOGWARNING("Received non-json msg from upstream pool %s",
-				   cs->buf);
+		val = urecv_loads(cs->buf, ret);
+		if (unlikely(!val))
 			goto nomsg;
-		}
 		method = json_string_value(json_object_get(val, "method"));
 		if (unlikely(!method)) {
 			LOGWARNING("Failed to find method from upstream pool json %s",

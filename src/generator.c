@@ -1928,7 +1928,7 @@ static void forward_passthrough_msg(ckpool_t *ckp, char *buf, int len)
 	char *bkey = NULL;
 
 	if (unlikely(len > slen)) {
-		bkey = strstr(buf + slen - 5, "bkey");
+		bkey = strstr(buf + slen - 5, "bkey\n");
 		if (bkey) {
 			json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 			int blen;

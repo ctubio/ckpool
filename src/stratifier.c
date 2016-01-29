@@ -1391,13 +1391,20 @@ static void send_node_block(sdata_t *sdata, const char *enonce1, const char *non
 	}
 }
 
-static void upstream_blocksubmit(ckpool_t *ckp, const char *gbt_block)
+static void upstream_blocksubmit(ckpool_t *ckp, const char *hash, const char *data)
 {
-	char *buf;
+	char *buf, *bkey = bkey_object();
+	uint32_t bkeylen, len;
 
-	ASPRINTF(&buf, "upstream={\"method\":\"submitblock\",\"submitblock\":\"%s\"}\n",
-		 gbt_block);
-	send_proc(ckp->connector, buf);
+	bkey_add_hex(bkey, "hash", hash);
+	bkey_add_hex(bkey, "data", data);
+	bkeylen = bkey_len(bkey);
+	ASPRINTF(&buf, "upstream={\"method\":\"submitblock\"}");
+	len = strlen(buf);
+	buf = realloc(buf, round_up_page(len + 1 + bkeylen));
+	memcpy(buf + len, bkey, bkeylen);
+	free(bkey);
+	send_proc_data(ckp->connector, buf, len + bkeylen);
 	free(buf);
 }
 
@@ -1414,7 +1421,7 @@ static void downstream_blocksubmits(ckpool_t *ckp, const char *gbt_block, const 
 
 		JSON_CPACK(val, "{ss,ss}",
 			        "method", "submitblock",
-				"submitblock", gbt_block);
+				"submitdata", gbt_block);
 		DL_FOREACH(sdata->remote_instances, client) {
 			ckmsg_t *client_msg;
 			smsg_t *msg;
@@ -1478,7 +1485,7 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 		realloc_strcat(&gbt_block, wb->txn_data);
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
 	if (ckp->remote)
-		upstream_blocksubmit(ckp, gbt_block);
+		upstream_blocksubmit(ckp, blockhash, gbt_block + 12 + 64 + 1);
 	else
 		downstream_blocksubmits(ckp, gbt_block, NULL);
 	free(gbt_block);
@@ -5985,18 +5992,23 @@ static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
 static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf,
 				     const stratum_instance_t *client)
 {
-	json_t *submitblock_val;
-	const char *gbt_block;
+	json_t *hash_val, *data_val;
+	const char *hash, *data;
+	char *gbt_block;
 
-	submitblock_val = json_object_get(val, "submitblock");
-	gbt_block = json_string_value(submitblock_val);
-	if (unlikely(!gbt_block)) {
-		LOGWARNING("Failed to get submitblock data from remote message %s", buf);
+	hash_val = json_object_get(val, "hash");
+	hash = json_string_value(hash_val);
+	data_val = json_object_get(val, "data");
+	data = json_string_value(data_val);
+	if (unlikely(!hash || !data)) {
+		LOGWARNING("Failed to extract hash and data from remote submitblock msg %s", buf);
 		return;
 	}
+	ASPRINTF(&gbt_block, "submitblock:%s,%s", hash, data);
 	LOGWARNING("Submitting possible downstream block!");
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
 	downstream_blocksubmits(ckp, gbt_block, client);
+	free(gbt_block);
 }
 
 static void parse_remote_block(sdata_t *sdata, json_t *val, const char *buf)
