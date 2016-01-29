@@ -1007,7 +1007,9 @@ static void remote_server(ckpool_t *ckp, cdata_t *cdata, client_instance_t *clie
 	ASPRINTF(&buf, "{\"result\": true}\n");
 	send_client(cdata, client->id, buf);
 	if (!ckp->rmem_warn)
-		set_recvbufsize(ckp, client->fd, 1048576);
+		set_recvbufsize(ckp, client->fd, 2097152);
+	if (!ckp->wmem_warn)
+		client->sendbufsize = set_sendbufsize(ckp, client->fd, 2097152);
 }
 
 static bool connect_upstream(ckpool_t *ckp, connsock_t *cs)
@@ -1025,8 +1027,10 @@ static bool connect_upstream(ckpool_t *ckp, connsock_t *cs)
 	keep_sockalive(cs->fd);
 
 	/* We want large send buffers for upstreaming messages */
+	if (!ckp->rmem_warn)
+		set_recvbufsize(ckp, cs->fd, 2097152);
 	if (!ckp->wmem_warn)
-		cs->sendbufsiz = set_sendbufsize(ckp, cs->fd, 1048576);
+		cs->sendbufsiz = set_sendbufsize(ckp, cs->fd, 2097152);
 
 	JSON_CPACK(req, "{ss,s[s]}",
 			"method", "mining.remote",
