@@ -5807,22 +5807,24 @@ static void parse_authorise_result(ckpool_t *ckp, sdata_t *sdata, stratum_instan
 
 static int node_msg_type(json_t *val)
 {
+	const char *method;
 	int i, ret = -1;
-	char *method;
 
 	if (!val)
 		goto out;
-	if (!json_get_string(&method, val, "node.method"))
-		goto out;
-	for (i = 0; i < SM_NONE; i++) {
-		if (!strcmp(method, stratum_msgs[i])) {
-			ret = i;
-			break;
+	method = json_string_value(json_object_get(val, "node.method"));
+	if (method) {
+		for (i = 0; i < SM_NONE; i++) {
+			if (!strcmp(method, stratum_msgs[i])) {
+				ret = i;
+				break;
+			}
 		}
-	}
-	json_object_del(val, "node.method");
-out:
-	if (ret < 0 && json_get_string(&method, val, "method")) {
+		json_object_del(val, "node.method");
+	} else
+		method = json_string_value(json_object_get(val, "method"));
+
+	if (ret < 0 && method) {
 		if (!safecmp(method, "mining.submit"))
 			ret = SM_SHARE;
 		else if (!safecmp(method, "mining.notify"))
@@ -5838,6 +5840,7 @@ out:
 		else
 			ret = SM_NONE;
 	}
+out:
 	return ret;
 }
 
