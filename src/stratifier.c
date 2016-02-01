@@ -5835,6 +5835,8 @@ out:
 			ret = SM_TXNS;
 		else if (cmdmatch(method, "mining.suggest_difficulty"))
 			ret = SM_SUGGESTDIFF;
+		else
+			ret = SM_NONE;
 	}
 	return ret;
 }
@@ -6054,6 +6056,10 @@ static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum
 			break;
 		case SM_AUTHRESULT:
 			parse_authorise_result(ckp, sdata, client, res_val);
+			break;
+		case SM_NONE:
+			LOGNOTICE("Unrecognised method from client %"PRId64" :%s",
+				  client->id, buf);
 			break;
 		default:
 			break;
