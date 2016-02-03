@@ -1212,9 +1212,9 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		while (42) {
 			if (binleft == 1)
 				break;
-			memcpy(&wb->merklebin[i][0], hashbin + 32, 32);
-			__bin2hex(&wb->merklehash[wb->merkles][0], &wb->merklebin[i][0], 32);
-			json_array_append_new(wb->merkle_array, json_string(&wb->merklehash[i][0]));
+			memcpy(&wb->merklebin[wb->merkles][0], hashbin + 32, 32);
+			__bin2hex(&wb->merklehash[wb->merkles][0], &wb->merklebin[wb->merkles][0], 32);
+			json_array_append_new(wb->merkle_array, json_string(&wb->merklehash[wb->merkles][0]));
 			LOGDEBUG("MH%d %s",wb->merkles, &wb->merklehash[wb->merkles][0]);
 			wb->merkles++;
 			if (binleft % 2) {
