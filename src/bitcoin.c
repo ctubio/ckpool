@@ -89,18 +89,18 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 
 	dealloc(gbt->txn_data);
 	dealloc(gbt->txn_hashes);
-	gbt->transactions = 0;
+	gbt->txns = 0;
 	gbt->merkles = 0;
-	gbt->transactions = json_array_size(transaction_arr);
-	binlen = gbt->transactions * 32 + 32;
+	gbt->txns = json_array_size(transaction_arr);
+	binlen = gbt->txns * 32 + 32;
 	hashbin = alloca(binlen + 32);
 	memset(hashbin, 0, 32);
 	binleft = binlen / 32;
-	if (gbt->transactions) {
+	if (gbt->txns) {
 		int len = 1, ofs = 0;
 		const char *txn;
 
-		for (i = 0; i < gbt->transactions; i++) {
+		for (i = 0; i < gbt->txns; i++) {
 			arr_val = json_array_get(transaction_arr, i);
 			txn = json_string_value(json_object_get(arr_val, "data"));
 			if (!txn) {
@@ -111,10 +111,10 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 		}
 
 		gbt->txn_data = ckzalloc(len + 1);
-		gbt->txn_hashes = ckzalloc(gbt->transactions * 65 + 1);
-		memset(gbt->txn_hashes, 0x20, gbt->transactions * 65); // Spaces
+		gbt->txn_hashes = ckzalloc(gbt->txns * 65 + 1);
+		memset(gbt->txn_hashes, 0x20, gbt->txns * 65); // Spaces
 
-		for (i = 0; i < gbt->transactions; i++) {
+		for (i = 0; i < gbt->txns; i++) {
 			char binswap[32];
 			const char *hash;
 
@@ -168,7 +168,7 @@ static bool gbt_merkle_bins(gbtbase_t *gbt, json_t *transaction_arr)
 			binlen = binleft * 32;
 		}
 	}
-	LOGINFO("Stored %d transactions", gbt->transactions);
+	LOGINFO("Stored %d transactions", gbt->txns);
 	return true;
 }
 
@@ -259,8 +259,8 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	json_object_set_new_nocheck(gbt->json, "flags", json_string_nocheck(gbt->flags));
 
 	gbt_merkle_bins(gbt, transaction_arr);
-	json_object_set_new_nocheck(gbt->json, "transactions", json_integer(gbt->transactions));
-	if (gbt->transactions) {
+	json_object_set_new_nocheck(gbt->json, "txns", json_integer(gbt->txns));
+	if (gbt->txns) {
 		json_object_set_new_nocheck(gbt->json, "txn_data", json_string_nocheck(gbt->txn_data));
 		json_object_set_new_nocheck(gbt->json, "txn_hashes", json_string_nocheck(gbt->txn_hashes));
 	}

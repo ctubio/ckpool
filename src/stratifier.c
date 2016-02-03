@@ -106,7 +106,7 @@ struct workbase {
 	uint64_t coinbasevalue;
 	int height;
 	char *flags;
-	int transactions;
+	int txns;
 	char *txn_data;
 	char *txn_hashes;
 	int merkles;
@@ -877,8 +877,8 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 		json_set_int(wb_val, "coinbasevalue", wb->coinbasevalue);
 		json_set_int(wb_val, "height", wb->height);
 		json_set_string(wb_val, "flags", wb->flags);
-		json_set_int(wb_val, "transactions", wb->transactions);
-		if (likely(wb->transactions))
+		json_set_int(wb_val, "txns", wb->txns);
+		if (likely(wb->txns))
 			json_set_string(wb_val, "txn_data", wb->txn_data);
 		/* We don't need txn_hashes */
 		json_set_int(wb_val, "merkles", wb->merkles);
@@ -1158,8 +1158,8 @@ retry:
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
-	json_intcpy(&wb->transactions, val, "transactions");
-	if (wb->transactions) {
+	json_intcpy(&wb->txns, val, "txns");
+	if (wb->txns) {
 		json_strdup(&wb->txn_data, val, "txn_data");
 		json_strdup(&wb->txn_hashes, val, "txn_hashes");
 	} else
@@ -1230,8 +1230,8 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
-	json_intcpy(&wb->transactions, val, "transactions");
-	if (wb->transactions)
+	json_intcpy(&wb->txns, val, "txns");
+	if (wb->txns)
 		json_strdup(&wb->txn_data, val, "txn_data");
 	json_intcpy(&wb->merkles, val, "merkles");
 	wb->merkle_array = json_object_dup(val, "merklehash");
@@ -1433,7 +1433,7 @@ static void
 process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const int cblen,
 	      const uchar *data, const uchar *hash, uchar *swap32, char *blockhash)
 {
-	int transactions = wb->transactions + 1;
+	int txns = wb->txns + 1;
 	char *gbt_block, varint[12];
 	char hexcoinbase[1024];
 
@@ -1444,17 +1444,17 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	/* Message format: "submitblock:hash,data" */
 	sprintf(gbt_block, "submitblock:%s,", blockhash);
 	__bin2hex(gbt_block + 12 + 64 + 1, data, 80);
-	if (transactions < 0xfd) {
-		uint8_t val8 = transactions;
+	if (txns < 0xfd) {
+		uint8_t val8 = txns;
 
 		__bin2hex(varint, (const unsigned char *)&val8, 1);
-	} else if (transactions <= 0xffff) {
-		uint16_t val16 = htole16(transactions);
+	} else if (txns <= 0xffff) {
+		uint16_t val16 = htole16(txns);
 
 		strcat(gbt_block, "fd");
 		__bin2hex(varint, (const unsigned char *)&val16, 2);
 	} else {
-		uint32_t val32 = htole32(transactions);
+		uint32_t val32 = htole32(txns);
 
 		strcat(gbt_block, "fe");
 		__bin2hex(varint, (const unsigned char *)&val32, 4);
@@ -1462,7 +1462,7 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	strcat(gbt_block, varint);
 	__bin2hex(hexcoinbase, coinbase, cblen);
 	strcat(gbt_block, hexcoinbase);
-	if (wb->transactions)
+	if (wb->txns)
 		realloc_strcat(&gbt_block, wb->txn_data);
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
 	if (ckp->remote)
@@ -6474,7 +6474,7 @@ static int transactions_by_jobid(sdata_t *sdata, const int64_t id)
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_I64(sdata->workbases, &id, wb);
 	if (wb)
-		ret = wb->transactions;
+		ret = wb->txns;
 	ck_runlock(&sdata->workbase_lock);
 
 	return ret;
