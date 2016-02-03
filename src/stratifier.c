@@ -899,7 +899,6 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 	json_set_string(wb_val, "flags", wb->flags);
 	 /* Set to zero to be backwards compat with older node code */
 	json_set_int(wb_val, "transactions", 0);
-	json_set_int(wb_val, "txns", wb->txns);
 	json_object_set_new_nocheck(wb_val, "txnhashes", txn_array);
 	json_set_int(wb_val, "merkles", wb->merkles);
 	json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
@@ -1267,6 +1266,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 			binlen = binleft * 32;
 		}
 	}
+	LOGINFO("Stored %d transactions", wb->txns);
 
 	txn_array = json_array();
 
@@ -1389,18 +1389,19 @@ out:
 
 static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
 {
+	int i, arr_size = json_array_size(txnhashes);
 	json_t *txn_array, *hash_val;
 	txntable_t *txn;
 	bool ret = true;
-	size_t i;
 
 	txn_array = json_array();
 
 	ck_rlock(&sdata->workbase_lock);
-	json_array_foreach(txnhashes, i, hash_val) {
+	for (i = 0; i < arr_size; i++) {
 		const char *hash;
 		json_t *txn_val;
 
+		hash_val = json_array_get(txnhashes, i);
 		hash = json_string_value(hash_val);
 		if (unlikely(!hash)) {
 			LOGERR("Failed to get hash in rebuild_txns");
@@ -1435,10 +1436,8 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	workbase_t *wb = ckzalloc(sizeof(workbase_t));
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
-	txntable_t *txn, *tmp;
 	json_t *txnhashes;
 	char header[228];
-	int purged = 0;
 
 	wb->ckp = ckp;
 	json_int64cpy(&wb->id, val, "jobid");
@@ -1454,7 +1453,6 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
-	json_intcpy(&wb->txns, val, "txns");
 	txnhashes = json_object_get(val, "txnhashes");
 	if (!rebuild_txns(sdata, wb, txnhashes)) {
 		LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
@@ -1485,20 +1483,6 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	add_base(ckp, sdata, wb, &new_block);
 	if (new_block)
 		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
-
-	ck_wlock(&sdata->workbase_lock);
-	HASH_ITER(hh, sdata->txns, txn, tmp) {
-		if (txn->refcount--)
-			continue;
-		HASH_DEL(sdata->txns, txn);
-		dealloc(txn->data);
-		dealloc(txn);
-		purged++;
-	}
-	ck_wunlock(&sdata->workbase_lock);
-
-	if (purged)
-		LOGINFO("Stratifier purged %d node transactions", purged);
 }
 
 /* Calculate share diff and fill in hash and swap */
@@ -6287,15 +6271,17 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 {
 	json_t *txn_array, *txn_val, *data_val, *hash_val;
 	txntable_t *txn;
+	int i, arr_size;
 	int added = 0;
-	size_t i;
 
 	txn_array = json_object_get(val, "transaction");
+	arr_size = json_array_size(txn_array);
 
 	ck_wlock(&sdata->workbase_lock);
-	json_array_foreach(txn_array, i, txn_val) {
+	for (i = 0; i < arr_size; i++) {
 		const char *hash, *data;
 
+		txn_val = json_array_get(txn_array, i);
 		data_val = json_object_get(txn_val, "data");
 		hash_val = json_object_get(txn_val, "hash");
 		data = json_string_value(data_val);
