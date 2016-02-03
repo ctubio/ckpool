@@ -1208,6 +1208,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		}
 	} else
 		wb->txn_hashes = ckzalloc(1);
+	wb->merkle_array = json_array();
 	if (binleft > 1) {
 		while (42) {
 			if (binleft == 1)
