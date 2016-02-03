@@ -1289,7 +1289,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 	send_node_transactions(sdata, val);
 	json_decref(val);
 
-	LOGDEBUG("Stratifier added %d transactions and purged %d", added, purged);
+	LOGINFO("Stratifier added %d transactions and purged %d", added, purged);
 }
 
 /* This function assumes it will only receive a valid json gbt base template
@@ -6190,6 +6190,42 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const 
 		LOGWARNING("unrecognised trusted message %s", buf);
 }
 
+static void add_node_txns(sdata_t *sdata, const json_t *val)
+{
+	json_t *txn_array, *txn_val, *data_val, *hash_val;
+	txntable_t *txn;
+	int added = 0;
+	size_t i;
+
+	txn_array = json_object_get(val, "transaction");
+
+	ck_wlock(&sdata->workbase_lock);
+	json_array_foreach(txn_array, i, txn_val) {
+		const char *hash, *data;
+
+		data_val = json_object_get(txn_val, "data");
+		hash_val = json_object_get(txn_val, "hash");
+		data = json_string_value(data_val);
+		hash = json_string_value(hash_val);
+		if (unlikely(!data || !hash)) {
+			LOGERR("Failed to get hash/data in add_node_txns");
+			continue;
+		}
+		HASH_FIND_STR(sdata->txns, hash, txn);
+		if (txn)
+			continue;
+		txn = ckzalloc(sizeof(txntable_t));
+		memcpy(txn->hash, hash, 65);
+		txn->data = strdup(data);
+		txn->refcount = 10;
+		HASH_ADD_STR(sdata->txns, hash, txn);
+		added++;
+	}
+	ck_wunlock(&sdata->workbase_lock);
+
+	LOGINFO("Stratifier added %d node transactions", added);
+}
+
 /* Entered with client holding ref count */
 static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum_instance_t *client)
 {
@@ -6250,6 +6286,9 @@ static void parse_node_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const cha
 	}
 	LOGDEBUG("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
 	switch (msg_type) {
+		case SM_TRANSACTIONS:
+			add_node_txns(sdata, val);
+			break;
 		case SM_WORKINFO:
 			add_node_base(ckp, val);
 			break;
