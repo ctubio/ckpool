@@ -6903,6 +6903,9 @@ static void *statsupdate(void *arg)
 				continue;
 			}
 
+			if (client->node || client->remote)
+				continue;
+
 			/* Test for clients that haven't authed in over a minute
 			 * and drop them lazily */
 			if (!client->authorised) {
