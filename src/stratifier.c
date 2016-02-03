@@ -375,6 +375,16 @@ struct session {
 	char address[INET6_ADDRSTRLEN];
 };
 
+typedef struct txntable txntable_t;
+
+struct txntable {
+	UT_hash_handle hh;
+	int id;
+	char hash[68];
+	const char *data;
+	int refcount;
+};
+
 #define ID_AUTH 0
 #define ID_WORKINFO 1
 #define ID_AGEWORKINFO 2
@@ -447,6 +457,7 @@ struct stratifier_data {
 	workbase_t *workbases;
 	workbase_t *current_workbase;
 	int workbases_generated;
+	txntable_t *txns;
 
 	/* Semaphore to serialise calls to add_base */
 	sem_t update_sem;
@@ -1104,11 +1115,37 @@ struct update_req {
 
 static void broadcast_ping(sdata_t *sdata);
 
+/* Build a hashlist of all transactions, allowing us to compare with the list of
+ * existing transactions to determine which need to be propagated */
+static void add_txn(sdata_t *sdata, txntable_t *txns, const char *hash, const char *data)
+{
+	bool found = false;
+	txntable_t *txn;
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_FIND_STR(sdata->txns, hash, txn);
+	if (txn) {
+		txn->refcount++;
+		found = true;
+	}
+	ck_runlock(&sdata->workbase_lock);
+	if (found)
+		return;
+
+	txn = ckzalloc(sizeof(txntable_t));
+	memcpy(txn->hash, hash, 65);
+	/* Note that data is pointing to a string in a json struture which will
+	 * be destroyed so we can only use the data value until then. */
+	txn->data = data;
+	HASH_ADD_STR(txns, hash, txn);
+}
+
 /* Distill down a set of transactions into an efficient tree arrangement for
  * stratum messages and fast work assembly. */
-static void wb_merkle_bins(workbase_t *wb, json_t *txn_array)
+static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 {
-	int i, j, binleft, binlen;
+	int i, j, binleft, binlen, added = 0, purged = 0;
+	txntable_t *txns = NULL, *tmp, *tmpa;
 	json_t *arr_val;
 	uchar *hashbin;
 
@@ -1143,6 +1180,7 @@ static void wb_merkle_bins(workbase_t *wb, json_t *txn_array)
 			arr_val = json_array_get(txn_array, i);
 			hash = json_string_value(json_object_get(arr_val, "hash"));
 			txn = json_string_value(json_object_get(arr_val, "data"));
+			add_txn(sdata, txns, hash, txn);
 			len = strlen(txn);
 			memcpy(wb->txn_data + ofs, txn, len);
 			ofs += len;
@@ -1191,6 +1229,28 @@ static void wb_merkle_bins(workbase_t *wb, json_t *txn_array)
 			binlen = binleft * 32;
 		}
 	}
+
+	ck_wlock(&sdata->workbase_lock);
+	HASH_ITER(hh, sdata->txns, tmp, tmpa) {
+		if (tmp->refcount--)
+			continue;
+		HASH_DEL(sdata->txns, tmp);
+		dealloc(tmp);
+		purged++;
+	}
+	HASH_ITER(hh, txns, tmp, tmpa) {
+		/* Propagate transaction here */
+		/* Move to the sdata transaction table */
+		HASH_DEL(txns, tmp);
+		HASH_ADD_STR(sdata->txns, data, tmp);
+		/* Empty data once used to not dereference since the json structure
+		 * will be destroyed. */
+		tmp->data = NULL;
+		added++;
+	}
+	ck_wunlock(&sdata->workbase_lock);
+
+	LOGDEBUG("Stratifier added %d transactions and purged %d", added, purged);
 }
 
 /* This function assumes it will only receive a valid json gbt base template
@@ -1248,7 +1308,7 @@ retry:
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
 	txn_array = json_object_get(val, "transactions");
-	wb_merkle_bins(wb, txn_array);
+	wb_merkle_bins(sdata, wb, txn_array);
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
