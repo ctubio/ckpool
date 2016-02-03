@@ -1104,6 +1104,95 @@ struct update_req {
 
 static void broadcast_ping(sdata_t *sdata);
 
+/* Distill down a set of transactions into an efficient tree arrangement for
+ * stratum messages and fast work assembly. */
+static void wb_merkle_bins(workbase_t *wb, json_t *txn_array)
+{
+	int i, j, binleft, binlen;
+	json_t *arr_val;
+	uchar *hashbin;
+
+	wb->txns = json_array_size(txn_array);
+	wb->merkles = 0;
+	binlen = wb->txns * 32 + 32;
+	hashbin = alloca(binlen + 32);
+	memset(hashbin, 0, 32);
+	binleft = binlen / 32;
+	if (wb->txns) {
+		int len = 1, ofs = 0;
+		const char *txn;
+
+		for (i = 0; i < wb->txns; i++) {
+			arr_val = json_array_get(txn_array, i);
+			txn = json_string_value(json_object_get(arr_val, "data"));
+			if (!txn) {
+				LOGWARNING("json_string_value fail - cannot find transaction data");
+				return;
+			}
+			len += strlen(txn);
+		}
+
+		wb->txn_data = ckzalloc(len + 1);
+		wb->txn_hashes = ckzalloc(wb->txns * 65 + 1);
+		memset(wb->txn_hashes, 0x20, wb->txns * 65); // Spaces
+
+		for (i = 0; i < wb->txns; i++) {
+			char binswap[32];
+			const char *hash;
+
+			arr_val = json_array_get(txn_array, i);
+			hash = json_string_value(json_object_get(arr_val, "hash"));
+			txn = json_string_value(json_object_get(arr_val, "data"));
+			len = strlen(txn);
+			memcpy(wb->txn_data + ofs, txn, len);
+			ofs += len;
+#if 0
+			/* In case we ever want to be a gbt poolproxy */
+			if (!hash) {
+				char *txn_bin;
+				int txn_len;
+
+				txn_len = len / 2;
+				txn_bin = ckalloc(txn_len);
+				hex2bin(txn_bin, txn, txn_len);
+				/* This is needed for pooled mining since only
+				 * transaction data and not hashes are sent */
+				gen_hash(txn_bin, hashbin + 32 + 32 * i, txn_len);
+				continue;
+			}
+#endif
+			if (!hex2bin(binswap, hash, 32)) {
+				LOGERR("Failed to hex2bin hash in gbt_merkle_bins");
+				return;
+			}
+			memcpy(wb->txn_hashes + i * 65, hash, 64);
+			bswap_256(hashbin + 32 + 32 * i, binswap);
+		}
+	} else
+		wb->txn_hashes = ckzalloc(1);
+	if (binleft > 1) {
+		while (42) {
+			uchar merklebin[32];
+
+			if (binleft == 1)
+				break;
+			memcpy(merklebin, hashbin + 32, 32);
+			__bin2hex(&wb->merklehash[wb->merkles][0], merklebin, 32);
+			LOGDEBUG("MH%d %s",wb->merkles, &wb->merklehash[wb->merkles][0]);
+			wb->merkles++;
+			if (binleft % 2) {
+				memcpy(hashbin + binlen, hashbin + binlen - 32, 32);
+				binlen += 32;
+				binleft++;
+			}
+			for (i = 32, j = 64; j < binlen; i += 32, j += 64)
+				gen_hash(hashbin + j, hashbin + i, 64);
+			binleft /= 2;
+			binlen = binleft * 32;
+		}
+	}
+}
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
@@ -1113,11 +1202,11 @@ static void *do_update(void *arg)
 	int prio = ur->prio, retries = 0;
 	ckpool_t *ckp = ur->ckp;
 	sdata_t *sdata = ckp->data;
+	json_t *val, *txn_array;
 	bool new_block = false;
 	bool ret = false;
 	workbase_t *wb;
 	time_t now_t;
-	json_t *val;
 	char *buf;
 
 	pthread_detach(pthread_self());
@@ -1158,25 +1247,8 @@ retry:
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
-	json_intcpy(&wb->txns, val, "txns");
-	if (wb->txns) {
-		json_strdup(&wb->txn_data, val, "txn_data");
-		json_strdup(&wb->txn_hashes, val, "txn_hashes");
-	} else
-		wb->txn_hashes = ckzalloc(1);
-	json_intcpy(&wb->merkles, val, "merkles");
-	wb->merkle_array = json_array();
-	if (wb->merkles) {
-		json_t *arr;
-		int i;
-
-		arr = json_object_get(val, "merklehash");
-		for (i = 0; i < wb->merkles; i++) {
-			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(arr, i)));
-			hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
-			json_array_append_new(wb->merkle_array, json_string(&wb->merklehash[i][0]));
-		}
-	}
+	txn_array = json_object_get(val, "transactions");
+	wb_merkle_bins(wb, txn_array);
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
