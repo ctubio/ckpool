@@ -868,19 +868,10 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 
 static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 {
-	json_t *wb_val, *txn_array;
 	stratum_instance_t *client;
 	ckmsg_t *bulk_send = NULL;
-	txntable_t *txn, *tmp;
 	int messages = 0;
-
-	txn_array = json_array();
-
-	ck_rlock(&sdata->workbase_lock);
-	HASH_ITER(hh, sdata->txns, txn, tmp) {
-		json_array_append_new(txn_array, json_string(txn->hash));
-	}
-	ck_runlock(&sdata->workbase_lock);
+	json_t *wb_val;
 
 	wb_val = json_object();
 
@@ -899,7 +890,8 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 	json_set_string(wb_val, "flags", wb->flags);
 	 /* Set to zero to be backwards compat with older node code */
 	json_set_int(wb_val, "transactions", 0);
-	json_object_set_new_nocheck(wb_val, "txnhashes", txn_array);
+	json_set_int(wb_val, "txns", wb->txns);
+	json_set_string(wb_val, "txn_hashes", wb->txn_hashes);
 	json_set_int(wb_val, "merkles", wb->merkles);
 	json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
 	json_set_string(wb_val, "coinb1", wb->coinb1);
@@ -1253,7 +1245,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 			memcpy(&wb->merklebin[wb->merkles][0], hashbin + 32, 32);
 			__bin2hex(&wb->merklehash[wb->merkles][0], &wb->merklebin[wb->merkles][0], 32);
 			json_array_append_new(wb->merkle_array, json_string(&wb->merklehash[wb->merkles][0]));
-			LOGDEBUG("MH%d %s",wb->merkles, &wb->merklehash[wb->merkles][0]);
+			LOGDEBUG("MerkleHash %d %s",wb->merkles, &wb->merklehash[wb->merkles][0]);
 			wb->merkles++;
 			if (binleft % 2) {
 				memcpy(hashbin + binlen, hashbin + binlen - 32, 32);
@@ -1389,25 +1381,32 @@ out:
 
 static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
 {
-	int i, arr_size = json_array_size(txnhashes);
-	json_t *txn_array, *hash_val;
+	const char *hashes = json_string_value(txnhashes);
+	json_t *txn_array;
 	txntable_t *txn;
 	bool ret = true;
+	int i, len;
 
+	if (likely(hashes))
+		len = strlen(hashes);
+	else
+		len = 0;
+	if (!hashes || !len)
+		return ret;
+
+	if (unlikely(len < wb->txns * 65)) {
+		LOGERR("Truncated transactions in rebuild_txns only %d long", len);
+		return false;
+	}
 	txn_array = json_array();
 
 	ck_rlock(&sdata->workbase_lock);
-	for (i = 0; i < arr_size; i++) {
-		const char *hash;
+	for (i = 0; i < wb->txns; i++) {
 		json_t *txn_val;
+		char hash[68];
 
-		hash_val = json_array_get(txnhashes, i);
-		hash = json_string_value(hash_val);
-		if (unlikely(!hash)) {
-			LOGERR("Failed to get hash in rebuild_txns");
-			ret = false;
-			goto out_unlock;
-		}
+		memcpy(hash, hashes + i * 65, 64);
+		hash[64] = '\0';
 		HASH_FIND_STR(sdata->txns, hash, txn);
 		if (unlikely(!txn)) {
 			LOGNOTICE("Failed to find txn in rebuild_txns");
@@ -1453,7 +1452,8 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
-	txnhashes = json_object_get(val, "txnhashes");
+	json_intcpy(&wb->txns, val, "txns");
+	txnhashes = json_object_get(val, "txn_hashes");
 	if (!rebuild_txns(sdata, wb, txnhashes)) {
 		LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
 		free(wb);
