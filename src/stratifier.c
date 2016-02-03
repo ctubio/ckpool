@@ -381,7 +381,7 @@ struct txntable {
 	UT_hash_handle hh;
 	int id;
 	char hash[68];
-	const char *data;
+	char *data;
 	int refcount;
 };
 
@@ -1129,14 +1129,14 @@ static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const c
 		found = true;
 	}
 	ck_runlock(&sdata->workbase_lock);
+
 	if (found)
 		return;
 
 	txn = ckzalloc(sizeof(txntable_t));
 	memcpy(txn->hash, hash, 65);
-	/* Note that data is pointing to a string in a json struture which will
-	 * be destroyed so we can only use the data value until then. */
-	txn->data = data;
+	txn->data = strdup(data);
+	txn->refcount = 10;
 	HASH_ADD_STR(*txns, hash, txn);
 }
 
@@ -1266,6 +1266,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		if (tmp->refcount--)
 			continue;
 		HASH_DEL(sdata->txns, tmp);
+		dealloc(tmp->data);
 		dealloc(tmp);
 		purged++;
 	}
@@ -1278,9 +1279,6 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		/* Move to the sdata transaction table */
 		HASH_DEL(txns, tmp);
 		HASH_ADD_STR(sdata->txns, hash, tmp);
-		/* Empty data once used to not dereference since the json structure
-		 * will be destroyed. */
-		tmp->data = NULL;
 		added++;
 	}
 	ck_wunlock(&sdata->workbase_lock);
@@ -5723,7 +5721,33 @@ static void init_client(sdata_t *sdata, const stratum_instance_t *client, const 
 	stratum_send_update(sdata, client_id, true);
 }
 
-static void *set_node_latency(void *arg)
+/* When a node first connects it has no transactions so we have to send all
+ * current ones to it. */
+static void send_node_all_txns(sdata_t *sdata, const stratum_instance_t *client)
+{
+	json_t *txn_array, *val, *txn_val;
+	txntable_t *txn, *tmp;
+	smsg_t *msg;
+
+	txn_array = json_array();
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_ITER(hh, sdata->txns, txn, tmp) {
+		JSON_CPACK(txn_val, "{ss,ss}", "hash", txn->hash, "data", txn->data);
+		json_array_append_new(txn_array, txn_val);
+	}
+	ck_runlock(&sdata->workbase_lock);
+
+	JSON_CPACK(val, "{ss,so}", "node.method", stratum_msgs[SM_TRANSACTIONS],
+		   "transaction", txn_array);
+	msg = ckzalloc(sizeof(smsg_t));
+	msg->json_msg = val;
+	msg->client_id = client->id;
+	ckmsgq_add(sdata->ssends, msg);
+	LOGNOTICE("Sending new node client %"PRId64" all transactions", client->id);
+}
+
+static void *setup_node(void *arg)
 {
 	stratum_instance_t *client = (stratum_instance_t *)arg;
 
@@ -5732,6 +5756,8 @@ static void *set_node_latency(void *arg)
 	client->latency = round_trip(client->address) / 2;
 	LOGNOTICE("Node client %"PRId64" %s latency set to %dms", client->id,
 		  client->address, client->latency);
+	sleep(5);
+	send_node_all_txns(client->sdata, client);
 	dec_instance_ref(client->sdata, client);
 	return NULL;
 }
@@ -5753,7 +5779,7 @@ static void add_mining_node(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *c
 	LOGWARNING("Added client %"PRId64" %s as mining node on server %d:%s", client->id,
 		   client->address, client->server, ckp->serverurl[client->server]);
 
-	create_pthread(&pth, set_node_latency, client);
+	create_pthread(&pth, setup_node, client);
 }
 
 static void add_remote_server(sdata_t *sdata, stratum_instance_t *client)
@@ -6223,7 +6249,7 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 	}
 	ck_wunlock(&sdata->workbase_lock);
 
-	LOGINFO("Stratifier added %d node transactions", added);
+	LOGNOTICE("Stratifier added %d node transactions", added);
 }
 
 /* Entered with client holding ref count */
