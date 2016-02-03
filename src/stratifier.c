@@ -1296,7 +1296,8 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 	send_node_transactions(sdata, val);
 	json_decref(val);
 
-	LOGINFO("Stratifier added %d transactions and purged %d", added, purged);
+	if (added || purged)
+		LOGINFO("Stratifier added %d transactions and purged %d", added, purged);
 }
 
 /* This function assumes it will only receive a valid json gbt base template
@@ -1412,6 +1413,7 @@ static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
 			ret = false;
 			goto out_unlock;
 		}
+		txn->refcount++;
 		JSON_CPACK(txn_val, "{ss,ss}",
 			   "hash", hash, "data", txn->data);
 		json_array_append_new(txn_array, txn_val);
@@ -1433,8 +1435,10 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	workbase_t *wb = ckzalloc(sizeof(workbase_t));
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
+	txntable_t *txn, *tmp;
 	json_t *txnhashes;
 	char header[228];
+	int purged = 0;
 
 	wb->ckp = ckp;
 	json_int64cpy(&wb->id, val, "jobid");
@@ -1481,6 +1485,20 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	add_base(ckp, sdata, wb, &new_block);
 	if (new_block)
 		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
+
+	ck_wlock(&sdata->workbase_lock);
+	HASH_ITER(hh, sdata->txns, txn, tmp) {
+		if (txn->refcount--)
+			continue;
+		HASH_DEL(sdata->txns, txn);
+		dealloc(txn->data);
+		dealloc(txn);
+		purged++;
+	}
+	ck_wunlock(&sdata->workbase_lock);
+
+	if (purged)
+		LOGINFO("Stratifier purged %d node transactions", purged);
 }
 
 /* Calculate share diff and fill in hash and swap */
@@ -6298,7 +6316,8 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 	}
 	ck_wunlock(&sdata->workbase_lock);
 
-	LOGNOTICE("Stratifier added %d node transactions", added);
+	if (added)
+		LOGINFO("Stratifier added %d node transactions", added);
 }
 
 /* Entered with client holding ref count */
