@@ -1452,12 +1452,26 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	json_uint64cpy(&wb->coinbasevalue, val, "coinbasevalue");
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
-	json_intcpy(&wb->txns, val, "txns");
-	txnhashes = json_object_get(val, "txn_hashes");
-	if (!rebuild_txns(sdata, wb, txnhashes)) {
-		LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
-		free(wb);
-		return;
+	/* First see if the server uses the old communication format */
+	json_intcpy(&wb->txns, val, "transactions");
+	if (wb->txns) {
+		int i;
+
+		json_strdup(&wb->txn_data, val, "txn_data");
+		json_intcpy(&wb->merkles, val, "merkles");
+		wb->merkle_array = json_object_dup(val, "merklehash");
+		for (i = 0; i < wb->merkles; i++) {
+			strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(wb->merkle_array, i)));
+			hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
+		}
+	} else {
+		json_intcpy(&wb->txns, val, "txns");
+		txnhashes = json_object_get(val, "txn_hashes");
+		if (!rebuild_txns(sdata, wb, txnhashes)) {
+			LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
+			free(wb);
+			return;
+		}
 	}
 	json_strdup(&wb->coinb1, val, "coinb1");
 	json_intcpy(&wb->coinb1len, val, "coinb1len");
