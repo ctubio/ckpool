@@ -1117,7 +1117,7 @@ static void broadcast_ping(sdata_t *sdata);
 
 /* Build a hashlist of all transactions, allowing us to compare with the list of
  * existing transactions to determine which need to be propagated */
-static void add_txn(sdata_t *sdata, txntable_t *txns, const char *hash, const char *data)
+static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const char *data)
 {
 	bool found = false;
 	txntable_t *txn;
@@ -1137,7 +1137,7 @@ static void add_txn(sdata_t *sdata, txntable_t *txns, const char *hash, const ch
 	/* Note that data is pointing to a string in a json struture which will
 	 * be destroyed so we can only use the data value until then. */
 	txn->data = data;
-	HASH_ADD_STR(txns, hash, txn);
+	HASH_ADD_STR(*txns, hash, txn);
 }
 
 /* Distill down a set of transactions into an efficient tree arrangement for
@@ -1180,7 +1180,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 			arr_val = json_array_get(txn_array, i);
 			hash = json_string_value(json_object_get(arr_val, "hash"));
 			txn = json_string_value(json_object_get(arr_val, "data"));
-			add_txn(sdata, txns, hash, txn);
+			add_txn(sdata, &txns, hash, txn);
 			len = strlen(txn);
 			memcpy(wb->txn_data + ofs, txn, len);
 			ofs += len;
