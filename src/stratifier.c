@@ -868,56 +868,65 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 
 static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 {
+	json_t *wb_val, *txn_array;
 	stratum_instance_t *client;
 	ckmsg_t *bulk_send = NULL;
+	txntable_t *txn, *tmp;
 	int messages = 0;
 
+	txn_array = json_array();
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_ITER(hh, sdata->txns, txn, tmp) {
+		json_array_append_new(txn_array, json_string(txn->hash));
+	}
+	ck_runlock(&sdata->workbase_lock);
+
+	wb_val = json_object();
+
 	ck_rlock(&sdata->instance_lock);
-	if (sdata->node_instances) {
-		json_t *wb_val = json_object();
+	json_set_int(wb_val, "jobid", wb->id);
+	json_set_string(wb_val, "target", wb->target);
+	json_set_double(wb_val, "diff", wb->diff);
+	json_set_int(wb_val, "version", wb->version);
+	json_set_int(wb_val, "curtime", wb->curtime);
+	json_set_string(wb_val, "prevhash", wb->prevhash);
+	json_set_string(wb_val, "ntime", wb->ntime);
+	json_set_string(wb_val, "bbversion", wb->bbversion);
+	json_set_string(wb_val, "nbit", wb->nbit);
+	json_set_int(wb_val, "coinbasevalue", wb->coinbasevalue);
+	json_set_int(wb_val, "height", wb->height);
+	json_set_string(wb_val, "flags", wb->flags);
+	 /* Set to zero to be backwards compat with older node code */
+	json_set_int(wb_val, "transactions", 0);
+	json_set_int(wb_val, "txns", wb->txns);
+	json_object_set_new_nocheck(wb_val, "txnhashes", txn_array);
+	json_set_int(wb_val, "merkles", wb->merkles);
+	json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
+	json_set_string(wb_val, "coinb1", wb->coinb1);
+	json_set_int(wb_val, "enonce1varlen", wb->enonce1varlen);
+	json_set_int(wb_val, "enonce2varlen", wb->enonce2varlen);
+	json_set_int(wb_val, "coinb1len", wb->coinb1len);
+	json_set_int(wb_val, "coinb2len", wb->coinb2len);
+	json_set_string(wb_val, "coinb2", wb->coinb2);
 
-		json_set_int(wb_val, "jobid", wb->id);
-		json_set_string(wb_val, "target", wb->target);
-		json_set_double(wb_val, "diff", wb->diff);
-		json_set_int(wb_val, "version", wb->version);
-		json_set_int(wb_val, "curtime", wb->curtime);
-		json_set_string(wb_val, "prevhash", wb->prevhash);
-		json_set_string(wb_val, "ntime", wb->ntime);
-		json_set_string(wb_val, "bbversion", wb->bbversion);
-		json_set_string(wb_val, "nbit", wb->nbit);
-		json_set_int(wb_val, "coinbasevalue", wb->coinbasevalue);
-		json_set_int(wb_val, "height", wb->height);
-		json_set_string(wb_val, "flags", wb->flags);
-		json_set_int(wb_val, "txns", wb->txns);
-		if (likely(wb->txns))
-			json_set_string(wb_val, "txn_data", wb->txn_data);
-		/* We don't need txn_hashes */
-		json_set_int(wb_val, "merkles", wb->merkles);
-		json_object_set_new_nocheck(wb_val, "merklehash", json_deep_copy(wb->merkle_array));
-		json_set_string(wb_val, "coinb1", wb->coinb1);
-		json_set_int(wb_val, "enonce1varlen", wb->enonce1varlen);
-		json_set_int(wb_val, "enonce2varlen", wb->enonce2varlen);
-		json_set_int(wb_val, "coinb1len", wb->coinb1len);
-		json_set_int(wb_val, "coinb2len", wb->coinb2len);
-		json_set_string(wb_val, "coinb2", wb->coinb2);
+	DL_FOREACH(sdata->node_instances, client) {
+		ckmsg_t *client_msg;
+		smsg_t *msg;
+		json_t *json_msg = json_deep_copy(wb_val);
 
-		DL_FOREACH(sdata->node_instances, client) {
-			ckmsg_t *client_msg;
-			smsg_t *msg;
-			json_t *json_msg = json_deep_copy(wb_val);
-
-			json_set_string(json_msg, "node.method", stratum_msgs[SM_WORKINFO]);
-			client_msg = ckalloc(sizeof(ckmsg_t));
-			msg = ckzalloc(sizeof(smsg_t));
-			msg->json_msg = json_msg;
-			msg->client_id = client->id;
-			client_msg->data = msg;
-			DL_APPEND(bulk_send, client_msg);
-			messages++;
-		}
-		json_decref(wb_val);
+		json_set_string(json_msg, "node.method", stratum_msgs[SM_WORKINFO]);
+		client_msg = ckalloc(sizeof(ckmsg_t));
+		msg = ckzalloc(sizeof(smsg_t));
+		msg->json_msg = json_msg;
+		msg->client_id = client->id;
+		client_msg->data = msg;
+		DL_APPEND(bulk_send, client_msg);
+		messages++;
 	}
 	ck_runlock(&sdata->instance_lock);
+
+	json_decref(wb_val);
 
 	/* We send workinfo postponed till after the stratum updates are sent
 	 * out to minimise any lag seen by clients getting updates. It means
@@ -1377,13 +1386,55 @@ out:
 	return NULL;
 }
 
+static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
+{
+	json_t *txn_array, *hash_val;
+	txntable_t *txn;
+	bool ret = true;
+	size_t i;
+
+	txn_array = json_array();
+
+	ck_rlock(&sdata->workbase_lock);
+	json_array_foreach(txnhashes, i, hash_val) {
+		const char *hash;
+		json_t *txn_val;
+
+		hash = json_string_value(hash_val);
+		if (unlikely(!hash)) {
+			LOGERR("Failed to get hash in rebuild_txns");
+			ret = false;
+			goto out_unlock;
+		}
+		HASH_FIND_STR(sdata->txns, hash, txn);
+		if (unlikely(!txn)) {
+			LOGNOTICE("Failed to find txn in rebuild_txns");
+			ret = false;
+			goto out_unlock;
+		}
+		JSON_CPACK(txn_val, "{ss,ss}",
+			   "hash", hash, "data", txn->data);
+		json_array_append_new(txn_array, txn_val);
+	}
+out_unlock:
+	ck_runlock(&sdata->workbase_lock);
+
+	if (ret) {
+		LOGINFO("Rebuilt txns into workbase with %d transactions", (int)i);
+		wb_merkle_bins(sdata, wb, txn_array);
+	}
+	json_decref(txn_array);
+
+	return ret;
+}
+
 static void add_node_base(ckpool_t *ckp, json_t *val)
 {
 	workbase_t *wb = ckzalloc(sizeof(workbase_t));
 	sdata_t *sdata = ckp->data;
 	bool new_block = false;
+	json_t *txnhashes;
 	char header[228];
-	int i;
 
 	wb->ckp = ckp;
 	json_int64cpy(&wb->id, val, "jobid");
@@ -1400,13 +1451,11 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
 	json_intcpy(&wb->txns, val, "txns");
-	if (wb->txns)
-		json_strdup(&wb->txn_data, val, "txn_data");
-	json_intcpy(&wb->merkles, val, "merkles");
-	wb->merkle_array = json_object_dup(val, "merklehash");
-	for (i = 0; i < wb->merkles; i++) {
-		strcpy(&wb->merklehash[i][0], json_string_value(json_array_get(wb->merkle_array, i)));
-		hex2bin(&wb->merklebin[i][0], &wb->merklehash[i][0], 32);
+	txnhashes = json_object_get(val, "txnhashes");
+	if (!rebuild_txns(sdata, wb, txnhashes)) {
+		LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
+		free(wb);
+		return;
 	}
 	json_strdup(&wb->coinb1, val, "coinb1");
 	json_intcpy(&wb->coinb1len, val, "coinb1len");
