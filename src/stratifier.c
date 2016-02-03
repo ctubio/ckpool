@@ -1242,7 +1242,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		/* Propagate transaction here */
 		/* Move to the sdata transaction table */
 		HASH_DEL(txns, tmp);
-		HASH_ADD_STR(sdata->txns, data, tmp);
+		HASH_ADD_STR(sdata->txns, hash, tmp);
 		/* Empty data once used to not dereference since the json structure
 		 * will be destroyed. */
 		tmp->data = NULL;
