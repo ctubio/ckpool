@@ -1140,13 +1140,42 @@ static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const c
 	HASH_ADD_STR(*txns, hash, txn);
 }
 
+static void send_node_transactions(sdata_t *sdata, const json_t *txn_val)
+{
+	stratum_instance_t *client;
+	ckmsg_t *bulk_send = NULL;
+	int messages = 0;
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(sdata->node_instances, client) {
+		ckmsg_t *client_msg;
+		smsg_t *msg;
+		json_t *json_msg = json_deep_copy(txn_val);
+
+		json_set_string(json_msg, "node.method", stratum_msgs[SM_TRANSACTIONS]);
+		client_msg = ckalloc(sizeof(ckmsg_t));
+		msg = ckzalloc(sizeof(smsg_t));
+		msg->json_msg = json_msg;
+		msg->client_id = client->id;
+		client_msg->data = msg;
+		DL_APPEND(bulk_send, client_msg);
+		messages++;
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	if (bulk_send) {
+		LOGINFO("Sending transactions to mining nodes");
+		ssend_bulk_append(sdata, bulk_send, messages);
+	}
+}
+
 /* Distill down a set of transactions into an efficient tree arrangement for
  * stratum messages and fast work assembly. */
 static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 {
 	int i, j, binleft, binlen, added = 0, purged = 0;
 	txntable_t *txns = NULL, *tmp, *tmpa;
-	json_t *arr_val;
+	json_t *arr_val, *val;
 	uchar *hashbin;
 
 	wb->txns = json_array_size(txn_array);
@@ -1230,6 +1259,8 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		}
 	}
 
+	txn_array = json_array();
+
 	ck_wlock(&sdata->workbase_lock);
 	HASH_ITER(hh, sdata->txns, tmp, tmpa) {
 		if (tmp->refcount--)
@@ -1239,7 +1270,11 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		purged++;
 	}
 	HASH_ITER(hh, txns, tmp, tmpa) {
+		json_t *txn_val;
+
 		/* Propagate transaction here */
+		JSON_CPACK(txn_val, "{ss,ss}", "hash", tmp->hash, "data", tmp->data);
+		json_array_append_new(txn_array, txn_val);
 		/* Move to the sdata transaction table */
 		HASH_DEL(txns, tmp);
 		HASH_ADD_STR(sdata->txns, hash, tmp);
@@ -1249,6 +1284,10 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		added++;
 	}
 	ck_wunlock(&sdata->workbase_lock);
+
+	JSON_CPACK(val, "{so}", "transaction", txn_array);
+	send_node_transactions(sdata, val);
+	json_decref(val);
 
 	LOGDEBUG("Stratifier added %d transactions and purged %d", added, purged);
 }
