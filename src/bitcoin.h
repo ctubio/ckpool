@@ -22,7 +22,7 @@ struct gbtbase {
 	uint64_t coinbasevalue;
 	int height;
 	char *flags;
-	int transactions;
+	int txns;
 	char *txn_data;
 	char *txn_hashes;
 	int merkles;
