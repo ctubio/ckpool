@@ -145,8 +145,8 @@ h1 {margin-top:20px;float:middle;font-size:20px;}
 #
 function SortJS()
 {
- $s = "function sot(t,s,o){if(t && s>=0){var rs=t.rows;if(rs && rs.length>2){var all=[], rn, ok=true;for(rn=1;rn<rs.length-1;rn++){if(rs[rn]){var c=rs[rn].cells[s];if(c){var key=c.getAttribute('data-srt');if(key){all.push([rs[rn],key])}else{all.push([rs[rn],c.innerHTML])}}else{ok=false}}else{ok=false}}if(ok){if(o=='s'){all.sort(function(a,b){return a[1].localeCompare(b[1])})}if(o=='n'){all.sort(function(a,b){return a[1]-b[1]})}if(o=='r'){all.sort(function(a,b){return b[1]-a[1]})}for(rn=0;rn<all.length;rn++){t.removeChild(all[rn][0])}var b4=t.lastChild;for(rn=0;rn<all.length;rn++){t.insertBefore(all[rn][0], b4);if(rn%2){all[rn][0].className='odd'}else{all[rn][0].className='even'}}}}}}
-function sott(cn,t){if(t){var sf=t.getAttribute('data-sf');var o=sf.substring(0,1);var s=Number(sf.substring(1));var id=t.id;scnv(cn,id);t.checked=true;sot(t.parentNode.parentNode.parentNode.parentNode,s,o)}}
+ $s = "function sot(t,s,o){if(t && s>=0){var tb=t.getElementsByTagName('tbody')[0];if(tb){var rs=tb.rows;if(rs && rs.length>0){var all=[], rn, ok=true;for(rn=0;rn<rs.length;rn++){if(rs[rn]){var c=rs[rn].cells[s];if(c){var key=c.getAttribute('data-srt');if(key){all.push([rs[rn],key])}else{all.push([rs[rn],c.innerHTML])}}else{ok=false}}else{ok=false}}if(ok){if(o=='s'){all.sort(function(a,b){return a[1].localeCompare(b[1])})}if(o=='n'){all.sort(function(a,b){return a[1]-b[1]})}if(o=='r'){all.sort(function(a,b){return b[1]-a[1]})}var ch=tb.firstChild;while (ch){tb.removeChild(ch);ch=tb.firstChild}for(rn=0;rn<all.length;rn++){if(rn%2){all[rn][0].className='odd'}else{all[rn][0].className='even'}tb.appendChild(all[rn][0])}}}}}}
+function sott(cn,t){if(t){var sf=t.getAttribute('data-sf');var o=sf.substring(0,1);var s=Number(sf.substring(1));var id=t.id;scnv(cn,id);t.checked=true;sot(t.parentNode.parentNode.parentNode.parentNode.parentNode,s,o)}}
 function sotn(cn,n){var e=document.getElementById(n);if(e){sott(cn,e)}}
 function sotc(cn,d){var ws=gcn(cn);if(ws==''){ws=d}sotn(cn,ws)}
 ";
