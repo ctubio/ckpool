@@ -399,6 +399,15 @@ void _cksem_wait(sem_t *sem, const char *file, const char *func, const int line)
 	}
 }
 
+int _cksem_trywait(sem_t *sem, const char *file, const char *func, const int line)
+{
+	int ret = sem_trywait(sem);
+
+	if (unlikely(ret && errno != EAGAIN && errno != EINTR))
+		quitfrom(1, file, func, line, "Failed to sem_trywait errno=%d sem=0x%p", errno, sem);
+	return ret;
+}
+
 int _cksem_mswait(sem_t *sem, int ms, const char *file, const char *func, const int line)
 {
 	ts_t abs_timeout, ts_now;
