@@ -4716,10 +4716,10 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	__inc_worker(sdata,user, worker);
 	ck_wunlock(&sdata->instance_lock);
 
-	if (new_user && !ckp->proxy) {
-		/* Is this a btc address based username? */
-		if (len > 26 && len < 35)
-			user->btcaddress = test_address(ckp, username);
+	/* Is this a btc address based username? */
+	if (!ckp->proxy && (new_user || !user->btcaddress) && (len > 26 && len < 35))
+		user->btcaddress = test_address(ckp, username);
+	if (new_user) {
 		LOGNOTICE("Added new user %s%s", username, user->btcaddress ?
 			  " as address based registration" : "");
 	}
@@ -6123,10 +6123,10 @@ static user_instance_t *generate_remote_user(ckpool_t *ckp, const char *workerna
 
 	user = get_create_user(ckp, sdata, username, &new_user);
 
-	if (new_user && !ckp->proxy) {
-		/* Is this a btc address based username? */
-		if (len > 26 && len < 35)
-			user->btcaddress = test_address(ckp, username);
+	/* Is this a btc address based username? */
+	if (!ckp->proxy && (new_user || !user->btcaddress) && (len > 26 && len < 35))
+		user->btcaddress = test_address(ckp, username);
+	if (new_user) {
 		LOGNOTICE("Added new remote user %s%s", username, user->btcaddress ?
 			  " as address based registration" : "");
 	}
