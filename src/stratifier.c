@@ -1122,6 +1122,8 @@ static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const c
 	bool found = false;
 	txntable_t *txn;
 
+	/* Look for transactions we already know about and increment their
+	 * refcount if we're still using them. */
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_STR(sdata->txns, hash, txn);
 	if (txn) {
@@ -1258,10 +1260,12 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 			binlen = binleft * 32;
 		}
 	}
-	LOGINFO("Stored %d transactions", wb->txns);
+	LOGNOTICE("Stored %d transactions", wb->txns);
 
 	txn_array = json_array();
 
+	/* Find which transactions have their refcount decremented to zero
+	 * and remove them. */
 	ck_wlock(&sdata->workbase_lock);
 	HASH_ITER(hh, sdata->txns, tmp, tmpa) {
 		if (tmp->refcount--)
@@ -1271,6 +1275,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 		dealloc(tmp);
 		purged++;
 	}
+	/* Add the new transactions to the transaction table */
 	HASH_ITER(hh, txns, tmp, tmpa) {
 		json_t *txn_val;
 
@@ -5822,7 +5827,6 @@ static void *setup_node(void *arg)
 	client->latency = round_trip(client->address) / 2;
 	LOGNOTICE("Node client %"PRId64" %s latency set to %dms", client->id,
 		  client->address, client->latency);
-	sleep(5);
 	send_node_all_txns(client->sdata, client);
 	dec_instance_ref(client->sdata, client);
 	return NULL;
@@ -5932,9 +5936,9 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 			connector_drop_client(ckp, client_id);
 			drop_client(ckp, sdata, client_id);
 		} else {
-			add_mining_node(ckp, sdata, client);
 			snprintf(buf, 255, "passthrough=%"PRId64, client_id);
 			send_proc(ckp->connector, buf);
+			add_mining_node(ckp, sdata, client);
 		}
 		return;
 	}
@@ -6311,7 +6315,10 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 		txn = ckzalloc(sizeof(txntable_t));
 		memcpy(txn->hash, hash, 65);
 		txn->data = strdup(data);
-		txn->refcount = 10;
+		/* Set the refcount for node transactions greater than the
+		 * upstream pool to ensure we never age them faster than the
+		 * pool does. */
+		txn->refcount = 20;
 		HASH_ADD_STR(sdata->txns, hash, txn);
 		added++;
 	}
