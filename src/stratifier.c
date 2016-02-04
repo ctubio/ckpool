@@ -1317,7 +1317,15 @@ static void *do_update(void *arg)
 	rename_proc("updater");
 
 	/* Serialise access to getbase to avoid out of order new block notifies */
-	cksem_wait(&sdata->update_sem);
+	if (prio < GEN_PRIORITY) {
+		/* Don't queue another routine update if one is already in
+		 * progress. */
+		if (cksem_trywait(&sdata->update_sem)) {
+			LOGINFO("Skipped lowprio update base");
+			goto out_free;
+		}
+	} else
+		cksem_wait(&sdata->update_sem);
 retry:
 	buf = send_recv_generator(ckp, "getbase", prio);
 	if (unlikely(!buf)) {
@@ -1379,6 +1387,7 @@ out:
 		broadcast_ping(sdata);
 	}
 	dealloc(buf);
+out_free:
 	free(ur->pth);
 	free(ur);
 	return NULL;
