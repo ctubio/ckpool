@@ -1119,21 +1119,26 @@ static void broadcast_ping(sdata_t *sdata);
  * existing transactions to determine which need to be propagated */
 static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const char *data)
 {
+	bool found = false;
 	txntable_t *txn;
 
 	/* Look for transactions we already know about and increment their
 	 * refcount if we're still using them. */
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_STR(sdata->txns, hash, txn);
+	if (txn) {
+		txn->refcount++;
+		found = true;
+	}
 	ck_runlock(&sdata->workbase_lock);
 
-	if (txn)
+	if (found)
 		return;
 
 	txn = ckzalloc(sizeof(txntable_t));
 	memcpy(txn->hash, hash, 65);
 	txn->data = strdup(data);
-	txn->refcount = 20;
+	txn->refcount = 10;
 	HASH_ADD_STR(*txns, hash, txn);
 }
 
@@ -1422,7 +1427,7 @@ static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
 			ret = false;
 			goto out_unlock;
 		}
-		txn->refcount++;
+		txn->refcount += 2;
 		JSON_CPACK(txn_val, "{ss,ss}",
 			   "hash", hash, "data", txn->data);
 		json_array_append_new(txn_array, txn_val);
@@ -6322,7 +6327,7 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 		/* Set the refcount for node transactions greater than the
 		 * upstream pool to ensure we never age them faster than the
 		 * pool does. */
-		txn->refcount = 100;
+		txn->refcount = 50;
 		HASH_ADD_STR(sdata->txns, hash, txn);
 		added++;
 	}
