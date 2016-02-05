@@ -6327,7 +6327,7 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 		/* Set the refcount for node transactions greater than the
 		 * upstream pool to ensure we never age them faster than the
 		 * pool does. */
-		txn->refcount = 20;
+		txn->refcount = 100;
 		HASH_ADD_STR(sdata->txns, hash, txn);
 		added++;
 	}
