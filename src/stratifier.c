@@ -459,6 +459,9 @@ struct stratifier_data {
 	int workbases_generated;
 	txntable_t *txns;
 
+	/* Is this a node and unable to rebuild workinfos due to lack of txns */
+	bool wbincomplete;
+
 	/* Semaphore to serialise calls to add_base */
 	sem_t update_sem;
 	/* Time we last sent out a stratum update */
@@ -1489,9 +1492,16 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 		json_intcpy(&wb->txns, val, "txns");
 		txnhashes = json_object_get(val, "txn_hashes");
 		if (!rebuild_txns(ckp, sdata, wb, txnhashes)) {
-			LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
+			if (!sdata->wbincomplete) {
+				sdata->wbincomplete = true;
+				LOGWARNING("Unable to rebuild transactions to create workinfo, ignore displayed hashrate");
+			}
 			free(wb);
 			return;
+		}
+		if (sdata->wbincomplete) {
+			LOGWARNING("Successfully resumed rebuilding transactions into workinfo");
+			sdata->wbincomplete = false;
 		}
 	}
 	json_strdup(&wb->coinb1, val, "coinb1");
@@ -5596,7 +5606,7 @@ out_unlock:
 	}
 	ckdbq_add(ckp, ID_SHARES, val);
 out:
-	if ((!result && !submit) || !share) {
+	if (!sdata->wbincomplete && ((!result && !submit) || !share)) {
 		/* Is this the first in a run of invalids? */
 		if (client->first_invalid < client->last_share.tv_sec || !client->first_invalid)
 			client->first_invalid = now_t;
