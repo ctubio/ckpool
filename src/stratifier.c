@@ -6319,8 +6319,10 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 			continue;
 		}
 		HASH_FIND_STR(sdata->txns, hash, txn);
-		if (txn)
+		if (txn) {
+			txn->refcount++;
 			continue;
+		}
 		txn = ckzalloc(sizeof(txntable_t));
 		memcpy(txn->hash, hash, 65);
 		txn->data = strdup(data);
