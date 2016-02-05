@@ -1119,26 +1119,21 @@ static void broadcast_ping(sdata_t *sdata);
  * existing transactions to determine which need to be propagated */
 static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const char *data)
 {
-	bool found = false;
 	txntable_t *txn;
 
 	/* Look for transactions we already know about and increment their
 	 * refcount if we're still using them. */
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_STR(sdata->txns, hash, txn);
-	if (txn) {
-		txn->refcount++;
-		found = true;
-	}
 	ck_runlock(&sdata->workbase_lock);
 
-	if (found)
+	if (txn)
 		return;
 
 	txn = ckzalloc(sizeof(txntable_t));
 	memcpy(txn->hash, hash, 65);
 	txn->data = strdup(data);
-	txn->refcount = 10;
+	txn->refcount = 20;
 	HASH_ADD_STR(*txns, hash, txn);
 }
 
