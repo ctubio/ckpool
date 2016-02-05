@@ -1117,7 +1117,8 @@ static void broadcast_ping(sdata_t *sdata);
 
 /* Build a hashlist of all transactions, allowing us to compare with the list of
  * existing transactions to determine which need to be propagated */
-static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const char *data)
+static void add_txn(ckpool_t *ckp, sdata_t *sdata, txntable_t **txns, const char *hash,
+		    const char *data)
 {
 	bool found = false;
 	txntable_t *txn;
@@ -1127,7 +1128,10 @@ static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const c
 	ck_rlock(&sdata->workbase_lock);
 	HASH_FIND_STR(sdata->txns, hash, txn);
 	if (txn) {
-		txn->refcount++;
+		if (ckp->node)
+			txn->refcount = 100;
+		else
+			txn->refcount = 20;
 		found = true;
 	}
 	ck_runlock(&sdata->workbase_lock);
@@ -1138,7 +1142,10 @@ static void add_txn(sdata_t *sdata, txntable_t **txns, const char *hash, const c
 	txn = ckzalloc(sizeof(txntable_t));
 	memcpy(txn->hash, hash, 65);
 	txn->data = strdup(data);
-	txn->refcount = 10;
+	if (ckp->node)
+		txn->refcount = 100;
+	else
+		txn->refcount = 20;
 	HASH_ADD_STR(*txns, hash, txn);
 }
 
@@ -1173,7 +1180,7 @@ static void send_node_transactions(sdata_t *sdata, const json_t *txn_val)
 
 /* Distill down a set of transactions into an efficient tree arrangement for
  * stratum messages and fast work assembly. */
-static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
+static void wb_merkle_bins(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 {
 	int i, j, binleft, binlen, added = 0, purged = 0;
 	txntable_t *txns = NULL, *tmp, *tmpa;
@@ -1211,7 +1218,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 			arr_val = json_array_get(txn_array, i);
 			hash = json_string_value(json_object_get(arr_val, "hash"));
 			txn = json_string_value(json_object_get(arr_val, "data"));
-			add_txn(sdata, &txns, hash, txn);
+			add_txn(ckp, sdata, &txns, hash, txn);
 			len = strlen(txn);
 			memcpy(wb->txn_data + ofs, txn, len);
 			ofs += len;
@@ -1268,7 +1275,7 @@ static void wb_merkle_bins(sdata_t *sdata, workbase_t *wb, json_t *txn_array)
 	 * and remove them. */
 	ck_wlock(&sdata->workbase_lock);
 	HASH_ITER(hh, sdata->txns, tmp, tmpa) {
-		if (tmp->refcount--)
+		if (tmp->refcount-- > 0)
 			continue;
 		HASH_DEL(sdata->txns, tmp);
 		dealloc(tmp->data);
@@ -1360,7 +1367,7 @@ retry:
 	json_intcpy(&wb->height, val, "height");
 	json_strdup(&wb->flags, val, "flags");
 	txn_array = json_object_get(val, "transactions");
-	wb_merkle_bins(sdata, wb, txn_array);
+	wb_merkle_bins(ckp, sdata, wb, txn_array);
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
@@ -1393,7 +1400,7 @@ out_free:
 	return NULL;
 }
 
-static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
+static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
 {
 	const char *hashes = json_string_value(txnhashes);
 	json_t *txn_array;
@@ -1427,7 +1434,7 @@ static bool rebuild_txns(sdata_t *sdata, workbase_t *wb, json_t *txnhashes)
 			ret = false;
 			goto out_unlock;
 		}
-		txn->refcount += 2;
+		txn->refcount = 100;
 		JSON_CPACK(txn_val, "{ss,ss}",
 			   "hash", hash, "data", txn->data);
 		json_array_append_new(txn_array, txn_val);
@@ -1437,7 +1444,7 @@ out_unlock:
 
 	if (ret) {
 		LOGINFO("Rebuilt txns into workbase with %d transactions", (int)i);
-		wb_merkle_bins(sdata, wb, txn_array);
+		wb_merkle_bins(ckp, sdata, wb, txn_array);
 	}
 	json_decref(txn_array);
 
@@ -1481,7 +1488,7 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	} else {
 		json_intcpy(&wb->txns, val, "txns");
 		txnhashes = json_object_get(val, "txn_hashes");
-		if (!rebuild_txns(sdata, wb, txnhashes)) {
+		if (!rebuild_txns(ckp, sdata, wb, txnhashes)) {
 			LOGWARNING("Unable to rebuild transactions from hashes to create workinfo");
 			free(wb);
 			return;
@@ -6320,7 +6327,7 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 		}
 		HASH_FIND_STR(sdata->txns, hash, txn);
 		if (txn) {
-			txn->refcount++;
+			txn->refcount = 100;
 			continue;
 		}
 		txn = ckzalloc(sizeof(txntable_t));
@@ -6329,7 +6336,7 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 		/* Set the refcount for node transactions greater than the
 		 * upstream pool to ensure we never age them faster than the
 		 * pool does. */
-		txn->refcount = 50;
+		txn->refcount = 100;
 		HASH_ADD_STR(sdata->txns, hash, txn);
 		added++;
 	}
