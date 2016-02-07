@@ -277,9 +277,17 @@ function doblocks($data, $user)
 		if ($diffratio > 0)
 		{
 			$pct = 100.0 * $diffratio;
-			list($fg, $bg) = pctcolour($pct);
-			$bpct = "<font color=$fg>$approx".number_format($pct, 3).'%</font>';
-			$bg = " bgcolor=$bg";
+			if ($conf != 'O' and $conf != 'R')
+			{
+				list($fg, $bg) = pctcolour($pct);
+				$bpct = "<font color=$fg>$approx".number_format($pct, 3).'%</font>';
+				$bg = " bgcolor=$bg";
+			}
+			else
+			{
+				$bpct = "$approx".number_format($pct, 3).'%';
+				$bg = '';
+			}
 			$blktot += $diffacc;
 			if ($conf != 'O' and $conf != 'R')
 				$nettot += $netdiff;
