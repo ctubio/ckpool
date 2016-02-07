@@ -958,7 +958,8 @@ static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 			"createcode", __func__,
 			"createinet", ckp->serverurl[0]);
 	ckdbq_add(ckp, ID_WORKINFO, val);
-	send_node_workinfo(sdata, wb);
+	if (!ckp->proxy)
+		send_node_workinfo(sdata, wb);
 }
 
 static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
