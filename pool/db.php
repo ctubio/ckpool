@@ -1,7 +1,6 @@
 <?php
 #
 include_once('socket.php');
-include_once('base.php');
 #
 # List of db functions to call and get the results back from ckdb
 # From homeInfo() and the rest after that

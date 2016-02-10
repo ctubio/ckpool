@@ -39,6 +39,7 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *i_username, *i_emailaddress, *i_passwordhash, *u_item = NULL;
+	int event = EVENT_OK;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -66,15 +67,18 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 		if (!i_passwordhash)
 			return strdup(reply);
 
-		u_item = users_add(conn, transfer_data(i_username),
-					 transfer_data(i_emailaddress),
-					 transfer_data(i_passwordhash), 0,
-					 by, code, inet, now, trf_root);
+		event = events_add(EVENTID_CREACC, trf_root);
+		if (event == EVENT_OK) {
+			u_item = users_add(conn, transfer_data(i_username),
+						 transfer_data(i_emailaddress),
+						 transfer_data(i_passwordhash), 0,
+						 by, code, inet, now, trf_root);
+		}
 	}
 
 	if (!u_item) {
 		LOGERR("%s() %s.failed.DBE", __func__, id);
-		return strdup("failed.DBE");
+		return reply_event(event, "failed.DBE");
 	}
 	LOGDEBUG("%s.ok.added %s", id, transfer_data(i_username));
 	snprintf(reply, siz, "ok.added %s", transfer_data(i_username));
@@ -88,6 +92,7 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_ITEM *i_username, *i_oldhash, *i_newhash, *i_2fa, *u_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	bool ok = true;
 	char *oldhash;
 	int32_t value;
@@ -112,8 +117,10 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	i_2fa = require_name(trf_root, "2fa", 1, (char *)intpatt, reply, siz);
-	if (!i_2fa)
-		return strdup(reply);
+	if (!i_2fa) {
+		event = events_add(EVENTID_INV2FA, trf_root);
+		return reply_event(event, reply);
+	}
 
 	if (ok) {
 		i_newhash = require_name(trf_root, "newhash",
@@ -131,6 +138,8 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 			if (USER_TOTP_ENA(users)) {
 				value = (int32_t)atoi(transfer_data(i_2fa));
 				ok = check_2fa(users, value);
+				if (!ok)
+					event = events_add(EVENTID_WRONG2FA, trf_root);
 			}
 			if (ok) {
 				ok = users_update(NULL,
@@ -140,7 +149,7 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 						  NULL,
 						  by, code, inet, now,
 						  trf_root,
-						  NULL);
+						  NULL, &event);
 			}
 		} else
 			ok = false;
@@ -148,7 +157,7 @@ static char *cmd_newpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	if (!ok) {
 		LOGERR("%s.failed.%s", id, transfer_data(i_username));
-		return strdup("failed.");
+		return reply_event(event, "failed.");
 	}
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
 	return strdup("ok.");
@@ -162,6 +171,7 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_ITEM *i_username, *i_passwordhash, *i_2fa, *u_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	USERS *users;
 	bool ok;
 
@@ -177,27 +187,34 @@ static char *cmd_chkpass(__maybe_unused PGconn *conn, char *cmd, char *id,
 		return strdup(reply);
 
 	i_2fa = require_name(trf_root, "2fa", 1, (char *)intpatt, reply, siz);
-	if (!i_2fa)
-		return strdup(reply);
+	if (!i_2fa) {
+		event = events_add(EVENTID_INV2FA, trf_root);
+		return reply_event(event, reply);
+	}
 
 	K_RLOCK(users_free);
 	u_item = find_users(transfer_data(i_username));
 	K_RUNLOCK(users_free);
 
-	if (!u_item)
+	if (!u_item) {
+		event = events_add(EVENTID_INVUSER, trf_root);
 		ok = false;
-	else {
+	} else {
 		DATA_USERS(users, u_item);
 		ok = check_hash(users, transfer_data(i_passwordhash));
+		if (!ok)
+			event = events_add(EVENTID_PASSFAIL, trf_root);
 		if (ok && USER_TOTP_ENA(users)) {
 			uint32_t value = (int32_t)atoi(transfer_data(i_2fa));
 			ok = check_2fa(users, value);
+			if (!ok)
+				event = events_add(EVENTID_WRONG2FA, trf_root);
 		}
 	}
 
 	if (!ok) {
 		LOGERR("%s.failed.%s", id, transfer_data(i_username));
-		return strdup("failed.");
+		return reply_event(event, "failed.");
 	}
 	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
 	return strdup("ok.");
@@ -210,6 +227,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_ITEM *i_username, *i_action, *i_entropy, *i_value, *u_item, *u_new;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	size_t len, off;
 	char tmp[1024];
 	int32_t entropy, value;
@@ -241,8 +259,10 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 	// Field always expected, use 0 if not required
 	i_value = require_name(trf_root, "value", 1, (char *)intpatt,
 				reply, siz);
-	if (!i_value)
-		return strdup(reply);
+	if (!i_value) {
+		event = events_add(EVENTID_INV2FA, trf_root);
+		return reply_event(event, reply);
+	}
 
 	K_RLOCK(users_free);
 	u_item = find_users(transfer_data(i_username));
@@ -328,6 +348,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 				goto dame;
 			value = (int32_t)atoi(transfer_data(i_value));
 			if (!check_2fa(users, value)) {
+				event = events_add(EVENTID_WRONG2FA, trf_root);
 				sfa_error = "Invalid code";
 				// Report sfa_error to web
 				ok = true;
@@ -350,6 +371,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 			// remove requires value
 			value = (int32_t)atoi(transfer_data(i_value));
 			if (!check_2fa(users, value)) {
+				event = events_add(EVENTID_WRONG2FA, trf_root);
 				sfa_error = "Invalid code";
 				// Report sfa_error to web
 				ok = true;
@@ -428,7 +450,7 @@ dame:
 		// Only db/php/code errors should get here
 		LOGERR("%s.failed.%s-%s", id, transfer_data(i_username), action);
 		FREENULL(buf);
-		return strdup("failed.");
+		return reply_event(event, "failed.");
 	}
 
 	snprintf(tmp, sizeof(tmp), "2fa_status=%s%c2fa_error=%s%c2fa_msg=%s",
@@ -436,7 +458,7 @@ dame:
 				   sfa_msg);
 	APPEND_REALLOC(buf, off, len, tmp);
 	LOGDEBUG("%s.%s-%s.%s", id, transfer_data(i_username), action, buf);
-	return buf;
+	return reply_event_free(event, buf);
 }
 
 static char *cmd_userset(PGconn *conn, char *cmd, char *id,
@@ -451,6 +473,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 	char *email, *address, *payname;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	char tmp[1024];
 	PAYMENTADDRESSES *row, *pa;
 	K_STORE *pa_store = NULL;
@@ -479,6 +502,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 	K_RUNLOCK(users_free);
 
 	if (!u_item) {
+		event = events_add(EVENTID_UNKATTS, trf_root);
 		reason = "Unknown user";
 		goto struckout;
 	} else {
@@ -548,11 +572,13 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			i_2fa = require_name(trf_root, "2fa", 1, (char *)intpatt,
 					      reply, siz);
 			if (!i_2fa) {
+				event = events_add(EVENTID_INV2FA, trf_root);
 				reason = "Invalid data";
 				goto struckout;
 			}
 
 			if (!check_hash(users, transfer_data(i_passwordhash))) {
+				event = events_add(EVENTID_PASSFAIL, trf_root);
 				reason = "Incorrect password";
 				goto struckout;
 			}
@@ -560,6 +586,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			if (USER_TOTP_ENA(users)) {
 				uint32_t value = (int32_t)atoi(transfer_data(i_2fa));
 				if (!check_2fa(users, value)) {
+					event = events_add(EVENTID_WRONG2FA, trf_root);
 					reason = "Invalid data";
 					goto struckout;
 				}
@@ -624,6 +651,8 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 									 reply, siz);
 						if (!i_address) {
 							K_WUNLOCK(paymentaddresses_free);
+							event = events_add(EVENTID_INCBTC,
+									   trf_root);
 							reason = "Invalid address";
 							goto struckout;
 						}
@@ -679,10 +708,14 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 						 * payout address */
 						DATA_PAYMENTADDRESSES(pa, old_pa_item);
 						if (pa->userid != users->userid) {
+							event = events_add(EVENTID_BTCUSED,
+									   trf_root);
 							reason = "Unavailable BTC address";
 							goto struckout;
 						}
 					} else if (!btc_valid_address(row->payaddress)) {
+						event = events_add(EVENTID_INVBTC,
+								   trf_root);
 						reason = "Invalid BTC address";
 						goto struckout;
 					}
@@ -696,7 +729,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 							email,
 							by, code, inet, now,
 							trf_root,
-							NULL);
+							NULL, &event);
 				if (!ok) {
 					reason = "email error";
 					goto struckout;
@@ -728,16 +761,22 @@ struckout:
 		pa_store = NULL;
 	}
 	if (reason) {
+		char *user, *st = NULL;
 		snprintf(reply, siz, "ERR.%s", reason);
-		LOGERR("%s.%s.%s", cmd, id, reply);
-		return strdup(reply);
+		if (i_username)
+			user = st = safe_text(transfer_data(i_username));
+		else
+			user = EMPTY;
+		LOGERR("%s.%s.%s (%s)", cmd, id, reply, user);
+		FREENULL(st);
+		return reply_event(event, reply);
 	}
 	APPEND_REALLOC_INIT(ret, off, len);
 	APPEND_REALLOC(ret, off, len, "ok.");
 	APPEND_REALLOC(ret, off, len, answer);
 	free(answer);
 	LOGDEBUG("%s.%s", id, ret);
-	return ret;
+	return reply_event_free(event, ret);
 }
 
 static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
@@ -2894,6 +2933,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *u_item, *oc_item, *w_item;
 	USERS *users = NULL;
@@ -2902,7 +2942,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	OPTIONCONTROL *optioncontrol;
 	size_t len, off;
 	char *buf;
-	bool ok, first;
+	bool ok = true, first;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -2958,26 +2998,33 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 		u_item = find_users(username);
 		K_RUNLOCK(users_free);
 		if (!u_item) {
-			DATA_OPTIONCONTROL(optioncontrol, oc_item);
-			u_item = users_add(conn, username, EMPTY,
-					   optioncontrol->optionvalue, 0,
-					   by, code, inet, cd, trf_root);
+			event = events_add(EVENTID_AUTOACC, trf_root);
+			if (event == EVENT_OK) {
+				DATA_OPTIONCONTROL(optioncontrol, oc_item);
+				u_item = users_add(conn, username, EMPTY,
+						   optioncontrol->optionvalue,
+						   0, by, code, inet, cd,
+						   trf_root);
+			} else
+				ok = false;
 		}
 	}
 
-	ok = auths_add(conn, transfer_data(i_poolinstance),
-			     username,
-			     transfer_data(i_workername),
-			     transfer_data(i_clientid),
-			     transfer_data(i_enonce1),
-			     transfer_data(i_useragent),
-			     transfer_data(i_preauth),
-			     by, code, inet, cd, trf_root, false,
-			     &users, &workers);
+	if (ok) {
+		ok = auths_add(conn, transfer_data(i_poolinstance),
+				     username,
+				     transfer_data(i_workername),
+				     transfer_data(i_clientid),
+				     transfer_data(i_enonce1),
+				     transfer_data(i_useragent),
+				     transfer_data(i_preauth),
+				     by, code, inet, cd, trf_root, false,
+				     &users, &workers, &event);
+	}
 
 	if (!ok) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
-		return strdup("failed.DBE");
+		return reply_event(event, "failed.DBE");
 	}
 
 	// Only flag a successful auth
@@ -3042,6 +3089,7 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *w_item;
 	USERS *users = NULL;
@@ -3105,11 +3153,11 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 			     transfer_data(i_useragent),
 			     transfer_data(i_preauth),
 			     by, code, inet, cd, trf_root, true,
-			     &users, &workers);
+			     &users, &workers, &event);
 
 	if (!ok) {
 		LOGDEBUG("%s() %s.failed.DBE", __func__, id);
-		return strdup("failed.DBE");
+		return reply_event(event, "failed.DBE");
 	}
 
 	// Only flag a successful auth
@@ -3352,7 +3400,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 				   pool.shareinv, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	// TODO: assumes only one poolinstance (for now)
+	// TODO: DB only has one poolinstance with -i
 	K_RLOCK(poolstats_free);
 	p_item = last_in_ktree(poolstats_root, ctx);
 	K_RUNLOCK(poolstats_free);
@@ -3524,6 +3572,7 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_ITEM *i_username, *i_attlist, *u_item, *ua_item;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
+	int event = EVENT_OK;
 	char tmp[1024];
 	USERATTS *useratts;
 	USERS *users;
@@ -3538,6 +3587,7 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	i_username = require_name(trf_root, "username", MIN_USERNAME,
 				  (char *)userpatt, reply, siz);
 	if (!i_username) {
+		// Shouldn't happen except with a code problem no event required
 		reason = "Missing username";
 		goto nuts;
 	}
@@ -3547,6 +3597,8 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RUNLOCK(users_free);
 
 	if (!u_item) {
+		// page_api.php without a valid username
+		event = events_add(EVENTID_UNKATTS, trf_root);
 		reason = "Unknown user";
 		goto nuts;
 	} else {
@@ -3639,7 +3691,7 @@ nuts:
 			free(answer);
 		snprintf(reply, siz, "ERR.%s", reason);
 		LOGERR("%s.%s.%s", cmd, id, reply);
-		return strdup(reply);
+		return reply_event(event, reply);
 	}
 	snprintf(reply, siz, "ok.%s", answer);
 	LOGDEBUG("%s.%s", id, answer);
@@ -5871,7 +5923,7 @@ static char *cmd_userstatus(PGconn *conn, char *cmd, char *id, tv_t *now, char *
 					NULL,
 					by, code, inet, now,
 					trf_root,
-					status);
+					status, NULL);
 	}
 
 	if (!ok) {

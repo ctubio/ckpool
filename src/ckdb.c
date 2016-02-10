@@ -286,6 +286,9 @@ static cklock_t fpm_lock;
 static char *first_pool_message;
 static sem_t socketer_sem;
 
+// command called for any ckdb alerts
+char *ckdb_alert_cmd = NULL;
+
 char *btc_server = "http://127.0.0.1:8330";
 char *btc_auth;
 int btc_timeout = 5;
@@ -477,12 +480,46 @@ K_STORE *payouts_store;
 // Emulate a list for lock checking
 K_LIST *process_pplns_free;
 
-/*
-// EVENTLOG
-K_TREE *eventlog_root;
-K_LIST *eventlog_free;
-K_STORE *eventlog_store;
-*/
+// IPS
+K_TREE *ips_root;
+K_LIST *ips_free;
+K_STORE *ips_store;
+
+// EVENTS
+K_TREE *events_user_root;
+K_TREE *events_ip_root;
+K_TREE *events_ipc_root;
+K_TREE *events_hash_root;
+K_LIST *events_free;
+K_STORE *events_store;
+
+EVENT_LIMITS e_limits[] = {
+ {	EVENTID_PASSFAIL,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // It's only possible to create an address account once, so user_lo/hi can never trigger
+ {	EVENTID_CREADDR,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // It's only possible to create an account once, so user_lo/hi can never trigger
+ {	EVENTID_CREACC,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // page_api.php with an invalid username
+ {	EVENTID_UNKATTS,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // 2fa missing/invalid format
+ {	EVENTID_INV2FA,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Wrong 2fa value
+ {	EVENTID_WRONG2FA,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Invalid address according to btcd
+ {	EVENTID_INVBTC,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Incorrect format/length address
+ {	EVENTID_INCBTC,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Address belongs to some other account
+ {	EVENTID_BTCUSED,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // It's only possible to create an account once, so user_lo/hi can never trigger
+ {	EVENTID_AUTOACC,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Invalid user on auth, CKPool will throttle these
+ {	EVENTID_INVAUTH,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Invalid user on chkpass
+ {	EVENTID_INVUSER,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 }
+};
+
+int event_limits_hash_lifetime = 24*60*60;
 
 // AUTHS authorise.id.json={...}
 K_TREE *auths_root;
@@ -1169,6 +1206,19 @@ static void alloc_storage()
 	payouts_wid_root = new_ktree("PayoutsWId", cmp_payouts_wid,
 					payouts_free);
 
+	ips_free = k_new_list("IPs", sizeof(IPS), ALLOC_IPS, LIMIT_IPS, true);
+	ips_store = k_new_store(ips_free);
+	ips_root = new_ktree(NULL, cmp_ips, ips_free);
+	ips_add(IPS_GROUP_OK, "127.0.0.1", "local", false, true, 0);
+
+	events_free = k_new_list("Events", sizeof(EVENTS),
+					ALLOC_EVENTS, LIMIT_EVENTS, true);
+	events_store = k_new_store(events_free);
+	events_user_root = new_ktree(NULL, cmp_events_user, events_free);
+	events_ip_root = new_ktree(NULL, cmp_events_ip, events_free);
+	events_ipc_root = new_ktree(NULL, cmp_events_ipc, events_free);
+	events_hash_root = new_ktree(NULL, cmp_events_hash, events_free);
+
 	auths_free = k_new_list("Auths", sizeof(AUTHS),
 					ALLOC_AUTHS, LIMIT_AUTHS, true);
 	auths_store = k_new_store(auths_free);
@@ -1250,6 +1300,9 @@ static void alloc_storage()
 
 	DLPRIO(userinfo, 50);
 
+	// Needs to check users and ips
+	DLPRIO(events, 47);
+
 	DLPRIO(auths, 44);
 	DLPRIO(users, 43);
 	DLPRIO(useratts, 42);
@@ -1272,6 +1325,7 @@ static void alloc_storage()
 	DLPRIO(idcontrol, PRIO_TERMINAL);
 	DLPRIO(optioncontrol, PRIO_TERMINAL);
 	DLPRIO(paymentaddresses, PRIO_TERMINAL);
+	DLPRIO(ips, PRIO_TERMINAL);
 
 	DLPCHECK();
 
@@ -1459,6 +1513,10 @@ static void dealloc_storage()
 	LOGWARNING("%s() poolstats ...", __func__);
 
 	FREE_ALL(poolstats);
+	FREE_TREE(events_user);
+	FREE_TREE(events_ip);
+	FREE_LISTS(events);
+	FREE_ALL(ips);
 	FREE_ALL(auths);
 
 	FREE_TREE(payouts_wid);
@@ -2675,9 +2733,10 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	TRANSFER *transfer;
 	K_TREE_CTX ctx[1];
 	MSGLINE *msgline;
-	K_ITEM *t_item = NULL, *cd_item = NULL, *seqall;
+	K_ITEM *t_item = NULL, *cd_item = NULL, *seqall, *i_item;
+	IPS *ips;
 	char *cmdptr, *idptr, *next, *eq, *end, *was;
-	char *data = NULL, *st = NULL, *st2 = NULL;
+	char *data = NULL, *st = NULL, *st2 = NULL, *ip = NULL;
 	bool noid = false;
 	size_t siz;
 
@@ -2939,6 +2998,8 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				k_add_head(transfer_free, t_item);
 				K_WUNLOCK(transfer_free);
 			} else {
+				if (strcmp(data, INETTRF) == 0)
+					ip = transfer->mvalue;
 				add_to_ktree_nolock(msgline->trf_root, t_item);
 				k_add_head_nolock(msgline->trf_store, t_item);
 			}
@@ -2991,6 +3052,30 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 		}
 	}
 	free(cmdptr);
+
+	if (!seqall && ip) {
+		bool alert = false;
+		K_WLOCK(ips_free);
+		i_item = find_ips(IPS_GROUP_BAN, ip);
+		if (i_item) {
+			DATA_IPS(ips, i_item);
+			// Has the ban expired?
+			if ((int)tvdiff(now, &(ips->createdate)) > ips->lifetime) {
+				remove_from_ktree(ips_root, i_item);
+				k_unlink_item(ips_store, i_item);
+				if (ips->description) {
+					LIST_MEM_SUB(ips_free, ips->description);
+					FREENULL(ips->description);
+				}
+				k_add_head(ips_free, i_item);
+			} else
+				alert = true;
+		}
+		K_WUNLOCK(ips_free);
+		if (alert)
+			return CMD_ALERT;
+	}
+
 	return ckdb_cmds[msgline->which_cmds].cmd_val;
 nogood:
 	if (t_item) {
@@ -4113,7 +4198,7 @@ static void *socketer(__maybe_unused void *arg)
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	pthread_t clis_pt, blis_pt;
 	unixsock_t *us = &pi->us;
-	char *end, *ans = NULL, *rep = NULL, *buf = NULL;
+	char *end, *ans = NULL, *rep = NULL, *buf = NULL, *tmp;
 	enum cmd_values cmdnum;
 	int sockd;
 	K_ITEM *wq_item = NULL, *ml_item = NULL;
@@ -4183,6 +4268,15 @@ static void *socketer(__maybe_unused void *arg)
 						 msgline->id,
 						 now.tv_sec);
 					send_unix_msg(sockd, reply);
+					break;
+				case CMD_ALERT:
+					snprintf(reply, sizeof(reply),
+						 "%s.%ld.failed.ERR",
+						 msgline->id,
+						 now.tv_sec);
+					tmp = reply_event(EVENTID_MAX, reply);
+					send_unix_msg(sockd, tmp);
+					FREENULL(tmp);
 					break;
 				case CMD_TERMINATE:
 					LOGWARNING("Listener received"
@@ -4506,6 +4600,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 		switch (cmdnum) {
 			// Ignore
 			case CMD_REPLY:
+			case CMD_ALERT:
 				break;
 			// Shouldn't be there
 			case CMD_TERMINATE:
@@ -5659,6 +5754,8 @@ static void check_restore_dir(char *name)
 }
 
 static struct option long_options[] = {
+	// script to call when alerts happen
+	{ "alert",		required_argument,	0,	'c' },
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
 	{ "free",		required_argument,	0,	'f' },
@@ -5715,8 +5812,11 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "c:d:ghi:kl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:c:d:ghi:kl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
+			case 'a':
+				ckdb_alert_cmd = strdup(optarg);
+				break;
 			case 'c':
 				ckp.config = strdup(optarg);
 				break;

@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.923"
+#define CKDB_VERSION DB_VERSION"-1.930"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -353,6 +353,8 @@ extern cklock_t last_lock;
 #define STR_SHAREERRORS "shareerror"
 #define STR_AGEWORKINFO "ageworkinfo"
 
+extern char *ckdb_alert_cmd;
+
 extern char *btc_server;
 extern char *btc_auth;
 extern int btc_timeout;
@@ -627,6 +629,7 @@ enum cmd_values {
 	CMD_UNSET,
 	CMD_DUPSEQ, // Ignore, we've already got it
 	CMD_REPLY, // Means something was wrong - send back reply
+	CMD_ALERT, // Means reply with the buf passed
 	CMD_TERMINATE,
 	CMD_PING,
 	CMD_VERSION,
@@ -804,6 +807,16 @@ enum cmd_values {
 		_row->expirydate.tv_usec = default_expiry.tv_usec; \
 	} while (0)
 
+#define HISTORYDATEDEFAULT(_row, _cd) do { \
+		_row->createdate.tv_sec = (_cd)->tv_sec; \
+		_row->createdate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY(_row->createby, by_default); \
+		STRNCPY(_row->createcode, (char *)__func__); \
+		STRNCPY(_row->createinet, inet_default); \
+		_row->expirydate.tv_sec = default_expiry.tv_sec; \
+		_row->expirydate.tv_usec = default_expiry.tv_usec; \
+	} while (0)
+
 /* Override _row defaults if transfer fields are present
  * We don't care about the reply so it can be small */
 #define HISTORYDATETRANSFER(_root, _row) do { \
@@ -815,17 +828,17 @@ enum cmd_values {
 			__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
-				STRNCPY(_row->createby, __transfer->mvalue); \
+				STRNCPY((_row)->createby, __transfer->mvalue); \
 			} \
 			__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
-				STRNCPY(_row->createcode, __transfer->mvalue); \
+				STRNCPY((_row)->createcode, __transfer->mvalue); \
 			} \
 			__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
-				STRNCPY(_row->createinet, __transfer->mvalue); \
+				STRNCPY((_row)->createinet, __transfer->mvalue); \
 			} \
 		} \
 	} while (0)
@@ -1935,25 +1948,109 @@ extern K_LIST *process_pplns_free;
  * UserAtts can also at the user level */
 #define SHIFTS_SETTING_NAME "ShiftsPageSize"
 
-/*
-// EVENTLOG
-typedef struct eventlog {
-	int64_t eventlogid;
-	char poolinstance[TXT_BIG+1];
-	char eventlogcode[TXT_SML+1];
-	char *eventlogdescription;
+// IPS
+typedef struct ips {
+	char group[TXT_SML+1];
+	char ip[TXT_MED+1];
+	int lifetime;
+	bool log;
+	char *description;
 	HISTORYDATECONTROLFIELDS;
-} EVENTLOG;
+} IPS;
 
-#define ALLOC_EVENTLOG 100
-#define LIMIT_EVENTLOG 0
-#define INIT_EVENTLOG(_item) INIT_GENERIC(_item, eventlog)
-#define DATA_EVENTLOG(_var, _item) DATA_GENERIC(_var, _item, eventlog, true)
+#define ALLOC_IPS 16
+#define LIMIT_IPS 0
+#define INIT_IPS(_item) INIT_GENERIC(_item, ips)
+#define DATA_IPS(_var, _item) DATA_GENERIC(_var, _item, ips, true)
+#define DATA_IPS_NULL(_var, _item) DATA_GENERIC(_var, _item, ips, false)
 
-extern K_TREE *eventlog_root;
-extern K_LIST *eventlog_free;
-extern K_STORE *eventlog_store;
-*/
+extern K_TREE *ips_root;
+extern K_LIST *ips_free;
+extern K_STORE *ips_store;
+
+#define IPS_GROUP_OK "OK"
+#define IPS_GROUP_BAD "BAD"
+#define IPS_GROUP_BAN "BAN"
+
+// EVENTS RAM only
+typedef struct events {
+	int id;
+	// class C truncated version of createinet or full IP for IPv6
+	char ipc[TXT_MED+1];
+	// check for repeated use of the same hash
+	char hash[TXT_BIG+1];
+	// How many trees the item is still in
+	int trees;
+	// who: createby, createinet, createdate
+	HISTORYDATECONTROLFIELDS;
+} EVENTS;
+
+#define ALLOC_EVENTS 1000
+#define LIMIT_EVENTS 0
+#define INIT_EVENTS(_item) INIT_GENERIC(_item, events)
+#define DATA_EVENTS(_var, _item) DATA_GENERIC(_var, _item, events, true)
+#define DATA_EVENTS_NULL(_var, _item) DATA_GENERIC(_var, _item, events, false)
+
+extern K_TREE *events_user_root;
+extern K_TREE *events_ip_root;
+extern K_TREE *events_ipc_root;
+extern K_TREE *events_hash_root;
+extern K_LIST *events_free;
+extern K_STORE *events_store;
+
+// Any password failure
+#define EVENTID_PASSFAIL 0
+// Add/Change address
+#define EVENTID_CREADDR 1
+// Create an account
+#define EVENTID_CREACC 2
+// API unkatts
+#define EVENTID_UNKATTS 3
+// 2FA rubbish
+#define EVENTID_INV2FA 4
+// 2FA incorrect
+#define EVENTID_WRONG2FA 5
+// Attempt change to an invalid BTC address (that required btcd checking)
+#define EVENTID_INVBTC 6
+// Attempt change to an incorrect BTC address (that failed the ckdb test)
+#define EVENTID_INCBTC 7
+// Attempt change to another used BTC address
+#define EVENTID_BTCUSED 8
+// Auto create account
+#define EVENTID_AUTOACC 9
+// Unknown auth username
+#define EVENTID_INVAUTH 10
+// Unknown chkpass username
+#define EVENTID_INVUSER 11
+#define EVENTID_MAX 11
+
+#define EVENT_OK -1
+
+/* user limits are checked for matching id+user
+ * ip limits are checked for matching id+ip,
+ *  however, it requires more than one user found with the given ip
+ * i.e. a single user will not fail the test result for ip */
+typedef struct event_limits {
+	int id;
+	int user_low_time;
+	// how many in above limit = ok (+1 = alert)
+	int user_low_time_limit;
+	int user_hi_time;
+	// how many in above limit = ok (+1 = alert)
+	int user_hi_time_limit;
+	int ip_low_time;
+	// how many in above limit = ok (+1 = alert)
+	int ip_low_time_limit;
+	int ip_hi_time;
+	// how many in above limit = ok (+1 = alert)
+	int ip_hi_time_limit;
+	// expire events
+	int lifetime;
+} EVENT_LIMITS;
+
+extern EVENT_LIMITS e_limits[];
+// Has a fixed limit of 1 event allowed
+extern int event_limits_hash_lifetime;
 
 // AUTHS authorise.id.json={...}
 typedef struct auths {
@@ -2650,6 +2747,20 @@ extern K_ITEM *find_payoutid(int64_t payoutid);
 extern K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx);
 extern double payout_stats(PAYOUTS *payouts, char *statname);
 extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
+extern cmp_t cmp_ips(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_ips(char *group, char *ip);
+extern cmp_t cmp_events_user(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_events_ip(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_events_ipc(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_events_hash(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *last_events_user(int id, char *user, K_TREE_CTX *ctx);
+extern K_ITEM *last_events_ip(int id, char *ip, K_TREE_CTX *ctx);
+extern K_ITEM *last_events_ipc(int id, char *ipc, K_TREE_CTX *ctx);
+extern K_ITEM *last_events_hash(int id, char *hash, K_TREE_CTX *ctx);
+extern int check_events(EVENTS *events);
+extern char *_reply_event(int event, char *buf, bool fre);
+#define reply_event(_event, _buf) _reply_event(_event, _buf, false)
+#define reply_event_free(_event, _buf) _reply_event(_event, _buf, true)
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b);
 extern void dsp_userstats(K_ITEM *item, FILE *stream);
@@ -2755,7 +2866,8 @@ extern int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 			tv_t *cd, char *by, char *code, char *inet);
 extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			 char *newhash, char *email, char *by, char *code,
-			 char *inet, tv_t *cd, K_TREE *trf_root, char *status);
+			 char *inet, tv_t *cd, K_TREE *trf_root, char *status,
+			 int *event);
 extern K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 			char *passwordhash, int64_t userbits, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root);
@@ -2857,11 +2969,15 @@ extern bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item,
 extern K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now,
 				bool lock);
 extern bool payouts_fill(PGconn *conn);
+extern void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life);
+extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
+#define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
 extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,
 			char *useragent, char *preauth, char *by, char *code,
 			char *inet, tv_t *cd, K_TREE *trf_root,
-			bool addressuser, USERS **users, WORKERS **workers);
+			bool addressuser, USERS **users, WORKERS **workers,
+			int *event);
 extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 				char *elapsed, char *users, char *workers,
 				char *hashrate, char *hashrate5m,

@@ -389,10 +389,10 @@ cleanup:
 	return lastid;
 }
 
-// status was added to the end so type checking intercepts new mistakes
 bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 		  char *newhash, char *email, char *by, char *code,
-		  char *inet, tv_t *cd, K_TREE *trf_root, char *status)
+		  char *inet, tv_t *cd, K_TREE *trf_root, char *status,
+		  int *event)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -414,8 +414,11 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 
 	DATA_USERS(users, u_item);
 	// i.e. if oldhash == EMPTY, just overwrite with new
-	if (hash && oldhash != EMPTY && !check_hash(users, oldhash))
+	if (hash && oldhash != EMPTY && !check_hash(users, oldhash)) {
+		if (event)
+			*event = events_add(EVENTID_PASSFAIL, trf_root);
 		return false;
+	}
 
 	K_WLOCK(users_free);
 	item = k_unlink_head(users_free);
@@ -6125,12 +6128,180 @@ bool payouts_fill(PGconn *conn)
 	return ok;
 }
 
+void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life)
+{
+	K_ITEM *i_item, *i2_item;
+	IPS *ips, *ips2;
+	char *dot;
+	tv_t now;
+	bool ok;
+
+	setnow(&now);
+	K_WLOCK(ips_free);
+	i_item = k_unlink_head(ips_free);
+	DATA_IPS(ips, i_item);
+	STRNCPY(ips->group, group);
+	STRNCPY(ips->ip, ip);
+	ips->lifetime = life;
+	if (des) {
+		ips->description = strdup(des);
+		if (!ips->description)
+			quithere(1, "strdup OOM");
+		LIST_MEM_ADD(ips_free, ips->description);
+	}
+	ips->log = log;
+	HISTORYDATEDEFAULT(ips, &now);
+	add_to_ktree(ips_root, i_item);
+	k_add_head(ips_store, i_item);
+	if (cclass) {
+		i2_item = k_unlink_head(ips_free);
+		DATA_IPS(ips2, i2_item);
+		memcpy(ips2, ips, sizeof(*ips2));
+		ok = false;
+		dot = strchr(ips->ip, '.');
+		if (dot) {
+			dot = strchr(dot+1, '.');
+			if (dot) {
+				dot = strchr(dot+1, '.');
+				if (dot) {
+					*dot = '\0';
+					ok = true;
+				}
+			}
+		}
+		if (ok) {
+			if (des) {
+				ips2->description = strdup(des);
+				LIST_MEM_ADD(ips_free, ips2->description);
+			}
+			add_to_ktree(ips_root, i2_item);
+			k_add_head(ips_store, i2_item);
+		} else
+			k_add_head(ips_free, i2_item);
+	}
+	K_WUNLOCK(ips_free);
+}
+
+// trf_root overrides by,inet,cd fields
+int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
+{
+	K_ITEM look, *e_item, *i_passwordhash, *i_webtime, *i_username;
+	K_TREE_CTX ctx[1];
+	EVENTS events, *d_events;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+
+	LOGDEBUG("%s(): add", __func__);
+
+	bzero(&events, sizeof(events));
+	events.id = id;
+	events.expirydate.tv_sec = default_expiry.tv_sec;
+	events.expirydate.tv_usec = default_expiry.tv_usec;
+
+	// Default to now if not specified
+	setnow(&(events.createdate));
+
+	if (by)
+		STRNCPY(events.createby, by);
+
+	if (inet)
+		STRNCPY(events.createinet, inet);
+
+	if (cd)
+		copy_tv(&(events.createdate), cd);
+
+	// trf_root values overrides parameters
+	HISTORYDATETRANSFER(trf_root, &events);
+
+	// username overrides createby
+	i_username = optional_name(trf_root, "username", 1, NULL,
+					reply, siz);
+	if (i_username)
+		STRNCPY(events.createby, transfer_data(i_username));
+
+	// webtime overrides
+	i_webtime = optional_name(trf_root, "webtime", 1, NULL,
+					reply, siz);
+	if (i_webtime) {
+		TXT_TO_CTV("webtime", transfer_data(i_webtime),
+			  events.createdate);
+	}
+
+	/* We don't care if it's valid or not, though php should have
+	 *  already ensured it's valid */
+	i_passwordhash = optional_name(trf_root, "passwordhash", 1, NULL,
+					reply, siz);
+	if (i_passwordhash)
+		STRNCPY(events.hash, transfer_data(i_passwordhash));
+
+	if (events.createinet[0]) {
+		char *dot;
+		STRNCPY(events.ipc, events.createinet);
+		dot = strchr(events.ipc, '.');
+		if (dot) {
+			dot = strchr(dot+1, '.');
+			if (dot) {
+				dot = strchr(dot+1, '.');
+				if (dot)
+					*dot = '\0';
+			}
+		}
+	}
+
+	// Only store an event that had actual usable data
+	if (!events.createby[0] && !events.createinet[0] &&
+	    !events.ipc[0] && !events.hash[0])
+		return EVENT_OK;
+
+	INIT_EVENTS(&look);
+	look.data = (void *)(&events);
+
+	// All processing under lock - since we must be able to delete events
+	K_WLOCK(events_free);
+	// keep looping incrementing the usec time until it's not a duplicate
+	while (find_in_ktree(events_user_root, &look, ctx) ||
+	       find_in_ktree(events_ip_root, &look, ctx) ||
+	       find_in_ktree(events_ipc_root, &look, ctx) ||
+	       find_in_ktree(events_hash_root, &look, ctx)) {
+		if (++events.createdate.tv_usec >= 1000000) {
+			events.createdate.tv_usec -= 1000000;
+			events.createdate.tv_sec++;
+		}
+	}
+	e_item = k_unlink_head(events_free);
+	DATA_EVENTS(d_events, e_item);
+	COPY_DATA(d_events, &events);
+	k_add_head(events_store, e_item);
+	if (d_events->createby[0]) {
+		add_to_ktree(events_user_root, e_item);
+		d_events->trees++;
+	}
+	if (d_events->createinet[0]) {
+		add_to_ktree(events_ip_root, e_item);
+		d_events->trees++;
+	}
+	// Don't bother if it's the same as IP
+	if (d_events->ipc[0] &&
+	    strcmp(d_events->ipc, d_events->createinet) != 0) {
+		add_to_ktree(events_ipc_root, e_item);
+		d_events->trees++;
+	}
+	if (d_events->hash[0]) {
+		add_to_ktree(events_hash_root, e_item);
+		d_events->trees++;
+	}
+	K_WUNLOCK(events_free);
+
+	return check_events(&events);
+}
+
 // TODO: discard them from RAM
 bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		char *workername, char *clientid, char *enonce1,
 		char *useragent, char *preauth, char *by, char *code,
 		char *inet, tv_t *cd, K_TREE *trf_root,
-		bool addressuser, USERS **users, WORKERS **workers)
+		bool addressuser, USERS **users, WORKERS **workers,
+		int *event)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *a_item, *u_item, *w_item;
@@ -6161,6 +6332,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 				 __func__,
 				 st = safe_text_nonull(username));
 			FREENULL(st);
+			*event = events_add(EVENTID_INVAUTH, trf_root);
 		}
 		if (!u_item)
 			goto unitem;

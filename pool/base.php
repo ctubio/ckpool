@@ -6,6 +6,9 @@ global $dbg, $dbgstr;
 $dbg = false;
 $dbgstr = '';
 #
+global $alrts;
+$alrts = array();
+#
 function adddbg($str)
 {
  global $dbg, $dbgstr;
