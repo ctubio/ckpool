@@ -2943,6 +2943,14 @@ bool workinfo_fill(PGconn *conn)
 		return false;
 	}
 
+	res = PQexec(conn, "Lock table workinfo in access exclusive mode", CKPQ_READ);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Lock", rescode, conn);
+		goto flail;
+	}
+
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	PQclear(res);
@@ -5468,6 +5476,14 @@ bool miningpayouts_fill(PGconn *conn)
 		return false;
 	}
 
+	res = PQexec(conn, "Lock table miningpayouts in access exclusive mode", CKPQ_READ);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Lock", rescode, conn);
+		goto flail;
+	}
+
 	res = PQexec(conn, sel, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	PQclear(res);
@@ -6967,9 +6983,6 @@ bool markersummary_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
-	printf(TICK_PREFIX"ms 0\r");
-	fflush(stdout);
-
 	// TODO: limit how far back
 	sel = "declare ws cursor for select "
 		"markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
@@ -6987,12 +7000,23 @@ bool markersummary_fill(PGconn *conn)
 
 	LOGWARNING("%s(): loading from markerid>=%s", __func__, params[0]);
 
+	printf(TICK_PREFIX"ms 0\r");
+	fflush(stdout);
+
 	res = PQexec(conn, "Begin", CKPQ_READ);
 	rescode = PQresultStatus(res);
 	PQclear(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Begin", rescode, conn);
 		return false;
+	}
+
+	res = PQexec(conn, "Lock table markersummary in access exclusive mode", CKPQ_READ);
+	rescode = PQresultStatus(res);
+	PQclear(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Lock", rescode, conn);
+		goto flail;
 	}
 
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
