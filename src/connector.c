@@ -208,14 +208,14 @@ static client_instance_t *recruit_client(cdata_t *cdata)
 	} else
 		LOGDEBUG("Connector recycled client instance");
 
-	client->buf = realloc(client->buf, PAGESIZE);
-	client->buf[0] = '\0';
+	client->buf = ckzalloc(PAGESIZE);
 
 	return client;
 }
 
 static void __recycle_client(cdata_t *cdata, client_instance_t *client)
 {
+	dealloc(client->buf);
 	memset(client, 0, sizeof(client_instance_t));
 	client->id = -1;
 	DL_APPEND(cdata->recycled_clients, client);
