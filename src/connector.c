@@ -691,7 +691,7 @@ static bool send_sender_send(ckpool_t *ckp, cdata_t *cdata, sender_send_t *sende
 	while (sender_send->len) {
 		int ret = write(client->fd, sender_send->buf + sender_send->ofs, sender_send->len);
 
-		if (unlikely(ret < 1)) {
+		if (ret < 1) {
 			/* Invalidate clients that block for more than 60 seconds */
 			if (unlikely(client->blocked_time && now_t - client->blocked_time >= 60)) {
 				LOGNOTICE("Client id %"PRId64" fd %d blocked for >60 seconds, disconnecting",
