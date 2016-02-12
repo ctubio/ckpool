@@ -3916,6 +3916,27 @@ static void get_poolstats(sdata_t *sdata, int *sockd)
 
 static void srecv_process(ckpool_t *ckp, char *buf);
 
+/* For emergency use only, flushes all pending ckdbq messages */
+static void ckdbq_flush(sdata_t *sdata)
+{
+	ckmsgq_t *ckdbq = sdata->ckdbq;
+	int flushed = 0;
+
+	mutex_lock(ckdbq->lock);
+	while (ckdbq->msgs) {
+		ckmsg_t *msg = ckdbq->msgs;
+
+		DL_DELETE(ckdbq->msgs, msg);
+		free(msg->data);
+		free(msg);
+		ckdbq->messages--;
+		flushed++;
+	}
+	mutex_unlock(ckdbq->lock);
+
+	LOGWARNING("Flushed %d messages from ckdb queue", flushed);
+}
+
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	sdata_t *sdata = ckp->data;
@@ -4080,6 +4101,8 @@ retry:
 		dead_proxy(sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
+	} else if (cmdmatch(buf, "ckdbflush")) {
+		ckdbq_flush(sdata);
 	} else
 		LOGWARNING("Unhandled stratifier message: %s", buf);
 	goto retry;
