@@ -135,6 +135,9 @@ struct connector_data {
 
 	int64_t client_id;
 
+	/* client message process queue */
+	ckmsgq_t *cmpq;
+
 	/* For the linked list of pending sends */
 	sender_send_t *sender_sends;
 
@@ -1200,17 +1203,10 @@ out:
 	return ret;
 }
 
-static void process_client_msg(cdata_t *cdata, const char *buf)
+static void client_message_processor(ckpool_t *ckp, json_t *json_msg)
 {
 	int64_t client_id;
-	json_t *json_msg;
 	char *msg;
-
-	json_msg = json_loads(buf, 0, NULL);
-	if (unlikely(!json_msg)) {
-		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
-		return;
-	}
 
 	/* Extract the client id from the json message and remove its entry */
 	client_id = json_integer_value(json_object_get(json_msg, "client_id"));
@@ -1221,8 +1217,20 @@ static void process_client_msg(cdata_t *cdata, const char *buf)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
 
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
-	send_client(cdata, client_id, msg);
+	send_client(ckp->data, client_id, msg);
 	json_decref(json_msg);
+}
+
+static void process_client_msg(cdata_t *cdata, const char *buf)
+{
+	json_t *json_msg = json_loads(buf, 0, NULL);
+
+	if (unlikely(!json_msg)) {
+		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
+		return;
+	}
+
+	ckmsgq_add(cdata->cmpq, json_msg);
 }
 
 /* Send the passthrough the terminate node.method */
@@ -1538,6 +1546,8 @@ int connector(proc_instance_t *pi)
 
 	if (tries)
 		LOGWARNING("Connector successfully bound to socket");
+
+	cdata->cmpq = create_ckmsgq(ckp, "cmpq", &client_message_processor);
 
 	if (ckp->remote && !setup_upstream(ckp, cdata)) {
 		ret = 1;
