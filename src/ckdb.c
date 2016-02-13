@@ -492,33 +492,40 @@ K_TREE *events_ipc_root;
 K_TREE *events_hash_root;
 K_LIST *events_free;
 K_STORE *events_store;
+// Emulate a list for lock checking
+K_LIST *event_limits_free;
 
+/* N.B. these limits are not production quality
+ *  They'll block anyone who makes a mistake 2 or 3 times :)
+ * Use optioncontrol OC_LIMITS to set/store them in the database */
 EVENT_LIMITS e_limits[] = {
- {	EVENTID_PASSFAIL,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_PASSFAIL, "PASSFAIL",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an address account once, so user_lo/hi can never trigger
- {	EVENTID_CREADDR,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_CREADDR, "CREADDR",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an account once, so user_lo/hi can never trigger
- {	EVENTID_CREACC,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_CREACC, "CREACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // page_api.php with an invalid username
- {	EVENTID_UNKATTS,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_UNKATTS, "UNKATTS",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // 2fa missing/invalid format
- {	EVENTID_INV2FA,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_INV2FA, "INV2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Wrong 2fa value
- {	EVENTID_WRONG2FA,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_WRONG2FA, "WRONG2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid address according to btcd
- {	EVENTID_INVBTC,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_INVBTC, "INVBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Incorrect format/length address
- {	EVENTID_INCBTC,		60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_INCBTC, "INCBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Address belongs to some other account
- {	EVENTID_BTCUSED,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_BTCUSED, "BTCUSED",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an account once, so user_lo/hi can never trigger
- {	EVENTID_AUTOACC,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_AUTOACC, "AUTOACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid user on auth, CKPool will throttle these
- {	EVENTID_INVAUTH,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ {	EVENTID_INVAUTH, "INVAUTH",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid user on chkpass
- {	EVENTID_INVUSER,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 }
+ {	EVENTID_INVUSER, "INVUSER",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ // Terminated by NULL name
+ { -1, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
-
+// All access to above and below limits requires the event_limits_free lock
 int event_limits_hash_lifetime = 24*60*60;
 
 // AUTHS authorise.id.json={...}
@@ -1300,7 +1307,7 @@ static void alloc_storage()
 
 	DLPRIO(userinfo, 50);
 
-	// Needs to check users and ips
+	// Needs to check users and ips and uses limits
 	DLPRIO(events, 47);
 
 	DLPRIO(auths, 44);
@@ -1320,10 +1327,12 @@ static void alloc_storage()
 	DLPRIO(poolstats, 11);
 	DLPRIO(userstats, 10);
 
+	// Uses limits lock for events_limits
+	DLPRIO(optioncontrol, 5);
+
 	// Don't currently nest any locks in these:
 	DLPRIO(workers, PRIO_TERMINAL);
 	DLPRIO(idcontrol, PRIO_TERMINAL);
-	DLPRIO(optioncontrol, PRIO_TERMINAL);
 	DLPRIO(paymentaddresses, PRIO_TERMINAL);
 	DLPRIO(ips, PRIO_TERMINAL);
 
@@ -4274,7 +4283,7 @@ static void *socketer(__maybe_unused void *arg)
 						 "%s.%ld.failed.ERR",
 						 msgline->id,
 						 now.tv_sec);
-					tmp = reply_event(EVENTID_MAX, reply);
+					tmp = reply_event(EVENTID_NONE, reply);
 					send_unix_msg(sockd, tmp);
 					FREENULL(tmp);
 					break;
@@ -6043,10 +6052,12 @@ int main(int argc, char **argv)
 	// Emulate a list for lock checking
 	process_pplns_free = k_lock_only_list("ProcessPPLNS");
 	workers_db_free = k_lock_only_list("WorkersDB");
+	event_limits_free = k_lock_only_list("EventLimits");
 
 #if LOCK_CHECK
 	DLPRIO(process_pplns, 99);
 	DLPRIO(workers_db, 98);
+	DLPRIO(event_limits, PRIO_TERMINAL);
 #endif
 
 	if (confirm_sharesummary) {

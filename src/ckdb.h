@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.940"
+#define CKDB_VERSION DB_VERSION"-1.950"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1599,6 +1599,12 @@ extern K_TREE *optioncontrol_root;
 extern K_LIST *optioncontrol_free;
 extern K_STORE *optioncontrol_store;
 
+typedef struct oc_trigger {
+	char *match;
+	bool exact;
+	void (*func)(OPTIONCONTROL *, const char *);
+} OC_TRIGGER;
+
 // TODO: discarding workinfo,shares
 // WORKINFO workinfo.id.json={...}
 typedef struct workinfo {
@@ -1997,6 +2003,10 @@ extern K_TREE *events_ipc_root;
 extern K_TREE *events_hash_root;
 extern K_LIST *events_free;
 extern K_STORE *events_store;
+// Emulate a list for lock checking     
+extern K_LIST *event_limits_free;
+
+#define OC_LIMITS "event_limits_"
 
 // Any password failure
 #define EVENTID_PASSFAIL 0
@@ -2022,7 +2032,7 @@ extern K_STORE *events_store;
 #define EVENTID_INVAUTH 10
 // Unknown chkpass username
 #define EVENTID_INVUSER 11
-#define EVENTID_MAX 11
+#define EVENTID_NONE 12
 
 #define EVENT_OK -1
 
@@ -2032,6 +2042,8 @@ extern K_STORE *events_store;
  * i.e. a single user will not fail the test result for ip */
 typedef struct event_limits {
 	int id;
+	// optioncontrol/display name
+	char *name;
 	int user_low_time;
 	// how many in above limit = ok (+1 = alert)
 	int user_low_time_limit;

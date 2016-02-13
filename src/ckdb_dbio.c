@@ -2438,6 +2438,137 @@ foil:
 	return ok;
 }
 
+void oc_switch_state(OPTIONCONTROL *oc, const char *from)
+{
+	switch_state = atoi(oc->optionvalue);
+	LOGWARNING("%s(%s) set switch_state to %d",
+		   from, __func__, switch_state);
+}
+
+void oc_diff_percent(OPTIONCONTROL *oc, __maybe_unused const char *from)
+{
+	diff_percent = DIFF_VAL(strtod(oc->optionvalue, NULL));
+	if (errno == ERANGE)
+		diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
+}
+
+/* An event limit setting looks like:
+ *	OC_LIMITS + events_limits.name + '_' + Item
+ * Item is one of the field names in event_limits
+ * 	e.g. user_low_time, user_low_time_limit etc
+ * 		as below in the if tests */
+void oc_event_limits(OPTIONCONTROL *oc, const char *from)
+{
+	bool processed = false;
+	size_t len;
+	char *ptr, *ptr2;
+	int val, i;
+
+	K_WLOCK(event_limits_free);
+	val = atoi(oc->optionvalue);
+	ptr = oc->optionname + strlen(OC_LIMITS);
+	i = -1;
+	while (e_limits[++i].name) {
+		len = strlen(e_limits[i].name);
+		if (strncmp(ptr, e_limits[i].name, len) == 0 &&
+		    ptr[len] == '_') {
+			ptr2 = ptr + len + 1;
+			if (strcmp(ptr2, "user_low_time") == 0) {
+				e_limits[i].user_low_time = val;
+			} else if (strcmp(ptr2, "user_low_time_limit") == 0) {
+				e_limits[i].user_low_time_limit = val;
+			} else if (strcmp(ptr2, "user_hi_time") == 0) {
+				e_limits[i].user_hi_time = val;
+			} else if (strcmp(ptr2, "user_hi_time_limit") == 0) {
+				e_limits[i].user_hi_time_limit = val;
+			} else if (strcmp(ptr2, "ip_low_time") == 0) {
+				e_limits[i].ip_low_time = val;
+			} else if (strcmp(ptr2, "ip_low_time_limit") == 0) {
+				e_limits[i].ip_low_time_limit = val;
+			} else if (strcmp(ptr2, "ip_hi_time") == 0) {
+				e_limits[i].ip_hi_time = val;
+			} else if (strcmp(ptr2, "ip_hi_time_limit") == 0) {
+				e_limits[i].ip_hi_time_limit = val;
+			} else if (strcmp(ptr2, "lifetime") == 0) {
+				e_limits[i].lifetime = val;
+			} else {
+				LOGERR("%s(%s): ERR: Unknown %s item '%s' "
+					"in '%s'",
+					from, __func__, OC_LIMITS, ptr2,
+					oc->optionname);
+			}
+			processed = true;
+			break;
+		}
+	}
+	if (!processed) {
+		if (strcmp(ptr, "hash_lifetime") == 0) {
+			event_limits_hash_lifetime = val;
+			processed = true;
+		}
+	}
+	K_WUNLOCK(event_limits_free);
+	if (!processed) {
+		LOGERR("%s(%s): ERR: Unknown %s name '%s'",
+			from, __func__, OC_LIMITS, oc->optionname);
+	}
+}
+
+OC_TRIGGER oc_trigger[] = {
+	{ SWITCH_STATE_NAME,	true,	oc_switch_state },
+	{ DIFF_PERCENT_NAME,	true,	oc_diff_percent },
+	{ OC_LIMITS,		false,	oc_event_limits },
+	{ NULL, 0, NULL }
+};
+
+/* For oc items that aren't date/height controlled, and use global variables
+ *  rather than having to look up the value every time it's needed
+ * Called from within the write lock that loaded/added the oc_item */
+static void optioncontrol_trigger(K_ITEM *oc_item, const char *from)
+{
+	char cd_buf[DATE_BUFSIZ], cd2_buf[DATE_BUFSIZ];
+	OPTIONCONTROL *oc;
+	int got, i;
+
+	DATA_OPTIONCONTROL(oc, oc_item);
+	if (CURRENT(&(oc->expirydate))) {
+		got = -1;
+		for (i = 0; oc_trigger[i].match; i++) {
+			if (oc_trigger[i].exact) {
+				if (strcmp(oc->optionname,
+					   oc_trigger[i].match) == 0) {
+					got = i;
+					break;
+				}
+			} else {
+				if (strncmp(oc->optionname, oc_trigger[i].match,
+					    strlen(oc_trigger[i].match)) == 0) {
+					got = i;
+					break;
+				}
+			}
+		}
+		if (got > -1) {
+			// If it's date/height controlled, display an ERR
+			if (oc->activationheight != OPTIONCONTROL_HEIGHT ||
+			    tv_newer(&date_begin, &(oc->activationdate)))
+			{
+				tv_to_buf(&(oc->activationdate), cd_buf,
+					  sizeof(cd_buf));
+				tv_to_buf((tv_t *)&date_begin, cd2_buf,
+					  sizeof(cd_buf));
+				LOGERR("%s(%s) ERR: ignored '%s' - has "
+					"height %"PRId32" & date '%s' - "
+					"expect height %d & date <= '%s'",
+					from, __func__, oc->optionname,
+					oc->activationheight, cd_buf,
+					OPTIONCONTROL_HEIGHT, cd2_buf);
+			} else
+				oc_trigger[i].func(oc, from);
+		}
+	}
+}
+
 K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool begun)
 {
 	ExecStatusType rescode;
@@ -2460,13 +2591,6 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 		row->activationdate.tv_sec = date_begin.tv_sec;
 		row->activationdate.tv_usec = date_begin.tv_usec;
 		row->activationheight = OPTIONCONTROL_HEIGHT;
-	}
-
-	// Update if it's changed
-	if (strcmp(row->optionname, DIFF_PERCENT_NAME) == 0) {
-		diff_percent = DIFF_VAL(strtod(row->optionvalue, NULL));
-		if (errno == ERANGE)
-			diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
 	}
 
 	INIT_OPTIONCONTROL(&look);
@@ -2552,6 +2676,8 @@ nostart:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
+	/* N.B. if the DB update fails,
+	 *	optioncontrol_trigger() will not be called */
 	K_WLOCK(optioncontrol_free);
 	if (!ok) {
 		// Cleanup item passed in
@@ -2567,11 +2693,8 @@ nostart:
 		}
 		add_to_ktree(optioncontrol_root, oc_item);
 		k_add_head(optioncontrol_store, oc_item);
-		if (strcmp(row->optionname, SWITCH_STATE_NAME) == 0) {
-			switch_state = atoi(row->optionvalue);
-			LOGWARNING("%s() set switch_state to %d",
-				   __func__, switch_state);
-		}
+
+		optioncontrol_trigger(oc_item, __func__);
 	}
 	K_WUNLOCK(optioncontrol_free);
 
@@ -2700,21 +2823,7 @@ bool optioncontrol_fill(PGconn *conn)
 		add_to_ktree(optioncontrol_root, item);
 		k_add_head(optioncontrol_store, item);
 
-		// There should only be one CURRENT version of switch_state
-		if (CURRENT(&(row->expirydate)) &&
-		    strcmp(row->optionname, SWITCH_STATE_NAME) == 0) {
-			switch_state = atoi(row->optionvalue);
-			LOGWARNING("%s() set switch_state to %d",
-				   __func__, switch_state);
-		}
-
-		// The last loaded CURRENT value will be used
-		if (CURRENT(&(row->expirydate)) &&
-		    strcmp(row->optionname, DIFF_PERCENT_NAME) == 0) {
-			diff_percent = DIFF_VAL(strtod(row->optionvalue, NULL));
-			if (errno == ERANGE)
-				diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
-		}
+		optioncontrol_trigger(item, __func__);
 	}
 	if (!ok) {
 		free_optioncontrol_data(item);

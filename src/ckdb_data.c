@@ -4509,6 +4509,7 @@ int check_events(EVENTS *events)
 	EVENTS *e = NULL;
 	int count, secs;
 	int tyme, limit, lifetime;
+	char name[TXT_SML+1];
 	pid_t pid;
 	tv_t now;
 
@@ -4527,6 +4528,7 @@ int check_events(EVENTS *events)
 	// All tests below always run all full checks to clean up old events
 	setnow(&now);
 	K_WLOCK(events_free);
+	K_RLOCK(event_limits_free);
 	// Check hash - same hash passfail on more than one valid User
 	if (events->id == EVENTID_PASSFAIL && *(events->hash)) {
 		e_item = last_events_hash(events->id, events->hash, ctx);
@@ -4573,6 +4575,7 @@ int check_events(EVENTS *events)
 								tyme = 0;
 								limit = 1;
 								lifetime = event_limits_hash_lifetime;
+								STRNCPY(name, "HASH");
 							}
 						}
 					}
@@ -4613,6 +4616,7 @@ int check_events(EVENTS *events)
 				tyme = e_limits[events->id].user_low_time;
 				limit = e_limits[events->id].user_low_time_limit;
 				lifetime = e_limits[events->id].lifetime;
+				STRNCPY(name, e_limits[events->id].name);
 			}
 			if (alert == false &&
 			    secs <= e_limits[events->id].user_hi_time &&
@@ -4622,6 +4626,7 @@ int check_events(EVENTS *events)
 				tyme = e_limits[events->id].user_hi_time;
 				limit = e_limits[events->id].user_hi_time_limit;
 				lifetime = e_limits[events->id].lifetime;
+				STRNCPY(name, e_limits[events->id].name);
 			}
 			e_item = prev_in_ktree(ctx);
 		}
@@ -4664,6 +4669,7 @@ int check_events(EVENTS *events)
 				tyme = e_limits[events->id].ip_low_time;
 				limit = e_limits[events->id].ip_low_time_limit;
 				lifetime = e_limits[events->id].lifetime;
+				STRNCPY(name, e_limits[events->id].name);
 			}
 			if (alert == false &&
 			    secs <= e_limits[events->id].ip_hi_time &&
@@ -4673,6 +4679,7 @@ int check_events(EVENTS *events)
 				tyme = e_limits[events->id].ip_hi_time;
 				limit = e_limits[events->id].ip_hi_time_limit;
 				lifetime = e_limits[events->id].lifetime;
+				STRNCPY(name, e_limits[events->id].name);
 			}
 			e_item = prev_in_ktree(ctx);
 		}
@@ -4719,6 +4726,7 @@ int check_events(EVENTS *events)
 				tyme = e_limits[events->id].ip_low_time;
 				limit = e_limits[events->id].ip_low_time_limit;
 				lifetime = e_limits[events->id].lifetime;
+				STRNCPY(name, e_limits[events->id].name);
 			}
 			if (alert == false &&
 			    secs <= e_limits[events->id].ip_hi_time &&
@@ -4728,6 +4736,7 @@ int check_events(EVENTS *events)
 				tyme = e_limits[events->id].ip_hi_time;
 				limit = e_limits[events->id].ip_hi_time_limit;
 				lifetime = e_limits[events->id].lifetime;
+				STRNCPY(name, e_limits[events->id].name);
 			}
 			e_item = prev_in_ktree(ctx);
 		}
@@ -4737,11 +4746,12 @@ int check_events(EVENTS *events)
 		    user2 == false)
 			alert = false;
 	}
+	K_RUNLOCK(event_limits_free);
 	K_WUNLOCK(events_free);
 	if (alert) {
-		LOGERR("%s() ALERT ID:%d Lim:%d Time:%d Life:%d %s '%s' '%s'",
+		LOGERR("%s() ALERT ID:%d %s Lim:%d Time:%d Life:%d %s '%s' '%s'",
 			__func__,
-			events->id, limit, tyme, lifetime,
+			events->id, name, limit, tyme, lifetime,
 			events->createinet,
 			st = safe_text_nonull(events->createby),
 			cause_str(cause));
@@ -4760,7 +4770,7 @@ int check_events(EVENTS *events)
 				snprintf(buf3, sizeof(buf3), "%d", tyme);
 				snprintf(buf4, sizeof(buf4), "%d", lifetime);
 				st = safe_text_nonull(events->createby);
-				execl(ckdb_alert_cmd, ckdb_alert_cmd, buf1,
+				execl(ckdb_alert_cmd, ckdb_alert_cmd, buf1, name,
 					buf2, buf3, buf4, events->createinet,
 					st, cause_str(cause), NULL);
 				LOGERR("%s() ALERT fork failed to execute (%d)",
