@@ -1216,7 +1216,7 @@ static void alloc_storage()
 	ips_free = k_new_list("IPs", sizeof(IPS), ALLOC_IPS, LIMIT_IPS, true);
 	ips_store = k_new_store(ips_free);
 	ips_root = new_ktree(NULL, cmp_ips, ips_free);
-	ips_add(IPS_GROUP_OK, "127.0.0.1", "local", false, true, 0);
+	ips_add(IPS_GROUP_OK, "127.0.0.1", "local", false, true, 0, false);
 
 	events_free = k_new_list("Events", sizeof(EVENTS),
 					ALLOC_EVENTS, LIMIT_EVENTS, true);
@@ -1307,8 +1307,13 @@ static void alloc_storage()
 
 	DLPRIO(userinfo, 50);
 
-	// Needs to check users and ips and uses limits
+	// Uses event_limits
+	DLPRIO(optioncontrol, 48);
+
+	// Needs to check users and ips and uses events_limits
 	DLPRIO(events, 47);
+
+	// events_limits 46 (events-1) above users
 
 	DLPRIO(auths, 44);
 	DLPRIO(users, 43);
@@ -1326,9 +1331,6 @@ static void alloc_storage()
 
 	DLPRIO(poolstats, 11);
 	DLPRIO(userstats, 10);
-
-	// Uses limits lock for events_limits
-	DLPRIO(optioncontrol, 5);
 
 	// Don't currently nest any locks in these:
 	DLPRIO(workers, PRIO_TERMINAL);
@@ -4393,6 +4395,7 @@ static void *socketer(__maybe_unused void *arg)
 				case CMD_SHSTA:
 				case CMD_USERINFO:
 				case CMD_LOCKS:
+				case CMD_EVENTS:
 					msgline->sockd = sockd;
 					sockd = -1;
 					K_WLOCK(workqueue_free);
@@ -4651,6 +4654,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_BTCSET:
 			case CMD_QUERY:
 			case CMD_LOCKS:
+			case CMD_EVENTS:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,
@@ -5810,6 +5814,7 @@ int main(int argc, char **argv)
 	char buf[512];
 	ckpool_t ckp;
 	int c, ret, i = 0, j;
+	size_t len;
 	char *kill;
 	tv_t now;
 
@@ -5824,6 +5829,11 @@ int main(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "a:c:d:ghi:kl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'a':
+				len = strlen(optarg);
+				if (len > MAX_ALERT_CMD)
+					quit(1, "ckdb_alert_cmd (%d) too large,"
+						" limit %d",
+						(int)len, MAX_ALERT_CMD);
 				ckdb_alert_cmd = strdup(optarg);
 				break;
 			case 'c':
@@ -6057,7 +6067,7 @@ int main(int argc, char **argv)
 #if LOCK_CHECK
 	DLPRIO(process_pplns, 99);
 	DLPRIO(workers_db, 98);
-	DLPRIO(event_limits, PRIO_TERMINAL);
+	DLPRIO(event_limits, 46); // events-1
 #endif
 
 	if (confirm_sharesummary) {

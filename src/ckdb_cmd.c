@@ -7484,6 +7484,289 @@ static char *cmd_locks(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(reply);
 }
 
+static void event_tree(K_TREE *event_tree, char *list, char *reply, size_t siz,
+			char *buf, size_t *off, size_t *len, int *rows)
+{
+	K_TREE_CTX ctx[1];
+	K_ITEM *e_item;
+	EVENTS *e;
+
+	e_item = first_in_ktree(event_tree, ctx);
+	while (e_item) {
+		DATA_EVENTS(e, e_item);
+		if (CURRENT(&(e->expirydate))) {
+			snprintf(reply, siz, "list:%d=%s%c",
+				 *rows, list, FLDSEP);
+			APPEND_REALLOC(buf, *off, *len, reply);
+
+			snprintf(reply, siz, "id:%d=%d%c",
+				 *rows, e->id, FLDSEP);
+			APPEND_REALLOC(buf, *off, *len, reply);
+
+			snprintf(reply, siz, "user:%d=%s%c",
+				 *rows, e->createby, FLDSEP);
+			APPEND_REALLOC(buf, *off, *len, reply);
+
+			if (event_tree == events_ipc_root) {
+				snprintf(reply, siz, "ipc:%d=%s%c",
+					 *rows, e->ipc, FLDSEP);
+				APPEND_REALLOC(buf, *off, *len, reply);
+			} else {
+				snprintf(reply, siz, "ip:%d=%s%c",
+					 *rows, e->createinet, FLDSEP);
+				APPEND_REALLOC(buf, *off, *len, reply);
+			}
+
+			if (event_tree == events_hash_root) {
+				snprintf(reply, siz, "hash:%d=%.8s%c",
+					 *rows, e->hash, FLDSEP);
+				APPEND_REALLOC(buf, *off, *len, reply);
+			}
+
+			snprintf(reply, siz, CDTRF":%d=%ld%c",
+				 (*rows)++, e->createdate.tv_sec, FLDSEP);
+			APPEND_REALLOC(buf, *off, *len, reply);
+		}
+		e_item = next_in_ktree(ctx);
+	}
+}
+
+// Events status/settings
+static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *cd, K_TREE *trf_root)
+{
+	K_ITEM *i_action, *i_cmd, *i_list, *i_ip, *i_lifetime, *i_des, *i_item;
+	K_TREE_CTX ctx[1];
+	IPS *ips;
+	char *action, *alert_cmd, *list, *ip, *des;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char tmp[1024] = "";
+	char *buf = NULL;
+	size_t len, off;
+	int i, rows, oldlife, lifetime;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_action = require_name(trf_root, "action", 1, NULL, reply, siz);
+	if (!i_action)
+		return strdup(reply);
+	action = transfer_data(i_action);
+
+	if (strcasecmp(action, "cmd") == 0) {
+		/* Change ckdb_alert_cmd to 'cmd'
+		 * blank to disable it */
+		i_cmd = require_name(trf_root, "cmd", 0, NULL, reply, siz);
+		if (!i_cmd)
+			return strdup(reply);
+		alert_cmd = transfer_data(i_cmd);
+		if (strlen(alert_cmd) > MAX_ALERT_CMD)
+			return strdup("Invalid cmd length - limit " STRINT(MAX_ALERT_CMD));
+		K_WLOCK(event_limits_free);
+		FREENULL(ckdb_alert_cmd);
+		if (*alert_cmd)
+			ckdb_alert_cmd = strdup(alert_cmd);
+		K_WUNLOCK(event_limits_free);
+		APPEND_REALLOC_INIT(buf, off, len);
+		if (*alert_cmd)
+			APPEND_REALLOC(buf, off, len, "ok.cmd set");
+		else
+			APPEND_REALLOC(buf, off, len, "ok.cmd disabled");
+	} else if (strcasecmp(action, "settings") == 0) {
+		// Return all current event settings
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+		K_RLOCK(event_limits_free);
+		i = -1;
+		while (e_limits[++i].name) {
+
+#define EVENTFLD(_fld) do { \
+		snprintf(tmp, sizeof(tmp), "%s_" #_fld "=%d%c", \
+			 e_limits[i].name, e_limits[i]._fld, FLDSEP); \
+		APPEND_REALLOC(buf, off, len, tmp); \
+	} while (0)
+
+			EVENTFLD(user_low_time);
+			EVENTFLD(user_low_time_limit);
+			EVENTFLD(user_hi_time);
+			EVENTFLD(user_hi_time_limit);
+			EVENTFLD(ip_low_time);
+			EVENTFLD(ip_low_time_limit);
+			EVENTFLD(ip_hi_time);
+			EVENTFLD(ip_hi_time_limit);
+			EVENTFLD(lifetime);
+		}
+		snprintf(tmp, sizeof(tmp), "event_limits_hash_lifetime=%d",
+			 event_limits_hash_lifetime);
+		APPEND_REALLOC(buf, off, len, tmp);
+		K_RUNLOCK(event_limits_free);
+	} else if (strcasecmp(action, "events") == 0) {
+		/* List the event tree contents
+		 * List is 'all' or one of: hash, user, ip or ipc <- tree names
+		 * Output can be large - check web Admin->ckp for tree sizes */
+		bool all, one = false;
+		i_list = require_name(trf_root, "list", 1, NULL, reply, siz);
+		if (!i_list)
+			return strdup(reply);
+		list = transfer_data(i_list);
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+		rows = 0;
+		all = (strcmp(list, "all") == 0);
+		K_RLOCK(events_free);
+		if (all || strcmp(list, "user") == 0) {
+			one = true;
+			event_tree(events_user_root, "user", reply, siz, buf,
+				   &off, &len, &rows);
+		}
+		if (all || strcmp(list, "ip") == 0) {
+			one = true;
+			event_tree(events_ip_root, "ip", reply, siz, buf,
+				   &off, &len, &rows);
+		}
+		if (all || strcmp(list, "ipc") == 0) {
+			one = true;
+			event_tree(events_ipc_root, "ipc", reply, siz, buf,
+				   &off, &len, &rows);
+		}
+		if (all || strcmp(list, "hash") == 0) {
+			one = true;
+			event_tree(events_hash_root, "hash", reply, siz, buf,
+				   &off, &len, &rows);
+		}
+		K_RUNLOCK(events_free);
+		if (!one) {
+			free(buf);
+			snprintf(reply, siz, "unknown stats list '%s'", list);
+			LOGERR("%s() %s.%s", __func__, id, reply);
+			return strdup(reply);
+		}
+		snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else if (strcasecmp(action, "ips") == 0) {
+		// List the ips tree contents
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+		rows = 0;
+		K_RLOCK(ips_free);
+		i_item = first_in_ktree(ips_root, ctx);
+		while (i_item) {
+			DATA_IPS(ips, i_item);
+			if (CURRENT(&(ips->expirydate))) {
+				snprintf(tmp, sizeof(tmp), "group:%d=%s%c",
+					 rows, ips->group, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "ip:%d=%s%c",
+					 rows, ips->ip, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "description:%d=%s%c",
+					 rows, ips->description ? : EMPTY,
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "lifetime:%d=%d%c",
+					 rows, ips->lifetime, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "log:%d=%c%c",
+					 rows, ips->log ? TRUE_CHR : FALSE_CHR,
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(reply, siz, CDTRF":%d=%ld%c",
+					 rows++, ips->createdate.tv_sec,
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, reply);
+			}
+			i_item = next_in_ktree(ctx);
+		}
+		K_RUNLOCK(ips_free);
+		snprintf(tmp, sizeof(tmp), "rows=%d", rows);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else if (strcasecmp(action, "ban") == 0) {
+		// Ban the ip with optional lifetime
+		bool found = false;
+		oldlife = 0;
+		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
+		if (!i_ip)
+			return strdup(reply);
+		ip = transfer_data(i_ip);
+		i_lifetime = optional_name(trf_root, "lifetime", 1,
+					   (char *)intpatt, reply, siz);
+		if (i_lifetime)
+			lifetime = atoi(transfer_data(i_lifetime));
+		else {
+			if (*reply)
+				return strdup(reply);
+			// default to almost 42 years :)
+			lifetime = 60*60*24*365*42;
+		}
+		i_des = optional_name(trf_root, "des", 1, NULL, reply, siz);
+		if (i_des)
+			des = transfer_data(i_des);
+		else {
+			if (*reply)
+				return strdup(reply);
+			des = NULL;
+		}
+		K_WLOCK(ips_free);
+		i_item = find_ips(IPS_GROUP_BAN, ip);
+		if (i_item) {
+			found = true;
+			DATA_IPS(ips, i_item);
+			oldlife = ips->lifetime;
+			ips->lifetime = lifetime;
+			// Don't change it if it's not supplied
+			if (des) {
+				LIST_MEM_SUB(ips_free, ips->description);
+				FREENULL(ips->description);
+				ips->description = strdup(des);
+				LIST_MEM_ADD(ips_free, ips->description);
+			}
+		} else {
+			ips_add(IPS_GROUP_BAN, ip, des, true, false,
+				lifetime, true);
+		}
+		K_WUNLOCK(ips_free);
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+		if (found) {
+			snprintf(tmp, sizeof(tmp), "already %s %d->%d",
+				 ip, oldlife, lifetime);
+		} else
+			snprintf(tmp, sizeof(tmp), "ban %s %d", ip, lifetime);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else if (strcasecmp(action, "unban") == 0) {
+		/* Unban the ip - sets lifetime to 1 meaning
+		 *  it expires 1s after it was created */
+		bool found = false;
+		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
+		if (!i_ip)
+			return strdup(reply);
+		ip = transfer_data(i_ip);
+		K_WLOCK(ips_free);
+		i_item = find_ips(IPS_GROUP_BAN, ip);
+		if (i_item) {
+			found = true;
+			DATA_IPS(ips, i_item);
+			ips->lifetime = 1;
+		}
+		K_WUNLOCK(ips_free);
+		APPEND_REALLOC_INIT(buf, off, len);
+		if (found) {
+			APPEND_REALLOC(buf, off, len, "ok.");
+			APPEND_REALLOC(buf, off, len, ip);
+			APPEND_REALLOC(buf, off, len, " unbanned");
+		} else
+			APPEND_REALLOC(buf, off, len, "ERR.unknown ip");
+	} else {
+		snprintf(reply, siz, "unknown action '%s'", action);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+
+	return buf;
+}
+
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -7594,5 +7877,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_BTCSET,	"btcset",	false,	false,	cmd_btcset,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_QUERY,	"query",	false,	false,	cmd_query,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_LOCKS,	"locks",	false,	false,	cmd_locks,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_EVENTS,	"events",	false,	false,	cmd_events,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

@@ -4507,14 +4507,21 @@ int check_events(EVENTS *events)
 	K_ITEM *i_item, *e_item = NULL, *tmp_item, *u_item;
 	K_TREE_CTX ctx[1];
 	EVENTS *e = NULL;
+	char cmd[MAX_ALERT_CMD+1];
 	int count, secs;
 	int tyme, limit, lifetime;
 	char name[TXT_SML+1];
 	pid_t pid;
 	tv_t now;
 
+	K_RLOCK(event_limits_free);
+	if (ckdb_alert_cmd)
+		STRNCPY(cmd, ckdb_alert_cmd);
+	else
+		cmd[0] = '\0';
+	K_RUNLOCK(event_limits_free);
 	// No way to send an alert, so don't test
-	if (!ckdb_alert_cmd)
+	if (!cmd[0])
 		return EVENT_OK;
 
 	K_RLOCK(ips_free);
@@ -4757,7 +4764,7 @@ int check_events(EVENTS *events)
 			cause_str(cause));
 		FREENULL(st);
 		ips_add(IPS_GROUP_BAN, events->createinet,
-			(char *)cause_str(cause), true, false, lifetime);
+			(char *)cause_str(cause), true, false, lifetime, false);
 		pid = fork();
 		if (pid < 0) {
 			LOGERR("%s() ALERT failed to fork (%d)",
@@ -4770,9 +4777,9 @@ int check_events(EVENTS *events)
 				snprintf(buf3, sizeof(buf3), "%d", tyme);
 				snprintf(buf4, sizeof(buf4), "%d", lifetime);
 				st = safe_text_nonull(events->createby);
-				execl(ckdb_alert_cmd, ckdb_alert_cmd, buf1, name,
-					buf2, buf3, buf4, events->createinet,
-					st, cause_str(cause), NULL);
+				execl(cmd, cmd, buf1, name, buf2, buf3, buf4,
+					events->createinet, st,
+					cause_str(cause), NULL);
 				LOGERR("%s() ALERT fork failed to execute (%d)",
 					__func__, errno);
 				FREENULL(st);

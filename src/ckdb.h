@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.950"
+#define CKDB_VERSION DB_VERSION"-1.951"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -353,6 +353,9 @@ extern cklock_t last_lock;
 #define STR_SHAREERRORS "shareerror"
 #define STR_AGEWORKINFO "ageworkinfo"
 
+// Fixed size required - increase if you need larger
+#define MAX_ALERT_CMD 255
+// Access using event_limits_free lock
 extern char *ckdb_alert_cmd;
 
 extern char *btc_server;
@@ -676,6 +679,7 @@ enum cmd_values {
 	CMD_BTCSET,
 	CMD_QUERY,
 	CMD_LOCKS,
+	CMD_EVENTS,
 	CMD_END
 };
 
@@ -2981,7 +2985,8 @@ extern bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item,
 extern K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now,
 				bool lock);
 extern bool payouts_fill(PGconn *conn);
-extern void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life);
+extern void ips_add(char *group, char *ip, char *des, bool log, bool cclass,
+			int life, bool locked);
 extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
 #define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
 extern bool auths_add(PGconn *conn, char *poolinstance, char *username,

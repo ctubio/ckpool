@@ -6253,7 +6253,8 @@ bool payouts_fill(PGconn *conn)
 	return ok;
 }
 
-void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life)
+void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life,
+		bool locked)
 {
 	K_ITEM *i_item, *i2_item;
 	IPS *ips, *ips2;
@@ -6262,7 +6263,8 @@ void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life)
 	bool ok;
 
 	setnow(&now);
-	K_WLOCK(ips_free);
+	if (!locked)
+		K_WLOCK(ips_free);
 	i_item = k_unlink_head(ips_free);
 	DATA_IPS(ips, i_item);
 	STRNCPY(ips->group, group);
@@ -6304,7 +6306,8 @@ void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life)
 		} else
 			k_add_head(ips_free, i2_item);
 	}
-	K_WUNLOCK(ips_free);
+	if (!locked)
+		K_WUNLOCK(ips_free);
 }
 
 // trf_root overrides by,inet,cd fields
