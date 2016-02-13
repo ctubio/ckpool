@@ -2514,10 +2514,31 @@ void oc_event_limits(OPTIONCONTROL *oc, const char *from)
 	}
 }
 
+/* IPS for IPS_GROUP_OK/BAN look like:
+ *	optionname: (OC_IPS_OK or OC_IPS_BAN) + description
+ *	optionvalue: is the IP address
+ * If you want to add the cclass subnet of an IP then add it separately
+ * 127.0.0.1 is hard coded OK in ckdb.c */
+void oc_ips(OPTIONCONTROL *oc, const char *from)
+{
+	if (strncmp(oc->optionname, OC_IPS_OK, strlen(OC_IPS_OK)) == 0) {
+		ips_add(IPS_GROUP_OK, oc->optionvalue, oc->optionname,
+			false, false, 0, false);
+	} else if (strncmp(oc->optionname, OC_IPS_BAN,
+			   strlen(OC_IPS_BAN)) == 0) {
+		ips_add(IPS_GROUP_BAN, oc->optionvalue, oc->optionname,
+			true, false, 0, false);
+	} else {
+		LOGERR("%s(%s): ERR: Unknown %s name '%s'",
+			from, __func__, OC_IPS, oc->optionname);
+	}
+}
+
 OC_TRIGGER oc_trigger[] = {
 	{ SWITCH_STATE_NAME,	true,	oc_switch_state },
 	{ DIFF_PERCENT_NAME,	true,	oc_diff_percent },
 	{ OC_LIMITS,		false,	oc_event_limits },
+	{ OC_IPS,		false,	oc_ips },
 	{ NULL, 0, NULL }
 };
 

@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.951"
+#define CKDB_VERSION DB_VERSION"-1.952"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1981,6 +1981,11 @@ extern K_STORE *ips_store;
 #define IPS_GROUP_OK "OK"
 #define IPS_GROUP_BAD "BAD"
 #define IPS_GROUP_BAN "BAN"
+
+// OptionControl records for IPS_GROUP_OK
+#define OC_IPS "ips_"
+#define OC_IPS_OK OC_IPS "ok_"
+#define OC_IPS_BAN OC_IPS "ban_"
 
 // EVENTS RAM only
 typedef struct events {

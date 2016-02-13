@@ -3070,8 +3070,9 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 		i_item = find_ips(IPS_GROUP_BAN, ip);
 		if (i_item) {
 			DATA_IPS(ips, i_item);
-			// Has the ban expired?
-			if ((int)tvdiff(now, &(ips->createdate)) > ips->lifetime) {
+			// Has the ban expired? 0=eternal
+			if (ips->lifetime > 0 &&
+			    (int)tvdiff(now, &(ips->createdate)) > ips->lifetime) {
 				remove_from_ktree(ips_root, i_item);
 				k_unlink_item(ips_store, i_item);
 				if (ips->description) {

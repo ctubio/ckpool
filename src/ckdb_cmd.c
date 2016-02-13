@@ -7683,7 +7683,9 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else if (strcasecmp(action, "ban") == 0) {
-		// Ban the ip with optional lifetime
+		/* Ban the ip with optional lifetime
+		 * N.B. this doesn't survive a CKDB restart
+		 *	use just cmd_setopts for permanent bans */
 		bool found = false;
 		oldlife = 0;
 		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
@@ -7737,7 +7739,14 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else if (strcasecmp(action, "unban") == 0) {
 		/* Unban the ip - sets lifetime to 1 meaning
-		 *  it expires 1s after it was created */
+		 *  it expires 1 second after it was created
+		 *  so next access will remove the ban and succeed
+		 * N.B. if it was a permanent 'cmd_setopts' ban, the unban
+		 *	won't survive a CKDB restart.
+		 *	You need to BOTH use this AND remove the optioncontrol
+		 *	record from the database to permanently remove a ban
+		 *	(since there's no cmd_expopts ... yet) */
+
 		bool found = false;
 		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
 		if (!i_ip)
