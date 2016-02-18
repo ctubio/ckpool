@@ -600,6 +600,8 @@ void *receiver(void *arg)
 
 	while (42) {
 		client_instance_t *client;
+		uint32_t events;
+		uint64_t edu64;
 
 		while (unlikely(!cdata->accept))
 			cksleep_ms(10);
@@ -612,28 +614,30 @@ void *receiver(void *arg)
 			/* Nothing to service, still very unlikely */
 			continue;
 		}
-		if (event.data.u64 < serverfds) {
-			ret = accept_client(cdata, epfd, event.data.u64);
+		edu64 = event.data.u64;
+		if (edu64 < serverfds) {
+			ret = accept_client(cdata, epfd, edu64);
 			if (unlikely(ret < 0)) {
 				LOGEMERG("FATAL: Failed to accept_client in receiver");
 				break;
 			}
 			continue;
 		}
-		client = ref_client_by_id(cdata, event.data.u64);
+		client = ref_client_by_id(cdata, edu64);
 		if (unlikely(!client)) {
-			LOGNOTICE("Failed to find client by id %"PRId64" in receiver!", event.data.u64);
+			LOGNOTICE("Failed to find client by id %"PRId64" in receiver!", edu64);
 			continue;
 		}
 		if (unlikely(client->invalid))
 			goto noparse;
 		/* We can have both messages and read hang ups so process the
 		 * message first. */
-		if (likely(event.events & EPOLLIN))
+		events = event.events;
+		if (likely(events & EPOLLIN))
 			parse_client_msg(cdata, client);
 		if (unlikely(client->invalid))
 			goto noparse;
-		if (unlikely(event.events & EPOLLERR)) {
+		if (unlikely(events & EPOLLERR)) {
 			socklen_t errlen = sizeof(int);
 			int error = 0;
 
@@ -648,11 +652,11 @@ void *receiver(void *arg)
 					client->id, client->fd, error, strerror(error));
 			}
 			invalidate_client(cdata->pi->ckp, cdata, client);
-		} else if (unlikely(event.events & EPOLLHUP)) {
+		} else if (unlikely(events & EPOLLHUP)) {
 			/* Client connection reset by peer */
 			LOGINFO("Client id %"PRId64" fd %d HUP in epoll", client->id, client->fd);
 			invalidate_client(cdata->pi->ckp, cdata, client);
-		} else if (unlikely(event.events & EPOLLRDHUP)) {
+		} else if (unlikely(events & EPOLLRDHUP)) {
 			/* Client disconnected by peer */
 			LOGINFO("Client id %"PRId64" fd %d RDHUP in epoll", client->id, client->fd);
 			invalidate_client(cdata->pi->ckp, cdata, client);
