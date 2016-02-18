@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.952"
+#define CKDB_VERSION DB_VERSION"-1.953"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2045,6 +2045,53 @@ extern K_LIST *event_limits_free;
 
 #define EVENT_OK -1
 
+// Homepage valid access
+#define OVENTID_HOMEPAGE 0
+// Blocks valid access
+#define OVENTID_BLOCKS 1
+// API valid access
+#define OVENTID_API 2
+// Add/Update single payment address
+#define OVENTID_ONEADDR 3
+// Add/Update multi payment address
+#define OVENTID_MULTIADDR 4
+// Workers valid access
+#define OVENTID_WORKERS 5
+// Other valid access
+#define OVENTID_OTHER 6
+#define OVENTID_NONE 7
+
+// OVENTS RAM only (OK EVENTS)
+typedef struct ovents {
+	// user, ip or ipc
+	char key[TXT_SML+1];
+	// One record per hour time/3600
+	int hour;
+	// per id per minute
+	int count[OVENTID_NONE * 60];
+	HISTORYDATECONTROLFIELDS;
+} OVENTS;
+
+#define ALLOC_OVENTS 1000
+#define LIMIT_OVENTS 0
+#define INIT_OVENTS(_item) INIT_GENERIC(_item, ovents)
+#define DATA_OVENTS(_var, _item) DATA_GENERIC(_var, _item, ovents, true)
+#define DATA_OVENTS_NULL(_var, _item) DATA_GENERIC(_var, _item, ovents, false)
+
+extern K_TREE *ovents_root;
+extern K_LIST *ovents_free;
+extern K_STORE *ovents_store;
+
+#define SEC_TO_HOUR(_s) ((int)((_s) / 3600))
+#define TV_TO_HOUR(_tv) SEC_TO_HOUR((_tv)->tv_sec)
+#define SEC_TO_MIN(_s) ((int)(((_s) % 3600) / 60))
+#define TV_TO_MIN(_tv) SEC_TO_MIN((_tv)->tv_sec)
+#define IDMIN(_id, _min) ((_id) * 60 + (_min))
+
+#define OC_OLIMITS "ovent_limits_"
+
+#define OVENT_OK EVENT_OK
+
 /* user limits are checked for matching id+user
  * ip limits are checked for matching id+ip,
  *  however, it requires more than one user found with the given ip
@@ -2072,6 +2119,13 @@ typedef struct event_limits {
 extern EVENT_LIMITS e_limits[];
 // Has a fixed limit of 1 event allowed
 extern int event_limits_hash_lifetime;
+
+// o_limits uses the event_limits_free lock (since it must)
+extern EVENT_LIMITS o_limits[];
+// multiply IP limit by this to get IPC limit
+extern double ovent_limits_ipc_factor;
+// maximum lifetime of all o_limits - set by code
+extern int o_limits_max_lifetime;
 
 // AUTHS authorise.id.json={...}
 typedef struct auths {
@@ -2782,6 +2836,10 @@ extern int check_events(EVENTS *events);
 extern char *_reply_event(int event, char *buf, bool fre);
 #define reply_event(_event, _buf) _reply_event(_event, _buf, false)
 #define reply_event_free(_event, _buf) _reply_event(_event, _buf, true)
+extern cmp_t cmp_ovents(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_ovents(char *key, int hour, K_TREE_CTX *ctx);
+extern K_ITEM *last_ovents(char *key, K_TREE_CTX *ctx);
+extern int check_ovents(int id, char *u_key, char *i_key, char *c_key, tv_t *now);
 extern cmp_t cmp_auths(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_poolstats(K_ITEM *a, K_ITEM *b);
 extern void dsp_userstats(K_ITEM *item, FILE *stream);

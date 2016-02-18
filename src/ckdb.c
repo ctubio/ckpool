@@ -495,38 +495,70 @@ K_STORE *events_store;
 // Emulate a list for lock checking
 K_LIST *event_limits_free;
 
+// OVENTS (OK EVENTS)
+K_TREE *ovents_root;
+K_LIST *ovents_free;
+K_STORE *ovents_store;
+
 /* N.B. these limits are not production quality
  *  They'll block anyone who makes a mistake 2 or 3 times :)
  * Use optioncontrol OC_LIMITS to set/store them in the database */
 EVENT_LIMITS e_limits[] = {
- {	EVENTID_PASSFAIL, "PASSFAIL",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_PASSFAIL,	"PASSFAIL",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an address account once, so user_lo/hi can never trigger
- {	EVENTID_CREADDR, "CREADDR",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_CREADDR,	"CREADDR",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an account once, so user_lo/hi can never trigger
- {	EVENTID_CREACC, "CREACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_CREACC,	"CREACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // page_api.php with an invalid username
- {	EVENTID_UNKATTS, "UNKATTS",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_UNKATTS,	"UNKATTS",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // 2fa missing/invalid format
- {	EVENTID_INV2FA, "INV2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INV2FA,	"INV2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Wrong 2fa value
- {	EVENTID_WRONG2FA, "WRONG2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_WRONG2FA,	"WRONG2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid address according to btcd
- {	EVENTID_INVBTC, "INVBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INVBTC,	"INVBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Incorrect format/length address
- {	EVENTID_INCBTC, "INCBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INCBTC,	"INCBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Address belongs to some other account
- {	EVENTID_BTCUSED, "BTCUSED",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_BTCUSED,	"BTCUSED",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an account once, so user_lo/hi can never trigger
- {	EVENTID_AUTOACC, "AUTOACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_AUTOACC,	"AUTOACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid user on auth, CKPool will throttle these
- {	EVENTID_INVAUTH, "INVAUTH",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INVAUTH,	"INVAUTH",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid user on chkpass
- {	EVENTID_INVUSER, "INVUSER",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INVUSER,	"INVUSER",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Terminated by NULL name
  { -1, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 // All access to above and below limits requires the event_limits_free lock
 int event_limits_hash_lifetime = 24*60*60;
+
+/* N.B. these limits are not production quality
+ *  They'll block anyone who does anything more than once a minute
+ * Use optioncontrol OC_OLIMITS to set/store them in the database */
+EVENT_LIMITS o_limits[] = {
+// Homepage valid access - most web access includes Homepage - so this isn't actually counted
+{ OVENTID_HOMEPAGE,	"HOMEPAGE",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+// Blocks valid access
+{ OVENTID_BLOCKS,	"BLOCKS",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+// API valid access
+{ OVENTID_API,		"API",		60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+// Add/Update single payment address
+{ OVENTID_ONEADDR,	"ONEADDR",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+// Add/Update multi payment address
+{ OVENTID_MULTIADDR,	"MULTIADDR",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+// Workers valid access
+{ OVENTID_WORKERS,	"WORKERS",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+// Other valid access
+{ OVENTID_OTHER,	"OTHER",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+ // Terminated by NULL name
+ { -1, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
+
+// mulitply IP limit by this to get IPC limit
+double ovent_limits_ipc_factor = 2.0;
+// maximum lifetime of all o_limits - set by code
+int o_limits_max_lifetime = -1;
 
 // AUTHS authorise.id.json={...}
 K_TREE *auths_root;
@@ -1226,6 +1258,11 @@ static void alloc_storage()
 	events_ipc_root = new_ktree(NULL, cmp_events_ipc, events_free);
 	events_hash_root = new_ktree(NULL, cmp_events_hash, events_free);
 
+	ovents_free = k_new_list("OKEvents", sizeof(OVENTS),
+					ALLOC_OVENTS, LIMIT_OVENTS, true);
+	ovents_store = k_new_store(ovents_free);
+	ovents_root = new_ktree(NULL, cmp_ovents, ovents_free);
+
 	auths_free = k_new_list("Auths", sizeof(AUTHS),
 					ALLOC_AUTHS, LIMIT_AUTHS, true);
 	auths_store = k_new_store(auths_free);
@@ -1308,12 +1345,13 @@ static void alloc_storage()
 	DLPRIO(userinfo, 50);
 
 	// Uses event_limits
-	DLPRIO(optioncontrol, 48);
+	DLPRIO(optioncontrol, 49);
 
 	// Needs to check users and ips and uses events_limits
-	DLPRIO(events, 47);
+	DLPRIO(events, 48);
+	DLPRIO(ovents, 47);
 
-	// events_limits 46 (events-1) above users
+	// events_limits 46 (events-2) above users
 
 	DLPRIO(auths, 44);
 	DLPRIO(users, 43);
@@ -1526,7 +1564,10 @@ static void dealloc_storage()
 	FREE_ALL(poolstats);
 	FREE_TREE(events_user);
 	FREE_TREE(events_ip);
+	FREE_TREE(events_ipc);
+	FREE_TREE(events_hash);
 	FREE_LISTS(events);
+	FREE_ALL(ovents);
 	FREE_ALL(ips);
 	FREE_ALL(auths);
 
@@ -6068,8 +6109,16 @@ int main(int argc, char **argv)
 #if LOCK_CHECK
 	DLPRIO(process_pplns, 99);
 	DLPRIO(workers_db, 98);
-	DLPRIO(event_limits, 46); // events-1
+	DLPRIO(event_limits, 46); // events-2
 #endif
+
+	// set initial value
+	o_limits_max_lifetime = -1;
+	i = -1;
+	while (o_limits[++i].name) {
+		if (o_limits_max_lifetime < o_limits[i].lifetime)
+			o_limits_max_lifetime = o_limits[i].lifetime;
+	}
 
 	if (confirm_sharesummary) {
 		// TODO: add a system lock to stop running 2 at once?
