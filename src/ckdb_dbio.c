@@ -2457,7 +2457,7 @@ void oc_diff_percent(OPTIONCONTROL *oc, __maybe_unused const char *from)
  * Item is one of the field names in event_limits
  * 	e.g. user_low_time, user_low_time_limit etc
  * 		as below in the if tests
- *	lifetime values can't = -EVENT_OK */
+ *	lifetime values can't = EVENT_OK */
 void oc_event_limits(OPTIONCONTROL *oc, const char *from)
 {
 	bool processed = false;
@@ -2491,12 +2491,12 @@ void oc_event_limits(OPTIONCONTROL *oc, const char *from)
 			} else if (strcmp(ptr2, "ip_hi_time_limit") == 0) {
 				e_limits[i].ip_hi_time_limit = val;
 			} else if (strcmp(ptr2, "lifetime") == 0) {
-				if (val != -(EVENT_OK))
+				if (val != EVENT_OK)
 					e_limits[i].lifetime = val;
 				else {
 					LOGERR("%s(%s): ERR: lifetime can't be"
 						" %d in '%s'",
-						from, __func__, -(EVENT_OK),
+						from, __func__, EVENT_OK,
 						oc->optionname);
 				}
 			} else {
@@ -2511,12 +2511,12 @@ void oc_event_limits(OPTIONCONTROL *oc, const char *from)
 	}
 	if (!processed) {
 		if (strcmp(ptr, "hash_lifetime") == 0) {
-			if (val != -(EVENT_OK))
+			if (val != EVENT_OK)
 				event_limits_hash_lifetime = val;
 			else {
 				LOGERR("%s(%s): ERR: lifetime can't be"
 					" %d in '%s'",
-					from, __func__, -(EVENT_OK),
+					from, __func__, EVENT_OK,
 					oc->optionname);
 			}
 			processed = true;
@@ -2610,18 +2610,36 @@ void oc_ovent_limits(OPTIONCONTROL *oc, const char *from)
 
 /* IPS for IPS_GROUP_OK/BAN look like:
  *	optionname: (OC_IPS_OK or OC_IPS_BAN) + description
- *	optionvalue: is the IP address
+ *	optionvalue: is the IP address:EVENTNAME
  * If you want to add the cclass subnet of an IP then add it separately
  * 127.0.0.1 is hard coded OK in ckdb.c */
 void oc_ips(OPTIONCONTROL *oc, const char *from)
 {
+	char *colon;
+	IPS ips;
+	bool e;
+
+	colon = strchr(oc->optionvalue, ':');
+	if (!colon) {
+		LOGERR("%s(%s): ERR: Missing ':' after IP '%s' name '%s'",
+			from, __func__, oc->optionvalue, oc->optionname);
+	}
+	STRNCPY(ips.eventname, colon+1);
+
+	STRNCPY(ips.ip, oc->optionvalue);
+	colon = strchr(ips.ip, ':');
+	if (colon)
+		*colon = '\0';
+	
 	if (strncmp(oc->optionname, OC_IPS_OK, strlen(OC_IPS_OK)) == 0) {
-		ips_add(IPS_GROUP_OK, oc->optionvalue, oc->optionname,
-			false, false, 0, false);
+		e = is_elimitname(ips.eventname, true);
+		ips_add(IPS_GROUP_OK, ips.ip, ips.eventname, e,
+			oc->optionname, false, false, 0, false);
 	} else if (strncmp(oc->optionname, OC_IPS_BAN,
 			   strlen(OC_IPS_BAN)) == 0) {
-		ips_add(IPS_GROUP_BAN, oc->optionvalue, oc->optionname,
-			true, false, 0, false);
+		e = is_elimitname(ips.eventname, true);
+		ips_add(IPS_GROUP_BAN, ips.ip, ips.eventname, e,
+			oc->optionname, false, false, 0, false);
 	} else {
 		LOGERR("%s(%s): ERR: Unknown %s name '%s'",
 			from, __func__, OC_IPS, oc->optionname);
@@ -6642,14 +6660,28 @@ int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 	return check_ovents(id, u_key, i_key, c_key, &(ovents.createdate));
 }
 
-void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life,
-		bool locked)
+void ips_add(char *group, char *ip, char *eventname, bool is_event, char *des,
+		bool log, bool cclass, int life, bool locked)
 {
 	K_ITEM *i_item, *i2_item;
 	IPS *ips, *ips2;
 	char *dot;
 	tv_t now;
 	bool ok;
+
+	if (is_event) {
+		if (!is_elimitname(eventname, true)) {
+			LOGERR("%s() invalid Event name '%s' - ignored",
+				__func__, eventname);
+			return;
+		}
+	} else {
+		if (!is_olimitname(eventname, true)) {
+			LOGERR("%s() invalid Ovent name '%s' - ignored",
+				__func__, eventname);
+			return;
+		}
+	}
 
 	setnow(&now);
 	if (!locked)
@@ -6658,7 +6690,8 @@ void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life,
 	DATA_IPS(ips, i_item);
 	STRNCPY(ips->group, group);
 	STRNCPY(ips->ip, ip);
-	ips->lifetime = life;
+	STRNCPY(ips->eventname, eventname);
+	ips->is_event = is_event;
 	if (des) {
 		ips->description = strdup(des);
 		if (!ips->description)
@@ -6666,6 +6699,7 @@ void ips_add(char *group, char *ip, char *des, bool log, bool cclass, int life,
 		LIST_MEM_ADD(ips_free, ips->description);
 	}
 	ips->log = log;
+	ips->lifetime = life;
 	HISTORYDATEDEFAULT(ips, &now);
 	add_to_ktree(ips_root, i_item);
 	k_add_head(ips_store, i_item);

@@ -1248,7 +1248,13 @@ static void alloc_storage()
 	ips_free = k_new_list("IPs", sizeof(IPS), ALLOC_IPS, LIMIT_IPS, true);
 	ips_store = k_new_store(ips_free);
 	ips_root = new_ktree(NULL, cmp_ips, ips_free);
-	ips_add(IPS_GROUP_OK, "127.0.0.1", "local", false, true, 0, false);
+	// Always default to allow localhost
+	K_WLOCK(ips_free);
+	ips_add(IPS_GROUP_OK, "127.0.0.1", EVENTNAME_ALL, true, "localhost",
+		false, true, 0, true);
+	ips_add(IPS_GROUP_OK, "127.0.0.1", OVENTNAME_ALL, false, "localhost",
+		false, true, 0, true);
+	K_WUNLOCK(ips_free);
 
 	events_free = k_new_list("Events", sizeof(EVENTS),
 					ALLOC_EVENTS, LIMIT_EVENTS, true);
@@ -2785,8 +2791,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	TRANSFER *transfer;
 	K_TREE_CTX ctx[1];
 	MSGLINE *msgline;
-	K_ITEM *t_item = NULL, *cd_item = NULL, *seqall, *i_item;
-	IPS *ips;
+	K_ITEM *t_item = NULL, *cd_item = NULL, *seqall;
 	char *cmdptr, *idptr, *next, *eq, *end, *was;
 	char *data = NULL, *st = NULL, *st2 = NULL, *ip = NULL;
 	bool noid = false;
@@ -3106,27 +3111,12 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	free(cmdptr);
 
 	if (!seqall && ip) {
-		bool alert = false;
+		bool alert, is_event;
 		K_WLOCK(ips_free);
-		i_item = find_ips(IPS_GROUP_BAN, ip);
-		if (i_item) {
-			DATA_IPS(ips, i_item);
-			// Has the ban expired? 0=eternal
-			if (ips->lifetime > 0 &&
-			    (int)tvdiff(now, &(ips->createdate)) > ips->lifetime) {
-				remove_from_ktree(ips_root, i_item);
-				k_unlink_item(ips_store, i_item);
-				if (ips->description) {
-					LIST_MEM_SUB(ips_free, ips->description);
-					FREENULL(ips->description);
-				}
-				k_add_head(ips_free, i_item);
-			} else
-				alert = true;
-		}
+		alert = banned_ips(ip, now, &is_event);
 		K_WUNLOCK(ips_free);
 		if (alert)
-			return CMD_ALERT;
+			return is_event ? CMD_ALERTEVENT : CMD_ALERTOVENT;
 	}
 
 	return ckdb_cmds[msgline->which_cmds].cmd_val;
@@ -4322,12 +4312,16 @@ static void *socketer(__maybe_unused void *arg)
 						 now.tv_sec);
 					send_unix_msg(sockd, reply);
 					break;
-				case CMD_ALERT:
+				case CMD_ALERTEVENT:
+				case CMD_ALERTOVENT:
 					snprintf(reply, sizeof(reply),
 						 "%s.%ld.failed.ERR",
 						 msgline->id,
 						 now.tv_sec);
-					tmp = reply_event(EVENTID_NONE, reply);
+					if (cmdnum == CMD_ALERTEVENT)
+						tmp = reply_event(EVENTID_NONE, reply);
+					else
+						tmp = reply_ovent(OVENTID_NONE, reply);
 					send_unix_msg(sockd, tmp);
 					FREENULL(tmp);
 					break;
@@ -4654,7 +4648,8 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 		switch (cmdnum) {
 			// Ignore
 			case CMD_REPLY:
-			case CMD_ALERT:
+			case CMD_ALERTEVENT:
+			case CMD_ALERTOVENT:
 				break;
 			// Shouldn't be there
 			case CMD_TERMINATE:

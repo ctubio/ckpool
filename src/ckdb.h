@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.953"
+#define CKDB_VERSION DB_VERSION"-1.954"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -632,7 +632,8 @@ enum cmd_values {
 	CMD_UNSET,
 	CMD_DUPSEQ, // Ignore, we've already got it
 	CMD_REPLY, // Means something was wrong - send back reply
-	CMD_ALERT, // Means reply with the buf passed
+	CMD_ALERTEVENT, // Means reply with the buf passed
+	CMD_ALERTOVENT, // Means reply with the buf passed
 	CMD_TERMINATE,
 	CMD_PING,
 	CMD_VERSION,
@@ -1962,6 +1963,8 @@ extern K_LIST *process_pplns_free;
 typedef struct ips {
 	char group[TXT_SML+1];
 	char ip[TXT_MED+1];
+	char eventname[TXT_SML+1];
+	bool is_event;
 	int lifetime;
 	bool log;
 	char *description;
@@ -1977,6 +1980,13 @@ typedef struct ips {
 extern K_TREE *ips_root;
 extern K_LIST *ips_free;
 extern K_STORE *ips_store;
+
+// Only used by OK
+#define EVENTNAME_ALL "*E"
+#define OVENTNAME_ALL "*O"
+
+// All eventnames will be less than this
+#define EVENTNAME_MAX "~"
 
 #define IPS_GROUP_OK "OK"
 #define IPS_GROUP_BAD "BAD"
@@ -2823,7 +2833,15 @@ extern K_ITEM *find_payouts_wid(int64_t workinfoidend, K_TREE_CTX *ctx);
 extern double payout_stats(PAYOUTS *payouts, char *statname);
 extern bool process_pplns(int32_t height, char *blockhash, tv_t *now);
 extern cmp_t cmp_ips(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_ips(char *group, char *ip);
+extern bool _is_limitname(bool is_event, char *eventname, bool allow_all);
+#define is_elimitname(_name, _all) _is_limitname(true, _name, _all)
+#define is_olimitname(_name, _all) _is_limitname(false, _name, _all)
+extern K_ITEM *find_ips(char *group, char *ip, char *eventname, K_TREE_CTX *ctx);
+extern K_ITEM *last_ips(char *group, char *ip, K_TREE_CTX *ctx);
+extern bool _ok_ips(bool is_event, char *ip, char *eventname, tv_t *now);
+#define ok_ips_event(_ip, _name, _now) _ok_ips(true, _ip, _name, _now)
+#define ok_ips_ovent(_ip, _name, _now) _ok_ips(false, _ip, _name, _now)
+extern bool banned_ips(char *ip, tv_t *now, bool *is_event);
 extern cmp_t cmp_events_user(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_events_ip(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_events_ipc(K_ITEM *a, K_ITEM *b);
@@ -2833,9 +2851,11 @@ extern K_ITEM *last_events_ip(int id, char *ip, K_TREE_CTX *ctx);
 extern K_ITEM *last_events_ipc(int id, char *ipc, K_TREE_CTX *ctx);
 extern K_ITEM *last_events_hash(int id, char *hash, K_TREE_CTX *ctx);
 extern int check_events(EVENTS *events);
-extern char *_reply_event(int event, char *buf, bool fre);
-#define reply_event(_event, _buf) _reply_event(_event, _buf, false)
-#define reply_event_free(_event, _buf) _reply_event(_event, _buf, true)
+extern char *_reply_event(bool is_event, int event, char *buf, bool fre);
+#define reply_event(_event, _buf) _reply_event(true, _event, _buf, false)
+#define reply_event_free(_event, _buf) _reply_event(true, _event, _buf, true)
+#define reply_ovent(_event, _buf) _reply_event(false, _event, _buf, false)
+#define reply_ovent_free(_event, _buf) _reply_event(false, _event, _buf, true)
 extern cmp_t cmp_ovents(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_ovents(char *key, int hour, K_TREE_CTX *ctx);
 extern K_ITEM *last_ovents(char *key, K_TREE_CTX *ctx);
@@ -3048,8 +3068,8 @@ extern bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item,
 extern K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now,
 				bool lock);
 extern bool payouts_fill(PGconn *conn);
-extern void ips_add(char *group, char *ip, char *des, bool log, bool cclass,
-			int life, bool locked);
+extern void ips_add(char *group, char *ip, char *eventname, bool is_event,
+		    char *des, bool log, bool cclass, int life, bool locked);
 extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
 #define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
 extern bool auths_add(PGconn *conn, char *poolinstance, char *username,

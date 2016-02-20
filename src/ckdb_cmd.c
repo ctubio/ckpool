@@ -7537,10 +7537,11 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 			__maybe_unused char *code, __maybe_unused char *inet,
 			__maybe_unused tv_t *cd, K_TREE *trf_root)
 {
-	K_ITEM *i_action, *i_cmd, *i_list, *i_ip, *i_lifetime, *i_des, *i_item;
+	K_ITEM *i_action, *i_cmd, *i_list, *i_ip, *i_eventname, *i_lifetime;
+	K_ITEM *i_des, *i_item;
 	K_TREE_CTX ctx[1];
 	IPS *ips;
-	char *action, *alert_cmd, *list, *ip, *des;
+	char *action, *alert_cmd, *list, *ip, *eventname, *des;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	char tmp[1024] = "";
@@ -7683,7 +7684,7 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else if (strcasecmp(action, "ban") == 0) {
-		/* Ban the ip with optional lifetime
+		/* Ban the ip with optional eventname and lifetime
 		 * N.B. this doesn't survive a CKDB restart
 		 *	use just cmd_setopts for permanent bans */
 		bool found = false;
@@ -7692,6 +7693,14 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		if (!i_ip)
 			return strdup(reply);
 		ip = transfer_data(i_ip);
+		i_eventname = optional_name(trf_root, "eventname", 1, NULL, reply, siz);
+		if (i_eventname)
+			eventname = transfer_data(i_eventname);
+		else {
+			if (*reply)
+				return strdup(reply);
+			eventname = EVENTNAME_ALL;
+		}
 		i_lifetime = optional_name(trf_root, "lifetime", 1,
 					   (char *)intpatt, reply, siz);
 		if (i_lifetime)
@@ -7711,10 +7720,10 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 			des = NULL;
 		}
 		K_WLOCK(ips_free);
-		i_item = find_ips(IPS_GROUP_BAN, ip);
+		i_item = find_ips(IPS_GROUP_BAN, ip, eventname, NULL);
 		if (i_item) {
-			found = true;
 			DATA_IPS(ips, i_item);
+			found = true;
 			oldlife = ips->lifetime;
 			ips->lifetime = lifetime;
 			// Don't change it if it's not supplied
@@ -7725,20 +7734,23 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 				LIST_MEM_ADD(ips_free, ips->description);
 			}
 		} else {
-			ips_add(IPS_GROUP_BAN, ip, des, true, false,
-				lifetime, true);
+			ips_add(IPS_GROUP_BAN, ip, eventname,
+				is_elimitname(eventname, true), des, true,
+				false, lifetime, true);
 		}
 		K_WUNLOCK(ips_free);
 		APPEND_REALLOC_INIT(buf, off, len);
 		APPEND_REALLOC(buf, off, len, "ok.");
 		if (found) {
-			snprintf(tmp, sizeof(tmp), "already %s %d->%d",
-				 ip, oldlife, lifetime);
-		} else
-			snprintf(tmp, sizeof(tmp), "ban %s %d", ip, lifetime);
+			snprintf(tmp, sizeof(tmp), "already %s/%s %d->%d",
+				 ip, eventname, oldlife, lifetime);
+		} else {
+			snprintf(tmp, sizeof(tmp), "ban %s/%s %d",
+				 ip, eventname, lifetime);
+		}
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else if (strcasecmp(action, "unban") == 0) {
-		/* Unban the ip - sets lifetime to 1 meaning
+		/* Unban the ip+eventname - sets lifetime to 1 meaning
 		 *  it expires 1 second after it was created
 		 *  so next access will remove the ban and succeed
 		 * N.B. if it was a permanent 'cmd_setopts' ban, the unban
@@ -7752,8 +7764,12 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		if (!i_ip)
 			return strdup(reply);
 		ip = transfer_data(i_ip);
+		i_eventname = require_name(trf_root, "eventname", 1, NULL, reply, siz);
+		if (!i_eventname)
+			return strdup(reply);
+		eventname = transfer_data(i_eventname);
 		K_WLOCK(ips_free);
-		i_item = find_ips(IPS_GROUP_BAN, ip);
+		i_item = find_ips(IPS_GROUP_BAN, ip, eventname, NULL);
 		if (i_item) {
 			found = true;
 			DATA_IPS(ips, i_item);
@@ -7764,9 +7780,13 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		if (found) {
 			APPEND_REALLOC(buf, off, len, "ok.");
 			APPEND_REALLOC(buf, off, len, ip);
+			APPEND_REALLOC(buf, off, len, "/");
+			APPEND_REALLOC(buf, off, len, eventname);
 			APPEND_REALLOC(buf, off, len, " unbanned");
-		} else
-			APPEND_REALLOC(buf, off, len, "ERR.unknown ip");
+		} else {
+			APPEND_REALLOC(buf, off, len,
+					"ERR.unknown ip+eventname");
+		}
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
 		LOGERR("%s() %s.%s", __func__, id, reply);
