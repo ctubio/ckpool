@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.954"
+#define CKDB_VERSION DB_VERSION"-1.955"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -65,10 +65,14 @@
 
 // So they can fit into a 1 byte flag field
 #define TRUE_STR "Y"
+#define TRUE2_STR "T"
 #define FALSE_STR "N"
+#define FALSE2_STR "F"
 
 #define TRUE_CHR 'Y'
+#define TRUE2_CHR 'T'
 #define FALSE_CHR 'N'
+#define FALSE2_CHR 'F'
 
 /* Set by cmd_setopts() and used by whatever code needs it
  * It's loaded during startup but set to SWITCH_STATE_ALL if it's missing,
@@ -2110,6 +2114,8 @@ typedef struct event_limits {
 	int id;
 	// optioncontrol/display name
 	char *name;
+	// enable/disable event/ovent generation
+	bool enabled;
 	int user_low_time;
 	// how many in above limit = ok (+1 = alert)
 	int user_low_time_limit;

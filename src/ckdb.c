@@ -504,31 +504,31 @@ K_STORE *ovents_store;
  *  They'll block anyone who makes a mistake 2 or 3 times :)
  * Use optioncontrol OC_LIMITS to set/store them in the database */
 EVENT_LIMITS e_limits[] = {
- { EVENTID_PASSFAIL,	"PASSFAIL",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_PASSFAIL,	"PASSFAIL",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an address account once, so user_lo/hi can never trigger
- { EVENTID_CREADDR,	"CREADDR",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_CREADDR,	"CREADDR",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an account once, so user_lo/hi can never trigger
- { EVENTID_CREACC,	"CREACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_CREACC,	"CREACC",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // page_api.php with an invalid username
- { EVENTID_UNKATTS,	"UNKATTS",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_UNKATTS,	"UNKATTS",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // 2fa missing/invalid format
- { EVENTID_INV2FA,	"INV2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INV2FA,	"INV2FA",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Wrong 2fa value
- { EVENTID_WRONG2FA,	"WRONG2FA",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_WRONG2FA,	"WRONG2FA",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid address according to btcd
- { EVENTID_INVBTC,	"INVBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INVBTC,	"INVBTC",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Incorrect format/length address
- { EVENTID_INCBTC,	"INCBTC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INCBTC,	"INCBTC",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Address belongs to some other account
- { EVENTID_BTCUSED,	"BTCUSED",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_BTCUSED,	"BTCUSED",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // It's only possible to create an account once, so user_lo/hi can never trigger
- { EVENTID_AUTOACC,	"AUTOACC",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_AUTOACC,	"AUTOACC",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid user on auth, CKPool will throttle these
- { EVENTID_INVAUTH,	"INVAUTH",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INVAUTH,	"INVAUTH",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Invalid user on chkpass
- { EVENTID_INVUSER,	"INVUSER",	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
+ { EVENTID_INVUSER,	"INVUSER",	true,	60,	1,	2*60,	2,	60,	1,	2*60,	2,	24*60*60 },
  // Terminated by NULL name
- { -1, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+ { -1, NULL, false, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 // All access to above and below limits requires the event_limits_free lock
 int event_limits_hash_lifetime = 24*60*60;
@@ -538,21 +538,21 @@ int event_limits_hash_lifetime = 24*60*60;
  * Use optioncontrol OC_OLIMITS to set/store them in the database */
 EVENT_LIMITS o_limits[] = {
 // Homepage valid access - most web access includes Homepage - so this isn't actually counted
-{ OVENTID_HOMEPAGE,	"HOMEPAGE",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_HOMEPAGE,	"HOMEPAGE",	false,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
 // Blocks valid access
-{ OVENTID_BLOCKS,	"BLOCKS",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_BLOCKS,	"BLOCKS",	true,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
 // API valid access
-{ OVENTID_API,		"API",		60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_API,		"API",		true,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
 // Add/Update single payment address
-{ OVENTID_ONEADDR,	"ONEADDR",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_ONEADDR,	"ONEADDR",	true,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
 // Add/Update multi payment address
-{ OVENTID_MULTIADDR,	"MULTIADDR",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_MULTIADDR,	"MULTIADDR",	true,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
 // Workers valid access
-{ OVENTID_WORKERS,	"WORKERS",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_WORKERS,	"WORKERS",	true,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
 // Other valid access
-{ OVENTID_OTHER,	"OTHER",	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
+{ OVENTID_OTHER,	"OTHER",	true,	60,	1,	10*60,	10,	60,	1,	10*60,	10,	24*60*60 },
  // Terminated by NULL name
- { -1, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+ { -1, NULL, false, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
 // mulitply IP limit by this to get IPC limit

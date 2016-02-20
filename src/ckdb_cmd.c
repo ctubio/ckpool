@@ -7582,6 +7582,11 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RLOCK(event_limits_free);
 		i = -1;
 		while (e_limits[++i].name) {
+			snprintf(tmp, sizeof(tmp), "%s_enabled=%c%c",
+				 e_limits[i].name,
+				 e_limits[i].enabled ? TRUE_CHR : FALSE_CHR,
+				 FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
 
 #define EVENTFLD(_fld) do { \
 		snprintf(tmp, sizeof(tmp), "%s_" #_fld "=%d%c", \
@@ -7599,8 +7604,35 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 			EVENTFLD(ip_hi_time_limit);
 			EVENTFLD(lifetime);
 		}
-		snprintf(tmp, sizeof(tmp), "event_limits_hash_lifetime=%d",
-			 event_limits_hash_lifetime);
+		snprintf(tmp, sizeof(tmp), "event_limits_hash_lifetime=%d%c",
+			 event_limits_hash_lifetime, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		i = -1;
+		while (o_limits[++i].name) {
+			snprintf(tmp, sizeof(tmp), "%s_enabled=%c%c",
+				 o_limits[i].name,
+				 o_limits[i].enabled ? TRUE_CHR : FALSE_CHR,
+				 FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+
+#define OVENTFLD(_fld) do { \
+		snprintf(tmp, sizeof(tmp), "%s_" #_fld "=%d%c", \
+			 o_limits[i].name, o_limits[i]._fld, FLDSEP); \
+		APPEND_REALLOC(buf, off, len, tmp); \
+	} while (0)
+
+			OVENTFLD(user_low_time);
+			OVENTFLD(user_low_time_limit);
+			OVENTFLD(user_hi_time);
+			OVENTFLD(user_hi_time_limit);
+			OVENTFLD(ip_low_time);
+			OVENTFLD(ip_low_time_limit);
+			OVENTFLD(ip_hi_time);
+			OVENTFLD(ip_hi_time_limit);
+			OVENTFLD(lifetime);
+		}
+		snprintf(tmp, sizeof(tmp), "ovent_limits_ipc_factor=%f",
+			 ovent_limits_ipc_factor);
 		APPEND_REALLOC(buf, off, len, tmp);
 		K_RUNLOCK(event_limits_free);
 	} else if (strcasecmp(action, "events") == 0) {
@@ -7662,8 +7694,12 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 				snprintf(tmp, sizeof(tmp), "ip:%d=%s%c",
 					 rows, ips->ip, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
-				snprintf(tmp, sizeof(tmp), "description:%d=%s%c",
-					 rows, ips->description ? : EMPTY,
+				snprintf(tmp, sizeof(tmp), "eventname:%d=%s%c",
+					 rows, ips->eventname, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "is_event:%d=%c%c",
+					 rows,
+					 ips->is_event ?  TRUE_CHR : FALSE_CHR,
 					 FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(tmp, sizeof(tmp), "lifetime:%d=%d%c",
@@ -7671,6 +7707,10 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(tmp, sizeof(tmp), "log:%d=%c%c",
 					 rows, ips->log ? TRUE_CHR : FALSE_CHR,
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "description:%d=%s%c",
+					 rows, ips->description ? : EMPTY,
 					 FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(reply, siz, CDTRF":%d=%ld%c",

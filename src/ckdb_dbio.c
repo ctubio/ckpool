@@ -2499,6 +2499,12 @@ void oc_event_limits(OPTIONCONTROL *oc, const char *from)
 						from, __func__, EVENT_OK,
 						oc->optionname);
 				}
+			} else if (strcmp(ptr2, "enabled") == 0) {
+				char ch = toupper(oc->optionvalue[0]);
+				if (ch == TRUE_CHR || ch == TRUE2_CHR)
+					e_limits[i].enabled = true;
+				else
+					e_limits[i].enabled = false;
 			} else {
 				LOGERR("%s(%s): ERR: Unknown %s item '%s' "
 					"in '%s'",
@@ -2577,6 +2583,12 @@ void oc_ovent_limits(OPTIONCONTROL *oc, const char *from)
 						from, __func__, OVENT_OK,
 						oc->optionname);
 				}
+			} else if (strcmp(ptr2, "enabled") == 0) {
+				char ch = toupper(oc->optionvalue[0]);
+				if (ch == TRUE_CHR || ch == TRUE2_CHR)
+					o_limits[i].enabled = true;
+				else
+					o_limits[i].enabled = false;
 			} else {
 				LOGERR("%s(%s): ERR: Unknown %s item '%s' "
 					"in '%s'",
@@ -6419,6 +6431,9 @@ int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 
 	LOGDEBUG("%s(): add", __func__);
 
+	if (e_limits[id].enabled == false)
+		return EVENT_OK;
+
 	bzero(&events, sizeof(events));
 	events.id = id;
 	events.expirydate.tv_sec = default_expiry.tv_sec;
@@ -6533,6 +6548,9 @@ int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 	bool gotc;
 
 	LOGDEBUG("%s(): add", __func__);
+
+	if (o_limits[id].enabled == false)
+		return EVENT_OK;
 
 	bzero(&ovents, sizeof(ovents));
 
