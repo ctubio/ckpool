@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.958"
+#define CKDB_VERSION DB_VERSION"-1.959"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2105,6 +2105,9 @@ extern K_STORE *ovents_store;
 #define OC_OLIMITS "ovent_limits_"
 
 #define OVENT_OK EVENT_OK
+
+// Web uses this, so only check IP for this user
+#define ANON_USER "Anon"
 
 /* user limits are checked for matching id+user
  * ip limits are checked for matching id+ip,

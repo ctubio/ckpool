@@ -5121,7 +5121,7 @@ int check_ovents(int id, char *u_key, char *i_key, char *c_key, tv_t *now)
 	K_WLOCK(ovents_free);
 	K_RLOCK(event_limits_free);
 
-	if (u_key[0]) {
+	if (u_key[0] && strcmp(u_key, ANON_USER) != 0) {
 		was = check_one_ovent(id, u_key, now,
 					o_limits[id].user_low_time,
 					o_limits[id].user_low_time_limit,
