@@ -6611,7 +6611,7 @@ int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 	min = TV_TO_MIN(&(ovents.createdate));
 
 	K_WLOCK(ovents_free);
-	if (u_key[0]) {
+	if (u_key[0] && strcmp(u_key, ANON_USER) != 0) {
 		o_item = find_ovents(u_key, hour, NULL);
 		if (o_item) {
 			DATA_OVENTS(d_ovents, o_item);
