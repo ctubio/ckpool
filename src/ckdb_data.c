@@ -4638,7 +4638,7 @@ int check_events(EVENTS *events)
 	EVENTS *e = NULL;
 	char cmd[MAX_ALERT_CMD+1];
 	int count, secs;
-	int tyme, limit, lifetime;
+	int tyme, limit, lifetime = 0;
 	char name[TXT_SML+1];
 	pid_t pid;
 	tv_t now;
