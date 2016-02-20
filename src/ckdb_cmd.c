@@ -7533,12 +7533,12 @@ static void event_tree(K_TREE *event_tree, char *list, char *reply, size_t siz,
 
 // Events status/settings
 static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
-			__maybe_unused tv_t *now, __maybe_unused char *by,
+			tv_t *now, __maybe_unused char *by,
 			__maybe_unused char *code, __maybe_unused char *inet,
 			__maybe_unused tv_t *cd, K_TREE *trf_root)
 {
 	K_ITEM *i_action, *i_cmd, *i_list, *i_ip, *i_eventname, *i_lifetime;
-	K_ITEM *i_des, *i_item;
+	K_ITEM *i_des, *i_item, *next_item;
 	K_TREE_CTX ctx[1];
 	IPS *ips;
 	char *action, *alert_cmd, *list, *ip, *eventname, *des;
@@ -7798,7 +7798,6 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 *	You need to BOTH use this AND remove the optioncontrol
 		 *	record from the database to permanently remove a ban
 		 *	(since there's no cmd_expopts ... yet) */
-
 		bool found = false;
 		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
 		if (!i_ip)
@@ -7825,8 +7824,142 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 			APPEND_REALLOC(buf, off, len, " unbanned");
 		} else {
 			APPEND_REALLOC(buf, off, len,
-					"ERR.unknown ip+eventname");
+					"ERR.unknown BAN ip+eventname");
 		}
+	} else if (strcasecmp(action, "ok") == 0) {
+		/* OK the ip+eventname with optional lifetime
+		 * N.B. this doesn't survive a CKDB restart
+		 *	use just cmd_setopts for permanent OKs */
+		bool found = false;
+		oldlife = 0;
+		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
+		if (!i_ip)
+			return strdup(reply);
+		ip = transfer_data(i_ip);
+		i_eventname = require_name(trf_root, "eventname", 1, NULL, reply, siz);
+		if (!i_eventname)
+			return strdup(reply);
+		eventname = transfer_data(i_eventname);
+		i_lifetime = optional_name(trf_root, "lifetime", 1,
+					   (char *)intpatt, reply, siz);
+		if (i_lifetime)
+			lifetime = atoi(transfer_data(i_lifetime));
+		else {
+			if (*reply)
+				return strdup(reply);
+			// Forever
+			lifetime = 0;
+		}
+		i_des = optional_name(trf_root, "des", 1, NULL, reply, siz);
+		if (i_des)
+			des = transfer_data(i_des);
+		else {
+			if (*reply)
+				return strdup(reply);
+			des = NULL;
+		}
+		K_WLOCK(ips_free);
+		i_item = find_ips(IPS_GROUP_OK, ip, eventname, NULL);
+		if (i_item) {
+			DATA_IPS(ips, i_item);
+			found = true;
+			oldlife = ips->lifetime;
+			ips->lifetime = lifetime;
+			// Don't change it if it's not supplied
+			if (des) {
+				LIST_MEM_SUB(ips_free, ips->description);
+				FREENULL(ips->description);
+				ips->description = strdup(des);
+				LIST_MEM_ADD(ips_free, ips->description);
+			}
+		} else {
+			ips_add(IPS_GROUP_OK, ip, eventname,
+				is_elimitname(eventname, true), des, true,
+				false, lifetime, true);
+		}
+		K_WUNLOCK(ips_free);
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+		if (found) {
+			snprintf(tmp, sizeof(tmp), "already %s/%s %d->%d",
+				 ip, eventname, oldlife, lifetime);
+		} else {
+			snprintf(tmp, sizeof(tmp), "ok %s/%s %d",
+				 ip, eventname, lifetime);
+		}
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else if (strcasecmp(action, "unok") == 0) {
+		/* UnOK the ip+eventname - sets lifetime to 1 meaning
+		 *  it expires 1 second after it was created
+		 *  so next access will remove the OK and succeed
+		 * N.B. if it was a permanent 'cmd_setopts' OK, the unOK
+		 *	won't survive a CKDB restart.
+		 *	You need to BOTH use this AND remove the optioncontrol
+		 *	record from the database to permanently remove an OK
+		 *	(since there's no cmd_expopts ... yet) */
+		bool found = false;
+		i_ip = require_name(trf_root, "ip", 1, NULL, reply, siz);
+		if (!i_ip)
+			return strdup(reply);
+		ip = transfer_data(i_ip);
+		i_eventname = require_name(trf_root, "eventname", 1, NULL, reply, siz);
+		if (!i_eventname)
+			return strdup(reply);
+		eventname = transfer_data(i_eventname);
+		K_WLOCK(ips_free);
+		i_item = find_ips(IPS_GROUP_OK, ip, eventname, NULL);
+		if (i_item) {
+			found = true;
+			DATA_IPS(ips, i_item);
+			ips->lifetime = 1;
+		}
+		K_WUNLOCK(ips_free);
+		APPEND_REALLOC_INIT(buf, off, len);
+		if (found) {
+			APPEND_REALLOC(buf, off, len, "ok.");
+			APPEND_REALLOC(buf, off, len, ip);
+			APPEND_REALLOC(buf, off, len, "/");
+			APPEND_REALLOC(buf, off, len, eventname);
+			APPEND_REALLOC(buf, off, len, " unOKed");
+		} else {
+			APPEND_REALLOC(buf, off, len,
+					"ERR.unknown OK ip+eventname");
+		}
+	} else if (strcasecmp(action, "expire") == 0) {
+		/* Expire all ips that are too old
+		 *  and remove all non-current */
+		bool expire;
+		rows = 0;
+		K_WLOCK(ips_free);
+		i_item = first_in_ktree(ips_root, ctx);
+		while (i_item) {
+			DATA_IPS(ips, i_item);
+			expire = false;
+			if (!CURRENT(&(ips->expirydate)))
+				expire = true;
+			else if (ips->lifetime != 0 &&
+				 (int)tvdiff(now, &(ips->createdate)) > ips->lifetime) {
+					expire = true;
+				}
+			if (expire) {
+				rows++;
+				next_item = next_in_ktree(ctx);
+				remove_from_ktree(ips_root, i_item);
+				k_unlink_item(ips_store, i_item);
+				if (ips->description) {
+					LIST_MEM_SUB(ips_free, ips->description);
+					FREENULL(ips->description);
+				}
+				k_add_head(ips_free, i_item);
+				i_item = next_item;
+				continue;
+			}
+			i_item = next_in_ktree(ctx);
+		}
+		K_WUNLOCK(ips_free);
+		APPEND_REALLOC_INIT(buf, off, len);
+		snprintf(tmp, sizeof(tmp), "ok.expired %d", rows);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
 		LOGERR("%s() %s.%s", __func__, id, reply);
