@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.957"
+#define CKDB_VERSION DB_VERSION"-1.958"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2143,6 +2143,8 @@ extern double ovent_limits_ipc_factor;
 // maximum lifetime of all o_limits - set by code
 extern int o_limits_max_lifetime;
 
+#define APIKEY "KAPIKey"
+
 // AUTHS authorise.id.json={...}
 typedef struct auths {
 	int64_t authid;
@@ -3078,6 +3080,8 @@ extern void ips_add(char *group, char *ip, char *eventname, bool is_event,
 		    char *des, bool log, bool cclass, int life, bool locked);
 extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
 #define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
+extern int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
+#define ovents_add(_id, _trf_root) _ovents_add(_id, NULL, NULL, NULL, _trf_root)
 extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *workername, char *clientid, char *enonce1,
 			char *useragent, char *preauth, char *by, char *code,

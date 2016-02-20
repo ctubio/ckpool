@@ -794,6 +794,7 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 	USERATTS *useratts;
 	WORKERS *workers;
 	USERS *users;
+	int ovent = OVENT_OK, done;
 	int32_t difficultydefault;
 	char *reason = NULL;
 	char *answer = NULL;
@@ -801,6 +802,12 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 	bool ok;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	ovent = ovents_add(OVENTID_WORKERS, trf_root);
+	if (ovent != OVENT_OK) {
+		snprintf(reply, siz, "ERR");
+		return reply_ovent(ovent, reply);
+	}
 
 	i_username = require_name(trf_root, "username", MIN_USERNAME,
 				  (char *)userpatt, reply, siz);
@@ -854,6 +861,7 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 			goto kazuki;
 		}
 
+		done = 0;
 		// Loop through the list of workers and do any changes
 		for (workernum = 0; workernum < 9999; workernum++) {
 			snprintf(workername_buf, sizeof(workername_buf),
@@ -863,6 +871,17 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 							1, NULL, reply, siz);
 			if (!i_workername)
 				break;
+
+			// More than 1?
+			if (done++ == 1) {
+				ovent = ovents_add(OVENTID_MULTIADDR, trf_root);
+				if (ovent != OVENT_OK) {
+					if (answer)
+						free(answer);
+					snprintf(reply, siz, "ERR");
+					return reply_ovent(ovent, reply);
+				}
+			}
 
 			w_item = find_workers(false, users->userid,
 					      transfer_data(i_workername));
@@ -926,6 +945,16 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 				K_WLOCK(heartbeatqueue_free);
 				k_add_tail(heartbeatqueue_store, hq_item);
 				K_WUNLOCK(heartbeatqueue_free);
+			}
+		}
+		// Only 1?
+		if (done == 1) {
+			ovent = ovents_add(OVENTID_ONEADDR, trf_root);
+			if (ovent != OVENT_OK) {
+				if (answer)
+					free(answer);
+				snprintf(reply, siz, "ERR");
+				return reply_ovent(ovent, reply);
 			}
 		}
 	}
@@ -1236,6 +1265,7 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 			   __maybe_unused tv_t *notcd,
 			   __maybe_unused K_TREE *trf_root)
 {
+	int ovent = OVENT_OK;
 	K_TREE_CTX ctx[1];
 	K_ITEM *b_item;
 	BLOCKS *blocks;
@@ -1249,6 +1279,12 @@ static char *cmd_blocklist(__maybe_unused PGconn *conn, char *cmd, char *id,
 	bool has_stats;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	ovent = ovents_add(OVENTID_BLOCKS, trf_root);
+	if (ovent != OVENT_OK) {
+		snprintf(tmp, sizeof(tmp), "ERR");
+		return reply_ovent(ovent, tmp);
+	}
 
 	maxrows = sys_setting(BLOCKS_SETTING_NAME, BLOCKS_DEFAULT, now);
 
@@ -2030,6 +2066,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	USERSTATS *userstats;
 	USERATTS *useratts;
 	USERS *users;
+	int ovent = OVENT_OK;
 	char reply[1024] = "";
 	char tmp[1024];
 	int64_t oldworkers = USER_OLD_WORKERS_DEFAULT;
@@ -2041,6 +2078,12 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	int rows;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	ovent = ovents_add(OVENTID_WORKERS, trf_root);
+	if (ovent != OVENT_OK) {
+		snprintf(reply, siz, "ERR");
+		return reply_ovent(ovent, reply);
+	}
 
 	i_username = adminuser(trf_root, reply, siz);
 	if (!i_username)
@@ -3287,6 +3330,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 {
 	K_ITEM *i_username, *u_item, *b_item, *p_item, *us_item, look;
 	K_ITEM *ua_item, *pa_item;
+	int ovent = OVENT_OK;
 	double u_hashrate5m, u_hashrate1hr;
 	char reply[1024], tmp[1024], *buf;
 	size_t siz = sizeof(reply);
@@ -3301,6 +3345,12 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 	bool has_uhr;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	ovent = ovents_add(OVENTID_HOMEPAGE, trf_root);
+	if (ovent != OVENT_OK) {
+		snprintf(reply, siz, "ERR");
+		return reply_ovent(ovent, reply);
+	}
 
 	i_username = optional_name(trf_root, "username", 1, NULL, reply, siz);
 
@@ -3622,6 +3672,18 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 				goto nuts;
 			}
 			*(dot++) = '\0';
+			if (strcmp(ptr, APIKEY) == 0) {
+				// API request count
+				event = ovents_add(OVENTID_API, trf_root);
+				if (event != OVENT_OK) {
+					if (attlist)
+						free(attlist);
+					if (answer)
+						free(answer);
+					snprintf(reply, siz, "ERR");
+					return reply_ovent(event, reply);
+				}
+			}
 			K_RLOCK(useratts_free);
 			ua_item = find_useratts(users->userid, ptr);
 			K_RUNLOCK(useratts_free);

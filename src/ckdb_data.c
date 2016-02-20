@@ -5118,7 +5118,7 @@ int check_ovents(int id, char *u_key, char *i_key, char *c_key, tv_t *now)
 			return OVENT_OK;
 	}
 
-	K_WLOCK(events_free);
+	K_WLOCK(ovents_free);
 	K_RLOCK(event_limits_free);
 
 	if (u_key[0]) {
@@ -5193,7 +5193,7 @@ int check_ovents(int id, char *u_key, char *i_key, char *c_key, tv_t *now)
 		}
 	}
 	K_RUNLOCK(event_limits_free);
-	K_WUNLOCK(events_free);
+	K_WUNLOCK(ovents_free);
 	if (alert) {
 		LOGERR("%s() OLERT ID:%d %s Lim:%d Time:%d Life:%d '%s/%s' "
 			"'%s' '%s'", __func__,
