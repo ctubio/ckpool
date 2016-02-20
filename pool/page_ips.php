@@ -8,6 +8,7 @@ function doips($data, $user)
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= '<thead><tr class=title>';
+ $pg .= '<td class=dr>#</td>';
  $pg .= '<td class=dl>Group</td>';
  $pg .= '<td class=dl>IP</td>';
  $pg .= '<td class=dl>Name</td>';
@@ -28,7 +29,9 @@ function doips($data, $user)
 		else
 			$row = 'odd';
 
+		$j = $i+1;
 		$pg .= "<tr class=$row>";
+		$pg .= "<td class=dr>$j</td>";
 		$pg .= '<td class=dl>'.$ans['group:'.$i].'</td>';
 		$pg .= '<td class=dl>'.$ans['ip:'.$i].'</td>';
 		$pg .= '<td class=dl>'.$ans['eventname:'.$i].'</td>';
