@@ -256,7 +256,9 @@ struct ckpool_instance {
 	char **redirectport;
 
 	/* Private data for each process */
-	void *data;
+	void *gdata;
+	void *sdata;
+	void *cdata;
 };
 
 enum stratum_msgtype {

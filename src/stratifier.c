@@ -569,7 +569,7 @@ static void info_msg_entries(char_entry_t **entries)
 static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 {
 	uint64_t *u64, g64, d64 = 0;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	char header[228];
 	int len, ofs = 0;
 	ts_t now;
@@ -773,7 +773,7 @@ static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char 
 		       const char *func, const int line)
 {
 	static time_t time_counter;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	static int counter = 0;
 	char *json_msg;
 	time_t now_t;
@@ -986,7 +986,7 @@ static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
 static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_block)
 {
 	workbase_t *tmp, *tmpa, *aged = NULL;
-	sdata_t *ckp_sdata = ckp->data;
+	sdata_t *ckp_sdata = ckp->sdata;
 	int len, ret;
 
 	ts_realtime(&wb->gentime);
@@ -1065,7 +1065,7 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
  * read the wrong priority but occasional wrong values are harmless. */
 static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	char *buf = NULL;
 	bool set;
 
@@ -1088,7 +1088,7 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int pri
  * processed for priority reasons, "failed" for an actual failure. */
 static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	char *buf = NULL;
 
 	if (prio >= sdata->gen_priority)
@@ -1098,7 +1098,7 @@ static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 
 static void send_generator(const ckpool_t *ckp, const char *msg, const int prio)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	bool set;
 
 	if (prio > sdata->gen_priority) {
@@ -1316,7 +1316,7 @@ static void *do_update(void *arg)
 	struct update_req *ur = (struct update_req *)arg;
 	int prio = ur->prio, retries = 0;
 	ckpool_t *ckp = ur->ckp;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	json_t *val, *txn_array;
 	bool new_block = false;
 	bool ret = false;
@@ -1458,7 +1458,7 @@ out_unlock:
 static void add_node_base(ckpool_t *ckp, json_t *val)
 {
 	workbase_t *wb = ckzalloc(sizeof(workbase_t));
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	bool new_block = false;
 	json_t *txnhashes;
 	char header[228];
@@ -1658,7 +1658,7 @@ static void upstream_blocksubmit(ckpool_t *ckp, const char *gbt_block)
 static void downstream_blocksubmits(ckpool_t *ckp, const char *gbt_block, const stratum_instance_t *source)
 {
 	stratum_instance_t *client;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	ckmsg_t *bulk_send = NULL;
 	int messages = 0;
 
@@ -1933,7 +1933,7 @@ static void connector_drop_client(ckpool_t *ckp, const int64_t id)
 static void drop_allclients(ckpool_t *ckp)
 {
 	stratum_instance_t *client, *tmp;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	int kills = 0;
 
 	ck_wlock(&sdata->instance_lock);
@@ -2323,7 +2323,7 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bo
 
 static void update_subscribe(ckpool_t *ckp, const char *cmd)
 {
-	sdata_t *sdata = ckp->data, *dsdata;
+	sdata_t *sdata = ckp->sdata, *dsdata;
 	int id = 0, subid = 0, userid = 0;
 	proxy_t *proxy, *old = NULL;
 	const char *buf;
@@ -2486,7 +2486,7 @@ static proxy_t *best_proxy(sdata_t *sdata)
 
 static void update_notify(ckpool_t *ckp, const char *cmd)
 {
-	sdata_t *sdata = ckp->data, *dsdata;
+	sdata_t *sdata = ckp->sdata, *dsdata;
 	bool new_block = false, clean;
 	int i, id = 0, subid = 0;
 	char header[228];
@@ -2591,7 +2591,7 @@ static void stratum_send_diff(sdata_t *sdata, const stratum_instance_t *client);
 
 static void update_diff(ckpool_t *ckp, const char *cmd)
 {
-	sdata_t *sdata = ckp->data, *dsdata;
+	sdata_t *sdata = ckp->sdata, *dsdata;
 	stratum_instance_t *client, *tmp;
 	double old_diff, diff;
 	int id = 0, subid = 0;
@@ -2834,7 +2834,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, const int64_t i
 						  const char *address, int server)
 {
 	stratum_instance_t *client;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 
 	client = __recruit_stratum_instance(sdata);
 	client->start_time = time(NULL);
@@ -2912,7 +2912,7 @@ static void connector_test_client(ckpool_t *ckp, const int64_t id)
 static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 {
 	ckpool_t *ckp = sdata->ckp;
-	sdata_t *ckp_sdata = ckp->data;
+	sdata_t *ckp_sdata = ckp->sdata;
 	stratum_instance_t *client, *tmp;
 	ckmsg_t *bulk_send = NULL;
 	int messages = 0;
@@ -3158,7 +3158,7 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
 	char *msg, *workername = NULL;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	char cdfield[64];
 	double diff = 0;
 	int height = 0;
@@ -3939,7 +3939,7 @@ static void ckdbq_flush(sdata_t *sdata)
 
 static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	unix_msg_t *umsg = NULL;
 	int ret = 0;
 	char *buf;
@@ -4114,7 +4114,7 @@ out:
 static void *blockupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	char *buf = NULL;
 	char request[8];
 
@@ -4343,7 +4343,7 @@ out_unlock:
 static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_id, const json_t *params_val)
 {
 	ckpool_t *ckp = client->ckp;
-	sdata_t *sdata, *ckp_sdata = ckp->data;
+	sdata_t *sdata, *ckp_sdata = ckp->sdata;
 	int session_id = 0, userid = -1;
 	bool old_match = false;
 	char sessionid[12];
@@ -4747,7 +4747,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 {
 	char *base_username = strdupa(workername), *username;
 	bool new_user = false, new_worker = false;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	worker_instance_t *worker;
 	user_instance_t *user;
 	int len;
@@ -4807,7 +4807,7 @@ static int send_recv_auth(stratum_instance_t *client)
 {
 	user_instance_t *user = client->user_instance;
 	ckpool_t *ckp = client->ckp;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	char *buf = NULL, *json_msg;
 	bool contended = false;
 	size_t responselen = 0;
@@ -4951,7 +4951,7 @@ static void queue_delayed_auth(stratum_instance_t *client)
 
 static void check_global_user(ckpool_t *ckp, user_instance_t *user, stratum_instance_t *client)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	proxy_t *proxy = best_proxy(sdata);
 	int proxyid = proxy->id;
 	char buf[256];
@@ -5127,7 +5127,7 @@ static void upstream_shares(ckpool_t *ckp, const char *workername, const int64_t
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double diff, const bool valid,
 		       const bool submit, const double sdiff)
 {
-	sdata_t *ckp_sdata = ckp->data, *sdata = client->sdata;
+	sdata_t *ckp_sdata = ckp->sdata, *sdata = client->sdata;
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	user_instance_t *user = client->user_instance;
@@ -5765,7 +5765,7 @@ static json_params_t
 static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
 {
 	stratum_instance_t *client;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	worker_instance_t *worker;
 	user_instance_t *user;
 
@@ -5810,7 +5810,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 static void suggest_diff(stratum_instance_t *client, const char *method, const json_t *params_val)
 {
 	json_t *arr_val = json_array_get(params_val, 0);
-	sdata_t *sdata = client->ckp->data;
+	sdata_t *sdata = client->ckp->sdata;
 	int64_t sdiff;
 
 	if (unlikely(!client_active(client))) {
@@ -6164,7 +6164,7 @@ out:
 static user_instance_t *generate_remote_user(ckpool_t *ckp, const char *workername)
 {
 	char *base_username = strdupa(workername), *username;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	bool new_user = false;
 	user_instance_t *user;
 	int len;
@@ -6385,7 +6385,7 @@ static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum
 {
 	json_t *params, *method, *res_val, *id_val, *err_val = NULL;
 	int msg_type = node_msg_type(val);
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	json_params_t *jp;
 	int errnum;
 
@@ -6513,7 +6513,7 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 {
 	bool noid = false, dropped = false;
 	char address[INET6_ADDRSTRLEN];
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	stratum_instance_t *client;
 	smsg_t *msg;
 	json_t *val;
@@ -6629,7 +6629,7 @@ static void sshare_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
 	stratum_instance_t *client;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	int64_t client_id;
 
 	client_id = jp->client_id;
@@ -6680,7 +6680,7 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
 	stratum_instance_t *client;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	int mindiff, errnum = 0;
 	int64_t client_id;
 
@@ -6782,7 +6782,7 @@ static bool test_and_clear(bool *val, mutex_t *lock)
 
 static void ckdbq_process(ckpool_t *ckp, char *msg)
 {
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	size_t responselen;
 	char *buf = NULL;
 
@@ -6862,7 +6862,7 @@ static void send_transactions(ckpool_t *ckp, json_params_t *jp)
 	const char *msg = json_string_value(jp->method),
 		*params = json_string_value(json_array_get(jp->params, 0));
 	stratum_instance_t *client = NULL;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	json_t *val, *hashes;
 	int64_t job_id = 0;
 	time_t now_t;
@@ -7055,7 +7055,7 @@ static void upstream_workers(ckpool_t *ckp, user_instance_t *user)
 static void *statsupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	pool_stats_t *stats = &sdata->stats;
 
 	pthread_detach(pthread_self());
@@ -7396,7 +7396,7 @@ static void *statsupdate(void *arg)
 static void *ckdb_heartbeat(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 
 	pthread_detach(pthread_self());
 	rename_proc("heartbeat");
@@ -7426,7 +7426,7 @@ static void *ckdb_heartbeat(void *arg)
 static void read_poolstats(ckpool_t *ckp)
 {
 	char *s = alloca(4096), *pstats, *dsps, *sps;
-	sdata_t *sdata = ckp->data;
+	sdata_t *sdata = ckp->sdata;
 	pool_stats_t *stats = &sdata->stats;
 	int tvsec_diff = 0, ret;
 	tv_t now, last;
@@ -7530,7 +7530,7 @@ int stratifier(proc_instance_t *pi)
 
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
-	ckp->data = sdata;
+	ckp->sdata = sdata;
 	sdata->ckp = ckp;
 	sdata->verbose = true;
 
@@ -7634,6 +7634,6 @@ out:
 		}
 		mutex_unlock(&sdata->proxy_lock);
 	}
-	dealloc(ckp->data);
+	dealloc(ckp->sdata);
 	return process_exit(ckp, pi, ret);
 }

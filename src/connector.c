@@ -569,7 +569,7 @@ static void client_event_processor(ckpool_t *ckp, struct epoll_event *event)
 {
 	const uint32_t events = event->events;
 	const uint64_t id = event->data.u64;
-	cdata_t *cdata = ckp->data;
+	cdata_t *cdata = ckp->cdata;
 	client_instance_t *client;
 
 	client = ref_client_by_id(cdata, id);
@@ -825,7 +825,7 @@ static int add_redirect(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client
 static void redirect_client(ckpool_t *ckp, client_instance_t *client)
 {
 	sender_send_t *sender_send;
-	cdata_t *cdata = ckp->data;
+	cdata_t *cdata = ckp->cdata;
 	json_t *val;
 	char *buf;
 	int num;
@@ -1089,7 +1089,7 @@ out:
 
 static void usend_process(ckpool_t *ckp, char *buf)
 {
-	cdata_t *cdata = ckp->data;
+	cdata_t *cdata = ckp->cdata;
 	connsock_t *cs = &cdata->upstream_cs;
 	int len, sent;
 
@@ -1139,7 +1139,7 @@ static void ping_upstream(cdata_t *cdata)
 static void *urecv_process(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	cdata_t *cdata = ckp->data;
+	cdata_t *cdata = ckp->cdata;
 	connsock_t *cs = &cdata->upstream_cs;
 	bool alive = true;
 
@@ -1246,7 +1246,7 @@ static void client_message_processor(ckpool_t *ckp, char *buf)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
 
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
-	send_client(ckp->data, client_id, msg);
+	send_client(ckp->cdata, client_id, msg);
 	json_decref(json_msg);
 out:
 	free(buf);
@@ -1474,7 +1474,7 @@ int connector(proc_instance_t *pi)
 	const int on = 1;
 
 	LOGWARNING("%s connector starting", ckp->name);
-	ckp->data = cdata;
+	ckp->cdata = cdata;
 	cdata->ckp = ckp;
 
 	if (!ckp->serverurls)
@@ -1590,6 +1590,6 @@ int connector(proc_instance_t *pi)
 
 	ret = connector_loop(pi, cdata);
 out:
-	dealloc(ckp->data);
+	dealloc(ckp->cdata);
 	return process_exit(ckp, pi, ret);
 }

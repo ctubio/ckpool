@@ -793,7 +793,7 @@ static void reconnect_generator(const ckpool_t *ckp)
 static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
-	gdata_t *gdata = proxi->ckp->data;
+	gdata_t *gdata = proxi->ckp->gdata;
 	char *coinbase1, *coinbase2;
 	const char *jobidbuf;
 	bool clean, ret = false;
@@ -1026,7 +1026,7 @@ static bool parse_reconnect(proxy_instance_t *proxy, json_t *val)
 {
 	bool sameurl = false, ret = false;
 	ckpool_t *ckp = proxy->ckp;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	proxy_instance_t *parent;
 	const char *new_url;
 	int new_port;
@@ -1318,7 +1318,7 @@ out:
 		LOGNOTICE("Disabling userproxy %d:%d %s that failed authorisation as %s",
 			  proxi->id, proxi->subid, proxi->url, proxi->auth);
 		proxi->disabled = true;
-		disable_subproxy(ckp->data, proxi->parent, proxi);
+		disable_subproxy(ckp->gdata, proxi->parent, proxi);
 	}
 	return ret;
 }
@@ -1626,7 +1626,7 @@ static void add_json_msgq(cs_msg_t **csmsgq, proxy_instance_t *proxy, json_t **v
 static void *proxy_send(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	stratum_msg_t *msg = NULL;
 	cs_msg_t *csmsgq = NULL;
 
@@ -1837,7 +1837,7 @@ static void *proxy_recruit(void *arg)
 {
 	proxy_instance_t *proxy, *parent = (proxy_instance_t *)arg;
 	ckpool_t *ckp = parent->ckp;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	bool recruit, alive;
 
 	pthread_detach(pthread_self());
@@ -1996,7 +1996,7 @@ static void *proxy_recv(void *arg)
 	connsock_t *cs = &proxi->cs;
 	proxy_instance_t *subproxy;
 	ckpool_t *ckp = proxi->ckp;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	struct epoll_event event;
 	bool alive;
 	int epfd;
@@ -2112,7 +2112,7 @@ static void *proxy_recv(void *arg)
 static void *userproxy_recv(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	struct epoll_event event;
 	int epfd;
 
@@ -2683,7 +2683,7 @@ static int proxy_loop(proc_instance_t *pi)
 	proxy_instance_t *proxi = NULL, *cproxy;
 	server_instance_t *si = NULL, *old_si;
 	ckpool_t *ckp = pi->ckp;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	unix_msg_t *umsg = NULL;
 	connsock_t *cs = NULL;
 	bool started = false;
@@ -2799,7 +2799,7 @@ out:
 static void *server_watchdog(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 
 	while (42) {
 		server_instance_t *best = NULL;
@@ -2890,7 +2890,7 @@ static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int id
 
 static int proxy_mode(ckpool_t *ckp, proc_instance_t *pi)
 {
-	gdata_t *gdata = ckp->data;
+	gdata_t *gdata = ckp->gdata;
 	proxy_instance_t *proxy;
 	int i, ret;
 
@@ -2929,7 +2929,7 @@ int generator(proc_instance_t *pi)
 
 	LOGWARNING("%s generator starting", ckp->name);
 	gdata = ckzalloc(sizeof(gdata_t));
-	ckp->data = gdata;
+	ckp->gdata = gdata;
 	gdata->ckp = ckp;
 	create_unix_receiver(pi);
 
@@ -2950,6 +2950,6 @@ int generator(proc_instance_t *pi)
 	} else
 		ret = server_mode(ckp, pi);
 out:
-	dealloc(ckp->data);
+	dealloc(ckp->gdata);
 	return process_exit(ckp, pi, ret);
 }
