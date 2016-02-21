@@ -5775,7 +5775,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	/* Then find the matching worker user */
 	worker = get_worker(sdata, user, workername);
 
-	if (mindiff < 1) {
+	if (mindiff < 0) {
 		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
 		return;
 	}
@@ -6783,7 +6783,7 @@ static bool test_and_clear(bool *val, mutex_t *lock)
 static void ckdbq_process(ckpool_t *ckp, char *msg)
 {
 	sdata_t *sdata = ckp->data;
-	size_t responselen = 0;
+	size_t responselen;
 	char *buf = NULL;
 
 	while (!buf) {
@@ -6803,16 +6803,15 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 
 	/* Process any requests from ckdb that are heartbeat responses with
 	 * specific requests. */
-	if (likely(buf))
-		responselen = strlen(buf);
-	if (likely(responselen > 0)) {
+	responselen = strlen(buf);
+	if (likely(responselen > 1)) {
 		char *response = alloca(responselen);
 		int offset = 0;
 
 		memset(response, 0, responselen);
-		if (sscanf(buf, "%*d.%*d.%c%n", response, &offset) > 0) {
-			strcpy(response+1, buf+offset);
-			if (safecmp(response, "ok")) {
+		if (likely(sscanf(buf, "%*d.%*d.%c%n", response, &offset) > 0)) {
+			strcpy(response + 1, buf + offset);
+			if (likely(safecmp(response, "ok"))) {
 				char *cmd;
 
 				cmd = response;
@@ -6826,8 +6825,8 @@ static void ckdbq_process(ckpool_t *ckp, char *msg)
 				LOGWARNING("Got ckdb failure response: %s", buf);
 		} else
 			LOGWARNING("Got bad ckdb response: %s", buf);
-		free(buf);
 	}
+	free(buf);
 }
 
 static int transactions_by_jobid(sdata_t *sdata, const int64_t id)
@@ -7597,11 +7596,11 @@ int stratifier(proc_instance_t *pi)
 	 * are CPUs */
 	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
 	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
-	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
+	sdata->ssends = create_ckmsgqs(ckp, "ssender", &ssend_process, threads);
 	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
 	sdata->srecvs = create_ckmsgqs(ckp, "sreceiver", &srecv_process, threads);
-	sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
+	sdata->ckdbq = create_ckmsgqs(ckp, "ckdbqueue", &ckdbq_process, threads);
 	create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
 	read_poolstats(ckp);
 
