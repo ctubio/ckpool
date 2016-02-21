@@ -5775,7 +5775,7 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 	/* Then find the matching worker user */
 	worker = get_worker(sdata, user, workername);
 
-	if (mindiff < 1) {
+	if (mindiff < 0) {
 		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
 		return;
 	}
