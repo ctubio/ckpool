@@ -496,13 +496,12 @@ function getOpts($user, $optlist)
  return repDecode($rep);
 }
 #
-function eventIPs($user)
+function eventCmd($user, $flds)
 {
  if ($user == false)
 	showIndex();
- $flds = array('action' => 'ips');
  $msg = msgEncode('events', 'events', $flds, $user);
- $rep = sendsockreply('eventIPs', $msg);
+ $rep = sendsockreply('eventCmd', $msg);
  if (!$rep)
 	dbdown();
  return repDecode($rep);

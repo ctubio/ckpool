@@ -343,6 +343,14 @@ function safetext($txt, $len = 1024)
  return $res;
 }
 #
+function isans($ans, $fld)
+{
+ if (isset($ans[$fld]))
+	return $ans[$fld];
+ else
+	return '&nbsp;';
+}
+#
 function dbd($data, $user)
 {
  return "<span class=alert><br>Database is reloading, mining is all OK</span>";

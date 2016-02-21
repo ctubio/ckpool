@@ -4,7 +4,7 @@ function doips($data, $user)
 {
  $pg = '<h1>Event IP Information</h1>';
 
- $ans = eventIPs($user);
+ $ans = eventCmd($user, array('action' => 'ips'));
 
  $pg .= "<table callpadding=0 cellspacing=0 border=0>\n";
  $pg .= '<thead><tr class=title>';
@@ -16,7 +16,7 @@ function doips($data, $user)
  $pg .= '<td class=dr>Lifetime</td>';
  $pg .= '<td class=dr>Log</td>';
  $pg .= '<td class=dl>Desc</td>';
- $pg .= '<td class=dr>CreateDate</td>';
+ $pg .= '<td class=dr>UTC</td>';
  $pg .= "</tr></thead>\n";
  if ($ans['STATUS'] == 'ok')
  {
