@@ -7596,11 +7596,11 @@ int stratifier(proc_instance_t *pi)
 	 * are CPUs */
 	threads = sysconf(_SC_NPROCESSORS_ONLN) / 2 ? : 1;
 	sdata->sshareq = create_ckmsgqs(ckp, "sprocessor", &sshare_process, threads);
-	sdata->ssends = create_ckmsgqs(ckp, "ssender", &ssend_process, threads);
+	sdata->ssends = create_ckmsgq(ckp, "ssender", &ssend_process);
 	sdata->sauthq = create_ckmsgq(ckp, "authoriser", &sauth_process);
 	sdata->stxnq = create_ckmsgq(ckp, "stxnq", &send_transactions);
 	sdata->srecvs = create_ckmsgqs(ckp, "sreceiver", &srecv_process, threads);
-	sdata->ckdbq = create_ckmsgqs(ckp, "ckdbqueue", &ckdbq_process, threads);
+	sdata->ckdbq = create_ckmsgq(ckp, "ckdbqueue", &ckdbq_process);
 	create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
 	read_poolstats(ckp);
 
