@@ -2734,19 +2734,7 @@ retry:
 
 	buf = umsg->buf;
 	LOGDEBUG("Proxy received request: %s", buf);
-	if (likely(buf[0] == '{')) {
-		if (ckp->passthrough)
-			passthrough_add_send(proxi, buf);
-		else {
-			/* Anything remaining should be share submissions */
-			json_t *val = json_loads(buf, 0, NULL);
-
-			if (unlikely(!val))
-				LOGWARNING("Generator received invalid json message: %s", buf);
-			else
-				submit_share(gdata, val);
-		}
-	} else if (cmdmatch(buf, "stats")) {
+	if (cmdmatch(buf, "stats")) {
 		send_stats(gdata, umsg->sockd);
 	} else if (cmdmatch(buf, "list")) {
 		send_list(gdata, umsg->sockd);

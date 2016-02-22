@@ -28,6 +28,7 @@
 #include "uthash.h"
 #include "utlist.h"
 #include "connector.h"
+#include "generator.h"
 
 #define MIN1	60
 #define MIN5	300
@@ -5354,16 +5355,12 @@ static void submit_share(stratum_instance_t *client, const int64_t jobid, const 
 	ckpool_t *ckp = client->ckp;
 	json_t *json_msg;
 	char enonce2[32];
-	char *msg;
 
 	sprintf(enonce2, "%s%s", client->enonce1var, nonce2);
 	JSON_CPACK(json_msg, "{sIsssssssIsIsi}", "jobid", jobid, "nonce2", enonce2,
 			     "ntime", ntime, "nonce", nonce, "client_id", client->id,
 			     "proxy", client->proxyid, "subproxy", client->subproxyid);
-	msg = json_dumps(json_msg, JSON_COMPACT);
-	json_decref(json_msg);
-	send_generator(ckp, msg, GEN_LAX);
-	free(msg);
+	generator_add_send(ckp, json_msg);
 }
 
 static void check_best_diff(ckpool_t *ckp, sdata_t *sdata, user_instance_t *user,
