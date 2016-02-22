@@ -3972,13 +3972,12 @@ retry:
 	} while (!umsg);
 
 	buf = umsg->buf;
-	if (likely(buf[0] == '{')) {
-		/* The bulk of the messages will be received json from the
-		 * connector so look for this first. The srecv_process frees
-		 * the buf heap ram */
+	if (buf[0] == '{') {
+		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+
+		/* This is a message for a node */
 		Close(umsg->sockd);
-		ckmsgq_add(sdata->srecvs, umsg->buf);
-		umsg->buf = NULL;
+		ckmsgq_add(sdata->srecvs, val);
 		goto retry;
 	}
 	if (cmdmatch(buf, "ping")) {
