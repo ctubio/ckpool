@@ -685,7 +685,6 @@ static void *receiver(void *arg)
 	}
 out:
 	/* We shouldn't get here unless there's an error */
-	childsighandler(15);
 	return NULL;
 }
 
@@ -794,7 +793,6 @@ static void *sender(void *arg)
 		mutex_unlock(&cdata->sender_lock);
 	}
 	/* We shouldn't get here unless there's an error */
-	childsighandler(15);
 	return NULL;
 }
 
@@ -1466,13 +1464,15 @@ out:
 	return ret;
 }
 
-int connector(proc_instance_t *pi)
+void *connector(void *arg)
 {
+	proc_instance_t *pi = (proc_instance_t *)arg;
 	cdata_t *cdata = ckzalloc(sizeof(cdata_t));
 	int threads, sockd, ret = 0, i, tries = 0;
 	ckpool_t *ckp = pi->ckp;
 	const int on = 1;
 
+	rename_proc(pi->processname);
 	LOGWARNING("%s connector starting", ckp->name);
 	ckp->cdata = cdata;
 	cdata->ckp = ckp;
@@ -1591,5 +1591,5 @@ int connector(proc_instance_t *pi)
 	ret = connector_loop(pi, cdata);
 out:
 	dealloc(ckp->cdata);
-	return process_exit(ckp, pi, ret);
+	return NULL;
 }

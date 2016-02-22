@@ -1074,7 +1074,7 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int pri
 		set = true;
 	} else
 		set = false;
-	buf = _send_recv_proc(ckp->generator, msg, UNIX_WRITE_TIMEOUT, RPC_TIMEOUT, __FILE__, __func__, __LINE__);
+	buf = _send_recv_proc(&ckp->generator, msg, UNIX_WRITE_TIMEOUT, RPC_TIMEOUT, __FILE__, __func__, __LINE__);
 	if (unlikely(!buf))
 		buf = strdup("failed");
 	if (set)
@@ -3937,7 +3937,7 @@ static void ckdbq_flush(sdata_t *sdata)
 	LOGWARNING("Flushed %d messages from ckdb queue", flushed);
 }
 
-static int stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
+static void stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 {
 	sdata_t *sdata = ckp->sdata;
 	unix_msg_t *umsg = NULL;
@@ -3968,11 +3968,6 @@ retry:
 		}
 
 		umsg = get_unix_msg(pi);
-		if (unlikely(!umsg &&!ping_main(ckp))) {
-			LOGEMERG("Stratifier failed to ping main process, exiting");
-			ret = 1;
-			goto out;
-		}
 	} while (!umsg);
 
 	buf = umsg->buf;
@@ -4060,10 +4055,7 @@ retry:
 
 	Close(umsg->sockd);
 	LOGDEBUG("Stratifier received request: %s", buf);
-	if (cmdmatch(buf, "shutdown")) {
-		ret = 0;
-		goto out;
-	} else if (cmdmatch(buf, "update")) {
+	if (cmdmatch(buf, "update")) {
 		update_base(ckp, GEN_PRIORITY);
 	} else if (cmdmatch(buf, "subscribe")) {
 		/* Proxifier has a new subscription */
@@ -4106,9 +4098,6 @@ retry:
 	} else
 		LOGWARNING("Unhandled stratifier message: %s", buf);
 	goto retry;
-
-out:
-	return ret;
 }
 
 static void *blockupdate(void *arg)
@@ -7519,15 +7508,17 @@ static bool script_address(const char *btcaddress)
 	return btcaddress[0] == '3';
 }
 
-int stratifier(proc_instance_t *pi)
+void *stratifier(void *arg)
 {
+	proc_instance_t *pi = (proc_instance_t *)arg;
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
 	ckpool_t *ckp = pi->ckp;
-	int ret = 1, threads;
 	int64_t randomiser;
 	char *buf = NULL;
 	sdata_t *sdata;
+	int threads;
 
+	rename_proc(pi->processname);
 	LOGWARNING("%s stratifier starting", ckp->name);
 	sdata = ckzalloc(sizeof(sdata_t));
 	ckp->sdata = sdata;
@@ -7536,10 +7527,6 @@ int stratifier(proc_instance_t *pi)
 
 	/* Wait for the generator to have something for us */
 	do {
-		if (!ping_main(ckp)) {
-			ret = 1;
-			goto out;
-		}
 		if (ckp->proxy)
 			break;
 		buf = send_recv_proc(ckp->generator, "ping");
@@ -7622,7 +7609,7 @@ int stratifier(proc_instance_t *pi)
 
 	LOGWARNING("%s stratifier ready", ckp->name);
 
-	ret = stratum_loop(ckp, pi);
+	stratum_loop(ckp, pi);
 out:
 	if (ckp->proxy) {
 		proxy_t *proxy, *tmpproxy;
@@ -7635,5 +7622,5 @@ out:
 		mutex_unlock(&sdata->proxy_lock);
 	}
 	dealloc(ckp->sdata);
-	return process_exit(ckp, pi, ret);
+	return NULL;
 }

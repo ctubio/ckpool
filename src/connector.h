@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Con Kolivas
+ * Copyright 2014-2016 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -10,6 +10,6 @@
 #ifndef CONNECTOR_H
 #define CONNECTOR_H
 
-int connector(proc_instance_t *pi);
+void *connector(void *arg);
 
 #endif /* CONNECTOR_H */
