@@ -1460,6 +1460,7 @@ void *connector(void *arg)
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	cdata_t *cdata = ckzalloc(sizeof(cdata_t));
 	int threads, sockd, ret = 0, i, tries = 0;
+	char newurl[INET6_ADDRSTRLEN], newport[8];
 	ckpool_t *ckp = pi->ckp;
 	const int on = 1;
 
@@ -1468,15 +1469,12 @@ void *connector(void *arg)
 	ckp->cdata = cdata;
 	cdata->ckp = ckp;
 
-	if (!ckp->serverurls)
-		cdata->serverfd = ckalloc(sizeof(int *));
-	else
-		cdata->serverfd = ckalloc(sizeof(int *) * ckp->serverurls);
-
 	if (!ckp->serverurls) {
 		/* No serverurls have been specified. Bind to all interfaces
 		 * on default sockets. */
 		struct sockaddr_in serv_addr;
+
+		cdata->serverfd = ckalloc(sizeof(int *));
 
 		sockd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockd < 0) {
@@ -1509,11 +1507,14 @@ void *connector(void *arg)
 			goto out;
 		}
 		cdata->serverfd[0] = sockd;
+		url_from_socket(sockd, newurl, newport);
+		ASPRINTF(&ckp->serverurl[0], "%s:%s", newurl, newport);
 		ckp->serverurls = 1;
 	} else {
+		cdata->serverfd = ckalloc(sizeof(int *) * ckp->serverurls);
+
 		for (i = 0; i < ckp->serverurls; i++) {
 			char oldurl[INET6_ADDRSTRLEN], oldport[8];
-			char newurl[INET6_ADDRSTRLEN], newport[8];
 			char *serverurl = ckp->serverurl[i];
 
 			if (!url_from_serverurl(serverurl, newurl, newport)) {

@@ -7568,10 +7568,6 @@ void *stratifier(void *arg)
 	if (!ckp->proxy)
 		sdata->blockchange_id = sdata->workbase_id = randomiser;
 
-	if (!ckp->serverurls) {
-		ckp->serverurl[0] = "127.0.0.1";
-		ckp->serverurls = 1;
-	}
 	cklock_init(&sdata->instance_lock);
 	cksem_init(&sdata->update_sem);
 	cksem_post(&sdata->update_sem);
