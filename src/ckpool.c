@@ -1047,15 +1047,9 @@ static void rm_namepid(const proc_instance_t *pi)
 	unlink(s);
 }
 
-static void launch_logger(const proc_instance_t *pi)
+static void launch_logger(ckpool_t *ckp)
 {
-	ckpool_t *ckp = pi->ckp;
-	char loggername[16];
-
-	/* Note that the logger is unique per process so it is the only value
-	 * in ckp that differs between processes */
-	snprintf(loggername, 15, "%clogger", pi->processname[0]);
-	ckp->logger = create_ckmsgq(ckp, loggername, &proclog);
+	ckp->logger = create_ckmsgq(ckp, "logger", &proclog);
 }
 
 static void clean_up(ckpool_t *ckp)
@@ -1866,7 +1860,7 @@ int main(int argc, char **argv)
 		manage_old_instance(&ckp, &ckp.main);
 	write_namepid(&ckp.main);
 	open_process_sock(&ckp, &ckp.main, &ckp.main.us);
-	launch_logger(&ckp.main);
+	launch_logger(&ckp);
 	ckp.logfd = fileno(ckp.logfp);
 
 	ret = sysconf(_SC_OPEN_MAX);
