@@ -20,6 +20,7 @@
 #include "libckpool.h"
 #include "uthash.h"
 #include "utlist.h"
+#include "stratifier.h"
 
 #define MAX_MSGSIZE 1024
 
@@ -529,14 +530,17 @@ reparse:
 		 * do this unlocked as the occasional false negative can be
 		 * filtered by the stratifier. */
 		if (likely(!client->invalid)) {
-			if (!ckp->passthrough || ckp->node)
-				send_proc(ckp->stratifier, s);
+			if (!ckp->passthrough || ckp->node) {
+				stratifier_add_recv(ckp, val);
+				val = NULL;
+			}
 			if (ckp->passthrough)
 				send_proc(ckp->generator, s);
 		}
 
 		free(s);
-		json_decref(val);
+		if (val)
+			json_decref(val);
 	}
 	client->bufofs -= buflen;
 	if (client->bufofs)
@@ -965,17 +969,13 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 		}
 		if (ckp->node) {
 			json_t *val = json_loads(buf, 0, NULL);
-			char *msg;
 
 			if (!val) // Can happen if client sent invalid json message
 				goto out;
 			json_object_set_new_nocheck(val, "client_id", json_integer(client->id));
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 			json_object_set_new_nocheck(val, "server", json_integer(client->server));
-			msg = json_dumps(val, JSON_COMPACT);
-			json_decref(val);
-			send_proc(ckp->stratifier, msg);
-			free(msg);
+			stratifier_add_recv(ckp, val);
 		}
 		if (ckp->redirector && !client->redirected)
 			test_redirector_shares(ckp, client, buf);

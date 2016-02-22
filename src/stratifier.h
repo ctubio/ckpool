@@ -10,6 +10,9 @@
 #ifndef STRATIFIER_H
 #define STRATIFIER_H
 
+#include "ckpool.h"
+
+void stratifier_add_recv(ckpool_t *ckp, json_t *val);
 void *stratifier(void *arg);
 
 #endif /* STRATIFIER_H */

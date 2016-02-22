@@ -3914,7 +3914,7 @@ static void get_poolstats(sdata_t *sdata, int *sockd)
 	_Close(sockd);
 }
 
-static void srecv_process(ckpool_t *ckp, char *buf);
+static void srecv_process(ckpool_t *ckp, json_t *val);
 
 /* For emergency use only, flushes all pending ckdbq messages */
 static void ckdbq_flush(sdata_t *sdata)
@@ -6498,21 +6498,16 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 	parse_method(ckp, sdata, client, client_id, id_val, method, params);
 }
 
-static void srecv_process(ckpool_t *ckp, char *buf)
+static void srecv_process(ckpool_t *ckp, json_t *val)
 {
+	char address[INET6_ADDRSTRLEN], *buf;
 	bool noid = false, dropped = false;
-	char address[INET6_ADDRSTRLEN];
 	sdata_t *sdata = ckp->sdata;
 	stratum_instance_t *client;
 	smsg_t *msg;
-	json_t *val;
 	int server;
 
-	val = json_loads(buf, 0, NULL);
-	if (unlikely(!val)) {
-		LOGWARNING("Received unrecognised non-json message: %s", buf);
-		goto out;
-	}
+	buf = json_dumps(val, JSON_COMPACT);
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	val = json_object_get(msg->json_msg, "client_id");
@@ -6575,8 +6570,14 @@ static void srecv_process(ckpool_t *ckp, char *buf)
 	dec_instance_ref(sdata, client);
 out_freemsg:
 	free_smsg(msg);
-out:
 	free(buf);
+}
+
+void stratifier_add_recv(ckpool_t *ckp, json_t *val)
+{
+	sdata_t *sdata = ckp->sdata;
+
+	ckmsgq_add(sdata->srecvs, val);
 }
 
 static void ssend_process(ckpool_t *ckp, smsg_t *msg)
