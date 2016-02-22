@@ -6299,17 +6299,17 @@ static void send_remote_pong(sdata_t *sdata, stratum_instance_t *client)
 	stratum_add_send(sdata, json_msg, client->id, SM_PONG);
 }
 
-static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf,
-			      stratum_instance_t *client)
+static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratum_instance_t *client)
 {
 	json_t *method_val = json_object_get(val, "method");
+	char *buf = json_dumps(val, 0);
 	const char *method;
 
 	LOGDEBUG("Got remote message %s", buf);
 	method = json_string_value(method_val);
 	if (unlikely(!method_val || !method)) {
 		LOGWARNING("Failed to get method from remote message %s", buf);
-		return;
+		goto out;
 	}
 	if (likely(!safecmp(method, "shares")))
 		parse_remote_shares(ckp, sdata, val, buf);
@@ -6323,6 +6323,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const 
 		send_remote_pong(sdata, client);
 	else
 		LOGWARNING("unrecognised trusted message %s", buf);
+out:
+	free(buf);
 }
 
 static void add_node_txns(sdata_t *sdata, const json_t *val)
@@ -6370,17 +6372,19 @@ static void add_node_txns(sdata_t *sdata, const json_t *val)
 }
 
 /* Entered with client holding ref count */
-static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum_instance_t *client)
+static void node_client_msg(ckpool_t *ckp, json_t *val, stratum_instance_t *client)
 {
 	json_t *params, *method, *res_val, *id_val, *err_val = NULL;
 	int msg_type = node_msg_type(val);
 	sdata_t *sdata = ckp->sdata;
 	json_params_t *jp;
+	char *buf = NULL;
 	int errnum;
 
 	if (msg_type < 0) {
+		buf = json_dumps(val, 0);
 		LOGERR("Missing client %"PRId64" node method from %s", client->id, buf);
-		return;
+		goto out;
 	}
 	LOGDEBUG("Got client %"PRId64" node method %d:%s", client->id, msg_type, stratum_msgs[msg_type]);
 	id_val = json_object_get(val, "id");
@@ -6411,20 +6415,26 @@ static void node_client_msg(ckpool_t *ckp, json_t *val, const char *buf, stratum
 			parse_authorise_result(ckp, sdata, client, res_val);
 			break;
 		case SM_NONE:
+			buf = json_dumps(val, 0);
 			LOGNOTICE("Unrecognised method from client %"PRId64" :%s",
 				  client->id, buf);
 			break;
 		default:
 			break;
 	}
+out:
+	free(buf);
 }
 
-static void parse_node_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
+static void parse_node_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 {
 	int msg_type = node_msg_type(val);
 
 	if (msg_type < 0) {
+		char *buf = json_dumps(val, 0);
+
 		LOGERR("Missing node method from %s", buf);
+		free(buf);
 		return;
 	}
 	LOGDEBUG("Got node method %d:%s", msg_type, stratum_msgs[msg_type]);
@@ -6500,23 +6510,23 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 
 static void srecv_process(ckpool_t *ckp, json_t *val)
 {
-	char address[INET6_ADDRSTRLEN], *buf;
+	char address[INET6_ADDRSTRLEN], *buf = NULL;
 	bool noid = false, dropped = false;
 	sdata_t *sdata = ckp->sdata;
 	stratum_instance_t *client;
 	smsg_t *msg;
 	int server;
 
-	buf = json_dumps(val, JSON_COMPACT);
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	val = json_object_get(msg->json_msg, "client_id");
 	if (unlikely(!val)) {
+		buf = json_dumps(val, JSON_COMPACT);
 		if (ckp->node)
-			parse_node_msg(ckp, sdata, msg->json_msg, buf);
+			parse_node_msg(ckp, sdata, msg->json_msg);
 		else
 			LOGWARNING("Failed to extract client_id from connector json smsg %s", buf);
-		goto out_freemsg;
+		goto out;
 	}
 
 	msg->client_id = json_integer_value(val);
@@ -6524,16 +6534,18 @@ static void srecv_process(ckpool_t *ckp, json_t *val)
 
 	val = json_object_get(msg->json_msg, "address");
 	if (unlikely(!val)) {
+		buf = json_dumps(val, JSON_COMPACT);
 		LOGWARNING("Failed to extract address from connector json smsg %s", buf);
-		goto out_freemsg;
+		goto out;
 	}
 	strcpy(address, json_string_value(val));
 	json_object_clear(val);
 
 	val = json_object_get(msg->json_msg, "server");
 	if (unlikely(!val)) {
+		buf = json_dumps(val, JSON_COMPACT);
 		LOGWARNING("Failed to extract server from connector json smsg %s", buf);
-		goto out_freemsg;
+		goto out;
 	}
 	server = json_integer_value(val);
 	json_object_clear(val);
@@ -6556,19 +6568,19 @@ static void srecv_process(ckpool_t *ckp, json_t *val)
 		LOGNOTICE("Stratifier skipped dropped instance %"PRId64" message from server %d",
 			  msg->client_id, server);
 		connector_drop_client(ckp, msg->client_id);
-		goto out_freemsg;
+		goto out;
 	}
 	if (unlikely(noid))
 		LOGINFO("Stratifier added instance %"PRId64" server %d", client->id, server);
 
 	if (client->remote)
-		parse_trusted_msg(ckp, sdata, msg->json_msg, buf, client);
+		parse_trusted_msg(ckp, sdata, msg->json_msg, client);
 	else if (ckp->node)
-		node_client_msg(ckp, msg->json_msg, buf, client);
+		node_client_msg(ckp, msg->json_msg, client);
 	else
 		parse_instance_msg(ckp, sdata, msg, client);
 	dec_instance_ref(sdata, client);
-out_freemsg:
+out:
 	free_smsg(msg);
 	free(buf);
 }
