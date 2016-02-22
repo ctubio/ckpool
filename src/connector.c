@@ -21,6 +21,7 @@
 #include "uthash.h"
 #include "utlist.h"
 #include "stratifier.h"
+#include "generator.h"
 
 #define MAX_MSGSIZE 1024
 
@@ -363,15 +364,11 @@ static int drop_client(cdata_t *cdata, client_instance_t *client)
 static void generator_drop_client(ckpool_t *ckp, const client_instance_t *client)
 {
 	json_t *val;
-	char *s;
 
 	JSON_CPACK(val, "{si,sI:ss:si:ss:s[]}", "id", 42, "client_id", client->id, "address",
 		   client->address_name, "server", client->server, "method", "mining.term",
 		   "params");
-	s = json_dumps(val, JSON_COMPACT);
-	json_decref(val);
-	send_proc(ckp->generator, s);
-	free(s);
+	generator_add_send(ckp, val);
 }
 
 static void stratifier_drop_id(ckpool_t *ckp, const int64_t id)
@@ -509,8 +506,6 @@ reparse:
 		send_client(cdata, client->id, buf);
 		return false;
 	} else {
-		char *s;
-
 		if (client->passthrough) {
 			int64_t passthrough_id;
 
@@ -524,22 +519,18 @@ reparse:
 			json_object_set_new_nocheck(val, "address", json_string(client->address_name));
 		}
 		json_object_set_new_nocheck(val, "server", json_integer(client->server));
-		s = json_dumps(val, JSON_COMPACT);
 
 		/* Do not send messages of clients we've already dropped. We
 		 * do this unlocked as the occasional false negative can be
 		 * filtered by the stratifier. */
 		if (likely(!client->invalid)) {
-			if (!ckp->passthrough || ckp->node) {
+			if (!ckp->passthrough)
 				stratifier_add_recv(ckp, val);
-				val = NULL;
-			}
+			if (ckp->node)
+				stratifier_add_recv(ckp, json_deep_copy(val));
 			if (ckp->passthrough)
-				send_proc(ckp->generator, s);
-		}
-
-		free(s);
-		if (val)
+				generator_add_send(ckp, val);
+		} else
 			json_decref(val);
 	}
 	client->bufofs -= buflen;
@@ -1357,7 +1348,11 @@ retry:
 	LOGDEBUG("Connector received message: %s", buf);
 	/* The bulk of the messages will be json messages to send to clients
 	 * so look for them first. */
-	if (cmdmatch(buf, "upstream=")) {
+	if (likely(buf[0] == '{')) {
+		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
+
+		ckmsgq_add(cdata->cmpq, val);
+	} else if (cmdmatch(buf, "upstream=")) {
 		char *msg = strdup(buf + 9);
 
 		LOGDEBUG("Upstreaming %s", msg);

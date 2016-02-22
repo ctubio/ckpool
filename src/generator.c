@@ -163,6 +163,8 @@ struct generator_data {
 	mutex_t share_lock;
 	share_msg_t *shares;
 	int64_t share_id;
+
+	proxy_instance_t *current_proxy;
 };
 
 typedef struct generator_data gdata_t;
@@ -1731,14 +1733,37 @@ out:
 	free(pm);
 }
 
-static void passthrough_add_send(proxy_instance_t *proxy, const char *msg)
+static void passthrough_add_send(proxy_instance_t *proxy, char *msg)
 {
 	pass_msg_t *pm = ckzalloc(sizeof(pass_msg_t));
 
 	pm->proxy = proxy;
 	pm->cs = &proxy->cs;
-	ASPRINTF(&pm->msg, "%s\n", msg);
+	pm->msg = msg;
 	ckmsgq_add(proxy->passsends, pm);
+}
+
+void generator_add_send(ckpool_t *ckp, json_t *val)
+{
+	gdata_t *gdata = ckp->gdata;
+	char *buf;
+
+	if (!ckp->passthrough) {
+		submit_share(gdata, val);
+		return;
+	}
+	if (unlikely(!gdata->current_proxy)) {
+		LOGWARNING("No current proxy to send passthrough data to");
+		goto out;
+	}
+	buf = json_dumps(val, JSON_COMPACT | JSON_EOL);
+	if (unlikely(!buf)) {
+		LOGWARNING("Unable to decode json in generator_add_send");
+		goto out;
+	}
+	passthrough_add_send(gdata->current_proxy, buf);
+out:
+	json_decref(val);
 }
 
 static bool proxy_alive(ckpool_t *ckp, proxy_instance_t *proxi, connsock_t *cs,
@@ -2692,7 +2717,7 @@ reconnect:
 	if (!cproxy)
 		goto out;
 	if (proxi != cproxy) {
-		proxi = cproxy;
+		gdata->current_proxy = proxi = cproxy;
 		LOGWARNING("Successfully connected to pool %d %s as proxy%s",
 			   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
 	}
