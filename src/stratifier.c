@@ -27,6 +27,7 @@
 #include "stratifier.h"
 #include "uthash.h"
 #include "utlist.h"
+#include "connector.h"
 
 #define MIN1	60
 #define MIN5	300
@@ -6582,8 +6583,6 @@ void stratifier_add_recv(ckpool_t *ckp, json_t *val)
 
 static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 {
-	char *s;
-
 	if (unlikely(!msg->json_msg)) {
 		LOGERR("Sent null json msg to stratum_sender");
 		free(msg);
@@ -6593,10 +6592,9 @@ static void ssend_process(ckpool_t *ckp, smsg_t *msg)
 	/* Add client_id to the json message and send it to the
 	 * connector process to be delivered */
 	json_object_set_new_nocheck(msg->json_msg, "client_id", json_integer(msg->client_id));
-	s = json_dumps(msg->json_msg, JSON_COMPACT);
-	send_proc(ckp->connector, s);
-	free(s);
-	free_smsg(msg);
+	connector_add_message(ckp, msg->json_msg);
+	/* The connector will free msg->json_msg */
+	free(msg);
 }
 
 static void discard_json_params(json_params_t *jp)

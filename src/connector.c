@@ -1224,16 +1224,10 @@ out:
 	return ret;
 }
 
-static void client_message_processor(ckpool_t *ckp, char *buf)
+static void client_message_processor(ckpool_t *ckp, json_t *json_msg)
 {
-	json_t *json_msg = json_loads(buf, 0, NULL);
 	int64_t client_id;
 	char *msg;
-
-	if (unlikely(!json_msg)) {
-		LOGWARNING("Invalid json message in process_client_msg: %s", buf);
-		goto out;
-	}
 
 	/* Extract the client id from the json message and remove its entry */
 	client_id = json_integer_value(json_object_get(json_msg, "client_id"));
@@ -1246,8 +1240,13 @@ static void client_message_processor(ckpool_t *ckp, char *buf)
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
 	send_client(ckp->cdata, client_id, msg);
 	json_decref(json_msg);
-out:
-	free(buf);
+}
+
+void connector_add_message(ckpool_t *ckp, json_t *val)
+{
+	cdata_t *cdata = ckp->cdata;
+
+	ckmsgq_add(cdata->cmpq, val);
 }
 
 /* Send the passthrough the terminate node.method */
@@ -1358,10 +1357,7 @@ retry:
 	LOGDEBUG("Connector received message: %s", buf);
 	/* The bulk of the messages will be json messages to send to clients
 	 * so look for them first. */
-	if (likely(buf[0] == '{')) {
-		ckmsgq_add(cdata->cmpq, buf);
-		umsg->buf = NULL;
-	} else if (cmdmatch(buf, "upstream=")) {
+	if (cmdmatch(buf, "upstream=")) {
 		char *msg = strdup(buf + 9);
 
 		LOGDEBUG("Upstreaming %s", msg);
