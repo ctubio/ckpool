@@ -7613,16 +7613,8 @@ void *stratifier(void *arg)
 
 	stratum_loop(ckp, pi);
 out:
-	if (ckp->proxy) {
-		proxy_t *proxy, *tmpproxy;
-
-		mutex_lock(&sdata->proxy_lock);
-		HASH_ITER(hh, sdata->proxies, proxy, tmpproxy) {
-			HASH_DEL(sdata->proxies, proxy);
-			dealloc(proxy);
-		}
-		mutex_unlock(&sdata->proxy_lock);
-	}
-	dealloc(ckp->sdata);
+	/* We should never get here unless there's a fatal error */
+	LOGEMERG("Stratifier failure, shutting down");
+	exit(1);
 	return NULL;
 }
