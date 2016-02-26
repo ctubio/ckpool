@@ -2928,6 +2928,8 @@ void *generator(void *arg)
 		proxy_mode(ckp, pi);
 	} else
 		server_mode(ckp, pi);
-	dealloc(ckp->gdata);
+	/* We should never get here unless there's a fatal error */
+	LOGEMERG("Generator failure, shutting down");
+	exit(1);
 	return NULL;
 }
