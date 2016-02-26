@@ -305,13 +305,6 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	cdata->nfds++;
 	ck_wunlock(&cdata->lock);
 
-	event.data.u64 = client->id;
-	event.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
-	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) < 0)) {
-		LOGERR("Failed to epoll_ctl add in accept_client");
-		return 0;
-	}
-
 	/* We increase the ref count on this client as epoll creates a pointer
 	 * to it. We drop that reference when the socket is closed which
 	 * removes it automatically from the epoll list. */
@@ -320,6 +313,14 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	optlen = sizeof(client->sendbufsize);
 	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &client->sendbufsize, &optlen);
 	LOGDEBUG("Client sendbufsize detected as %d", client->sendbufsize);
+
+	event.data.u64 = client->id;
+	event.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) < 0)) {
+		LOGERR("Failed to epoll_ctl add in accept_client");
+		dec_instance_ref(cdata, client);
+		return 0;
+	}
 
 	return 1;
 }
