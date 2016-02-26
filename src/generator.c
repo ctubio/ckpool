@@ -2787,6 +2787,10 @@ static void *server_watchdog(void *arg)
 	ckpool_t *ckp = (ckpool_t *)arg;
 	gdata_t *gdata = ckp->gdata;
 
+	rename_proc("swatchdog");
+
+	pthread_detach(pthread_self());
+
 	while (42) {
 		server_instance_t *best = NULL;
 		ts_t timer_t;
