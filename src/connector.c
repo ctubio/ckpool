@@ -1309,7 +1309,7 @@ static char *connector_stats(cdata_t *cdata, const int runtime)
 	return buf;
 }
 
-static int connector_loop(proc_instance_t *pi, cdata_t *cdata)
+static void connector_loop(proc_instance_t *pi, cdata_t *cdata)
 {
 	unix_msg_t *umsg = NULL;
 	ckpool_t *ckp = pi->ckp;
@@ -1409,8 +1409,6 @@ retry:
 		send_unix_msg(umsg->sockd, msg);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
-	} else if (cmdmatch(buf, "shutdown")) {
-		goto out;
 	} else if (cmdmatch(buf, "passthrough")) {
 		client_instance_t *client;
 
@@ -1450,16 +1448,14 @@ retry:
 	} else
 		LOGWARNING("Unhandled connector message: %s", buf);
 	goto retry;
-out:
-	return ret;
 }
 
 void *connector(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	cdata_t *cdata = ckzalloc(sizeof(cdata_t));
-	int threads, sockd, ret = 0, i, tries = 0;
 	char newurl[INET6_ADDRSTRLEN], newport[8];
+	int threads, sockd, i, tries = 0, ret;
 	ckpool_t *ckp = pi->ckp;
 	const int on = 1;
 
@@ -1478,7 +1474,6 @@ void *connector(void *arg)
 		sockd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockd < 0) {
 			LOGERR("Connector failed to open socket");
-			ret = 1;
 			goto out;
 		}
 		setsockopt(sockd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
@@ -1488,6 +1483,7 @@ void *connector(void *arg)
 		serv_addr.sin_port = htons(ckp->proxy ? 3334 : 3333);
 		do {
 			ret = bind(sockd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+
 			if (!ret)
 				break;
 			LOGWARNING("Connector failed to bind to socket, retrying in 5s");
@@ -1518,7 +1514,6 @@ void *connector(void *arg)
 
 			if (!url_from_serverurl(serverurl, newurl, newport)) {
 				LOGWARNING("Failed to extract resolved url from %s", serverurl);
-				ret = 1;
 				goto out;
 			}
 			sockd = ckp->oldconnfd[i];
@@ -1542,7 +1537,6 @@ void *connector(void *arg)
 
 			if (sockd < 0) {
 				LOGERR("Connector failed to bind to socket for 2 minutes");
-				ret = 1;
 				goto out;
 			}
 			if (listen(sockd, 8192) < 0) {
@@ -1559,10 +1553,9 @@ void *connector(void *arg)
 
 	cdata->cmpq = create_ckmsgq(ckp, "cmpq", &client_message_processor);
 
-	if (ckp->remote && !setup_upstream(ckp, cdata)) {
-		ret = 1;
+	if (ckp->remote && !setup_upstream(ckp, cdata))
 		goto out;
-	}
+
 	cklock_init(&cdata->lock);
 	cdata->pi = pi;
 	cdata->nfds = 0;
@@ -1577,8 +1570,10 @@ void *connector(void *arg)
 	create_pthread(&cdata->pth_receiver, receiver, cdata);
 	cdata->start_time = time(NULL);
 
-	ret = connector_loop(pi, cdata);
+	connector_loop(pi, cdata);
 out:
-	dealloc(ckp->cdata);
+	/* We should never get here unless there's a fatal error */
+	LOGEMERG("Connector failure, shutting down");
+	exit(1);
 	return NULL;
 }
