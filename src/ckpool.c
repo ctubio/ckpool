@@ -286,7 +286,7 @@ unix_msg_t *get_unix_msg(proc_instance_t *pi)
 	return umsg;
 }
 
-void create_unix_receiver(proc_instance_t *pi)
+static void create_unix_receiver(proc_instance_t *pi)
 {
 	pthread_t pth;
 
@@ -1499,6 +1499,7 @@ static void prepare_child(ckpool_t *ckp, proc_instance_t *pi, void *process, cha
 	pi->sockname = pi->processname;
 	create_process_unixsock(pi);
 	create_pthread(&pi->pth_process, process, pi);
+	create_unix_receiver(pi);
 }
 
 #ifdef USE_CKDB

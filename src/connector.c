@@ -1577,8 +1577,6 @@ void *connector(void *arg)
 	create_pthread(&cdata->pth_receiver, receiver, cdata);
 	cdata->start_time = time(NULL);
 
-	create_unix_receiver(pi);
-
 	ret = connector_loop(pi, cdata);
 out:
 	dealloc(ckp->cdata);

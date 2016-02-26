@@ -7609,8 +7609,6 @@ void *stratifier(void *arg)
 	mutex_init(&sdata->share_lock);
 	mutex_init(&sdata->block_lock);
 
-	create_unix_receiver(pi);
-
 	LOGWARNING("%s stratifier ready", ckp->name);
 
 	stratum_loop(ckp, pi);

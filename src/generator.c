@@ -2915,7 +2915,6 @@ void *generator(void *arg)
 	gdata = ckzalloc(sizeof(gdata_t));
 	ckp->gdata = gdata;
 	gdata->ckp = ckp;
-	create_unix_receiver(pi);
 
 	if (ckp->proxy) {
 		char *buf = NULL;
