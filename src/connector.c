@@ -625,8 +625,10 @@ static void *receiver(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
 	struct epoll_event *event = ckzalloc(sizeof(struct epoll_event));
+	ckpool_t *ckp = cdata->ckp;
 	uint64_t serverfds, i;
 	int ret, epfd;
+	char *buf;
 
 	rename_proc("creceiver");
 
@@ -635,7 +637,7 @@ static void *receiver(void *arg)
 		LOGEMERG("FATAL: Failed to create epoll in receiver");
 		goto out;
 	}
-	serverfds = cdata->ckp->serverurls;
+	serverfds = ckp->serverurls;
 	/* Add all the serverfds to the epoll */
 	for (i = 0; i < serverfds; i++) {
 		/* The small values will be less than the first client ids */
@@ -648,8 +650,11 @@ static void *receiver(void *arg)
 		}
 	}
 
-	while (!cdata->accept)
-		cksleep_ms(1);
+	/* Wait for the stratifier to be ready for us */
+	do {
+		buf = send_recv_proc(ckp->stratifier, "ping");
+	} while (!buf);
+	free(buf);
 
 	while (42) {
 		uint64_t edu64;
