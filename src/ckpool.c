@@ -180,11 +180,12 @@ ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, cons
 
 /* Generic function for adding messages to a ckmsgq linked list and signal the
  * ckmsgq parsing thread(s) to wake up and process it. */
-void ckmsgq_add(ckmsgq_t *ckmsgq, void *data)
+void _ckmsgq_add(ckmsgq_t *ckmsgq, void *data, const char *file, const char *func, const int line)
 {
 	ckmsg_t *msg;
 
 	if (unlikely(!ckmsgq)) {
+		LOGWARNING("Sending messages to no queue from %s %s:%d", file, func, line);
 		/* Discard data if we're unlucky enough to be sending it to
 		 * msg queues not set up during start up */
 		free(data);
