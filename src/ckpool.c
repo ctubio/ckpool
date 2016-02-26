@@ -1824,6 +1824,7 @@ int main(int argc, char **argv)
 	ckp.main.sockname = strdup("listener");
 	name_process_sockname(&ckp.main.us, &ckp.main);
 	ckp.oldconnfd = ckzalloc(sizeof(int *) * ckp.serverurls);
+	manage_old_instance(&ckp, &ckp.main);
 	if (ckp.handover) {
 		const char *path = ckp.main.us.path;
 
@@ -1872,8 +1873,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (!ckp.handover)
-		manage_old_instance(&ckp, &ckp.main);
 	write_namepid(&ckp.main);
 	open_process_sock(&ckp, &ckp.main, &ckp.main.us);
 	launch_logger(&ckp);
