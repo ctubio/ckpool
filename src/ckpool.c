@@ -910,7 +910,7 @@ out:
 static void terminate_oldpid(const ckpool_t *ckp, proc_instance_t *pi, const pid_t oldpid)
 {
 	if (!ckp->killold) {
-		quit(1, "Process %s pid %d still exists, start ckpool with -k if you wish to kill it",
+		quit(1, "Process %s pid %d still exists, start ckpool with -H to get a handover or -k if you wish to kill it",
 				pi->processname, oldpid);
 	}
 	LOGNOTICE("Terminating old process %s pid %d", pi->processname, oldpid);
