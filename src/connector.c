@@ -333,12 +333,12 @@ static int __drop_client(cdata_t *cdata, client_instance_t *client)
 		goto out;
 	client->invalid = true;
 	ret = client->fd;
+	/* Closing the fd will automatically remove it from the epoll list */
 	Close(client->fd);
-	epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, ret, NULL);
 	HASH_DEL(cdata->clients, client);
 	DL_APPEND(cdata->dead_clients, client);
 	/* This is the reference to this client's presence in the
-		* epoll list. */
+	 * epoll list. */
 	__dec_instance_ref(client);
 	cdata->dead_generated++;
 out:
