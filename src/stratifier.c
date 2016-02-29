@@ -5765,6 +5765,8 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
 		return;
 	}
+	if (!mindiff)
+		mindiff = ckp->startdiff;
 	if (mindiff < ckp->mindiff)
 		mindiff = ckp->mindiff;
 	if (mindiff == worker->mindiff)
