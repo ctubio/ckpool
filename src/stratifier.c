@@ -5795,10 +5795,10 @@ static json_params_t
 /* Implement support for the diff in the params as well as the originally
  * documented form of placing diff within the method. Needs to be entered with
  * client holding a ref count. */
-static void suggest_diff(stratum_instance_t *client, const char *method, const json_t *params_val)
+static void suggest_diff(ckpool_t *ckp, stratum_instance_t *client, const char *method,
+			 const json_t *params_val)
 {
 	json_t *arr_val = json_array_get(params_val, 0);
-	sdata_t *sdata = client->ckp->sdata;
 	int64_t sdiff;
 
 	if (unlikely(!client_active(client))) {
@@ -5811,16 +5811,16 @@ static void suggest_diff(stratum_instance_t *client, const char *method, const j
 		LOGINFO("Failed to parse suggest_difficulty for client %"PRId64, client->id);
 		return;
 	}
+	/* Clamp suggest diff to global pool mindiff */
+	if (sdiff < ckp->mindiff)
+		sdiff = ckp->mindiff;
 	if (sdiff == client->suggest_diff)
 		return;
 	client->suggest_diff = sdiff;
 	if (client->diff == sdiff)
 		return;
-	if (sdiff < client->ckp->mindiff)
-		client->diff = client->ckp->mindiff;
-	else
-		client->diff = sdiff;
-	stratum_send_diff(sdata, client);
+	client->diff = sdiff;
+	stratum_send_diff(ckp->sdata, client);
 }
 
 /* Send diff first when sending the first stratum template after subscribing */
@@ -6034,7 +6034,7 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 	}
 
 	if (cmdmatch(method, "mining.suggest")) {
-		suggest_diff(client, method, params_val);
+		suggest_diff(ckp, client, method, params_val);
 		return;
 	}
 
