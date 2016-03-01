@@ -5585,8 +5585,8 @@ out_submit:
 out_unlock:
 	ck_runlock(&sdata->workbase_lock);
 
-	/* Accept the lower of new and old diffs until the next update */
-	if (id < client->diff_change_job_id && client->old_diff < client->diff)
+	/* Accept shares of the old diff until the next update */
+	if (id < client->diff_change_job_id)
 		diff = client->old_diff;
 	if (!invalid) {
 		char wdiffsuffix[16];
