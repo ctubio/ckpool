@@ -4812,6 +4812,8 @@ static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindif
 			continue;
 		if (mindiff == client->diff)
 			continue;
+		client->diff_change_job_id = sdata->workbase_id + 1;
+		client->old_diff = client->diff;
 		client->diff = mindiff;
 		stratum_send_diff(sdata, client);
 	}
@@ -5819,6 +5821,8 @@ static void suggest_diff(ckpool_t *ckp, stratum_instance_t *client, const char *
 	client->suggest_diff = sdiff;
 	if (client->diff == sdiff)
 		return;
+	client->diff_change_job_id = client->sdata->workbase_id + 1;
+	client->old_diff = client->diff;
 	client->diff = sdiff;
 	stratum_send_diff(ckp->sdata, client);
 }
