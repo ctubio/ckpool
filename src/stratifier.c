@@ -5158,7 +5158,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	worker_instance_t *worker = client->worker_instance;
 	double tdiff, bdiff, dsps, drr, network_diff, bias;
 	user_instance_t *user = client->user_instance;
-	int64_t next_blockid, optimal;
+	int64_t next_blockid, optimal, mindiff;
 	tv_t now_t;
 
 	mutex_lock(&ckp_sdata->stats_lock);
@@ -5233,8 +5233,13 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	if (drr > 0.15 && drr < 0.4)
 		return;
 
+	/* Client suggest diff overrides worker mindiff */
+	if (client->suggest_diff)
+		mindiff = client->suggest_diff;
+	else
+		mindiff = worker->mindiff;
 	/* Allow slightly lower diffs when users choose their own mindiff */
-	if (worker->mindiff || client->suggest_diff) {
+	if (mindiff) {
 		if (drr < 0.5)
 			return;
 		optimal = lround(dsps * 2.4);
@@ -5242,18 +5247,20 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 		optimal = lround(dsps * 3.33);
 
 	/* Clamp to mindiff ~ network_diff */
-	if (optimal < ckp->mindiff)
-		optimal = ckp->mindiff;
-	/* Client suggest diff overrides worker mindiff */
-	if (client->suggest_diff) {
-		if (optimal < client->suggest_diff)
-			optimal = client->suggest_diff;
-	} else if (optimal < worker->mindiff)
-		optimal = worker->mindiff;
-	if (ckp->maxdiff && optimal > ckp->maxdiff)
-		optimal = ckp->maxdiff;
-	if (optimal > network_diff)
-		optimal = network_diff;
+
+	/* Set to higher of pool mindiff and optimal */
+	optimal = MAX(optimal, ckp->mindiff);
+
+	/* Set to higher of optimal and user chosen diff */
+	optimal = MAX(optimal, mindiff);
+
+	/* Set to lower of optimal and pool maxdiff */
+	if (ckp->maxdiff)
+		optimal = MIN(optimal, ckp->maxdiff);
+
+	/* Set to lower of optimal and network_diff */
+	optimal = MIN(optimal, network_diff);
+
 	if (client->diff == optimal)
 		return;
 
