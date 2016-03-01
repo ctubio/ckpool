@@ -6670,10 +6670,10 @@ static stratum_instance_t *preauth_ref_instance_by_id(sdata_t *sdata, const int6
 static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
-	stratum_instance_t *client;
 	sdata_t *sdata = ckp->sdata;
-	int mindiff, errnum = 0;
-	int64_t client_id;
+	stratum_instance_t *client;
+	int64_t mindiff, client_id;
+	int errnum = 0;
 
 	client_id = jp->client_id;
 
@@ -6703,12 +6703,18 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	steal_json_id(json_msg, jp);
 	stratum_add_send(sdata, json_msg, client_id, SM_AUTHRESULT);
 
-	if (!json_is_true(result_val) || !client->suggest_diff)
+	if (!json_is_true(result_val))
 		goto out;
 
 	/* Update the client now if they have set a valid mindiff different
-	 * from the startdiff */
-	mindiff = MAX(ckp->mindiff, client->suggest_diff);
+	 * from the startdiff. suggest_diff overrides worker mindiff */
+	if (client->suggest_diff)
+		mindiff = client->suggest_diff;
+	else
+		mindiff = client->worker_instance->mindiff;
+	if (!mindiff)
+		goto out;
+	mindiff = MAX(ckp->mindiff, mindiff);
 	if (mindiff != client->diff) {
 		client->diff = mindiff;
 		stratum_send_diff(sdata, client);
