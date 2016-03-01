@@ -4889,7 +4889,6 @@ static int send_recv_auth(stratum_instance_t *client)
 		responselen = strlen(buf);
 	if (likely(responselen > 0)) {
 		char *cmd = NULL, *secondaryuserid = NULL, *response;
-		worker_instance_t *worker = client->worker_instance;
 		json_error_t err_val;
 		json_t *val = NULL;
 		int offset = 0;
@@ -4921,7 +4920,6 @@ static int send_recv_auth(stratum_instance_t *client)
 
 			json_get_string(&secondaryuserid, val, "secondaryuserid");
 			parse_worker_diffs(ckp, worker_array);
-			client->suggest_diff = worker->mindiff;
 			user->auth_time = time(NULL);
 		}
 		if (secondaryuserid && (!safecmp(response, "ok.authorise") ||
@@ -4961,9 +4959,6 @@ static void queue_delayed_auth(stratum_instance_t *client)
 	char cdfield[64];
 	json_t *val;
 	ts_t now;
-
-	/* Read off any cached mindiff from previous auths */
-	client->suggest_diff = client->worker_instance->mindiff;
 
 	ts_realtime(&now);
 	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
@@ -5070,9 +5065,7 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 		/* Preauth workers for the first 10 minutes after the user is
 		 * first authorised by ckdb to avoid floods of worker auths.
 		 * *errnum is implied zero already so ret will be set true */
-		if (user->auth_time && time(NULL) - user->auth_time < 600)
-			client->suggest_diff = client->worker_instance->mindiff;
-		else
+		if (!user->auth_time || time(NULL) - user->auth_time > 600)
 			*errnum = send_recv_auth(client);
 		if (!*errnum)
 			ret = true;
