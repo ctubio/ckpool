@@ -4772,7 +4772,51 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 	return user;
 }
 
-static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff);
+static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
+{
+	stratum_instance_t *client;
+	sdata_t *sdata = ckp->sdata;
+	worker_instance_t *worker;
+	user_instance_t *user;
+
+	/* Find the user first */
+	user = user_by_workername(sdata, workername);
+
+	/* Then find the matching worker user */
+	worker = get_worker(sdata, user, workername);
+
+	if (mindiff < 1) {
+		if (likely(!mindiff)) {
+			worker->mindiff = 0;
+			return;
+		}
+		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
+		return;
+	}
+	if (mindiff < ckp->mindiff)
+		mindiff = ckp->mindiff;
+	if (mindiff == worker->mindiff)
+		return;
+	worker->mindiff = mindiff;
+
+	/* Iterate over all the workers from this user to find any with the
+	 * matching worker that are currently live and send them a new diff
+	 * if we can. Otherwise it will only act as a clamp on next share
+	 * submission. */
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(user->clients, client) {
+		if (client->worker_instance != worker)
+			continue;
+		/* Per connection suggest diff overrides worker mindiff ugh */
+		if (mindiff < client->suggest_diff)
+			continue;
+		if (mindiff == client->diff)
+			continue;
+		client->diff = mindiff;
+		stratum_send_diff(sdata, client);
+	}
+	ck_runlock(&sdata->instance_lock);
+}
 
 static void parse_worker_diffs(ckpool_t *ckp, json_t *worker_array)
 {
@@ -5746,50 +5790,6 @@ static json_params_t
 	jp->id_val = json_deep_copy(id_val);
 	jp->client_id = client_id;
 	return jp;
-}
-
-static void set_worker_mindiff(ckpool_t *ckp, const char *workername, int mindiff)
-{
-	stratum_instance_t *client;
-	sdata_t *sdata = ckp->sdata;
-	worker_instance_t *worker;
-	user_instance_t *user;
-
-	/* Find the user first */
-	user = user_by_workername(sdata, workername);
-
-	/* Then find the matching worker user */
-	worker = get_worker(sdata, user, workername);
-
-	if (mindiff < 0) {
-		LOGINFO("Worker %s requested invalid diff %d", worker->workername, mindiff);
-		return;
-	}
-	if (!mindiff)
-		mindiff = ckp->startdiff;
-	if (mindiff < ckp->mindiff)
-		mindiff = ckp->mindiff;
-	if (mindiff == worker->mindiff)
-		return;
-	worker->mindiff = mindiff;
-
-	/* Iterate over all the workers from this user to find any with the
-	 * matching worker that are currently live and send them a new diff
-	 * if we can. Otherwise it will only act as a clamp on next share
-	 * submission. */
-	ck_rlock(&sdata->instance_lock);
-	DL_FOREACH(user->clients, client) {
-		if (client->worker_instance != worker)
-			continue;
-		/* Per connection suggest diff overrides worker mindiff ugh */
-		if (mindiff < client->suggest_diff)
-			continue;
-		if (mindiff == client->diff)
-			continue;
-		client->diff = mindiff;
-		stratum_send_diff(sdata, client);
-	}
-	ck_runlock(&sdata->instance_lock);
 }
 
 /* Implement support for the diff in the params as well as the originally
