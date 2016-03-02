@@ -305,13 +305,6 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	cdata->nfds++;
 	ck_wunlock(&cdata->lock);
 
-	event.data.u64 = client->id;
-	event.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
-	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) < 0)) {
-		LOGERR("Failed to epoll_ctl add in accept_client");
-		return 0;
-	}
-
 	/* We increase the ref count on this client as epoll creates a pointer
 	 * to it. We drop that reference when the socket is closed which
 	 * removes it automatically from the epoll list. */
@@ -320,6 +313,14 @@ static int accept_client(cdata_t *cdata, const int epfd, const uint64_t server)
 	optlen = sizeof(client->sendbufsize);
 	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &client->sendbufsize, &optlen);
 	LOGDEBUG("Client sendbufsize detected as %d", client->sendbufsize);
+
+	event.data.u64 = client->id;
+	event.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+	if (unlikely(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) < 0)) {
+		LOGERR("Failed to epoll_ctl add in accept_client");
+		dec_instance_ref(cdata, client);
+		return 0;
+	}
 
 	return 1;
 }
@@ -332,12 +333,12 @@ static int __drop_client(cdata_t *cdata, client_instance_t *client)
 		goto out;
 	client->invalid = true;
 	ret = client->fd;
+	/* Closing the fd will automatically remove it from the epoll list */
 	Close(client->fd);
-	epoll_ctl(cdata->epfd, EPOLL_CTL_DEL, ret, NULL);
 	HASH_DEL(cdata->clients, client);
 	DL_APPEND(cdata->dead_clients, client);
 	/* This is the reference to this client's presence in the
-		* epoll list. */
+	 * epoll list. */
 	__dec_instance_ref(client);
 	cdata->dead_generated++;
 out:
@@ -572,22 +573,16 @@ static void client_event_processor(ckpool_t *ckp, struct epoll_event *event)
 		LOGNOTICE("Failed to find client by id %"PRId64" in receiver!", id);
 		goto outnoclient;
 	}
-	if (unlikely(client->invalid))
-		goto out;
 	/* We can have both messages and read hang ups so process the
-		* message first. */
+	 * message first. */
 	if (likely(events & EPOLLIN)) {
 		/* Rearm the client for epoll events if we have successfully
 		 * parsed a message from it */
-		if (parse_client_msg(ckp, cdata, client)) {
-			event->data.u64 = id;
-			event->events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
-			epoll_ctl(cdata->epfd, EPOLL_CTL_MOD, client->fd, event);
-		} else
+		if (unlikely(!parse_client_msg(ckp, cdata, client))) {
 			invalidate_client(ckp, cdata, client);
+			goto out;
+		}
 	}
-	if (unlikely(client->invalid))
-		goto out;
 	if (unlikely(events & EPOLLERR)) {
 		socklen_t errlen = sizeof(int);
 		int error = 0;
@@ -613,6 +608,12 @@ static void client_event_processor(ckpool_t *ckp, struct epoll_event *event)
 		invalidate_client(cdata->pi->ckp, cdata, client);
 	}
 out:
+	if (likely(!client->invalid)) {
+		/* Rearm the fd in the epoll list if it's still active */
+		event->data.u64 = id;
+		event->events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+		epoll_ctl(cdata->epfd, EPOLL_CTL_MOD, client->fd, event);
+	}
 	dec_instance_ref(cdata, client);
 outnoclient:
 	free(event);
@@ -624,8 +625,10 @@ static void *receiver(void *arg)
 {
 	cdata_t *cdata = (cdata_t *)arg;
 	struct epoll_event *event = ckzalloc(sizeof(struct epoll_event));
+	ckpool_t *ckp = cdata->ckp;
 	uint64_t serverfds, i;
 	int ret, epfd;
+	char *buf;
 
 	rename_proc("creceiver");
 
@@ -634,7 +637,7 @@ static void *receiver(void *arg)
 		LOGEMERG("FATAL: Failed to create epoll in receiver");
 		goto out;
 	}
-	serverfds = cdata->ckp->serverurls;
+	serverfds = ckp->serverurls;
 	/* Add all the serverfds to the epoll */
 	for (i = 0; i < serverfds; i++) {
 		/* The small values will be less than the first client ids */
@@ -647,8 +650,11 @@ static void *receiver(void *arg)
 		}
 	}
 
-	while (!cdata->accept)
-		cksleep_ms(1);
+	/* Wait for the stratifier to be ready for us */
+	do {
+		buf = send_recv_proc(ckp->stratifier, "ping");
+	} while (!buf);
+	free(buf);
 
 	while (42) {
 		uint64_t edu64;
@@ -1308,7 +1314,7 @@ static char *connector_stats(cdata_t *cdata, const int runtime)
 	return buf;
 }
 
-static int connector_loop(proc_instance_t *pi, cdata_t *cdata)
+static void connector_loop(proc_instance_t *pi, cdata_t *cdata)
 {
 	unix_msg_t *umsg = NULL;
 	ckpool_t *ckp = pi->ckp;
@@ -1408,8 +1414,6 @@ retry:
 		send_unix_msg(umsg->sockd, msg);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
-	} else if (cmdmatch(buf, "shutdown")) {
-		goto out;
 	} else if (cmdmatch(buf, "passthrough")) {
 		client_instance_t *client;
 
@@ -1449,16 +1453,14 @@ retry:
 	} else
 		LOGWARNING("Unhandled connector message: %s", buf);
 	goto retry;
-out:
-	return ret;
 }
 
 void *connector(void *arg)
 {
 	proc_instance_t *pi = (proc_instance_t *)arg;
 	cdata_t *cdata = ckzalloc(sizeof(cdata_t));
-	int threads, sockd, ret = 0, i, tries = 0;
 	char newurl[INET6_ADDRSTRLEN], newport[8];
+	int threads, sockd, i, tries = 0, ret;
 	ckpool_t *ckp = pi->ckp;
 	const int on = 1;
 
@@ -1477,7 +1479,6 @@ void *connector(void *arg)
 		sockd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockd < 0) {
 			LOGERR("Connector failed to open socket");
-			ret = 1;
 			goto out;
 		}
 		setsockopt(sockd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
@@ -1487,6 +1488,7 @@ void *connector(void *arg)
 		serv_addr.sin_port = htons(ckp->proxy ? 3334 : 3333);
 		do {
 			ret = bind(sockd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+
 			if (!ret)
 				break;
 			LOGWARNING("Connector failed to bind to socket, retrying in 5s");
@@ -1517,7 +1519,6 @@ void *connector(void *arg)
 
 			if (!url_from_serverurl(serverurl, newurl, newport)) {
 				LOGWARNING("Failed to extract resolved url from %s", serverurl);
-				ret = 1;
 				goto out;
 			}
 			sockd = ckp->oldconnfd[i];
@@ -1541,7 +1542,6 @@ void *connector(void *arg)
 
 			if (sockd < 0) {
 				LOGERR("Connector failed to bind to socket for 2 minutes");
-				ret = 1;
 				goto out;
 			}
 			if (listen(sockd, 8192) < 0) {
@@ -1558,10 +1558,9 @@ void *connector(void *arg)
 
 	cdata->cmpq = create_ckmsgq(ckp, "cmpq", &client_message_processor);
 
-	if (ckp->remote && !setup_upstream(ckp, cdata)) {
-		ret = 1;
+	if (ckp->remote && !setup_upstream(ckp, cdata))
 		goto out;
-	}
+
 	cklock_init(&cdata->lock);
 	cdata->pi = pi;
 	cdata->nfds = 0;
@@ -1576,10 +1575,10 @@ void *connector(void *arg)
 	create_pthread(&cdata->pth_receiver, receiver, cdata);
 	cdata->start_time = time(NULL);
 
-	create_unix_receiver(pi);
-
-	ret = connector_loop(pi, cdata);
+	connector_loop(pi, cdata);
 out:
-	dealloc(ckp->cdata);
+	/* We should never get here unless there's a fatal error */
+	LOGEMERG("Connector failure, shutting down");
+	exit(1);
 	return NULL;
 }
