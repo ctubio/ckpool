@@ -50,8 +50,8 @@
  * Consider adding row level locking (a per kitem usage count) if needed */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.4"
-#define CKDB_VERSION DB_VERSION"-1.960"
+#define DB_VERSION "1.0.5"
+#define CKDB_VERSION DB_VERSION"-1.970"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1673,6 +1673,8 @@ typedef struct shares {
 	int32_t errn;
 	char error[TXT_SML+1];
 	char secondaryuserid[TXT_SML+1];
+	char ntime[TXT_SML+1];
+	double minsdiff;
 	HISTORYDATECONTROLFIELDS;
 	int32_t redo; // non-DB field
 	int32_t oldcount; // non-DB field
@@ -1689,6 +1691,13 @@ extern K_STORE *shares_store;
 // shares unexpectedly before the workinfo
 extern K_TREE *shares_early_root;
 extern K_STORE *shares_early_store;
+/* DB stored high sdiff shares N.B. they are duplicated,
+ *  not relinked, since an item can't be in 2 lists
+ * New high shares are placed in both trees then removed from shares_hi_root
+ *  after they are stored in the db */
+extern K_TREE *shares_hi_root;
+extern K_TREE *shares_db_root;
+extern K_STORE *shares_hi_store;
 
 /* Once a share is this old, it can only once more be
     check for it's workinfoid and then be discarded */
@@ -1704,6 +1713,11 @@ extern K_STORE *shares_early_store;
 #define DIFF_VAL(_v) (1.0 - ((double)(_v) / 100.0))
 
 extern double diff_percent;
+
+/* Record shares in the DB >= this
+ * The default of 0 means don't store shares
+ * This is set only via the runtime parameter -D or --minsdiff */
+extern double share_min_sdiff;
 
 // SHAREERRORS shareerrors.id.json={...}
 typedef struct shareerrors {
@@ -3029,10 +3043,14 @@ extern int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstanc
 				char *code, char *inet, tv_t *cd, bool igndup,
 				K_TREE *trf_root);
 extern bool workinfo_fill(PGconn *conn);
-extern bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername,
-			char *clientid, char *errn, char *enonce1, char *nonce2,
-			char *nonce, char *diff, char *sdiff, char *secondaryuserid,
-			char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+extern bool shares_add(PGconn *conn, char *workinfoid, char *username,
+			char *workername, char *clientid, char *errn,
+			char *enonce1, char *nonce2, char *nonce, char *diff,
+			char *sdiff, char *secondaryuserid, char *ntime,
+			char *by, char *code, char *inet, tv_t *cd,
+			K_TREE *trf_root);
+extern bool shares_db(PGconn *conn, K_ITEM *s_item);
+extern bool shares_fill(PGconn *conn);
 extern bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 				char *workername, char *clientid, char *errn,
 				char *error, char *secondaryuserid, char *by,

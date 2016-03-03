@@ -5436,11 +5436,13 @@ K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 			  tv_t *cd, K_TREE *trf_root)
 {
+	PGconn *conn;
 	K_TREE_CTX ctx[1];
 	WORKMARKERS *workmarkers;
-	K_ITEM *wm_item, *wm_last = NULL;
+	K_ITEM *wm_item, *wm_last = NULL, *s_item = NULL;
+	bool ok, did;
+	int count = 0;
 	tv_t now;
-	bool ok;
 
 	K_RLOCK(workmarkers_free);
 	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
@@ -5462,6 +5464,27 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 			LOGWARNING("%s() no READY workmarkers", __func__);
 		return false;
 	}
+
+	conn = dbconnect();
+
+	/* Store all shares in the DB before processing the workmarker
+	 * This way we know that the high shares in the DB will match the start
+	 *  of, or be after the start of, the shares included in the reload
+	 * All duplicate high shares are ignored */
+	count = 0;
+	do {
+		did = false;
+		K_WLOCK(shares_free);
+		s_item = first_in_ktree(shares_hi_root, ctx);
+		K_WUNLOCK(shares_free);
+		if (s_item) {
+			did = true;
+			ok = shares_db(conn, s_item);
+			if (!ok)
+				goto flailed;
+			count++;
+		}
+	} while (did);
 
 	DATA_WORKMARKERS(workmarkers, wm_last);
 
@@ -5486,9 +5509,15 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	 *  payout is being generated
 	 * N.B. this is a long lock since it stores the markersummaries */
 	K_WLOCK(process_pplns_free);
-	ok = sharesummaries_to_markersummaries(NULL, workmarkers, by, code,
+	ok = sharesummaries_to_markersummaries(conn, workmarkers, by, code,
 						inet, &now, trf_root);
 	K_WUNLOCK(process_pplns_free);
+
+flailed:
+	PQfinish(conn);
+
+	if (count > 0)
+		LOGWARNING("%s() Stored: %d high shares", __func__, count);
 
 	return ok;
 }
