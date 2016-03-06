@@ -282,7 +282,7 @@ bool like_address(char *username)
 
 void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t siz, WHERE_FFL_ARGS)
 {
-	char *tmp;
+	char *dot, *tmp;
 
 	switch (typ) {
 		case TYPE_STR:
@@ -310,6 +310,7 @@ void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t s
 			*((int32_t *)data) = atoi(fld);
 			break;
 		case TYPE_TV:
+		case TYPE_TVDB:
 			if (siz != sizeof(tv_t)) {
 				quithere(1, "Field %s tv_t incorrect structure size %d - should be %d"
 						WHERE_FFL,
@@ -319,7 +320,7 @@ void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t s
 			char pm[2];
 			struct tm tm;
 			time_t tim;
-			int n;
+			int n, d;
 			// A timezone looks like: +10 or +09:30 or -05 etc
 			n = sscanf(fld, "%u-%u-%u %u:%u:%u%1[+-]%u:%u",
 					&yyyy, &mm, &dd, &HH, &MM, &SS, pm, &tz, &tzm);
@@ -334,6 +335,23 @@ void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, size_t s
 
 				if (n < 10)
 					tzm = 0;
+
+				// DB uS isn't zero padded on the right
+				if (typ == TYPE_TVDB && uS < 100000) {
+					dot = strchr(fld, '.');
+					if (!dot) {
+						// impossible?
+						quithere(1, "Field %s tv_t missing '.' in  date "
+							 "'%s' (%d)" WHERE_FFL,
+							 nam, fld, n, WHERE_FFL_PASS);
+					}
+					tmp = dot;
+					while (*tmp && *tmp != '+' && *tmp != '-')
+						tmp++;
+					d = (int)(tmp - dot);
+					while (d++ < 7)
+						uS *= 10;
+				}
 			} else if (n < 9)
 				tzm = 0;
 			tm.tm_sec = (int)SS;
@@ -425,6 +443,11 @@ void _txt_to_tv(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_ARGS)
 	_txt_to_data(TYPE_TV, nam, fld, (void *)data, siz, WHERE_FFL_PASS);
 }
 
+void _txt_to_tvdb(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_ARGS)
+{
+	_txt_to_data(TYPE_TVDB, nam, fld, (void *)data, siz, WHERE_FFL_PASS);
+}
+
 // Convert msg S[,nS] to tv_t
 void _txt_to_ctv(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_ARGS)
 {
@@ -459,6 +482,7 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 				siz = INT_BUFSIZ;
 				break;
 			case TYPE_TV:
+			case TYPE_TVDB:
 			case TYPE_TVS:
 			case TYPE_BTV:
 			case TYPE_T:
@@ -495,6 +519,7 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 			snprintf(buf, siz, "%"PRId32, *((uint32_t *)data));
 			break;
 		case TYPE_TV:
+		case TYPE_TVDB:
 			gmtime_r(&(((tv_t *)data)->tv_sec), &tm);
 			snprintf(buf, siz, "%d-%02d-%02d %02d:%02d:%02d.%06ld+00",
 					   tm.tm_year + 1900,

@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-1.970"
+#define CKDB_VERSION DB_VERSION"-1.980"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -252,6 +252,7 @@ enum data_type {
 	TYPE_BIGINT,
 	TYPE_INT,
 	TYPE_TV,
+	TYPE_TVDB,
 	TYPE_BTV,
 	TYPE_TVS,
 	TYPE_CTV,
@@ -269,6 +270,7 @@ enum data_type {
 #define TXT_TO_BIGINT(__nam, __fld, __data) txt_to_bigint(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_INT(__nam, __fld, __data) txt_to_int(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_TV(__nam, __fld, __data) txt_to_tv(__nam, __fld, &(__data), sizeof(__data))
+#define TXT_TO_TVDB(__nam, __fld, __data) txt_to_tvdb(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_CTV(__nam, __fld, __data) txt_to_ctv(__nam, __fld, &(__data), sizeof(__data))
 #define TXT_TO_BLOB(__nam, __fld, __data) txt_to_blob(__nam, __fld, &(__data))
 #define TXT_TO_DOUBLE(__nam, __fld, __data) txt_to_double(__nam, __fld, &(__data), sizeof(__data))
@@ -1684,6 +1686,7 @@ typedef struct shares {
 #define LIMIT_SHARES 0
 #define INIT_SHARES(_item) INIT_GENERIC(_item, shares)
 #define DATA_SHARES(_var, _item) DATA_GENERIC(_var, _item, shares, true)
+#define DATA_SHARES_NULL(_var, _item) DATA_GENERIC(_var, _item, shares, false)
 
 extern K_TREE *shares_root;
 extern K_LIST *shares_free;
@@ -2644,6 +2647,7 @@ extern void _txt_to_data(enum data_type typ, char *nam, char *fld, void *data, s
 #define txt_to_bigint(_nam, _fld, _data, _siz) _txt_to_bigint(_nam, _fld, _data, _siz, WHERE_FFL_HERE)
 #define txt_to_int(_nam, _fld, _data, _siz) _txt_to_int(_nam, _fld, _data, _siz, WHERE_FFL_HERE)
 #define txt_to_tv(_nam, _fld, _data, _siz) _txt_to_tv(_nam, _fld, _data, _siz, WHERE_FFL_HERE)
+#define txt_to_tvdb(_nam, _fld, _data, _siz) _txt_to_tvdb(_nam, _fld, _data, _siz, WHERE_FFL_HERE)
 #define txt_to_ctv(_nam, _fld, _data, _siz) _txt_to_ctv(_nam, _fld, _data, _siz, WHERE_FFL_HERE)
 #define txt_to_blob(_nam, _fld, _data) _txt_to_blob(_nam, _fld, _data, WHERE_FFL_HERE)
 #define txt_to_double(_nam, _fld, _data, _siz) _txt_to_double(_nam, _fld, _data, _siz, WHERE_FFL_HERE)
@@ -2653,6 +2657,7 @@ extern void _txt_to_str(char *nam, char *fld, char data[], size_t siz, WHERE_FFL
 extern void _txt_to_bigint(char *nam, char *fld, int64_t *data, size_t siz, WHERE_FFL_ARGS);
 extern void _txt_to_int(char *nam, char *fld, int32_t *data, size_t siz, WHERE_FFL_ARGS);
 extern void _txt_to_tv(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_ARGS);
+extern void _txt_to_tvdb(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_ARGS);
 // Convert msg S,nS to tv_t
 extern void _txt_to_ctv(char *nam, char *fld, tv_t *data, size_t siz, WHERE_FFL_ARGS);
 extern void _txt_to_blob(char *nam, char *fld, char **data, WHERE_FFL_ARGS);

@@ -56,7 +56,7 @@ char *pqerrmsg(PGconn *conn)
 		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV(CDDB, _fld, (_data)->createdate); \
+		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
 		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -72,7 +72,7 @@ char *pqerrmsg(PGconn *conn)
 		PQ_GET_FLD(_res, _row, EDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV(EDDB, _fld, (_data)->expirydate); \
+		TXT_TO_TVDB(EDDB, _fld, (_data)->expirydate); \
 	} while (0)
 
 #define HISTORYDATEPARAMS(_params, _his_pos, _row) do { \
@@ -89,7 +89,7 @@ char *pqerrmsg(PGconn *conn)
 		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV(CDDB, _fld, (_data)->createdate); \
+		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
 		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -105,7 +105,7 @@ char *pqerrmsg(PGconn *conn)
 		PQ_GET_FLD(_res, _row, MDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV(MDDB, _fld, (_data)->modifydate); \
+		TXT_TO_TVDB(MDDB, _fld, (_data)->modifydate); \
 		PQ_GET_FLD(_res, _row, MBYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -144,7 +144,7 @@ char *pqerrmsg(PGconn *conn)
 		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
-		TXT_TO_TV(CDDB, _fld, (_data)->createdate); \
+		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
 		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -857,7 +857,7 @@ bool users_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "joineddate", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_TV("joineddate", field, row->joineddate);
+		TXT_TO_TVDB("joineddate", field, row->joineddate);
 
 		PQ_GET_FLD(res, i, "passwordhash", field, ok);
 		if (!ok)
@@ -1268,12 +1268,12 @@ bool useratts_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "attdate", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_TV("attdate", field, row->attdate);
+		TXT_TO_TVDB("attdate", field, row->attdate);
 
 		PQ_GET_FLD(res, i, "attdate2", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_TV("attdate2", field, row->attdate2);
+		TXT_TO_TVDB("attdate2", field, row->attdate2);
 
 		HISTORYDATEFLDS(res, i, row, ok);
 		if (!ok)
@@ -2310,7 +2310,7 @@ bool payments_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "paydate", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_TV("paydate", field, row->paydate);
+			TXT_TO_TVDB("paydate", field, row->paydate);
 
 			PQ_GET_FLD(res, i, "payaddress", field, ok);
 			if (!ok)
@@ -2958,7 +2958,7 @@ bool optioncontrol_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "activationdate", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_TV("activationdate", field, row->activationdate);
+		TXT_TO_TVDB("activationdate", field, row->activationdate);
 
 		PQ_GET_FLD(res, i, "activationheight", field, ok);
 		if (!ok)
@@ -3733,7 +3733,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 				// Store them in advance - always
 				add_to_ktree(shares_hi_root, s2_item);
 				add_to_ktree(shares_db_root, s2_item);
-				k_add_head(shares_hi_store, s_item);
+				k_add_head(shares_hi_store, s2_item);
 			} else {
 				k_add_head(shares_free, s2_item);
 				s2_item = NULL;
@@ -6667,7 +6667,7 @@ bool payouts_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "lastshareacc", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_TV("lastshareacc", field, row->lastshareacc);
+		TXT_TO_TVDB("lastshareacc", field, row->lastshareacc);
 
 		PQ_GET_FLD(res, i, "stats", field, ok);
 		if (!ok)
@@ -7884,22 +7884,22 @@ bool markersummary_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "firstshare", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_TV("firstshare", field, row->firstshare);
+			TXT_TO_TVDB("firstshare", field, row->firstshare);
 
 			PQ_GET_FLD(res, i, "lastshare", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_TV("lastshare", field, row->lastshare);
+			TXT_TO_TVDB("lastshare", field, row->lastshare);
 
 			PQ_GET_FLD(res, i, "firstshareacc", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_TV("firstshareacc", field, row->firstshareacc);
+			TXT_TO_TVDB("firstshareacc", field, row->firstshareacc);
 
 			PQ_GET_FLD(res, i, "lastshareacc", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_TV("lastshareacc", field, row->lastshareacc);
+			TXT_TO_TVDB("lastshareacc", field, row->lastshareacc);
 
 			PQ_GET_FLD(res, i, "lastdiffacc", field, ok);
 			if (!ok)
