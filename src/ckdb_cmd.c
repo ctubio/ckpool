@@ -7551,48 +7551,51 @@ static char *cmd_locks(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return strdup(reply);
 }
 
-static void event_tree(K_TREE *event_tree, char *list, char *reply, size_t siz,
-			char *buf, size_t *off, size_t *len, int *rows)
+static void event_tree(K_TREE *the_tree, char *list, char *reply, size_t siz,
+			char **buf, size_t *off, size_t *len, int *rows)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *e_item;
 	EVENTS *e;
 
-	e_item = first_in_ktree(event_tree, ctx);
+	LOGDEBUG(">%s() tree='%s' list='%s'", __func__, the_tree->name, list);
+	e_item = first_in_ktree(the_tree, ctx);
 	while (e_item) {
 		DATA_EVENTS(e, e_item);
 		if (CURRENT(&(e->expirydate))) {
 			snprintf(reply, siz, "list:%d=%s%c",
 				 *rows, list, FLDSEP);
-			APPEND_REALLOC(buf, *off, *len, reply);
+			APPEND_REALLOC(*buf, *off, *len, reply);
 
 			snprintf(reply, siz, "id:%d=%d%c",
 				 *rows, e->id, FLDSEP);
-			APPEND_REALLOC(buf, *off, *len, reply);
+			APPEND_REALLOC(*buf, *off, *len, reply);
 
 			snprintf(reply, siz, "user:%d=%s%c",
 				 *rows, e->createby, FLDSEP);
-			APPEND_REALLOC(buf, *off, *len, reply);
+			APPEND_REALLOC(*buf, *off, *len, reply);
 
-			if (event_tree == events_ipc_root) {
+			if (the_tree == events_ipc_root) {
 				snprintf(reply, siz, "ipc:%d=%s%c",
 					 *rows, e->ipc, FLDSEP);
-				APPEND_REALLOC(buf, *off, *len, reply);
+				APPEND_REALLOC(*buf, *off, *len, reply);
 			} else {
 				snprintf(reply, siz, "ip:%d=%s%c",
 					 *rows, e->createinet, FLDSEP);
-				APPEND_REALLOC(buf, *off, *len, reply);
+				APPEND_REALLOC(*buf, *off, *len, reply);
 			}
 
-			if (event_tree == events_hash_root) {
+			if (the_tree == events_hash_root) {
 				snprintf(reply, siz, "hash:%d=%.8s%c",
 					 *rows, e->hash, FLDSEP);
-				APPEND_REALLOC(buf, *off, *len, reply);
+				APPEND_REALLOC(*buf, *off, *len, reply);
 			}
 
 			snprintf(reply, siz, CDTRF":%d=%ld%c",
-				 (*rows)++, e->createdate.tv_sec, FLDSEP);
-			APPEND_REALLOC(buf, *off, *len, reply);
+				 *rows, e->createdate.tv_sec, FLDSEP);
+			APPEND_REALLOC(*buf, *off, *len, reply);
+
+			(*rows)++;
 		}
 		e_item = next_in_ktree(ctx);
 	}
@@ -7718,22 +7721,22 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_RLOCK(events_free);
 		if (all || strcmp(list, "user") == 0) {
 			one = true;
-			event_tree(events_user_root, "user", reply, siz, buf,
+			event_tree(events_user_root, "user", reply, siz, &buf,
 				   &off, &len, &rows);
 		}
 		if (all || strcmp(list, "ip") == 0) {
 			one = true;
-			event_tree(events_ip_root, "ip", reply, siz, buf,
+			event_tree(events_ip_root, "ip", reply, siz, &buf,
 				   &off, &len, &rows);
 		}
 		if (all || strcmp(list, "ipc") == 0) {
 			one = true;
-			event_tree(events_ipc_root, "ipc", reply, siz, buf,
+			event_tree(events_ipc_root, "ipc", reply, siz, &buf,
 				   &off, &len, &rows);
 		}
 		if (all || strcmp(list, "hash") == 0) {
 			one = true;
-			event_tree(events_hash_root, "hash", reply, siz, buf,
+			event_tree(events_hash_root, "hash", reply, siz, &buf,
 				   &off, &len, &rows);
 		}
 		K_RUNLOCK(events_free);
