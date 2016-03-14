@@ -8039,6 +8039,72 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+// High Share actions
+static char *cmd_high(PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *cd, K_TREE *trf_root)
+{
+	bool conned = false;
+	K_TREE_CTX ctx[1];
+	K_ITEM *i_action, *s_item = NULL;
+	char *action;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char *buf = NULL;
+	int count = 0;
+	bool ok, did;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_action = require_name(trf_root, "action", 1, NULL, reply, siz);
+	if (!i_action)
+		return strdup(reply);
+	action = transfer_data(i_action);
+
+	if (strcasecmp(action, "store") == 0) {
+		/* Store the shares_hi_root list in the db now,
+		 * rather than wait for a shift process to do it */
+		if (!conn) {
+			conn = dbconnect();
+			conned = true;
+		}
+		count = 0;
+		do {
+			did = false;
+			K_WLOCK(shares_free);
+			s_item = first_in_ktree(shares_hi_root, ctx);
+			K_WUNLOCK(shares_free);
+			if (s_item) {
+				did = true;
+				ok = shares_db(conn, s_item);
+				if (!ok)
+					break;
+				count++;
+			}
+		} while (did);
+		if (conned)
+			PQfinish(conn);
+		if (count) {
+			LOGWARNING("%s() Stored: %d high shares",
+				   __func__, count);
+		} else
+			LOGWARNING("%s() No high shares to store", __func__);
+
+		if (ok)
+			snprintf(reply, siz, "ok.stored %d", count);
+		else
+			snprintf(reply, siz, "DBERR.stored %d", count);
+		return strdup(reply);
+	} else {
+		snprintf(reply, siz, "unknown action '%s'", action);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+
+	return buf;
+}
+
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -8150,5 +8216,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_QUERY,	"query",	false,	false,	cmd_query,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_LOCKS,	"locks",	false,	false,	cmd_locks,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_EVENTS,	"events",	false,	false,	cmd_events,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_HIGH,	"high",		false,	false,	cmd_high,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

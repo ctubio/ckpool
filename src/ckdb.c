@@ -10,11 +10,8 @@
 
 #include "ckdb.h"
 
-/* TODO: any tree/list accessed in new threads needs
- *  to ensure all code using those trees/lists use locks
- * This code's lock implementation is equivalent to table level locking
+/* This code's lock implementation is equivalent to table level locking
  * Consider adding row level locking (a per kitem usage count) if needed
- * TODO: verify all tables with multithread access are locked
  */
 
 /* Startup
@@ -4449,6 +4446,7 @@ static void *socketer(__maybe_unused void *arg)
 				case CMD_USERINFO:
 				case CMD_LOCKS:
 				case CMD_EVENTS:
+				case CMD_HIGH:
 					msgline->sockd = sockd;
 					sockd = -1;
 					K_WLOCK(workqueue_free);
@@ -4709,6 +4707,7 @@ static void reload_line(PGconn *conn, char *filename, uint64_t count, char *buf)
 			case CMD_QUERY:
 			case CMD_LOCKS:
 			case CMD_EVENTS:
+			case CMD_HIGH:
 				LOGERR("%s() INVALID message line %"PRIu64
 					" ignored '%.42s...",
 					__func__, count,
