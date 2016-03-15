@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-1.982"
+#define CKDB_VERSION DB_VERSION"-1.983"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1974,6 +1974,11 @@ extern K_LIST *process_pplns_free;
 #define PAYOUTS_REJECT 'R'
 #define PAYOUTS_REJECT_STR "R"
 #define PAYREJECT(_status) ((_status)[0] == PAYOUTS_REJECT)
+
+// UserAtts to hold payouts
+#define HOLD_PAYOUTS "HoldPayouts"
+#define HOLD_ADDRESS "hold"
+#define NONE_ADDRESS "none"
 
 // Default number of shifts (payouts) to display on web
 #define SHIFTS_DEFAULT 99

@@ -4761,7 +4761,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char *block_extra, *marks_status = EMPTY;
 	size_t siz = sizeof(reply);
 	K_ITEM *i_height;
-	K_ITEM b_look, *b_item, *p_item, *mp_item, *pay_item, *u_item;
+	K_ITEM b_look, *b_item, *p_item, *mp_item, *pay_item, *u_item, *ua_item;
 	K_ITEM *w_item;
 	MININGPAYOUTS *miningpayouts;
 	PAYMENTS *payments;
@@ -4920,6 +4920,9 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 				goto shazbot;
 			}
 			DATA_USERS(users, u_item);
+			K_RLOCK(useratts_free);
+			ua_item = find_useratts(miningpayouts->userid, HOLD_PAYOUTS);
+			K_RUNLOCK(useratts_free);
 
 			K_RLOCK(payments_free);
 			pay_item = find_first_paypayid(miningpayouts->userid,
@@ -4936,7 +4939,8 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 						 "amount:%d=%"PRId64"%c"
 						 "diffacc:%d=%.1f%c",
 						 rows, payments->subname, FLDSEP,
-						 rows, payments->payaddress, FLDSEP,
+						 rows, ua_item ? HOLD_ADDRESS :
+						  payments->payaddress, FLDSEP,
 						 rows, payments->amount, FLDSEP,
 						 rows, payments->diffacc, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
@@ -4954,7 +4958,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 "amount:%d=%"PRId64"%c"
 					 "diffacc:%d=%.1f%c",
 					 rows, users->username, FLDSEP,
-					 rows, "none", FLDSEP,
+					 rows, NONE_ADDRESS, FLDSEP,
 					 rows, miningpayouts->amount, FLDSEP,
 					 rows, miningpayouts->diffacc, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
