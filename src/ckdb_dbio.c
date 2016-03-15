@@ -3640,6 +3640,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	USERS *users;
 	bool ok = false;
 	char *st = NULL;
+	int errn_int;
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
@@ -3648,10 +3649,13 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	FREENULL(st);
 
 	TXT_TO_DOUBLE("sdiff", sdiff, sdiff_amt);
+	TXT_TO_INT("errn", errn, errn_int);
 
 	K_WLOCK(shares_free);
 	s_item = k_unlink_head(shares_free);
-	if (share_min_sdiff > 0 && sdiff_amt >= share_min_sdiff)
+	// Don't store duplicates since they will already exist
+	if (errn_int != SE_DUPE && share_min_sdiff > 0 &&
+	    sdiff_amt >= share_min_sdiff)
 		s2_item = k_unlink_head(shares_free);
 	K_WUNLOCK(shares_free);
 
