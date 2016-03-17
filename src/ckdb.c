@@ -128,6 +128,7 @@ static char *status_chars = "|/-\\";
 
 static char *restorefrom;
 
+static bool ignore_seq = false;
 bool genpayout_auto;
 bool markersummary_auto;
 
@@ -2680,6 +2681,9 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 	bool dupall, dupcmd;
 	char *st = NULL;
 
+	if (ignore_seq)
+		return ckdb_cmds[msgline->which_cmds].cmd_val;
+
 	dupall = update_seq(SEQ_ALL, msgline->n_seqall, msgline->n_seqstt,
 			    msgline->n_seqpid, SEQALL, &(msgline->now),
 			    &(msgline->cd), msgline->code,
@@ -3095,7 +3099,8 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 		if (confirm_check_createdate)
 			check_createdate_ccl(msgline->cmd, &(msgline->cd));
 		if (seqall) {
-			setup_seq(seqall, msgline);
+			if (!ignore_seq)
+				setup_seq(seqall, msgline);
 			free(cmdptr);
 			return ckdb_cmds[msgline->which_cmds].cmd_val;
 		} else {
@@ -5821,7 +5826,7 @@ static void check_restore_dir(char *name)
 
 static struct option long_options[] = {
 	// script to call when alerts happen
-	{ "alert",		required_argument,	0,	'c' },
+	{ "alert",		required_argument,	0,	'a' },
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
 	{ "minsdiff",		required_argument,	0,	'D' },
@@ -5830,6 +5835,9 @@ static struct option long_options[] = {
 	{ "generate",		no_argument,		0,	'g' },
 	{ "help",		no_argument,		0,	'h' },
 	{ "pool-instance",	required_argument,	0,	'i' },
+	// only use 'I' for reloading lots of known valid data via CKDB,
+	// DON'T use when connected to ckpool
+	{ "ignore-seq",		required_argument,	0,	'I' },
 	{ "killold",		no_argument,		0,	'k' },
 	{ "loglevel",		required_argument,	0,	'l' },
 	// marker = enable mark/workmarker/markersummary auto generation
@@ -5880,7 +5888,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:c:d:D:ghi:kl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:c:d:D:ghi:I:kl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'a':
 				len = strlen(optarg);
@@ -5921,14 +5929,6 @@ int main(int argc, char **argv)
 						optarg);
 				}
 				break;
-			/* WARNING - enabling -i will require a DB data update
-			 *  if you've used ckdb before 1.920
-			 * All (old) marks and workmarkers in the DB will need
-			 *  to have poolinstance set to the given -i value
-			 *  since they will be blank */
-			case 'i':
-				poolinstance = (const char *)strdup(optarg);
-				break;
 			case 'g':
 				genpayout_auto = true;
 				break;
@@ -5949,6 +5949,17 @@ int main(int argc, char **argv)
 						printf("-%c | --%s\n", jopt->val, jopt->name);
 				}
 				exit(0);
+			/* WARNING - enabling -i will require a DB data update
+			 *  if you've used ckdb before 1.920
+			 * All (old) marks and workmarkers in the DB will need
+			 *  to have poolinstance set to the given -i value
+			 *  since they will be blank */
+			case 'i':
+				poolinstance = (const char *)strdup(optarg);
+				break;
+			case 'I':
+				ignore_seq = true;
+				break;
 			case 'k':
 				ckp.killold = true;
 				break;
