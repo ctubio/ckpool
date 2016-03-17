@@ -3625,7 +3625,7 @@ discard:
 static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 				      tv_t *good_cd, K_TREE *trf_root);
 
-// DB Shares are stored by by the summariser to ensure the reload is correct
+// DB Shares are stored by the summariser to ensure the reload is correct
 bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername,
 		char *clientid, char *errn, char *enonce1, char *nonce2,
 		char *nonce, char *diff, char *sdiff, char *secondaryuserid,
@@ -3640,7 +3640,6 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	USERS *users;
 	bool ok = false;
 	char *st = NULL;
-	int errn_int;
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
@@ -3649,13 +3648,10 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	FREENULL(st);
 
 	TXT_TO_DOUBLE("sdiff", sdiff, sdiff_amt);
-	TXT_TO_INT("errn", errn, errn_int);
 
 	K_WLOCK(shares_free);
 	s_item = k_unlink_head(shares_free);
-	// Don't store duplicates since they will already exist
-	if (errn_int != SE_DUPE && share_min_sdiff > 0 &&
-	    sdiff_amt >= share_min_sdiff)
+	if (share_min_sdiff > 0 && sdiff_amt >= share_min_sdiff)
 		s2_item = k_unlink_head(shares_free);
 	K_WUNLOCK(shares_free);
 
@@ -3731,7 +3727,9 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		add_to_ktree(shares_early_root, s_item);
 		k_add_head(shares_early_store, s_item);
 		if (s2_item) {
-			// Just ignore duplicates
+			/* Just ignore duplicates - this matches the DB index
+			   N.B. a duplicate share doesn't have to be SE_DUPE,
+				two shares can be SE_NONE and SE_STALE */
 			tmp_item = find_in_ktree(shares_db_root, s2_item, ctx);
 			if (tmp_item == NULL) {
 				// Store them in advance - always

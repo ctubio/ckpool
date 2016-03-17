@@ -1204,8 +1204,8 @@ static void alloc_storage()
 	shares_root = new_ktree(NULL, cmp_shares, shares_free);
 	shares_early_root = new_ktree("SharesEarly", cmp_shares, shares_free);
 	shares_hi_store = k_new_store(shares_free);
-	shares_hi_root = new_ktree("SharesHi", cmp_shares, shares_free);
-	shares_db_root = new_ktree("SharesDB", cmp_shares, shares_free);
+	shares_hi_root = new_ktree("SharesHi", cmp_shares_db, shares_free);
+	shares_db_root = new_ktree("SharesDB", cmp_shares_db, shares_free);
 
 	shareerrors_free = k_new_list("ShareErrors", sizeof(SHAREERRORS),
 					ALLOC_SHAREERRORS, LIMIT_SHAREERRORS,

@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-1.984"
+#define CKDB_VERSION DB_VERSION"-1.985"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2814,6 +2814,7 @@ extern bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by,
 extern double coinbase_reward(int32_t height);
 extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
+extern cmp_t cmp_shares_db(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b);
 extern void dsp_sharesummary(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_sharesummary(K_ITEM *a, K_ITEM *b);
