@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-1.987"
+#define CKDB_VERSION DB_VERSION"-1.988"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2428,7 +2428,8 @@ extern K_TREE *markersummary_pool_root;
 extern K_STORE *markersummary_pool_store;
 
 // The markerid load start for markersummary
-extern char *mark_start;
+extern char mark_start_type;
+extern int64_t mark_start;
 
 // WORKMARKERS
 typedef struct workmarkers {

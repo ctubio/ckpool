@@ -7755,16 +7755,85 @@ bool markersummary_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item = NULL, *p_item;
+	K_ITEM *item = NULL, *p_item, *wm_item = NULL;
+	K_TREE_CTX ctx[1];
+	char cd_buf[DATE_BUFSIZ];
+	char *cd = NULL, *what = NULL;
 	int n, t, i, p_n;
 	MARKERSUMMARY *row, *p_row;
+	WORKMARKERS *workmarkers;
 	char *params[1];
 	char *field;
 	char *sel;
 	int fields = 20, par = 0;
+	int64_t ms = 0, amt = 0;
 	bool ok = false;
+	tv_t old;
 
 	LOGDEBUG("%s(): select", __func__);
+
+	if (mark_start < 0)
+		mark_start = 0;
+	else {
+		amt = ms = mark_start;
+		switch (mark_start_type) {
+			case 'D': // mark_start days
+				setnow(&old);
+				old.tv_sec -= 60 * 60 * 24 * ms;
+				K_RLOCK(workmarkers_free);
+				wm_item = last_in_ktree(workmarkers_root, ctx);
+				while (wm_item) {
+					// Newest processed workmarker <= old
+					DATA_WORKMARKERS(workmarkers, wm_item);
+					if (CURRENT(&(workmarkers->expirydate)) &&
+					    WMPROCESSED(workmarkers->status) &&
+					    !tv_newer(&old, &(workmarkers->createdate)))
+						break;
+					wm_item = prev_in_ktree(ctx);
+				}
+				if (!wm_item)
+					mark_start = 0;
+				else {
+					mark_start = workmarkers->markerid;
+					tv_to_buf(&(workmarkers->createdate),
+						  cd_buf, sizeof(cd_buf));
+					cd = cd_buf;
+					what = "days";
+				}
+				K_RUNLOCK(workmarkers_free);
+				break;
+			case 'S': // mark_start shifts (workmarkers)
+				K_RLOCK(workmarkers_free);
+				wm_item = last_in_ktree(workmarkers_root, ctx);
+				while (wm_item) {
+					DATA_WORKMARKERS(workmarkers, wm_item);
+					if (CURRENT(&(workmarkers->expirydate)) &&
+					    WMPROCESSED(workmarkers->status)) {
+						ms--;
+						if (ms <= 0)
+							break;
+					}
+					wm_item = prev_in_ktree(ctx);
+				}
+				if (!wm_item)
+					mark_start = 0;
+				else {
+					mark_start = workmarkers->markerid;
+					tv_to_buf(&(workmarkers->createdate),
+						  cd_buf, sizeof(cd_buf));
+					cd = cd_buf;
+					what = "shifts";
+				}
+				K_RUNLOCK(workmarkers_free);
+				break;
+			case 'M': // markerid = mark_start
+				break;
+			default:
+				/* Not possible unless ckdb.c is different
+				 *  in which case it will just use mark_start */
+				break;
+		}
+	}
 
 	// TODO: limit how far back
 	sel = "declare ws cursor for select "
@@ -7774,14 +7843,16 @@ bool markersummary_fill(PGconn *conn)
 		"lastshareacc,lastdiffacc"
 		MODIFYDATECONTROL
 		" from markersummary where markerid>=$1";
+
 	par = 0;
-	if (mark_start)
-		params[par++] = mark_start;
-	else
-		params[par++] = "0";
+	params[par++] = bigint_to_buf(mark_start, NULL, 0);
 	PARCHK(par, params);
 
 	LOGWARNING("%s(): loading from markerid>=%s", __func__, params[0]);
+	if (cd) {
+		LOGWARNING(" ... %s = %s >= %"PRId64" %s",
+			   params[0], cd, amt, what);
+	}
 
 	printf(TICK_PREFIX"ms 0\r");
 	fflush(stdout);
@@ -8015,6 +8086,10 @@ bool markersummary_fill(PGconn *conn)
 flail:
 	res = PQexec(conn, "Commit", CKPQ_READ);
 	PQclear(res);
+
+	for (i = 0; i < par; i++)
+		free(params[i]);
+	par = 0;
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);

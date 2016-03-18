@@ -595,7 +595,8 @@ K_TREE *markersummary_pool_root;
 K_STORE *markersummary_pool_store;
 
 // The markerid load start for markersummary
-char *mark_start = NULL;
+char mark_start_type = '\0';
+int64_t mark_start = -1;
 
 // WORKMARKERS
 K_TREE *workmarkers_root;
@@ -5996,7 +5997,29 @@ int main(int argc, char **argv)
 				markersummary_auto = true;
 				break;
 			case 'M':
-				mark_start = strdup(optarg);
+				{
+					bool ok = true;
+					switch (optarg[0]) {
+						case 'D': // Days * mark_start
+							mark_start_type = 'D';
+							mark_start = atoll(optarg+1);
+							break;
+						case 'S': // Shifts * mark_start
+							mark_start_type = 'S';
+							mark_start = atoll(optarg+1);
+							break;
+						case 'M': // Markerid = mark_start
+							mark_start_type = 'M';
+							mark_start = atoll(optarg+1);
+							break;
+						default:
+							ok = false;
+							break;
+					}
+					if (!ok || mark_start <= 0)
+						quit(1, "Invalid -M must be D, S or"
+							" M followed by a number>0");
+				}
 				break;
 			case 'n':
 				ckp.name = strdup(optarg);
