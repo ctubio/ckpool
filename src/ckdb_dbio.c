@@ -3858,15 +3858,50 @@ bool shares_fill(PGconn *conn)
 {
 	ExecStatusType rescode;
 	PGresult *res;
-	K_ITEM *item = NULL;
+	K_TREE_CTX ctx[1];
+	K_ITEM *item = NULL, *wi_item;
+	WORKINFO *workinfo = NULL;
 	SHARES *row;
 	int n, t, i;
 	char *field;
 	char *sel = NULL;
-	int fields = 14;
+	char *params[1];
+	int fields = 14, par = 0;
 	bool ok = false;
+	int64_t workinfoid;
+	tv_t old;
 
 	LOGDEBUG("%s(): select", __func__);
+
+	if (shares_begin >= 0)
+		workinfoid = shares_begin;
+	else {
+		/* Workinfo is already loaded
+		 * CKDB doesn't currently use shares_db in processing,
+		 *  but make sure we have enough to avoid loading duplicates
+		 * 1 day should be more than enough for normal running,
+		 *  however, if more than 1 day is needed,
+		 *  use -b to set the shares_begin workinfoid */
+		setnow(&old);
+		old.tv_sec -= 60 * 60 * 24; // 1 day
+		K_RLOCK(workinfo_free);
+		wi_item = last_in_ktree(workinfo_root, ctx);
+		while (wi_item) {
+			DATA_WORKINFO(workinfo, wi_item);
+			if (!tv_newer(&old, &(workinfo->createdate)))
+				break;
+			wi_item = prev_in_ktree(ctx);
+		}
+		if (wi_item)
+			workinfoid = workinfo->workinfoid;
+		else {
+			// none old enough, so just load from them all
+			workinfoid = 0;
+		}
+		K_RUNLOCK(workinfo_free);
+	}
+
+	LOGWARNING("%s(): loading from workinfoid>=%"PRId64, __func__, workinfoid);
 
 	printf(TICK_PREFIX"sh 0\r");
 	fflush(stdout);
@@ -3875,7 +3910,10 @@ bool shares_fill(PGconn *conn)
 		"workinfoid,userid,workername,clientid,enonce1,nonce2,nonce,"
 		"diff,sdiff,errn,error,secondaryuserid,ntime,minsdiff"
 		HISTORYDATECONTROL
-		" from shares";
+		" from shares where workinfoid>=$1";
+	par = 0;
+	params[par++] = bigint_to_buf(workinfoid, NULL, 0);
+	PARCHK(par, params);
 
 	res = PQexec(conn, "Begin", CKPQ_READ);
 	rescode = PQresultStatus(res);
@@ -3893,7 +3931,7 @@ bool shares_fill(PGconn *conn)
 		goto flail;
 	}
 
-	res = PQexec(conn, sel, CKPQ_READ);
+	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
 	rescode = PQresultStatus(res);
 	PQclear(res);
 	if (!PGOK(rescode)) {

@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-1.986"
+#define CKDB_VERSION DB_VERSION"-1.987"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1722,6 +1722,9 @@ extern double diff_percent;
  * The default of 0 means don't store shares
  * This is set only via the runtime parameter -D or --minsdiff */
 extern double share_min_sdiff;
+
+// workinfoid to start loading shares, unset = shares_fill() decides
+extern int64_t shares_begin;
 
 // SHAREERRORS shareerrors.id.json={...}
 typedef struct shareerrors {

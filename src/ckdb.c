@@ -436,6 +436,7 @@ K_STORE *shares_hi_store;
 
 double diff_percent = DIFF_VAL(DIFF_PERCENT_DEFAULT);
 double share_min_sdiff = 0;
+int64_t shares_begin = -1;
 
 // SHAREERRORS shareerrors.id.json={...}
 K_TREE *shareerrors_root;
@@ -1728,6 +1729,9 @@ static bool setup_data()
 	mutex_init(&wq_waitlock);
 	cond_init(&wq_waitcond);
 
+	LOGWARNING("%sSequence processing is %s",
+		   ignore_seq ? "ALERT: " : "",
+		   ignore_seq ? "Off" : "On");
 	LOGWARNING("%sStartup payout generation state is %s",
 		   genpayout_auto ? "" : "WARNING: ",
 		   genpayout_auto ? "On" : "Off");
@@ -2682,6 +2686,12 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 	char *st = NULL;
 
 	if (ignore_seq)
+		return ckdb_cmds[msgline->which_cmds].cmd_val;
+
+	/* If non-seqall data was in a CCL reload file,
+	 *  it can't be processed by update_seq(), so don't */
+	if (msgline->n_seqall == 0 && msgline->n_seqstt == 0 &&
+	    msgline->n_seqpid == 0)
 		return ckdb_cmds[msgline->which_cmds].cmd_val;
 
 	dupall = update_seq(SEQ_ALL, msgline->n_seqall, msgline->n_seqstt,
@@ -5827,6 +5837,8 @@ static void check_restore_dir(char *name)
 static struct option long_options[] = {
 	// script to call when alerts happen
 	{ "alert",		required_argument,	0,	'a' },
+	// workinfo to start shares_fill() default is 1 day
+	{ "shares-begin",	required_argument,	0,	'b' },
 	{ "config",		required_argument,	0,	'c' },
 	{ "dbname",		required_argument,	0,	'd' },
 	{ "minsdiff",		required_argument,	0,	'D' },
@@ -5888,7 +5900,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:c:d:D:ghi:I:kl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:c:d:D:ghi:Ikl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'a':
 				len = strlen(optarg);
@@ -5898,6 +5910,16 @@ int main(int argc, char **argv)
 						(int)len, MAX_ALERT_CMD);
 				ckdb_alert_cmd = strdup(optarg);
 				break;
+			case 'b':
+				{
+					int64_t beg = atoll(optarg);
+					if (beg < 0) {
+						quit(1, "Invalid shares begin "
+						     "%"PRId64" - must be >= 0",
+						     beg);
+					}
+					shares_begin = beg;
+				}
 			case 'c':
 				ckp.config = strdup(optarg);
 				break;
