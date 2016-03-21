@@ -108,7 +108,8 @@ What: <input type=text name=what size=10 value='$wh'>
 	$pg .= '<td class=dr>#</td>';
 	$pg .= '<td class=dl>List</td>';
 	$pg .= '<td class=dr>ID</td>';
-	$pg .= '<td class=dr>User</td>';
+	$pg .= '<td class=dl>IDName</td>';
+	$pg .= '<td class=dl>User</td>';
 	$pg .= '<td class=dr>IP</td>';
 	$pg .= '<td class=dr>IPc</td>';
 	$pg .= '<td class=dr>Hash</td>';
@@ -131,7 +132,8 @@ What: <input type=text name=what size=10 value='$wh'>
 			$pg .= "<td class=dr>$j</td>";
 			$pg .= '<td class=dl>'.$ans['list:'.$i].'</td>';
 			$pg .= '<td class=dr>'.$ans['id:'.$i].'</td>';
-			$pg .= '<td class=dr>'.$ans['user:'.$i].'</td>';
+			$pg .= '<td class=dl>'.$ans['idname:'.$i].'</td>';
+			$pg .= '<td class=dl>'.$ans['user:'.$i].'</td>';
 			$pg .= '<td class=dr>'.isans($ans, 'ip:'.$i).'</td>';
 			$pg .= '<td class=dr>'.isans($ans, 'ipc:'.$i).'</td>';
 			$pg .= '<td class=dr>'.isans($ans, 'hash:'.$i).'</td>';
@@ -151,7 +153,7 @@ What: <input type=text name=what size=10 value='$wh'>
 	$pg .= '<td class=dr>#</td>';
 	$pg .= '<td class=dl>Key</td>';
 	$pg .= '<td class=dr>ID</td>';
-	$pg .= '<td class=dr>IDName</td>';
+	$pg .= '<td class=dl>IDName</td>';
 	$pg .= '<td class=dr>Hour UTC</td>';
 	$pg .= '<td class=dl>Count</td>';
 	$pg .= "</tr></thead>\n";
@@ -172,7 +174,7 @@ What: <input type=text name=what size=10 value='$wh'>
 			$pg .= "<td class=dr>$j</td>";
 			$pg .= '<td class=dl>'.$ans['key:'.$i].'</td>';
 			$pg .= '<td class=dr>'.$ans['id:'.$i].'</td>';
-			$pg .= '<td class=dr>'.$ans['idname:'.$i].'</td>';
+			$pg .= '<td class=dl>'.$ans['idname:'.$i].'</td>';
 			$pg .= '<td class=dr>'.gmdate('j/M H:i:s',$ans['hour:'.$i]*3600).'</td>';
 			$co = '';
 			for ($k = 0; $k < 60; $k++)

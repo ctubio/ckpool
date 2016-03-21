@@ -7570,11 +7570,12 @@ static void event_tree(K_TREE *the_tree, char *list, char *reply, size_t siz,
 			snprintf(reply, siz, "list:%d=%s%c",
 				 *rows, list, FLDSEP);
 			APPEND_REALLOC(*buf, *off, *len, reply);
-
 			snprintf(reply, siz, "id:%d=%d%c",
 				 *rows, e->id, FLDSEP);
 			APPEND_REALLOC(*buf, *off, *len, reply);
-
+			snprintf(reply, siz, "idname:%d=%s%c",
+				 *rows, e_limits[e->id].name, FLDSEP);
+			APPEND_REALLOC(*buf, *off, *len, reply);
 			snprintf(reply, siz, "user:%d=%s%c",
 				 *rows, e->createby, FLDSEP);
 			APPEND_REALLOC(*buf, *off, *len, reply);
