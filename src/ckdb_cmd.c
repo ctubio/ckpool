@@ -7612,8 +7612,9 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 			__maybe_unused tv_t *cd, K_TREE *trf_root)
 {
 	K_ITEM *i_action, *i_cmd, *i_list, *i_ip, *i_eventname, *i_lifetime;
-	K_ITEM *i_des, *i_item, *next_item;
+	K_ITEM *i_des, *i_item, *next_item, *o_item;
 	K_TREE_CTX ctx[1];
+	OVENTS *ovents;
 	IPS *ips;
 	char *action, *alert_cmd, *list, *ip, *eventname, *des;
 	char reply[1024] = "";
@@ -7621,7 +7622,7 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024] = "";
 	char *buf = NULL;
 	size_t len, off;
-	int i, rows, oldlife, lifetime;
+	int i, rows, oldlife, lifetime, vid, min;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
@@ -8033,6 +8034,50 @@ static char *cmd_events(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_WUNLOCK(ips_free);
 		APPEND_REALLOC_INIT(buf, off, len);
 		snprintf(tmp, sizeof(tmp), "ok.expired %d", rows);
+		APPEND_REALLOC(buf, off, len, tmp);
+	} else if (strcasecmp(action, "ovents") == 0) {
+		/* List the ovent tree contents
+		 * Output can be large - check web Admin->ckp for tree sizes */
+		bool got;
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, "ok.");
+		rows = 0;
+		K_RLOCK(ovents_free);
+		o_item = first_in_ktree(ovents_root, ctx);
+		while (o_item) {
+			DATA_OVENTS(ovents, o_item);
+			for (vid = 0; o_limits[vid].name; vid++) {
+				got = false;
+				for (min = 0; min < 60; min++) {
+					if (ovents->count[IDMIN(vid, min)]) {
+						if (!got) {
+							snprintf(reply, siz, "key:%d=%s%c",
+								 rows, ovents->key, FLDSEP);
+							APPEND_REALLOC(buf, off, len, reply);
+							snprintf(reply, siz, "id:%d=%d%c",
+								 rows, vid, FLDSEP);
+							APPEND_REALLOC(buf, off, len, reply);
+							snprintf(reply, siz, "idname:%d=%s%c",
+								 rows, o_limits[vid].name, FLDSEP);
+							APPEND_REALLOC(buf, off, len, reply);
+							snprintf(reply, siz, "hour:%d=%d%c",
+								 rows, ovents->hour, FLDSEP);
+							APPEND_REALLOC(buf, off, len, reply);
+							got = true;
+						}
+						snprintf(reply, siz, "min%02d:%d=%d%c",
+							 min, rows, ovents->count[IDMIN(vid, min)],
+							 FLDSEP);
+						APPEND_REALLOC(buf, off, len, reply);
+					}
+				}
+				if (got)
+					rows++;
+			}
+			o_item = next_in_ktree(ctx);
+		}
+		K_RUNLOCK(ovents_free);
+		snprintf(tmp, sizeof(tmp), "rows=%d", rows);
 		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
 		snprintf(reply, siz, "unknown action '%s'", action);
