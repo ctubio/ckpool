@@ -20,7 +20,7 @@ What: <input type=text name=what size=10 value='$wh'>
 	$other = array('event_limits_hash_lifetime',
 			'ovent_limits_ipc_factor');
 
-	$pg .= "<br><br><table callpadding=0 cellspacing=0 border=0>\n";
+	$pg .= "<br><br><table cellpadding=0 cellspacing=0 border=0>\n";
 	$pg .= '<thead><tr class=title>';
 	$pg .= '<td class=dr>#</td>';
 	$pg .= '<td class=dl>Name</td>';
@@ -60,7 +60,7 @@ What: <input type=text name=what size=10 value='$wh'>
 			'ip_hi_time_limit' => 'IPHiLim',
 			'lifetime' => 'Life');
 
-	$pg .= "<br><br><table callpadding=0 cellspacing=0 border=0>\n";
+	$pg .= "<br><br><table cellpadding=0 cellspacing=0 border=0>\n";
 	$pg .= '<thead><tr class=title>';
 	$pg .= '<td class=dr>#</td>';
 	$pg .= '<td class=dl>Name</td>';
@@ -103,7 +103,7 @@ What: <input type=text name=what size=10 value='$wh'>
  {
 	$ans = eventCmd($user, array('action' => 'events', 'list' => $wh));
 
-	$pg .= "<br><br><table callpadding=0 cellspacing=0 border=0>\n";
+	$pg .= "<br><br><table cellpadding=0 cellspacing=0 border=0>\n";
 	$pg .= '<thead><tr class=title>';
 	$pg .= '<td class=dr>#</td>';
 	$pg .= '<td class=dl>List</td>';
@@ -148,7 +148,7 @@ What: <input type=text name=what size=10 value='$wh'>
  {
 	$ans = eventCmd($user, array('action' => 'ovents'));
 
-	$pg .= "<br><br><table callpadding=0 cellspacing=0 border=0>\n";
+	$pg .= "<br><br><table cellpadding=0 cellspacing=0 border=0>\n";
 	$pg .= '<thead><tr class=title>';
 	$pg .= '<td class=dr>#</td>';
 	$pg .= '<td class=dl>Key</td>';
