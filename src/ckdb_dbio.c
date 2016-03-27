@@ -7100,7 +7100,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		char *useragent, char *preauth, char *by, char *code,
 		char *inet, tv_t *cd, K_TREE *trf_root,
 		bool addressuser, USERS **users, WORKERS **workers,
-		int *event)
+		int *event, bool reload_data)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *a_item, *u_item, *w_item;
@@ -7131,7 +7131,8 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 				 __func__,
 				 st = safe_text_nonull(username));
 			FREENULL(st);
-			*event = events_add(EVENTID_INVAUTH, trf_root);
+			if (!reload_data)
+				*event = events_add(EVENTID_INVAUTH, trf_root);
 		}
 		if (!u_item)
 			goto unitem;

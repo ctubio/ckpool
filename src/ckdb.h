@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-1.990"
+#define CKDB_VERSION DB_VERSION"-2.000"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1037,13 +1037,64 @@ typedef struct msgline {
 
 #define ALLOC_MSGLINE 8192
 #define LIMIT_MSGLINE 0
-#define CULL_MSGLINE 16
+#define CULL_MSGLINE 8
 #define INIT_MSGLINE(_item) INIT_GENERIC(_item, msgline)
 #define DATA_MSGLINE(_var, _item) DATA_GENERIC(_var, _item, msgline, true)
 #define DATA_MSGLINE_NULL(_var, _item) DATA_GENERIC(_var, _item, msgline, false)
 
 extern K_LIST *msgline_free;
 extern K_STORE *msgline_store;
+
+// BREAKQUEUE
+typedef struct breakqueue {
+	char *buf;
+	tv_t now;
+	int seqentryflags;
+	int sockd;
+	enum cmd_values cmdnum;
+	K_ITEM *ml_item;
+	uint64_t count;
+	char *filename;
+} BREAKQUEUE;
+
+#define ALLOC_BREAKQUEUE 16384
+#define LIMIT_BREAKQUEUE 0
+#define CULL_BREAKQUEUE 4
+#define INIT_BREAKQUEUE(_item) INIT_GENERIC(_item, breakqueue)
+#define DATA_BREAKQUEUE(_var, _item) DATA_GENERIC(_var, _item, breakqueue, true)
+
+/* If a breaker() thread's done break queue count hits the LIMIT, or is empty,
+ *  it will sleep for SLEEP ms
+ * So this means that with a single breaker() thread,
+ *  it can process at most LIMIT records per SLEEP ms
+ *  or: 1000 * LIMIT / SLEEP records per second
+ * For N breaker() threads, that would mean between 1 and N times that value
+ *  dependent upon the random time spacing of the N thread sleeps
+ * However, also note that LIMIT defines how much RAM can be used by
+ *  the break queues, so a limit is required
+ *  A breakqueue item can get quite large since it includes both buf
+ *   and ml_item (which has the transfer data) in the 'done' queue
+ * Of course the processing speed of the ml_items will also decide how big the
+ *  break queue count can get
+ * Note that if the CMD queues get too large they will be too slow responding
+ *  to the sockets that sent the message, however the CMD ml_item processing
+ *  responds immediately before processing the ml_item for all but ADDRAUTH,
+ *  AUTHORISE and HEARTBEAT
+ * The reload also uses this limit when filling the reload break queue
+ *  thus limiting the line processing of reload files
+ */
+// 16300,42 equated to single thread limitation of ~388k per second
+#define RELOAD_QUEUE_LIMIT 16300
+#define RELOAD_QUEUE_SLEEP 42
+#define CMD_QUEUE_LIMIT 16300
+#define CMD_QUEUE_SLEEP 42
+
+extern K_LIST *breakqueue_free;
+extern K_STORE *reload_breakqueue_store;
+extern K_STORE *reload_done_breakqueue_store;
+extern K_STORE *cmd_breakqueue_store;
+extern K_STORE *cmd_done_breakqueue_store;
+extern int max_sockd_count;
 
 // WORKQUEUE
 typedef struct workqueue {
@@ -1093,7 +1144,7 @@ typedef struct transfer {
 // Suggest malloc use MMAP - 1913 = largest under 2MB
 #define ALLOC_TRANSFER 1913
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 64
+#define CULL_TRANSFER 32
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
@@ -3124,7 +3175,7 @@ extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
 			char *useragent, char *preauth, char *by, char *code,
 			char *inet, tv_t *cd, K_TREE *trf_root,
 			bool addressuser, USERS **users, WORKERS **workers,
-			int *event);
+			int *event, bool reload_data);
 extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 				char *elapsed, char *users, char *workers,
 				char *hashrate, char *hashrate5m,
@@ -3192,7 +3243,7 @@ struct CMDS {
 	bool noid; // doesn't require an id
 	bool createdate; // requires a createdate
 	char *(*func)(PGconn *, char *, char *, tv_t *, char *, char *,
-			char *, tv_t *, K_TREE *);
+			char *, tv_t *, K_TREE *, bool);
 	enum seq_num seq;
 	int access;
 };
