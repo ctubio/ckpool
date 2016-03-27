@@ -5550,6 +5550,7 @@ static void *listener(void *arg)
 		if (wq_item) {
 			wqgot++;
 			process_queued(conn, wq_item);
+			tick();
 		}
 
 		if (left == 0 && wq_stt.tv_sec != 0L) {
