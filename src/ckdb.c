@@ -837,6 +837,17 @@ static void check_createdate_ccl(char *cmd, tv_t *cd)
 	STRNCPY(last_cmd, cmd);
 }
 
+void _ckdb_unix_msg(int sockd, const char *msg, WHERE_FFL_ARGS)
+{
+	bool ok;
+
+	ok = _send_unix_msg(sockd, msg, UNIX_WRITE_TIMEOUT, WHERE_FFL_PASS);
+	if (!ok) {
+		LOGWARNING(" msg was %.42s%s", msg ? : nullstr,
+						msg ? "..." : EMPTY);
+	}
+}
+
 static uint64_t ticks;
 static time_t last_tick;
 
@@ -4334,7 +4345,7 @@ static void process_sockd(PGconn *conn, K_ITEM *wq_item)
 	snprintf(rep, siz, "%s.%ld.%s",
 		 msgline->id,
 		 msgline->now.tv_sec, ans);
-	send_unix_msg(msgline->sockd, rep);
+	ckdb_unix_msg(msgline->sockd, rep);
 	close(msgline->sockd);
 	K_WLOCK(breakqueue_free);
 	sockd_count--;
@@ -4478,7 +4489,7 @@ static void *process_socket(void *arg)
 					 "%s.%ld.?.",
 					 msgline->id,
 					 bq->now.tv_sec);
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				break;
 			case CMD_ALERTEVENT:
 			case CMD_ALERTOVENT:
@@ -4490,7 +4501,7 @@ static void *process_socket(void *arg)
 					tmp = reply_event(EVENTID_NONE, reply);
 				else
 					tmp = reply_ovent(OVENTID_NONE, reply);
-				send_unix_msg(bq->sockd, tmp);
+				ckdb_unix_msg(bq->sockd, tmp);
 				FREENULL(tmp);
 				break;
 			case CMD_TERMINATE:
@@ -4501,7 +4512,7 @@ static void *process_socket(void *arg)
 					 "%s.%ld.ok.exiting",
 					 msgline->id,
 					 bq->now.tv_sec);
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				everyone_die = true;
 				break;
 			case CMD_PING:
@@ -4511,7 +4522,7 @@ static void *process_socket(void *arg)
 					 "%s.%ld.ok.pong",
 					 msgline->id,
 					 bq->now.tv_sec);
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				break;
 			case CMD_VERSION:
 				LOGDEBUG("Listener received"
@@ -4521,7 +4532,7 @@ static void *process_socket(void *arg)
 					 msgline->id,
 					 bq->now.tv_sec,
 					 CKDB_VERSION);
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				break;
 			case CMD_LOGLEVEL:
 				if (!*(msgline->id)) {
@@ -4565,7 +4576,7 @@ static void *process_socket(void *arg)
 						 " %d currently %d B",
 						 loglevel, oldloglevel);
 				}
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				break;
 			case CMD_FLUSH:
 				LOGDEBUG("Listener received"
@@ -4573,7 +4584,7 @@ static void *process_socket(void *arg)
 				snprintf(reply, sizeof(reply),
 					 "%s.%ld.ok.splash",
 					 msgline->id, bq->now.tv_sec);
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				fflush(stdout);
 				fflush(stderr);
 				if (global_ckp && global_ckp->logfd)
@@ -4638,7 +4649,7 @@ static void *process_socket(void *arg)
 						 msgline->id,
 						 bq->now.tv_sec,
 						 msgline->cmd);
-					send_unix_msg(bq->sockd, reply);
+					ckdb_unix_msg(bq->sockd, reply);
 				} else {
 					msgline->sockd = bq->sockd;
 					bq->sockd = -1;
@@ -4683,7 +4694,7 @@ static void *process_socket(void *arg)
 				snprintf(rep, siz, "%s.%ld.%s",
 					 msgline->id,
 					 bq->now.tv_sec, ans);
-				send_unix_msg(bq->sockd, rep);
+				ckdb_unix_msg(bq->sockd, rep);
 				FREENULL(ans);
 				FREENULL(rep);
 				replied = true;
@@ -4705,7 +4716,7 @@ static void *process_socket(void *arg)
 						 "%s.%ld.ok.queued",
 						 msgline->id,
 						 bq->now.tv_sec);
-					send_unix_msg(bq->sockd, reply);
+					ckdb_unix_msg(bq->sockd, reply);
 				}
 
 				K_WLOCK(workqueue_free);
@@ -4746,7 +4757,7 @@ static void *process_socket(void *arg)
 					 "%s.%ld.failed.code",
 					 msgline->id,
 					 bq->now.tv_sec);
-				send_unix_msg(bq->sockd, reply);
+				ckdb_unix_msg(bq->sockd, reply);
 				break;
 		}
 		if (bq->sockd >= 0) {
