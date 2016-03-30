@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.002"
+#define CKDB_VERSION DB_VERSION"-2.003"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1111,6 +1111,8 @@ typedef struct workqueue {
 #define DATA_WORKQUEUE(_var, _item) DATA_GENERIC(_var, _item, workqueue, true)
 
 extern K_LIST *workqueue_free;
+// pool0 is all pool data during the reload
+extern K_STORE *pool0_workqueue_store;
 extern K_STORE *pool_workqueue_store;
 extern K_STORE *cmd_workqueue_store;
 extern K_STORE *btc_workqueue_store;
