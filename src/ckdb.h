@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.003"
+#define CKDB_VERSION DB_VERSION"-2.004"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1083,17 +1083,22 @@ typedef struct breakqueue {
  * The reload also uses this limit when filling the reload break queue
  *  thus limiting the line processing of reload files
  */
-// 16300,42 equated to single thread limitation of ~388k per second
 #define RELOAD_QUEUE_LIMIT 16300
 #define RELOAD_QUEUE_SLEEP 42
-#define CMD_QUEUE_LIMIT 16300
-#define CMD_QUEUE_SLEEP 42
+// Don't really limit the cmd queue
+#define CMD_QUEUE_LIMIT 1048500
+#define CMD_QUEUE_SLEEP 1
 
 extern K_LIST *breakqueue_free;
 extern K_STORE *reload_breakqueue_store;
 extern K_STORE *reload_done_breakqueue_store;
 extern K_STORE *cmd_breakqueue_store;
 extern K_STORE *cmd_done_breakqueue_store;
+
+// Locked access with breakqueue_free
+extern int reload_processing;
+extern int cmd_processing;
+extern int sockd_count;
 extern int max_sockd_count;
 
 // WORKQUEUE
@@ -1116,8 +1121,10 @@ extern K_STORE *pool0_workqueue_store;
 extern K_STORE *pool_workqueue_store;
 extern K_STORE *cmd_workqueue_store;
 extern K_STORE *btc_workqueue_store;
-extern mutex_t wq_waitlock;
-extern pthread_cond_t wq_waitcond;
+// this counter ensures we don't switch early from pool0 to pool
+extern int pool0_left;
+extern int pool0_tot;
+extern int pool0_discarded;
 
 // HEARTBEATQUEUE
 typedef struct heartbeatqueue {
