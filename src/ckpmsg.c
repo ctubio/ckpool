@@ -1,5 +1,6 @@
 /*
  * Copyright 2014-2016 Con Kolivas
+ * Copyright 2014-2016 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -14,6 +15,23 @@
 #include <unistd.h>
 
 #include "libckpool.h"
+
+static int msg_loglevel = LOG_DEBUG;
+
+void logmsg(int loglevel, const char *fmt, ...)
+{
+	va_list ap;
+	char *buf;
+
+	if (loglevel <= msg_loglevel) {
+		va_start(ap, fmt);
+		VASPRINTF(&buf, fmt, ap);
+		va_end(ap);
+
+		printf("%s\n", buf);
+		free(buf);
+	}
+}
 
 void mkstamp(char *stamp, size_t siz)
 {
@@ -57,12 +75,28 @@ int main(int argc, char **argv)
 	char *name = NULL, *socket_dir = NULL, *buf = NULL, *sockname = "listener";
 	int tmo1 = RECV_UNIX_TIMEOUT1;
 	int tmo2 = RECV_UNIX_TIMEOUT2;
-	bool proxy = false;
+	bool proxy = false, counter = false;
 	char stamp[128];
-	int c;
+	int c, count;
 
-	while ((c = getopt(argc, argv, "N:n:s:pt:T:")) != -1) {
+	while ((c = getopt(argc, argv, "cl:N:n:ps:t:T:")) != -1) {
 		switch(c) {
+			/* You'd normally disable most logmsg with -l 3 to
+			 * only see the counter */
+			case 'c':
+				counter = true;
+				break;
+			case 'l':
+				msg_loglevel = atoi(optarg);
+				if (msg_loglevel < LOG_EMERG ||
+				    msg_loglevel > LOG_DEBUG) {
+					quit(1, "Invalid loglevel: %d (range %d"
+						" - %d)",
+						msg_loglevel,
+						LOG_EMERG,
+						LOG_DEBUG);
+				}
+				break;
 			/* Allows us to specify which process or socket to
 			 * talk to. */
 			case 'N':
@@ -71,11 +105,11 @@ int main(int argc, char **argv)
 			case 'n':
 				name = strdup(optarg);
 				break;
-			case 's':
-				socket_dir = strdup(optarg);
-				break;
 			case 'p':
 				proxy = true;
+				break;
+			case 's':
+				socket_dir = strdup(optarg);
 				break;
 			case 't':
 				tmo1 = atoi(optarg);
@@ -99,6 +133,7 @@ int main(int argc, char **argv)
 	trail_slash(&socket_dir);
 	realloc_strcat(&socket_dir, sockname);
 
+	count = 0;
 	while (42) {
 		int sockd, len;
 		size_t n;
@@ -106,7 +141,7 @@ int main(int argc, char **argv)
 		dealloc(buf);
 		len = getline(&buf, &n, stdin);
 		if (len == -1) {
-			LOGERR("Failed to get a valid line");
+			LOGNOTICE("Failed to get a valid line");
 			break;
 		}
 		mkstamp(stamp, sizeof(stamp));
@@ -135,11 +170,18 @@ int main(int argc, char **argv)
 		buf = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
 		close(sockd);
 		if (!buf) {
-			LOGERR("Received empty message");
+			LOGERR("Received empty reply");
 			continue;
 		}
 		mkstamp(stamp, sizeof(stamp));
 		LOGMSGSIZ(65536, LOG_NOTICE, "%s Received response: %s", stamp, buf);
+
+		if (counter) {
+			if ((++count % 100) == 0) {
+				printf("%8d\r", count);
+				fflush(stdout);
+			}
+		}
 	}
 
 	dealloc(buf);
