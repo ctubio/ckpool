@@ -4832,7 +4832,8 @@ int check_events(EVENTS *events)
 	DATA_EVENTS_NULL(e, e_item);
 	count = 0;
 	// Remember the first username
-	STRNCPY(createby, e->createby);
+	if (e_item)
+		STRNCPY(createby, e->createby);
 	user2 = false;
 	while (e_item && e->id == events->id &&
 	       strcmp(e->createinet, events->createinet) == 0 &&
@@ -4891,7 +4892,8 @@ int check_events(EVENTS *events)
 	DATA_EVENTS_NULL(e, e_item);
 	count = 0;
 	// Remember the first username
-	STRNCPY(createby, e->createby);
+	if (e_item)
+		STRNCPY(createby, e->createby);
 	user2 = false;
 	while (e_item && e->id == events->id &&
 	       strcmp(e->ipc, events->ipc) == 0 &&
