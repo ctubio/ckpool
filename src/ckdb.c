@@ -2200,8 +2200,10 @@ static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 		for (i = 0; i < SEQ_MAX; i++) {
 			// Unnecessary - but as a reminder
 			seqset->seqdata[i].SEQINUSE = 0;
+			seqset->seqdata[i].highlimit = 0;
 			switch (i) {
 			    case SEQ_ALL:
+				seqset->seqdata[i].highlimit = SEQ_ALL_HIGHLIMIT;
 			    case SEQ_SHARES:
 				seqset->seqdata[i].size = SEQ_LARGE_SIZ;
 				seqset->seqdata[i].timelimit = SEQ_LARGE_TRANS_LIM;
@@ -2227,15 +2229,20 @@ static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 						"not a power of",
 					    (siz < BASE_SIZ) ? BASE_SIZ : 2);
 			}
-			highlimit = siz >> HIGH_SHIFT;
-			if (highlimit < HIGH_MIN) {
-				// On the first ever seq record
-				quithere(1, "seqdata[%d] highlimit %d (0x%x) "
-					    "is too small, must be >= %d",
-					    i, highlimit, highlimit, HIGH_MIN);
+			if (seqset->seqdata[i].highlimit == 0) {
+				highlimit = siz >> HIGH_SHIFT;
+				if (highlimit < HIGH_MIN) {
+					// On the first ever seq record
+					quithere(1, "seqdata[%d] highlimit %d "
+						    "(0x%x) is too small, must"
+						    " be >= %d",
+						    i, highlimit, highlimit,
+						    HIGH_MIN);
+				}
+				seqset->seqdata[i].highlimit = highlimit;
 			}
-			seqset->seqdata[i].highlimit = highlimit;
-			seqset->seqdata[i].entry = calloc(siz, sizeof(SEQENTRY));
+			seqset->seqdata[i].entry = calloc(siz,
+							  sizeof(SEQENTRY));
 			end = siz * sizeof(SEQENTRY);
 			off0 = &(seqset->seqdata[i].entry[0]);
 			offn = &(seqset->seqdata[i].entry[siz]);

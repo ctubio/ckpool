@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.005"
+#define CKDB_VERSION DB_VERSION"-2.006"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1350,6 +1350,9 @@ typedef struct seqset {
 // The rest
 #define SEQ_SMALL_TRANS_LIM 64
 #define SEQ_SMALL_SIZ 16384
+
+// Give SEQ_ALL a much higher limit to allow for all type processing times
+#define SEQ_ALL_HIGHLIMIT (SEQ_LARGE_SIZ << 3)
 
 // highlimit ratio (shift down bits)
 #define HIGH_SHIFT 8
