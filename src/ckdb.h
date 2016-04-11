@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.006"
+#define CKDB_VERSION DB_VERSION"-2.007"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -324,6 +324,8 @@ extern bool sharesummary_marks_limit;
 extern bool db_users_complete;
 // DB load is complete
 extern bool db_load_complete;
+// Before the reload starts (and during the reload)
+extern bool prereload;
 // Different input data handling
 extern bool reloading;
 // Data load is complete
@@ -1122,7 +1124,7 @@ extern K_STORE *pool_workqueue_store;
 extern K_STORE *cmd_workqueue_store;
 extern K_STORE *btc_workqueue_store;
 // this counter ensures we don't switch early from pool0 to pool
-extern int pool0_left;
+extern int earlysock_left;
 extern int pool0_tot;
 extern int pool0_discarded;
 

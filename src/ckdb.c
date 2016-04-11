@@ -268,13 +268,15 @@ bool sharesummary_marks_limit = false;
 bool db_users_complete = false;
 // DB load is complete
 bool db_load_complete = false;
+// Before the reload starts (and during the reload)
+bool prereload = true;
 // Different input data handling
 bool reloading = false;
 // Start marks processing during a larger reload
 static bool reloaded_N_files = false;
 // Data load is complete
 bool startup_complete = false;
-// Set to true the first time workqueue reaches 0 after startup
+// Set to true when pool0 completes, pool0 = socket data during reload
 static bool reload_queue_complete = false;
 // Tell everyone to die
 bool everyone_die = false;
@@ -364,7 +366,7 @@ K_STORE *pool_workqueue_store;
 K_STORE *cmd_workqueue_store;
 K_STORE *btc_workqueue_store;
 // this counter ensures we don't switch early from pool0 to pool
-int pool0_left;
+int earlysock_left;
 int pool0_tot;
 int pool0_discarded;
 
@@ -4499,6 +4501,25 @@ static void *process_socket(void *arg)
 		DATA_MSGLINE(msgline, bq->ml_item);
 		replied = btc = false;
 		switch (bq->cmdnum) {
+			case CMD_AUTH:
+			case CMD_ADDRAUTH:
+			case CMD_HEARTBEAT:
+			case CMD_SHARELOG:
+			case CMD_POOLSTAT:
+			case CMD_USERSTAT:
+			case CMD_WORKERSTAT:
+			case CMD_BLOCK:
+				break;
+			default:
+				// Non-pool commands can't affect pool0
+				if (bq->seqentryflags == SE_EARLYSOCK) {
+					K_WLOCK(workqueue_free);
+					earlysock_left--;
+					K_WUNLOCK(workqueue_free);
+				}
+				break;
+		}
+		switch (bq->cmdnum) {
 			case CMD_REPLY:
 				snprintf(reply, sizeof(reply),
 					 "%s.%ld.?.",
@@ -4745,12 +4766,13 @@ static void *process_socket(void *arg)
 					k_add_tail(pool_workqueue_store, wq_item);
 				else {
 					k_add_tail(pool0_workqueue_store, wq_item);
+					pool0_tot++;
 					/* Stop the reload queue from growing too big
 					 * Use a size that 'should be big enough' */
 					if (reloading && pool0_workqueue_store->count > 250000) {
 						K_ITEM *wq2_item = k_unlink_head(pool0_workqueue_store);
+						earlysock_left--;
 						pool0_discarded++;
-						pool0_left--;
 						K_WUNLOCK(workqueue_free);
 						WORKQUEUE *wq;
 						DATA_WORKQUEUE(wq, wq2_item);
@@ -4860,11 +4882,11 @@ static void *socketer(void *arg)
 			}
 		} else {
 			int seqentryflags = SE_SOCKET;
-			if (!reload_queue_complete) {
+			// Flag all work for pool0 until the reload completes
+			if (prereload || reloading) {
 				seqentryflags = SE_EARLYSOCK;
 				K_WLOCK(workqueue_free);
-				pool0_tot++;
-				pool0_left++;
+				earlysock_left++;
 				K_WUNLOCK(workqueue_free);
 			}
 
@@ -5229,6 +5251,7 @@ static bool reload_from(tv_t *start)
 	LOGQUE(reload_buf, true);
 	LOGQUE(reload_buf, false);
 
+	// Start after reloading = true
 	create_pthread(&proc_pt, process_reload, NULL);
 
 	total = 0;
@@ -5251,7 +5274,7 @@ static bool reload_from(tv_t *start)
 			tmp_time = time(NULL);
 			// Report stats every 15s
 			if ((tmp_time - tick_time) > 14) {
-				int relq, relqd, cmdq, cmdqd, mx, pool0q;
+				int relq, relqd, cmdq, cmdqd, mx, pool0q, poolq;
 				K_RLOCK(breakqueue_free);
 				relq = reload_breakqueue_store->count +
 					reload_processing;
@@ -5263,12 +5286,13 @@ static bool reload_from(tv_t *start)
 				K_RUNLOCK(breakqueue_free);
 				K_RLOCK(workqueue_free);
 				pool0q = pool0_workqueue_store->count;
+				poolq = pool_workqueue_store->count;
 				// pool_workqueue_store should be zero
 				K_RUNLOCK(workqueue_free);
 				printf(TICK_PREFIX"reload %"PRIu64"/%d/%d"
-					" ckp %d/%d/%d (%d)  \r",
+					" ckp %d/%d/%d/%d (%d)  \r",
 					total+count, relq, relqd,
-					cmdq, cmdqd, pool0q, mx);
+					cmdq, cmdqd, pool0q, poolq, mx);
 				fflush(stdout);
 				tick_time = tmp_time;
 			}
@@ -5290,7 +5314,7 @@ static bool reload_from(tv_t *start)
 		} else
 			fclose(fp);
 		/* Don't free the old filename since
-		 *  process_reload() could access use it */
+		 *  process_reload() could access it */
 		if (everyone_die)
 			break;
 		reload_timestamp.tv_sec += ROLL_S;
@@ -5384,6 +5408,7 @@ static bool reload_from(tv_t *start)
 
 	seq_reloadmax();
 
+	prereload = false;
 	reloading = false;
 	FREENULL(reload_buf);
 	return ret;
@@ -5569,12 +5594,12 @@ static void *listener(void *arg)
 		wq_item = NULL;
 		K_WLOCK(workqueue_free);
 		if (pool0) {
-			if (pool0_left == 0)
+			if (earlysock_left == 0)
 				pool0 = false;
 			else {
 				wq_item = k_unlink_head(pool0_workqueue_store);
 				if (wq_item)
-					pool0_left--;
+					earlysock_left--;
 			}
 		}
 		if (!pool0)

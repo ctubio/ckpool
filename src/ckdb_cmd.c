@@ -6788,7 +6788,8 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char buf[256];
 	int relq_count, _reload_processing, relqd_count;
 	int cmdq_count, _cmd_processing, cmdqd_count, _max_sockd_count;
-	int _pool0_left, _pool0_discarded, _pool0_tot, poolq_count;
+	int _earlysock_left, pool0_count, _pool0_discarded, _pool0_tot;
+	int poolq_count;
 
 	LOGWARNING("OoO %s", ooo_status(ooo_buf, sizeof(ooo_buf)));
 	sequence_report(true);
@@ -6804,16 +6805,19 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 	K_RUNLOCK(breakqueue_free);
 
 	K_RLOCK(workqueue_free);
-	_pool0_left = pool0_left;
+	_earlysock_left = earlysock_left;
+	pool0_count = pool0_workqueue_store->count;
 	_pool0_discarded = pool0_discarded;
 	_pool0_tot = pool0_tot;
 	poolq_count = pool_workqueue_store->count;
 	K_RUNLOCK(workqueue_free);
 
-	LOGWARNING(" reload=%d/%d/%d cmd=%d/%d/%d pool0=%d/%d/%d poolq=%d max_sockd=%d",
+	LOGWARNING(" reload=%d/%d/%d cmd=%d/%d/%d es=%d pool0=%d/%d/%d "
+		   "poolq=%d max_sockd=%d",
 		   relq_count, _reload_processing, relqd_count,
 		   cmdq_count, _cmd_processing, cmdqd_count,
-		   _pool0_left, _pool0_discarded, _pool0_tot,
+		   _earlysock_left,
+		   pool0_count, _pool0_discarded, _pool0_tot,
 		   poolq_count, _max_sockd_count);
 
 	snprintf(buf, sizeof(buf), "ok.%s", cmd);
