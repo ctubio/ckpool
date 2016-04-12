@@ -2106,8 +2106,10 @@ static void trans_seq(tv_t *now)
 							 "%"PRIu64, seqnum1);
 					} else {
 						snprintf(range, sizeof(range),
-							 "%"PRIu64"-%"PRIu64,
-							 seqnum0, seqnum1);
+							 "%"PRIu64"-%"PRIu64
+							 " (%"PRIu64")",
+							 seqnum0, seqnum1,
+							 1 + seqnum1 - seqnum0);
 					}
 					btu64_to_buf(&seqstt, t_buf,
 							sizeof(t_buf));
@@ -2135,8 +2137,9 @@ static void trans_seq(tv_t *now)
 					 "%"PRIu64, seqnum1);
 			} else {
 				snprintf(range, sizeof(range),
-					 "%"PRIu64"-%"PRIu64,
-					 seqnum0, seqnum1);
+					 "%"PRIu64"-%"PRIu64" (%"PRIu64")",
+					 seqnum0, seqnum1,
+					 1 + seqnum1 - seqnum0);
 			}
 			btu64_to_buf(&seqstt, t_buf, sizeof(t_buf));
 			bt_to_buf(&(seqsec.tv_sec), t_buf2, sizeof(t_buf2));
