@@ -1791,9 +1791,11 @@ int main(int argc, char **argv)
 		ckp.nonce1length = 4;
 	else if (ckp.nonce1length < 2 || ckp.nonce1length > 8)
 		quit(0, "Invalid nonce1length %d specified, must be 2~8", ckp.nonce1length);
-	if (!ckp.nonce2length)
-		ckp.nonce2length = 8;
-	else if (ckp.nonce2length < 2 || ckp.nonce2length > 8)
+	if (!ckp.nonce2length) {
+		/* nonce2length is zero by default in proxy mode */
+		if (!ckp.proxy)
+			ckp.nonce2length = 8;
+	} else if (ckp.nonce2length < 2 || ckp.nonce2length > 8)
 		quit(0, "Invalid nonce2length %d specified, must be 2~8", ckp.nonce2length);
 	if (!ckp.update_interval)
 		ckp.update_interval = 30;

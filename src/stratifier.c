@@ -2397,7 +2397,11 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	proxy->enonce1constlen = strlen(proxy->enonce1) / 2;
 	hex2bin(proxy->enonce1bin, proxy->enonce1, proxy->enonce1constlen);
 	proxy->nonce2len = json_integer_value(json_object_get(val, "nonce2len"));
-	if (proxy->nonce2len > 7)
+	if (ckp->nonce2length) {
+		proxy->enonce1varlen = proxy->nonce2len - ckp->nonce2length;
+		if (proxy->enonce1varlen < 0)
+			proxy->enonce1varlen = 0;
+	} else if (proxy->nonce2len > 7)
 		proxy->enonce1varlen = 4;
 	else if (proxy->nonce2len > 5)
 		proxy->enonce1varlen = 2;
@@ -2417,6 +2421,9 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGNOTICE("Upstream pool %s %d extranonce2 length %d, max proxy clients %"PRId64,
 			  proxy->url, id, proxy->nonce2len, proxy->max_clients);
 	}
+	if (ckp->nonce2length && proxy->enonce2varlen != ckp->nonce2length)
+		LOGWARNING("Only able to set nonce2len %d of requested %d on proxy %d:%d",
+			   proxy->enonce2varlen, ckp->nonce2length, id, subid);
 	json_decref(val);
 }
 
