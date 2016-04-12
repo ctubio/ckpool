@@ -5455,8 +5455,8 @@ static bool reload_from(tv_t *start)
 
 	ck_wlock(&fpm_lock);
 	if (first_pool_message) {
-		LOGERR("%s() reload didn't find the first ckpool queue '%.32s...",
-			__func__, st = safe_text(first_pool_message));
+		LOGEMERG("%s() reload didn't find the first ckpool queue '%.32s...",
+			 __func__, st = safe_text(first_pool_message));
 		FREENULL(st);
 		FREENULL(first_pool_message);
 	}
@@ -5646,6 +5646,8 @@ static void *listener(void *arg)
 	/* Process queued work - ensure pool0 is emptied first,
 	 *  even if there is pending pool0 data being processed by breaker() */
 	pool0 = true;
+	// Override checking until pool0 is complete
+	wqcount = -1;
 	while (!everyone_die) {
 		wq_item = NULL;
 		K_WLOCK(workqueue_free);
@@ -5658,11 +5660,13 @@ static void *listener(void *arg)
 					earlysock_left--;
 			}
 		}
-		if (!pool0)
+		if (!pool0) {
 			wq_item = k_unlink_head(pool_workqueue_store);
+			wqcount = pool_workqueue_store->count;
+		}
 		K_WUNLOCK(workqueue_free);
 
-		if (!pool0 && wq_stt.tv_sec != 0L)
+		if (wqcount == 0 && wq_stt.tv_sec != 0L)
 			setnow(&wq_fin);
 
 		/* Don't keep a connection for more than ~10s or ~10000 items
@@ -5680,7 +5684,7 @@ static void *listener(void *arg)
 			tick();
 		}
 
-		if (!pool0 && wq_stt.tv_sec != 0L) {
+		if (wqcount == 0 && wq_stt.tv_sec != 0L) {
 			sec = tvdiff(&wq_fin, &wq_stt);
 			min = floor(sec / 60.0);
 			sec -= min * 60.0;
