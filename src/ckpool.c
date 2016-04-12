@@ -1771,15 +1771,13 @@ int main(int argc, char **argv)
 		ckp.btcdpass = ckzalloc(sizeof(char *));
 		ckp.btcdnotify = ckzalloc(sizeof(bool));
 	}
-	if (ckp.btcds) {
-		for (i = 0; i < ckp.btcds; i++) {
-			if (!ckp.btcdurl[i])
-				ckp.btcdurl[i] = strdup("localhost:8332");
-			if (!ckp.btcdauth[i])
-				ckp.btcdauth[i] = strdup("user");
-			if (!ckp.btcdpass[i])
-				ckp.btcdpass[i] = strdup("pass");
-		}
+	for (i = 0; i < ckp.btcds; i++) {
+		if (!ckp.btcdurl[i])
+			ckp.btcdurl[i] = strdup("localhost:8332");
+		if (!ckp.btcdauth[i])
+			ckp.btcdauth[i] = strdup("user");
+		if (!ckp.btcdpass[i])
+			ckp.btcdpass[i] = strdup("pass");
 	}
 
 	ckp.donaddress = "14BMjogz69qe8hk9thyzbmR5pg34mVKB1e";
