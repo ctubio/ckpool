@@ -2036,14 +2036,16 @@ static void trans_process(SEQSET *seqset, tv_t *now, K_STORE *store)
 static void trans_seq(tv_t *now)
 {
 	char t_buf[DATE_BUFSIZ], t_buf2[DATE_BUFSIZ];
+	char range[64];
 	K_STORE *store;
 	SEQSET *seqset = NULL;
 	K_ITEM *item = NULL, *lastitem = NULL;
 	SEQTRANS *seqtrans;
 	K_ITEM *st_item;
-	uint64_t seqstt = 0, seqpid = 0;
-	bool more = true;
-	int i, j;
+	uint64_t seqstt = 0, seqpid = 0, seqnum0, seqnum1;
+	tv_t seqsec;
+	bool more = true, gotseq;
+	int i, j, nam;
 
 	store = k_new_store(seqtrans_free);
 	for (i = 0; more; i++) {
@@ -2077,17 +2079,71 @@ static void trans_seq(tv_t *now)
 		SEQUNLOCK();
 
 		st_item = STORE_TAIL_NOLOCK(store);
+		/* Display one line for all records that would display the same
+		 *  excluding the sequence number - displayed as a continuous
+		 *  range */
+		seqnum0 = seqnum1 = 0;
+		seqsec.tv_sec = 0;
+		gotseq = false;
+		nam = -1;
 		while (st_item) {
 			DATA_SEQTRANS(seqtrans, st_item);
-			btu64_to_buf(&seqstt, t_buf, sizeof(t_buf));
-			bt_to_buf(&(seqtrans->entry.time.tv_sec), t_buf2,
-				  sizeof(t_buf2));
-			LOGWARNING("Seq trans %s %"PRIu64" set:%d/%"PRIu64
-				   "=%s/%"PRIu64" %s/%s",
-				   seqnam[seqtrans->seq], seqtrans->seqnum,
-				   i, seqstt, t_buf, seqpid,
-				   t_buf2, seqtrans->entry.code);
+			if (!gotseq) {
+				seqnum0 = seqnum1 = seqtrans->seqnum;
+				nam = seqtrans->seq;
+				seqsec.tv_sec = seqtrans->entry.time.tv_sec;
+				gotseq = true;
+			} else {
+				if (seqtrans->seqnum == seqnum1+1 &&
+				    seqtrans->seq == nam &&
+				    seqtrans->entry.time.tv_sec == seqsec.tv_sec) {
+					seqnum1++;
+				} else {
+					// Display the previous range
+
+					if (seqnum0 == seqnum1) {
+						snprintf(range, sizeof(range),
+							 "%"PRIu64, seqnum1);
+					} else {
+						snprintf(range, sizeof(range),
+							 "%"PRIu64"-%"PRIu64,
+							 seqnum0, seqnum1);
+					}
+					btu64_to_buf(&seqstt, t_buf,
+							sizeof(t_buf));
+					bt_to_buf(&(seqsec.tv_sec), t_buf2,
+						  sizeof(t_buf2));
+					LOGWARNING("Seq trans %s %s set:%d/"
+						   "%"PRIu64"=%s/%"PRIu64" %s",
+						   seqnam[nam], range,
+						   i, seqstt, t_buf, seqpid,
+						   t_buf2);
+
+					// Current record is a new range
+					seqnum0 = seqnum1 = seqtrans->seqnum;
+					nam = seqtrans->seq;
+					seqsec.tv_sec = seqtrans->entry.time.tv_sec;
+					gotseq = true;
+				}
+			}
 			st_item = st_item->prev;
+		}
+		// Display the last range if there was one
+		if (gotseq) {
+			if (seqnum0 == seqnum1) {
+				snprintf(range, sizeof(range),
+					 "%"PRIu64, seqnum1);
+			} else {
+				snprintf(range, sizeof(range),
+					 "%"PRIu64"-%"PRIu64,
+					 seqnum0, seqnum1);
+			}
+			btu64_to_buf(&seqstt, t_buf, sizeof(t_buf));
+			bt_to_buf(&(seqsec.tv_sec), t_buf2, sizeof(t_buf2));
+			LOGWARNING("Seq trans %s %s set:%d/"
+				   "%"PRIu64"=%s/%"PRIu64" %s",
+				   seqnam[nam], range, i, seqstt, t_buf,
+				   seqpid, t_buf2);
 		}
 		if (store->count) {
 			K_WLOCK(seqtrans_free);

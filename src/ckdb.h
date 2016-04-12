@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.007"
+#define CKDB_VERSION DB_VERSION"-2.008"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1344,8 +1344,8 @@ typedef struct seqset {
  *  the first time it processes a record with sequences */
 
 // SEQALL and SHARES */
-#define SEQ_LARGE_TRANS_LIM 16
-#define SEQ_LARGE_SIZ (65536*SEQ_LARGE_TRANS_LIM)
+#define SEQ_LARGE_TRANS_LIM 32
+#define SEQ_LARGE_SIZ (65536*16)
 // WORKERSTATS, AUTH and ADDRAUTH
 #define SEQ_MEDIUM_TRANS_LIM 32
 #define SEQ_MEDIUM_SIZ 65536
