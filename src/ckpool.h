@@ -158,8 +158,10 @@ struct ckpool_instance {
 	/* Directory where logs are written */
 	char *logdir;
 	/* Logfile */
+	char *logfilename;
 	FILE *logfp;
 	int logfd;
+	time_t lastopen_t;
 	/* Connector fds if we inherit them from a running process */
 	int *oldconnfd;
 	/* Should we inherit a running instance's socket and shut it down */

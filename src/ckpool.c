@@ -34,10 +34,28 @@
 
 ckpool_t *global_ckp;
 
+static bool open_logfile(ckpool_t *ckp)
+{
+	if (ckp->logfd > 0) {
+		flock(ckp->logfd, LOCK_EX);
+		fflush(ckp->logfp);
+		Close(ckp->logfd);
+	}
+	ckp->logfp = fopen(ckp->logfilename, "ae");
+	if (unlikely(!ckp->logfp)) {
+		LOGEMERG("Failed to make open log file %s", ckp->logfilename);
+		return false;
+	}
+	/* Make logging line buffered */
+	setvbuf(ckp->logfp, NULL, _IOLBF, 0);
+	ckp->logfd = fileno(ckp->logfp);
+	ckp->lastopen_t = time(NULL);
+	return true;
+}
+
 static void proclog(ckpool_t *ckp, char *msg)
 {
-	FILE *LOGFP;
-	int logfd;
+	time_t log_t;
 
 	if (unlikely(!msg)) {
 		fprintf(stderr, "Proclog received null message");
@@ -48,12 +66,17 @@ static void proclog(ckpool_t *ckp, char *msg)
 		free(msg);
 		return;
 	}
-	LOGFP = ckp->logfp;
-	logfd = ckp->logfd;
+	log_t = time(NULL);
+	/* Reopen log file every minute, allowing us to move/rename it and
+	 * create a new logfile */
+	if (log_t > ckp->lastopen_t + 60) {
+		LOGDEBUG("Reopening logfile");
+		open_logfile(ckp);
+	}
 
-	flock(logfd, LOCK_EX);
-	fprintf(LOGFP, "%s", msg);
-	flock(logfd, LOCK_UN);
+	flock(ckp->logfd, LOCK_EX);
+	fprintf(ckp->logfp, "%s", msg);
+	flock(ckp->logfd, LOCK_UN);
 
 	free(msg);
 }
@@ -91,7 +114,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 				fprintf(stderr, "%s %s\n", stamp, buf);
 			fflush(stderr);
 		}
-		if (logfd) {
+		if (logfd > 0) {
 			char *msg;
 
 			if (loglevel <= LOG_ERR && errno != 0)
@@ -1812,12 +1835,10 @@ int main(int argc, char **argv)
 		quit(1, "Failed to make pool log directory %s", buf);
 
 	/* Create the logfile */
-	sprintf(buf, "%s%s.log", ckp.logdir, ckp.name);
-	ckp.logfp = fopen(buf, "ae");
-	if (!ckp.logfp)
+	ASPRINTF(&ckp.logfilename, "%s%s.log", ckp.logdir, ckp.name);
+	if (!open_logfile(&ckp))
 		quit(1, "Failed to make open log file %s", buf);
-	/* Make logging line buffered */
-	setvbuf(ckp.logfp, NULL, _IOLBF, 0);
+	launch_logger(&ckp);
 
 	ckp.main.ckp = &ckp;
 	ckp.main.processname = strdup("main");
@@ -1875,8 +1896,6 @@ int main(int argc, char **argv)
 
 	write_namepid(&ckp.main);
 	open_process_sock(&ckp, &ckp.main, &ckp.main.us);
-	launch_logger(&ckp);
-	ckp.logfd = fileno(ckp.logfp);
 
 	ret = sysconf(_SC_OPEN_MAX);
 	if (ckp.maxclients > ret * 9 / 10) {
