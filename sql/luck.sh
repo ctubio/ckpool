@@ -6,6 +6,7 @@ tmp1="$tmp.1.sql"
 tmp2="$tmp.2.sql"
 tmp3="$tmp.3.sql"
 tmp4="$tmp.4.sql"
+tmp5="$tmp.5.sql"
 msdd="1,000,000,000"
 msd="`echo "$msdd" | tr -d ,`"
 #
@@ -90,12 +91,17 @@ toG()
 #
 dedup()
 {
- cut -d '|' -f 1-5,7-10,12
+ cut -d '|' -f 1-5,7-10,12-
 }
 #
 dedupw()
 {
- cut -d '|' -f 1-4,6-9,11
+ cut -d '|' -f 1-4,6-9,11-
+}
+#
+debar()
+{
+ sed -e "s/[ |]*$//" -e "s/|[ |]*|/|/g"
 }
 #
 p1="$((0x1d))"
@@ -152,6 +158,7 @@ proc()
 		break
 	fi
 	uorw="`echo "$line" | cut -d'|' -f1 | tr -d ' '`"
+	uws="`echo "$uorw" | sed -e "s/\(^[^_\.]*\)[_\.].*$/\1/"`"
 	diffs="`getdiff` BDR"
 	if [ "${diffs:0:1}" = "." ] ; then
 		diffs="  0$diffs"
@@ -162,17 +169,18 @@ proc()
 	fi
 	stats="`grep "^$uorw  *|" "$tmp2"`"
 	bstats="`grep "^$uorw  *|" "$tmp3"`"
+	hstats="`grep "^$uws  *|" "$tmp5" | cut -d'|' -f2 | sed -e "s/6666-06-06 //"`"
 	if [ "$stats" ] ; then
-		s=" | "
+		s=" | $stats"
 	else
-		s=""
+		s=" | | | | | "
 	fi
 	if [ "$bstats" ] ; then
-		b=" | "
+		b=" | $bstats"
 	else
-		b=""
+		b=" | |"
 	fi
-	echo "$line | $diffs$s$stats$b$bstats"
+	echo "$line | $diffs$s$b |$hstats"
  done
 }
 #
@@ -312,7 +320,19 @@ sql="$sql0 from markersummary ms join workmarkers wm on ms.markerid=wm.markerid 
 #
 dosql | diff1 > "$tmp4"
 #
-# join (append) to each tmp1 row, the matching row/data in tmp4, tmp2 and tmp3
-cat "$tmp1" | proc | toG | dedup$work
+if [ -z "$work" ] ; then
+ sql0="select userid"
+ sqlz="group by userid"
+else
+ sql0="select username"
+ sqlz="group by username"
+fi
 #
-shred -uz "$tmp0" "$tmp1" "$tmp2" "$tmp3" "$tmp4" &> /dev/null
+sql="$sql0,substring(max(expirydate)::varchar from 1 for 10)||' Hold' from useratts where attname='HoldPayouts' $sqlz;"
+#
+dosql > "$tmp5"
+#
+# join (append) to each tmp1 row, the matching row/data in tmp4, tmp2 and tmp3
+cat "$tmp1" | proc | toG | dedup$work | debar
+#
+shred -uz "$tmp0" "$tmp1" "$tmp2" "$tmp3" "$tmp4" "$tmp5" &> /dev/null
