@@ -143,15 +143,16 @@ function addrmgtuser($data, $user, $err)
 function doaddrmgt($data, $user)
 {
  $err = '';
- $ans = null;
  $OK = getparam('OK', false);
  $count = getparam('rows', false);
  $pass = getparam('pass', false);
  $twofa = getparam('2fa', false);
+ $mfail = false;
  if ($OK == 'Save' && !nuem($count) && !nuem($pass))
  {
 	if ($count > 0 && $count < 1000)
 	{
+		$mfail = true;
 		$addrarr = array();
 		for ($i = 0; $i < $count; $i++)
 		{
@@ -168,22 +169,29 @@ function doaddrmgt($data, $user)
 			$err = $ans['ERROR'];
 		else
 		{
+			$ans = userSettings($user);
+			if ($ans['STATUS'] != 'ok')
+				goto meh;
 			if (isset($ans['email']))
 				$email = $ans['email'];
 			else
-				$email = '';
+				goto meh;
 
 			$emailinfo = getOpts($user, emailOptList());
 			if ($emailinfo['STATUS'] != 'ok')
-			{
-				if ($err != '')
-					$err .= '<br>';
-				$err .= 'An error occurred, check your details below';
-			}
+				goto meh;
 			else
 				payoutAddressChanged($email, zeip(), $emailinfo);
 		}
+		$mfail = false;
 	}
+ }
+meh:
+ if ($mfail == true)
+ {
+	if ($err != '')
+		$err .= '<br>';
+	$err .= 'An error occurred, check your details below';
  }
 
  $pg = addrmgtuser($data, $user, $err);
