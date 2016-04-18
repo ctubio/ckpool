@@ -1,5 +1,7 @@
 <?php
 #
+include_once('email.php');
+#
 function addrmgtuser($data, $user, $err)
 {
  $pg = '<h1>Address Management</h1>';
@@ -141,6 +143,7 @@ function addrmgtuser($data, $user, $err)
 function doaddrmgt($data, $user)
 {
  $err = '';
+ $ans = null;
  $OK = getparam('OK', false);
  $count = getparam('rows', false);
  $pass = getparam('pass', false);
@@ -163,6 +166,23 @@ function doaddrmgt($data, $user)
 		$ans = userSettings($user, null, $addrarr, $pass, $twofa);
 		if ($ans['STATUS'] != 'ok')
 			$err = $ans['ERROR'];
+		else
+		{
+			if (isset($ans['email']))
+				$email = $ans['email'];
+			else
+				$email = '';
+
+			$emailinfo = getOpts($user, emailOptList());
+			if ($emailinfo['STATUS'] != 'ok')
+			{
+				if ($err != '')
+					$err .= '<br>';
+				$err .= 'An error occurred, check your details below';
+			}
+			else
+				payoutAddressChanged($email, zeip(), $emailinfo);
+		}
 	}
  }
 
