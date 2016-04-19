@@ -3773,7 +3773,7 @@ static char *shift_words[] =
 	"charlotte",
 	"darkchii",
 	"elen",
-	"felli",
+	"frey",
 	"gin",
 	"hitagi",
 	"ichiko",
