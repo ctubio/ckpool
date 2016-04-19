@@ -4995,6 +4995,8 @@ static void *socketer(void *arg)
 					col = strchr(pos, JSON_VALUE);
 					if (col) {
 						com = strchr(col, JSON_SEP);
+						if (!com)
+							com = strchr(col, JSON_END);
 						if (com) {
 							LOGNOTICE("%s() SEQALL %s %.*s",
 								  __func__,
@@ -5231,6 +5233,8 @@ static void reload_line(char *filename, char *buf, uint64_t count)
 				col = strchr(pos, JSON_VALUE);
 				if (col) {
 					com = strchr(col, JSON_SEP);
+					if (!com)
+						com = strchr(col, JSON_END);
 					if (com) {
 						LOGNOTICE("%s() SEQALL %.*s",
 							  __func__,
