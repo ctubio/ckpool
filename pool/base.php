@@ -272,6 +272,21 @@ function safepass($pass)
  return true;
 }
 #
+# simple test without checksum validation
+function btcaddr($addr)
+{
+ $c0 = substr($addr, 0, 1);
+ if ($c0 != '1' && $c0 != '3')
+	return false;
+ $len = strlen($addr);
+ if ($len <= 26 || $len >= 37)
+	return false;
+ $rem = preg_replace('/[A-HJ-NP-Za-km-z1-9]/', '', $addr);
+ if (strlen($rem) > 0)
+	return false;
+ return true;
+}
+#
 function bademail($email, $isold = false)
 {
  if ($email == null || $email == '')
