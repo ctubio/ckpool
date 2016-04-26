@@ -6778,7 +6778,7 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 /* Show a share status report on the console
  * Currently: sequence status, OoO info and max_sockd_count */
 static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
-			__maybe_unused tv_t *now, __maybe_unused char *by,
+			tv_t *now, __maybe_unused char *by,
 			__maybe_unused char *code, __maybe_unused char *inet,
 			__maybe_unused tv_t *notcd,
 			__maybe_unused K_TREE *trf_root,
@@ -6788,8 +6788,10 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char buf[256];
 	int relq_count, _reload_processing, relqd_count;
 	int cmdq_count, _cmd_processing, cmdqd_count, _max_sockd_count;
-	int _earlysock_left, pool0_count, _pool0_discarded, _pool0_tot;
-	int poolq_count;
+	int pool0_count, poolq_count;
+	int64_t _earlysock_left, _pool0_discarded, _pool0_tot;
+	uint64_t count1, count2, count3, count4;
+	double tot1, tot2;
 
 	LOGWARNING("OoO %s", ooo_status(ooo_buf, sizeof(ooo_buf)));
 	sequence_report(true);
@@ -6812,13 +6814,52 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 	poolq_count = pool_workqueue_store->count;
 	K_RUNLOCK(workqueue_free);
 
-	LOGWARNING(" reload=%d/%d/%d cmd=%d/%d/%d es=%d pool0=%d/%d/%d "
-		   "poolq=%d max_sockd=%d",
+	LOGWARNING(" reload=%d/%d/%d cmd=%d/%d/%d es=%"PRId64
+		   " pool0=%d/%"PRId64"/%"PRId64" poolq=%d max_sockd=%d",
 		   relq_count, _reload_processing, relqd_count,
 		   cmdq_count, _cmd_processing, cmdqd_count,
 		   _earlysock_left,
 		   pool0_count, _pool0_discarded, _pool0_tot,
 		   poolq_count, _max_sockd_count);
+
+	count1 = sock_acc ? : 1;
+	count2 = sock_recv ? : 1;
+	count3 = sock_proc_early ? : 1;
+	count4 = sock_processed ? : 1;
+	LOGWARNING(" sock: tot %f sock %f/%"PRIu64"/%f recv %f/%"PRIu64"/%f "
+		   "lckw %f/%"PRIu64"/%f lckb %f/%"PRIu64"/%f",
+		   us_tvdiff(now, &sock_stt)/1000000,
+		   sock_us/1000000, sock_acc, (sock_us/count1)/1000000,
+		   sock_recv_us/1000000, sock_recv,
+		   (sock_recv_us/count2)/1000000,
+		   sock_lock_wq_us/1000000, sock_proc_early,
+		   (sock_lock_wq_us/count3)/1000000,
+		   sock_lock_br_us/1000000, sock_processed,
+		   (sock_lock_br_us/count4)/1000000);
+
+	if (!break_reload_stt.tv_sec)
+		tot1 = 0;
+	else {
+		if (!break_reload_fin.tv_sec)
+			tot1 = us_tvdiff(now, &break_reload_stt);
+		else
+			tot1 = us_tvdiff(&break_reload_fin, &break_reload_stt);
+	}
+	if (!break_cmd_stt.tv_sec)
+		tot2 = 0;
+	else
+		tot2 = us_tvdiff(now, &break_cmd_stt);
+	count1 = break_reload_processed ? : 1;
+	count2 = break_cmd_processed ? : 1;
+	LOGWARNING(" break reload: %f/%"PRIu64"/%f cmd: %f/%"PRIu64"/%f",
+		   tot1/1000000, break_reload_processed, (tot1/count1)/1000000,
+		   tot2/1000000, break_cmd_processed, (tot2/count2)/1000000);
+
+	count1 = clis_processed ? : 1;
+	count2 = blis_processed ? : 1;
+	LOGWARNING(" clistener %f/%"PRIu64"/%f blistener: %f/%"PRIu64"/%f",
+		   clis_us/1000000, clis_processed, (clis_us/count1)/1000000,
+		   blis_us/1000000, blis_processed, (blis_us/count2)/1000000);
 
 	snprintf(buf, sizeof(buf), "ok.%s", cmd);
 	LOGDEBUG("%s.%s", id, buf);

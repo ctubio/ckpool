@@ -51,7 +51,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.014"
+#define CKDB_VERSION DB_VERSION"-2.015"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -342,6 +342,21 @@ extern tv_t last_share_acc;
 extern tv_t last_share_inv;
 extern tv_t last_auth;
 extern cklock_t last_lock;
+
+// Running stats
+// socketer()
+extern tv_t sock_stt;
+extern double sock_us, sock_recv_us, sock_lock_wq_us, sock_lock_br_us;
+extern uint64_t sock_proc_early, sock_processed, sock_acc, sock_recv;
+// breaker() summarised
+extern tv_t break_reload_stt, break_cmd_stt, break_reload_fin;
+extern uint64_t break_reload_processed, break_cmd_processed;
+// clistener()
+extern double clis_us;
+extern uint64_t clis_processed;
+// blistener()
+extern double blis_us;
+extern uint64_t blis_processed;
 
 #define JSON_TRANSFER "json="
 #define JSON_TRANSFER_LEN (sizeof(JSON_TRANSFER)-1)
@@ -1124,9 +1139,9 @@ extern K_STORE *pool_workqueue_store;
 extern K_STORE *cmd_workqueue_store;
 extern K_STORE *btc_workqueue_store;
 // this counter ensures we don't switch early from pool0 to pool
-extern int earlysock_left;
-extern int pool0_tot;
-extern int pool0_discarded;
+extern int64_t earlysock_left;
+extern int64_t pool0_tot;
+extern int64_t pool0_discarded;
 
 // HEARTBEATQUEUE
 typedef struct heartbeatqueue {
