@@ -5578,7 +5578,7 @@ static void *socketer(void *arg)
 	setnow(&sock_stt);
 	while (!everyone_die) {
 		setnow(&now1);
-		sockd = accept(us->sockd, NULL, SOCK_CLOEXEC);
+		sockd = accept(us->sockd, NULL, NULL);
 		if (sockd < 0) {
 			int e = errno;
 			LOGERR("%s() Failed to accept on socket (%d:%s)",
@@ -6326,7 +6326,7 @@ static void *listener(void *arg)
 	pthread_t mark_pt;
 	pthread_t break_pt;
 	K_ITEM *wq_item;
-	time_t now;
+	time_t now = 0;
 	int bq, bqp, bqd, wq0count, wqcount, wqgot;
 	char ooo_buf[256];
 	tv_t wq_stt, wq_fin;
