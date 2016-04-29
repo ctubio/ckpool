@@ -1146,6 +1146,16 @@ void _workerstatus_update(AUTHS *auths, SHARES *shares,
 	}
 }
 
+/* default tree order by now asc
+ *  now is guaranteed unique since it's acquired under exclusive lock */
+cmp_t cmp_replies(K_ITEM *a, K_ITEM *b)
+{
+	REPLIES *ra, *rb;
+	DATA_REPLIES(ra, a);
+	DATA_REPLIES(rb, b);
+	return CMP_TV(ra->now, rb->now);
+}
+
 // default tree order by username asc,expirydate desc
 cmp_t cmp_users(K_ITEM *a, K_ITEM *b)
 {
@@ -4991,6 +5001,10 @@ static size_t tmfsiz = sizeof(tmf); // includes null
 static char tma[] = "Too many accesses, come back later";
 static size_t tmasiz = sizeof(tma); // includes null
 
+/* This always returns a reply that needs to be freed
+ * fre says if buf was malloced
+ *  i.e. fre means buf needs to be freed if it is not returned
+ *   and !fre means we need to strdup buf, if we need to return it */
 char *_reply_event(bool is_event, int event, char *buf, bool fre)
 {
 	size_t len;

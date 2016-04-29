@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/epoll.h>
 #include <fenv.h>
 #include <getopt.h>
 #include <jansson.h>
@@ -51,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.015"
+#define CKDB_VERSION DB_VERSION"-2.100"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -344,6 +345,9 @@ extern tv_t last_auth;
 extern cklock_t last_lock;
 
 // Running stats
+// replier()
+extern double reply_full_us;
+extern uint64_t reply_sent, reply_cant, reply_discarded, reply_fails;
 // socketer()
 extern tv_t sock_stt;
 extern double sock_us, sock_recv_us, sock_lock_wq_us, sock_lock_br_us;
@@ -1036,6 +1040,10 @@ typedef struct msgline {
 	int which_cmds;
 	tv_t now;
 	tv_t cd;
+	tv_t accepted; // copied from breakqueue
+	tv_t broken; // breakdown done
+	tv_t processed; // not all are processed
+	tv_t replied;
 	char id[ID_SIZ+1];
 	char cmd[CMD_SIZ+1];
 	char *msg;
@@ -1065,7 +1073,8 @@ extern K_STORE *msgline_store;
 // BREAKQUEUE
 typedef struct breakqueue {
 	char *buf;
-	tv_t now;
+	tv_t accepted; // socket accepted or line read
+	tv_t now; // msg read or line read
 	int seqentryflags;
 	int sockd;
 	enum cmd_values cmdnum;
@@ -1082,13 +1091,8 @@ typedef struct breakqueue {
 
 /* If a breaker() thread's done break queue count hits the LIMIT, or is empty,
  *  it will sleep for SLEEP ms
- * So this means that with a single breaker() thread,
- *  it can process at most LIMIT records per SLEEP ms
- *  or: 1000 * LIMIT / SLEEP records per second
- * For N breaker() threads, that would mean between 1 and N times that value
- *  dependent upon the random time spacing of the N thread sleeps
- * However, also note that LIMIT defines how much RAM can be used by
- *  the break queues, so a limit is required
+ * Also note that LIMIT defines how much RAM can be used by the break queues,
+ *  so a limit is required
  *  A breakqueue item can get quite large since it includes both buf
  *   and ml_item (which has the transfer data) in the 'done' queue
  * Of course the processing speed of the ml_items will also decide how big the
@@ -1101,10 +1105,10 @@ typedef struct breakqueue {
  *  thus limiting the line processing of reload files
  */
 #define RELOAD_QUEUE_LIMIT 16300
-#define RELOAD_QUEUE_SLEEP 42
+#define RELOAD_QUEUE_SLEEP_MS 42
 // Don't really limit the cmd queue
 #define CMD_QUEUE_LIMIT 1048500
-#define CMD_QUEUE_SLEEP 1
+#define CMD_QUEUE_SLEEP_MS 42
 
 extern K_LIST *breakqueue_free;
 extern K_STORE *reload_breakqueue_store;
@@ -1117,6 +1121,26 @@ extern int reload_processing;
 extern int cmd_processing;
 extern int sockd_count;
 extern int max_sockd_count;
+
+// Trigger breaker() processing
+extern mutex_t bq_reload_waitlock;
+extern mutex_t bq_cmd_waitlock;
+extern pthread_cond_t bq_reload_waitcond;
+extern pthread_cond_t bq_cmd_waitcond;
+
+extern uint64_t bq_reload_signals, bq_cmd_signals;
+extern uint64_t bq_reload_wakes, bq_cmd_wakes;
+extern uint64_t bq_reload_timeouts, bq_cmd_timeouts;
+
+// Trigger reload/socket *_done_* processing
+extern mutex_t process_reload_waitlock;
+extern mutex_t process_socket_waitlock;
+extern pthread_cond_t process_reload_waitcond;
+extern pthread_cond_t process_socket_waitcond;
+
+extern uint64_t process_reload_signals, process_socket_signals;
+extern uint64_t process_reload_wakes, process_socket_wakes;
+extern uint64_t process_reload_timeouts, process_socket_timeouts;
 
 // WORKQUEUE
 typedef struct workqueue {
@@ -1142,6 +1166,62 @@ extern K_STORE *btc_workqueue_store;
 extern int64_t earlysock_left;
 extern int64_t pool0_tot;
 extern int64_t pool0_discarded;
+
+// Trigger workqueue threads
+extern mutex_t wq_pool_waitlock;
+extern mutex_t wq_cmd_waitlock;
+extern mutex_t wq_btc_waitlock;
+extern pthread_cond_t wq_pool_waitcond;
+extern pthread_cond_t wq_cmd_waitcond;
+extern pthread_cond_t wq_btc_waitcond;
+
+extern uint64_t wq_pool_signals, wq_cmd_signals, wq_btc_signals;
+extern uint64_t wq_pool_wakes, wq_cmd_wakes, wq_btc_wakes;
+extern uint64_t wq_pool_timeouts, wq_cmd_timeouts, wq_btc_timeouts;
+
+// REPLIES
+typedef struct replies {
+	tv_t now;
+	tv_t createdate;
+	tv_t accepted;
+	tv_t broken;
+	tv_t processed;
+	int sockd;
+	char *reply;
+	struct epoll_event event;
+	const char *file;
+	const char *func;
+	int line;
+} REPLIES;
+
+#define ALLOC_REPLIES 65536
+#define LIMIT_REPLIES 0
+#define INIT_REPLIES(_item) INIT_GENERIC(_item, replies)
+#define DATA_REPLIES(_var, _item) DATA_GENERIC(_var, _item, replies, true)
+
+extern K_LIST *replies_free;
+extern K_STORE *replies_store;
+extern K_TREE *replies_pool_root;
+extern K_TREE *replies_cmd_root;
+extern K_TREE *replies_btc_root;
+
+// Close the socket and discard the reply, X ms after it gets in a list
+#define REPLIES_LIMIT_MS 10000
+
+extern int epollfd_pool;
+extern int epollfd_cmd;
+extern int epollfd_btc;
+
+extern int rep_tot_sockd;
+extern int rep_failed_sockd;
+extern int rep_max_sockd;
+// maximum counts and fd values
+extern int rep_max_pool_sockd;
+extern int rep_max_cmd_sockd;
+extern int rep_max_btc_sockd;
+extern int rep_max_pool_sockd_fd;
+extern int rep_max_cmd_sockd_fd;
+extern int rep_max_btc_sockd_fd;
 
 // HEARTBEATQUEUE
 typedef struct heartbeatqueue {
@@ -2676,10 +2756,14 @@ extern K_TREE *userinfo_root;
 extern K_LIST *userinfo_free;
 extern K_STORE *userinfo_store;
 
+enum reply_type {
+	REPLIER_POOL,
+	REPLIER_CMD,
+	REPLIER_BTC
+};
+
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnow(tv_t *now);
-extern void _ckdb_unix_msg(int sockd, const char *msg, WHERE_FFL_ARGS);
-#define ckdb_unix_msg(_sockd, _msg) _ckdb_unix_msg(_sockd, _msg, WHERE_FFL_HERE)
 extern void tick();
 extern PGconn *dbconnect();
 extern void sequence_report(bool lock);
@@ -2823,6 +2907,7 @@ extern void workerstatus_ready();
 	_workerstatus_update(_auths, _shares, _userstats, WHERE_FFL_HERE)
 extern void _workerstatus_update(AUTHS *auths, SHARES *shares,
 				 USERSTATS *userstats, WHERE_FFL_ARGS);
+extern cmp_t cmp_replies(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_users(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_userid(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_users(char *username);
