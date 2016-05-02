@@ -6830,7 +6830,7 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 		   " recv t%fs/t%"PRIu64"/av%fs"
 		   " lckw t%fs/t%"PRIu64"/av%fs"
 		   " lckb t%fs/t%"PRIu64"/av%fs",
-		   us_tvdiff(now, &sock_stt)/1000000,
+		   tvdiff(now, &sock_stt),
 		   sock_us/1000000, sock_acc, (sock_us/count1)/1000000,
 		   sock_recv_us/1000000, sock_recv,
 		   (sock_recv_us/count2)/1000000,
@@ -6843,23 +6843,23 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 		tot1 = 0;
 	else {
 		if (!break_reload_fin.tv_sec)
-			tot1 = us_tvdiff(now, &break_reload_stt);
+			tot1 = tvdiff(now, &break_reload_stt);
 		else
-			tot1 = us_tvdiff(&break_reload_fin, &break_reload_stt);
+			tot1 = tvdiff(&break_reload_fin, &break_reload_stt);
 	}
 	if (!break_cmd_stt.tv_sec)
 		tot2 = 0;
 	else
-		tot2 = us_tvdiff(now, &break_cmd_stt);
+		tot2 = tvdiff(now, &break_cmd_stt);
 	count1 = break_reload_processed ? : 1;
 	count2 = break_cmd_processed ? : 1;
 	LOGWARNING(" break reload: t%fs/t%"PRIu64"/av%fs "
 		   "%"PRIu64"s/%"PRIu64"w/%"PRIu64"t"
 		   " cmd: t%fs/t%"PRIu64"/av%fs "
 		   "%"PRIu64"s/%"PRIu64"w/%"PRIu64"t",
-		   tot1/1000000, break_reload_processed, (tot1/count1)/1000000,
+		   tot1, break_reload_processed, tot1/count1,
 		   bq_reload_signals, bq_reload_wakes, bq_reload_timeouts,
-		   tot2/1000000, break_cmd_processed, (tot2/count2)/1000000,
+		   tot2, break_cmd_processed, tot2/count2,
 		   bq_cmd_signals, bq_cmd_wakes, bq_cmd_timeouts);
 
 	LOGWARNING(" queue reload: %"PRIu64"s/%"PRIu64"w/%"PRIu64"t"
