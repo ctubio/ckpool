@@ -5656,9 +5656,9 @@ static void *socketer(void *arg)
 			copy_tv(&(bq->now), &now);
 			bq->seqentryflags = seqentryflags;
 			bq->sockd = sockd;
+			K_WLOCK(breakqueue_free);
 			if (max_sockd_count < ++sockd_count)
 				max_sockd_count = sockd_count;
-			K_WLOCK(breakqueue_free);
 			k_add_tail(cmd_breakqueue_store, bq_item);
 			K_WUNLOCK(breakqueue_free);
 			setnow(&now2);
