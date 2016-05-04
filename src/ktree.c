@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2015 Andrew Smith
+ * Copyright 1995-2016 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -1097,4 +1097,6 @@ void _free_ktree(K_TREE *tree, void (*free_funct)(void *), KTREE_FFL_ARGS)
 
 	tree->node_store = k_free_store(tree->node_store);
 	tree->node_free = k_free_list(tree->node_free);
+
+	free(tree);
 }

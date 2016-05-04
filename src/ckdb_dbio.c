@@ -2981,6 +2981,8 @@ bool optioncontrol_fill(PGconn *conn)
 
 	K_WUNLOCK(optioncontrol_free);
 	PQclear(res);
+	for (n = 0; n < par; n++)
+		free(params[n]);
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
@@ -3384,7 +3386,9 @@ bool workinfo_fill(PGconn *conn)
 flail:
 	res = PQexec(conn, "Commit", CKPQ_READ);
 	PQclear(res);
-
+	for (n = 0; n < par; n++)
+		free(params[n]);
+	free(sel);
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
@@ -7053,7 +7057,9 @@ void ips_add(char *group, char *ip, char *eventname, bool is_event, char *des,
 	STRNCPY(ips->ip, ip);
 	STRNCPY(ips->eventname, eventname);
 	ips->is_event = is_event;
-	if (des) {
+	if (!des)
+		ips->description = NULL;
+	else {
 		ips->description = strdup(des);
 		if (!ips->description)
 			quithere(1, "strdup OOM");
@@ -7081,7 +7087,9 @@ void ips_add(char *group, char *ip, char *eventname, bool is_event, char *des,
 			}
 		}
 		if (ok) {
-			if (des) {
+			if (!des)
+				ips2->description = NULL;
+			else {
 				ips2->description = strdup(des);
 				LIST_MEM_ADD(ips_free, ips2->description);
 			}

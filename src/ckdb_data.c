@@ -73,6 +73,15 @@ void free_payouts_data(K_ITEM *item)
 	FREENULL(payouts->stats);
 }
 
+void free_ips_data(K_ITEM *item)
+{
+	IPS *ips;
+
+	DATA_IPS(ips, item);
+	LIST_MEM_SUB(ips_free, ips->description);
+	FREENULL(ips->description);
+}
+
 void free_sharesummary_data(K_ITEM *item)
 {
 	SHARESUMMARY *sharesummary;

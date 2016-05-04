@@ -1882,7 +1882,9 @@ static void dealloc_storage()
 	FREE_TREE(events_hash);
 	FREE_LISTS(events);
 	FREE_ALL(ovents);
-	FREE_ALL(ips);
+	FREE_TREE(ips);
+	FREE_STORE_DATA(ips);
+	FREE_LIST(ips);
 	FREE_ALL(auths);
 
 	FREE_TREE(payouts_wid);
