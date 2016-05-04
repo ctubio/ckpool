@@ -173,12 +173,15 @@ function btcfmt($amt)
  return number_format($amt, 8);
 }
 #
-function utcd($when, $brief = false)
+function utcd($when, $brief = false, $zone = true)
 {
  if ($brief)
-	 return gmdate('M-d H:i:s', round($when));
+	return gmdate('M&#8209;d H:i:s', round($when));
  else
-	 return gmdate('Y-m-d H:i:s+00', round($when));
+	if ($zone)
+		return gmdate('Y&#8209;m&#8209;d H:i:s+00', round($when));
+	else
+		return gmdate('Y&#8209;m&#8209;d H:i:s', round($when));
 }
 #
 global $sipre;

@@ -3021,13 +3021,18 @@ bool check_update_blocks_stats(tv_t *stats)
 	WORKINFO *workinfo;
 	BLOCKS *blocks;
 	double ok, diffacc, netsumm, diffmean, pending, txmean, cr;
+	double meansum, meanall[LUCKNUM];
 	bool ret = false;
 	tv_t now;
+	int i, lim;
 
 	/* Wait for startup_complete rather than db_load_complete
 	 * This avoids doing a 'long' lock stats update while reloading */
 	if (!startup_complete)
 		return false;
+
+	for (i = 0; i < LUCKNUM; i++)
+		meanall[i] = 0.0;
 
 	K_RLOCK(workinfo_free);
 	K_WLOCK(blocks_free);
@@ -3035,28 +3040,17 @@ bool check_update_blocks_stats(tv_t *stats)
 		/* Have to first work out the diffcalc for each block
 		 * Orphans count towards the next valid block after the orphan
 		 *  so this has to be done in the reverse order of the range
-		 *  calculations */
+		 *  calculations
+		 * Luckhistory is calculated from earlier blocks up to the
+		 *  current block so must be calculated in reverse order also
+		 *  Luckhistory requires netdiff */
 		pending = 0.0;
+		ok = 0;
 		b_item = first_in_ktree(blocks_root, ctx);
 		while (b_item) {
 			DATA_BLOCKS(blocks, b_item);
 			if (CURRENT(&(blocks->expirydate))) {
 				pending += blocks->diffacc;
-				if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
-				    blocks->confirmed[0] == BLOCKS_REJECT)
-					blocks->diffcalc = 0.0;
-				else {
-					blocks->diffcalc = pending;
-					pending = 0.0;
-				}
-			}
-			b_item = next_in_ktree(ctx);
-		}
-		ok = diffacc = netsumm = diffmean = txmean = 0.0;
-		b_item = last_in_ktree(blocks_root, ctx);
-		while (b_item) {
-			DATA_BLOCKS(blocks, b_item);
-			if (CURRENT(&(blocks->expirydate))) {
 				if (blocks->netdiff == 0) {
 					w_item = _find_workinfo(blocks->workinfoid, true, NULL);
 					if (!w_item) {
@@ -3076,6 +3070,42 @@ bool check_update_blocks_stats(tv_t *stats)
 					DATA_WORKINFO(workinfo, w_item);
 					blocks->netdiff = workinfo->diff_target;
 				}
+				if (blocks->confirmed[0] == BLOCKS_ORPHAN ||
+				    blocks->confirmed[0] == BLOCKS_REJECT) {
+					blocks->diffcalc = 0.0;
+					blocks->luckhistory = 0.0;
+				} else {
+					ok++;
+					blocks->diffcalc = pending;
+					pending = 0.0;
+
+					meansum = 0.0;
+					for (i = LUCKNUM-1; i > 0; i--) {
+						meanall[i] = meanall[i-1];
+						meansum += meanall[i];
+					}
+
+					if (blocks->netdiff == 0.0)
+						meanall[0] = 0.0;
+					else
+						meanall[0] = blocks->diffcalc / blocks->netdiff;
+
+					meansum += meanall[0];
+
+					lim = (ok < LUCKNUM) ? ok : LUCKNUM;
+					if (meansum == 0.0)
+						blocks->luckhistory = 0.0;
+					else
+						blocks->luckhistory = lim / meansum;
+				}
+			}
+			b_item = next_in_ktree(ctx);
+		}
+		ok = diffacc = netsumm = diffmean = txmean = 0.0;
+		b_item = last_in_ktree(blocks_root, ctx);
+		while (b_item) {
+			DATA_BLOCKS(blocks, b_item);
+			if (CURRENT(&(blocks->expirydate))) {
 				/* Stats for each blocks are independent of
 				 * if they are orphans or not */
 				if (blocks->netdiff == 0.0)
@@ -3108,8 +3138,12 @@ bool check_update_blocks_stats(tv_t *stats)
 					else
 						blocks->diffratio = diffacc / netsumm;
 
-					diffmean = ((diffmean * (ok - 1)) +
-						    (blocks->diffcalc / blocks->netdiff)) / ok;
+					if (blocks->netdiff == 0.0)
+						diffmean = (diffmean * (ok - 1)) / ok;
+					else {
+						diffmean = ((diffmean * (ok - 1)) +
+							    (blocks->diffcalc / blocks->netdiff)) / ok;
+					}
 					blocks->diffmean = diffmean;
 
 					if (diffmean == 0.0) {
@@ -3121,8 +3155,12 @@ bool check_update_blocks_stats(tv_t *stats)
 					}
 
 					cr = coinbase_reward(blocks->height);
-					txmean = ((txmean * (ok - 1)) +
-						    ((double)(blocks->reward) / cr)) / ok;
+					if (cr == 0.0)
+						txmean = (txmean * (ok - 1)) / ok;
+					else {
+						txmean = ((txmean * (ok - 1)) +
+							    ((double)(blocks->reward) / cr)) / ok;
+					}
 					blocks->txmean = txmean;
 				}
 			}

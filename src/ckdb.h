@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.103"
+#define CKDB_VERSION DB_VERSION"-2.104"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1960,6 +1960,8 @@ extern K_STORE *sharesummary_store;
 extern K_TREE *sharesummary_pool_root;
 extern K_STORE *sharesummary_pool_store;
 
+#define LUCKNUM 100
+
 // BLOCKS block.id.json={...}
 typedef struct blocks {
 	int32_t height;
@@ -2003,6 +2005,9 @@ typedef struct blocks {
 	double diffmean;
 	double cdferl;
 	double luck;
+	/* Last LUCKNUM block luck - or
+	 *  back to the first block if there aren't LUCKNUM blocks before it */
+	double luckhistory;
 
 	// Mean reward ratio per block from last to this
 	double txmean;

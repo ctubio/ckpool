@@ -1411,18 +1411,22 @@ redo:
 			if (has_stats) {
 				snprintf(tmp, sizeof(tmp),
 					 "netdiff:%d=%.8f%cdiffratio:%d=%.8f%c"
-					 "cdf:%d=%.8f%cluck:%d=%.8f%c",
+					 "cdf:%d=%.8f%cluck:%d=%.8f%c"
+					 "luckhistory:%d=%.8f%c",
 					 rows, blocks->netdiff, FLDSEP,
 					 rows, blocks->blockdiffratio, FLDSEP,
 					 rows, blocks->blockcdf, FLDSEP,
-					 rows, blocks->blockluck, FLDSEP);
+					 rows, blocks->blockluck, FLDSEP,
+					 rows, blocks->luckhistory, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 			} else {
 				snprintf(tmp, sizeof(tmp),
 					 "netdiff:%d=?%cdiffratio:%d=?%c"
-					 "cdf:%d=?%cluck:%d=?%c",
+					 "cdf:%d=?%cluck:%d=?%c"
+					 "luckhistory:%d=?%c",
 					 rows, FLDSEP, rows, FLDSEP,
-					 rows, FLDSEP, rows, FLDSEP);
+					 rows, FLDSEP, rows, FLDSEP,
+					 rows, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 			}
 
@@ -1515,11 +1519,12 @@ redo:
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp),
-		 "rows=%d%cflds=%s%c",
-		 rows, FLDSEP,
+		 "historysize=%d%crows=%d%cflds=%s%c",
+		 LUCKNUM, FLDSEP, rows, FLDSEP,
 		 "seq,height,blockhash,nonce,reward,workername,first"CDTRF","
 		 CDTRF",prev"CDTRF",confirmed,status,info,statsconf,diffacc,"
-		 "diffinv,shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck",
+		 "diffinv,shareacc,shareinv,elapsed,netdiff,diffratio,cdf,luck,"
+		 "luckhistory",
 		 FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
