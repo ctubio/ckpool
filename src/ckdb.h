@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.105"
+#define CKDB_VERSION DB_VERSION"-2.106"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -3377,6 +3377,7 @@ extern struct CMDS ckdb_cmds[];
 // ***
 
 extern bool btc_valid_address(char *addr);
+extern bool btc_orphancheck(BLOCKS *blocks);
 extern void btc_blockstatus(BLOCKS *blocks);
 
 // ***

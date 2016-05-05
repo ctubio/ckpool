@@ -1,6 +1,6 @@
 /*
  * Copyright 2013-2014 Andrew Smith - BlackArrow Ltd
- * Copyright 2015 Andrew Smith
+ * Copyright 2015-2016 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free

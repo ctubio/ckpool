@@ -3774,6 +3774,46 @@ static void *breaker(void *arg)
 	return NULL;
 }
 
+static void check_orphans()
+{
+	K_TREE_CTX ctx[1];
+	K_ITEM *b_item;
+	BLOCKS *blocks = NULL;
+	uint32_t currhi = 0;
+
+	K_RLOCK(blocks_free);
+	// Find the most recent block BLOCKS_NEW or BLOCKS_CONFIRM
+	b_item = last_in_ktree(blocks_root, ctx);
+	while (b_item) {
+		DATA_BLOCKS(blocks, b_item);
+		if (!blocks->ignore &&
+		    CURRENT(&(blocks->expirydate)) &&
+		    (blocks->confirmed[0] == BLOCKS_NEW ||
+		     blocks->confirmed[0] == BLOCKS_CONFIRM))
+			break;
+		b_item = prev_in_ktree(ctx);
+	}
+	K_RUNLOCK(blocks_free);
+
+	// None
+	if (!b_item)
+		return;
+
+	K_RLOCK(workinfo_free);
+	if (workinfo_current) {
+		WORKINFO *wic;
+		DATA_WORKINFO(wic, workinfo_current);
+		currhi = wic->height - 1;
+	}
+	K_RUNLOCK(workinfo_free);
+
+	LOGDEBUG("%s() currhi=%"PRIu32" block=%"PRIu32,
+		 __func__, currhi, blocks->height);
+	// Keep checking for 6 blocks
+	if (currhi && (currhi - blocks->height) < 6)
+		btc_orphancheck(blocks);
+}
+
 static void check_blocks()
 {
 	K_TREE_CTX ctx[1];
@@ -3800,7 +3840,8 @@ static void check_blocks()
 	if (!b_item)
 		return;
 
-	btc_blockstatus(blocks);
+	if (btc_orphancheck(blocks))
+		btc_blockstatus(blocks);
 }
 
 static void pplns_block(BLOCKS *blocks)
@@ -4043,6 +4084,7 @@ static void summarise_blocks()
 
 static void *summariser(__maybe_unused void *arg)
 {
+	bool orphan_check = false;
 	int i;
 
 	pthread_detach(pthread_self());
@@ -4073,6 +4115,19 @@ static void *summariser(__maybe_unused void *arg)
 			if (!everyone_die)
 				sleep(1);
 		}
+
+		if (everyone_die)
+			break;
+		else {
+			orphan_check = !orphan_check;
+			// Check every 2nd time
+			if (orphan_check)
+				check_orphans();
+		}
+
+		if (!everyone_die)
+			sleep(1);
+
 		if (everyone_die)
 			break;
 		else
