@@ -5664,6 +5664,8 @@ out_unlock:
 	json_set_string(val, "createinet", ckp->serverurl[client->server]);
 	json_set_string(val, "workername", client->workername);
 	json_set_string(val, "username", user->username);
+        json_set_string(val, "address", client->address);
+        json_set_string(val, "agent", client->useragent);
 
 	if (ckp->logshares) {
 		fp = fopen(fname, "ae");
