@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.106"
+#define CKDB_VERSION DB_VERSION"-2.107"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -384,6 +384,8 @@ extern uint64_t blis_processed;
 #define MAX_ALERT_CMD 255
 // Access using event_limits_free lock
 extern char *ckdb_alert_cmd;
+
+extern tv_t ckdb_start;
 
 extern char *btc_server;
 extern char *btc_auth;

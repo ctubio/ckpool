@@ -3515,13 +3515,18 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		tvs_to_buf(&(poolstats->createdate), reply, siz);
 		snprintf(tmp, sizeof(tmp), "p_statsdate=%s%c", reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "ckdb_elapsed=%d%c",
+			 (int)(now->tv_sec - ckdb_start.tv_sec), FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
 	} else {
 		snprintf(tmp, sizeof(tmp), "users=?%cworkers=?%cp_hashrate=?%c"
 					   "p_hashrate5m=?%cp_hashrate1hr=?%c"
 					   "p_hashrate24hr=?%cp_elapsed=?%c"
-					   "p_statsdate=?%c",
+					   "p_statsdate=?%cckdb_elapsed=?%c",
 					   FLDSEP, FLDSEP, FLDSEP, FLDSEP,
-					   FLDSEP, FLDSEP, FLDSEP, FLDSEP);
+					   FLDSEP, FLDSEP, FLDSEP, FLDSEP,
+					   FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 	}
 

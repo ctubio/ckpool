@@ -322,6 +322,8 @@ static sem_t socketer_sem;
 // command called for any ckdb alerts
 char *ckdb_alert_cmd = NULL;
 
+tv_t ckdb_start;
+
 char *btc_server = "http://127.0.0.1:8330";
 char *btc_auth;
 int btc_timeout = 5;
@@ -7243,6 +7245,8 @@ int main(int argc, char **argv)
 	size_t len;
 	char *kill;
 	tv_t now;
+
+	setnow(&ckdb_start);
 
 	printf("CKDB Master V%s (C) Kano (see source code)\n", CKDB_VERSION);
 
