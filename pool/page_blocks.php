@@ -181,7 +181,7 @@ function doblocks($data, $user)
 		$pg .= "<td class=dl>Who</td>";
 	$pg .= "<td class=dr>Block Reward</td>";
 	$pg .= "<td class=dc>When UTC</td>";
-	$pg .= "<td class=dr>Status</td>";
+	$pg .= "<td class=dl>Status</td>";
 	$pg .= "<td class=dr>Diff</td>";
 	$pg .= "<td class=dr>Diff%</td>";
 	$pg .= "<td class=dr>CDF</td>";
@@ -335,8 +335,8 @@ function doblocks($data, $user)
 			$pg .= "<td class=dl$ex>$nam</td>";
 		 }
 		 $pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
-		 $pg .= "<td class=dl$ex>".utcd($ans['firstcreatedate:'.$i], false, false).'</td>';
-		 $pg .= "<td class=dr$ex>$tt$stat</td>";
+		 $pg .= "<td class=dc$ex>".utcd($ans['firstcreatedate:'.$i], false, false).'</td>';
+		 $pg .= "<td class=dl$ex>$tt$stat</td>";
 		 $pg .= "<td class=dr>$stara$approx$acc</td>";
 		 $pg .= "<td class=dr$bg>$bpct</td>";
 		 $pg .= "<td class=dr>$cdfdsp</td>";
