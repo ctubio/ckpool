@@ -330,7 +330,10 @@ function doblocks($data, $user)
 		 $pg .= "<td class=dr$ex>$seq</td>";
 		 $pg .= "<td class=dl$ex>$hifld</td>";
 		 if ($user !== null)
-			$pg .= "<td class=dl$ex>".htmlspecialchars($ans['workername:'.$i]).'</td>';
+		 {
+			list($abr, $nam) = dspname($ans['workername:'.$i]);
+			$pg .= "<td class=dl$ex>$nam</td>";
+		 }
 		 $pg .= "<td class=dr$ex>".btcfmt($ans['reward:'.$i]).'</td>';
 		 $pg .= "<td class=dl$ex>".utcd($ans['firstcreatedate:'.$i], false, false).'</td>';
 		 $pg .= "<td class=dr$ex>$tt$stat</td>";

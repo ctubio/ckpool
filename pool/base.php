@@ -233,6 +233,19 @@ function difffmt($amt)
  return siprefmt($amt, 3);
 }
 #
+function dspname($name)
+{
+ if (strlen($name) < 23)
+	return array(false, htmlspecialchars($name));
+
+ if (strpbrk($name, '._') === false)
+	return array(false, htmlspecialchars(substr($name, 0, 20)).'&hellip;');
+
+ $left = htmlspecialchars(substr($name, 0, 17));
+ $right = htmlspecialchars(substr($name, -3));
+ return array(true, $left.'&hellip;'.$right);
+}
+#
 function emailStr($str)
 {
  $all = '/[^A-Za-z0-9_+\.@-]/'; // no space = trim
