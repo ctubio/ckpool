@@ -239,7 +239,7 @@ function dspname($name)
 	return array(false, htmlspecialchars($name));
 
  if (strpbrk($name, '._') === false)
-	return array(false, htmlspecialchars(substr($name, 0, 20)).'&hellip;');
+	return array(true, htmlspecialchars(substr($name, 0, 20)).'&hellip;');
 
  $left = htmlspecialchars(substr($name, 0, 17));
  $right = htmlspecialchars(substr($name, -3));
