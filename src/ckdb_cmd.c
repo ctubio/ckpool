@@ -2618,7 +2618,8 @@ wiconf:
 	} else if (strcasecmp(cmd, STR_SHARES) == 0) {
 		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
 		K_ITEM *i_enonce1, *i_nonce2, *i_nonce, *i_diff, *i_sdiff;
-		K_ITEM *i_secondaryuserid, *i_ntime;
+		K_ITEM *i_secondaryuserid, *i_ntime, *i_address, *i_agent;
+		char *address, *agent;
 		bool ok;
 
 		i_nonce = require_name(trf_root, "nonce", 1, NULL, reply, siz);
@@ -2697,6 +2698,18 @@ wiconf:
 		if (!i_ntime)
 			return strdup(reply);
 
+		i_address = optional_name(trf_root, "address", 0, NULL, reply, siz);
+		if (i_address)
+			address = transfer_data(i_address);
+		else
+			address = EMPTY;
+
+		i_agent = optional_name(trf_root, "agent", 0, NULL, reply, siz);
+		if (i_agent)
+			agent = transfer_data(i_agent);
+		else
+			agent = EMPTY;
+
 		ok = shares_add(conn, transfer_data(i_workinfoid),
 				      transfer_data(i_username),
 				      transfer_data(i_workername),
@@ -2708,7 +2721,7 @@ wiconf:
 				      transfer_data(i_diff),
 				      transfer_data(i_sdiff),
 				      transfer_data(i_secondaryuserid),
-				      transfer_data(i_ntime),
+				      transfer_data(i_ntime), address, agent,
 				      by, code, inet, cd, trf_root);
 
 		if (!ok) {

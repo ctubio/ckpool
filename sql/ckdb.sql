@@ -192,7 +192,7 @@ CREATE TABLE workinfo (
 );
 
 
-CREATE TABLE shares ( -- only shares with sdiff >= minsdiff are stored in the DB
+CREATE TABLE shares ( -- only shares with sdiff >= -D minsdiff are stored in the DB
     workinfoid bigint NOT NULL,
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
@@ -207,6 +207,8 @@ CREATE TABLE shares ( -- only shares with sdiff >= minsdiff are stored in the DB
     secondaryuserid character varying(64) NOT NULL,
     ntime character varying(64) NOT NULL,
     minsdiff float NOT NULL,
+    agent character varying(128) DEFAULT ''::character varying NOT NULL,
+    address character varying(128) DEFAULT ''::character varying NOT NULL,
     createdate timestamp with time zone NOT NULL,
     createby character varying(64) DEFAULT ''::character varying NOT NULL,
     createcode character varying(128) DEFAULT ''::character varying NOT NULL,
@@ -233,7 +235,7 @@ CREATE TABLE shareerrors ( -- not stored in the db - only in log files
 );
 
 
-CREATE TABLE sharesummary ( -- per workinfo for each user+worker
+CREATE TABLE sharesummary ( -- per workinfo for each user+worker - RAM not DB
     userid bigint NOT NULL,
     workername character varying(256) NOT NULL,
     workinfoid bigint NOT NULL,
@@ -472,4 +474,4 @@ CREATE TABLE version (
     PRIMARY KEY (vlock)
 );
 
-insert into version (vlock,version) values (1,'1.0.5');
+insert into version (vlock,version) values (1,'1.0.6');

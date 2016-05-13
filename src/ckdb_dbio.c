@@ -185,7 +185,7 @@ char *pqerrmsg(PGconn *conn)
 #define PQPARAM16 PQPARAM8 ",$9,$10,$11,$12,$13,$14,$15,$16"
 #define PQPARAM17 PQPARAM16 ",$17"
 #define PQPARAM18 PQPARAM16 ",$17,$18"
-#define PQPARAM19 PQPARAM16 ",$17,$18,$19"
+#define PQPARAM21 PQPARAM16 ",$17,$18,$19,$20,$21"
 #define PQPARAM22 PQPARAM16 ",$17,$18,$19,$20,$21,$22"
 #define PQPARAM23 PQPARAM16 ",$17,$18,$19,$20,$21,$22,$23"
 #define PQPARAM26 PQPARAM22 ",$23,$24,$25,$26"
@@ -3633,8 +3633,8 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername,
 		char *clientid, char *errn, char *enonce1, char *nonce2,
 		char *nonce, char *diff, char *sdiff, char *secondaryuserid,
-		char *ntime, char *by, char *code, char *inet, tv_t *cd,
-		K_TREE *trf_root)
+		char *ntime, char *address, char *agent, char *by, char *code,
+		char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *s_item = NULL, *s2_item = NULL, *u_item, *wi_item, *tmp_item;
@@ -3706,6 +3706,8 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 
 	STRNCPY(shares->ntime, ntime);
 	shares->minsdiff = share_min_sdiff;
+	STRNCPY(shares->address, address);
+	STRNCPY(shares->agent, agent);
 
 	HISTORYDATEINIT(shares, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, shares);
@@ -3794,7 +3796,7 @@ bool shares_db(PGconn *conn, K_ITEM *s_item)
 	PGresult *res;
 	SHARES *row;
 	char *ins;
-	char *params[14 + HISTORYDATECOUNT];
+	char *params[16 + HISTORYDATECOUNT];
 	int n, par = 0;
 	bool ok = false;
 
@@ -3817,13 +3819,15 @@ bool shares_db(PGconn *conn, K_ITEM *s_item)
 	params[par++] = str_to_buf(row->secondaryuserid, NULL, 0);
 	params[par++] = str_to_buf(row->ntime, NULL, 0);
 	params[par++] = double_to_buf(row->minsdiff, NULL, 0);
+	params[par++] = str_to_buf(row->address, NULL, 0);
+	params[par++] = str_to_buf(row->agent, NULL, 0);
 	HISTORYDATEPARAMS(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into shares "
 		"(workinfoid,userid,workername,clientid,enonce1,nonce2,nonce,"
-		"diff,sdiff,errn,error,secondaryuserid,ntime,minsdiff"
-		HISTORYDATECONTROL ") values (" PQPARAM19 ")";
+		"diff,sdiff,errn,error,secondaryuserid,ntime,minsdiff,address,"
+		"agent" HISTORYDATECONTROL ") values (" PQPARAM21 ")";
 
 	if (!conn) {
 		conn = dbconnect();

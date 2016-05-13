@@ -51,8 +51,8 @@
  * Consider adding row level locking (a per kitem usage count) if needed */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.5"
-#define CKDB_VERSION DB_VERSION"-2.107"
+#define DB_VERSION "1.0.6"
+#define CKDB_VERSION DB_VERSION"-2.108"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1840,6 +1840,8 @@ typedef struct shares {
 	char secondaryuserid[TXT_SML+1];
 	char ntime[TXT_SML+1];
 	double minsdiff;
+	char agent[TXT_MED+1];
+	char address[TXT_MED+1];
 	HISTORYDATECONTROLFIELDS;
 	int32_t redo; // non-DB field
 	int32_t oldcount; // non-DB field
@@ -3238,8 +3240,8 @@ extern bool shares_add(PGconn *conn, char *workinfoid, char *username,
 			char *workername, char *clientid, char *errn,
 			char *enonce1, char *nonce2, char *nonce, char *diff,
 			char *sdiff, char *secondaryuserid, char *ntime,
-			char *by, char *code, char *inet, tv_t *cd,
-			K_TREE *trf_root);
+			char *address, char *agent, char *by, char *code,
+			char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool shares_db(PGconn *conn, K_ITEM *s_item);
 extern bool shares_fill(PGconn *conn);
 extern bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
