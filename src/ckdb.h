@@ -51,7 +51,7 @@
  * Consider adding row level locking (a per kitem usage count) if needed */
 
 #define DB_VLOCK "1"
-#define DB_VERSION "1.0.6"
+#define DB_VERSION "1.0.7"
 #define CKDB_VERSION DB_VERSION"-2.108"
 
 #define WHERE_FFL " - from %s %s() line %d"
