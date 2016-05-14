@@ -7252,6 +7252,9 @@ int main(int argc, char **argv)
 
 	feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
 
+	// Zombie no go zone
+	signal(SIGCHLD, SIG_IGN);
+
 	global_ckp = &ckp;
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;

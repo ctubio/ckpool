@@ -5022,6 +5022,7 @@ int check_events(EVENTS *events)
 		} else {
 			if (pid == 0) {
 				char buf1[16], buf2[16], buf3[16], buf4[16];
+				int e;
 				snprintf(buf1, sizeof(buf1), "%d", events->id);
 				snprintf(buf2, sizeof(buf2), "%d", limit);
 				snprintf(buf3, sizeof(buf3), "%d", tyme);
@@ -5030,10 +5031,11 @@ int check_events(EVENTS *events)
 				execl(cmd, cmd, buf1, name, buf2, buf3, buf4,
 					events->createinet, st,
 					cause_str(cause), NULL);
+				e = errno;
 				LOGERR("%s() ALERT fork failed to execute (%d)",
-					__func__, errno);
+					__func__, e);
 				FREENULL(st);
-				exit(0);
+				_exit(0);
 			}
 		}
 		return lifetime;
