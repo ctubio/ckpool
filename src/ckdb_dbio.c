@@ -4448,6 +4448,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	char *reason = NULL;
 	int ss_count, ms_count;
 	char *st = NULL;
+	tv_t db_stt, db_fin, lck_stt, lck_fin;
 
 	LOGWARNING("%s() Processing: workmarkers %"PRId64"/%s/"
 		   "End %"PRId64"/Stt %"PRId64"/%s/%s",
@@ -4594,6 +4595,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		ss_item = ss_prev;
 	}
 
+	setnow(&db_stt);
 	if (conn == NULL) {
 		conn = dbconnect();
 		conned = true;
@@ -4604,6 +4606,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	PQclear(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Begin", rescode, conn);
+		setnow(&db_fin);
 		goto flail;
 	}
 
@@ -4612,6 +4615,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		if (!(markersummary_add(conn, ms_item, by, code, inet,
 					cd, trf_root))) {
 			reason = "db error";
+			setnow(&db_fin);
 			goto rollback;
 		}
 		ms_item = ms_item->next;
@@ -4625,6 +4629,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 				 workmarkers->description,
 				 MARKER_PROCESSED_STR,
 				 by, code, inet, cd, trf_root);
+	setnow(&db_fin);
 rollback:
 	if (ok)
 		res = PQexec(conn, "Commit", CKPQ_WRITE);
@@ -4638,9 +4643,10 @@ flail:
 
 	if (reason) {
 		// already displayed the full workmarkers detail at the top
-		LOGERR("%s() %s: workmarkers %"PRId64"/%s/%s",
+		LOGERR("%s() %s: workmarkers %"PRId64"/%s/%s db %.3fs",
 			shortname, reason, workmarkers->markerid,
-			workmarkers->description, workmarkers->status);
+			workmarkers->description, workmarkers->status,
+			tvdiff(&db_fin, &db_stt));
 
 		ok = false;
 	}
@@ -4667,6 +4673,7 @@ flail:
 		ms_count = new_markersummary_store->count;
 		ss_count = old_sharesummary_store->count;
 
+		setnow(&lck_stt);
 		K_WLOCK(sharesummary_free);
 		K_WLOCK(markersummary_free);
 		K_RLOCK(workmarkers_free);
@@ -4719,16 +4726,19 @@ flail:
 		K_RUNLOCK(workmarkers_free);
 		K_WUNLOCK(markersummary_free);
 		K_WUNLOCK(sharesummary_free);
+		setnow(&lck_fin);
 
 		LOGWARNING("%s() Processed: %d ms %d ss %"PRId64" shares "
 			   "%"PRId64" diff for workmarkers %"PRId64"/%s/"
-			   "End %"PRId64"/Stt %"PRId64"/%s/%s",
+			   "End %"PRId64"/Stt %"PRId64"/%s/%s db %.3fs "
+			   "lck %.3fs",
 			   shortname, ms_count, ss_count, shareacc, diffacc,
 			   workmarkers->markerid, workmarkers->poolinstance,
 			   workmarkers->workinfoidend,
 			   workmarkers->workinfoidstart,
 			   workmarkers->description,
-			   workmarkers->status);
+			   workmarkers->status, tvdiff(&db_fin, &db_stt),
+			   tvdiff(&lck_fin, &lck_stt));
 	}
 	free_ktree(ms_root, NULL);
 	new_markersummary_store = k_free_store(new_markersummary_store);

@@ -5562,7 +5562,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	K_ITEM *wm_item, *wm_last = NULL, *s_item = NULL;
 	bool ok, did;
 	int count = 0;
-	tv_t now;
+	tv_t now, share_stt, share_fin, proc_lock_stt, proc_lock_fin;
 
 	K_RLOCK(workmarkers_free);
 	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
@@ -5591,6 +5591,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	 * This way we know that the high shares in the DB will match the start
 	 *  of, or be after the start of, the shares included in the reload
 	 * All duplicate high shares are ignored */
+	setnow(&share_stt);
 	count = 0;
 	do {
 		did = false;
@@ -5600,11 +5601,14 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 		if (s_item) {
 			did = true;
 			ok = shares_db(conn, s_item);
-			if (!ok)
+			if (!ok) {
+				setnow(&share_fin);
 				goto flailed;
+			}
 			count++;
 		}
 	} while (did);
+	setnow(&share_fin);
 
 	DATA_WORKMARKERS(workmarkers, wm_last);
 
@@ -5628,16 +5632,22 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	/* So we can't change any sharesummaries/markersummaries while a
 	 *  payout is being generated
 	 * N.B. this is a long lock since it stores the markersummaries */
+	setnow(&proc_lock_stt);
 	K_WLOCK(process_pplns_free);
 	ok = sharesummaries_to_markersummaries(conn, workmarkers, by, code,
 						inet, &now, trf_root);
 	K_WUNLOCK(process_pplns_free);
+	setnow(&proc_lock_fin);
+	LOGWARNING("%s() pplns lock time %.3fs",
+		   __func__, tvdiff(&proc_lock_fin, &proc_lock_stt));
 
 flailed:
 	PQfinish(conn);
 
-	if (count > 0)
-		LOGWARNING("%s() Stored: %d high shares", __func__, count);
+	if (count > 0) {
+		LOGWARNING("%s() Stored: %d high shares %.3fs",
+			   __func__, count, tvdiff(&share_fin, &share_stt));
+	}
 
 	return ok;
 }
