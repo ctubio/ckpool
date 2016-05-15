@@ -4448,9 +4448,10 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	char *reason = NULL;
 	int ss_count, ms_count;
 	char *st = NULL;
-	tv_t add_stt, db_stt, db_fin, lck_stt, lck_got, lck_fin;
+	tv_t add_stt, add_fin, db_stt, db_fin, lck_stt, lck_got, lck_fin;
 
 	DATE_ZERO(&add_stt);
+	DATE_ZERO(&add_fin);
 	DATE_ZERO(&db_stt);
 	DATE_ZERO(&db_fin);
 
@@ -4500,7 +4501,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		 *  so this will continue and regenerate the markersummaries
 		 */
 		reason = "markersummaries already exist";
-		setnow(&add_stt);
+		setnow(&add_fin);
 		goto flail;
 	}
 
@@ -4600,6 +4601,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 		ss_item = ss_prev;
 	}
+	setnow(&add_fin);
 
 	setnow(&db_stt);
 	if (conn == NULL) {
@@ -4649,10 +4651,11 @@ flail:
 
 	if (reason) {
 		// already displayed the full workmarkers detail at the top
-		LOGERR("%s() %s: workmarkers %"PRId64"/%s/%s db %.3fs",
+		LOGERR("%s() %s: workmarkers %"PRId64"/%s/%s add=%.3fs "
+			"db=%.3fs",
 			shortname, reason, workmarkers->markerid,
 			workmarkers->description, workmarkers->status,
-			tvdiff(&db_fin, &db_stt));
+			tvdiff(&add_fin, &add_stt), tvdiff(&db_fin, &db_stt));
 
 		ok = false;
 	}
@@ -4737,14 +4740,14 @@ flail:
 
 		LOGWARNING("%s() Processed: %d ms %d ss %"PRId64" shares "
 			   "%"PRId64" diff for workmarkers %"PRId64"/%s/"
-			   "End %"PRId64"/Stt %"PRId64"/%s/%s add %.3f "
-			   "db %.3fs lck %.3fs+%.3f",
+			   "End %"PRId64"/Stt %"PRId64"/%s/%s add=%.3f "
+			   "db=%.3fs lck=%.3fs+%.3f",
 			   shortname, ms_count, ss_count, shareacc, diffacc,
 			   workmarkers->markerid, workmarkers->poolinstance,
 			   workmarkers->workinfoidend,
 			   workmarkers->workinfoidstart,
 			   workmarkers->description,
-			   workmarkers->status, tvdiff(&db_stt, &add_stt),
+			   workmarkers->status, tvdiff(&add_fin, &add_stt),
 			   tvdiff(&db_fin, &db_stt),
 			   tvdiff(&lck_got, &lck_stt),
 			   tvdiff(&lck_fin, &lck_got));
