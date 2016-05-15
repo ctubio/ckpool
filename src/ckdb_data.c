@@ -5564,7 +5564,8 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	K_ITEM *wm_item, *wm_last = NULL, *s_item = NULL;
 	bool ok, did;
 	int count = 0;
-	tv_t now, share_stt, share_fin, proc_lock_stt, proc_lock_fin;
+	tv_t now, share_stt, share_fin;
+	tv_t proc_lock_stt, proc_lock_got, proc_lock_fin;
 
 	K_RLOCK(workmarkers_free);
 	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
@@ -5636,12 +5637,14 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	 * N.B. this is a long lock since it stores the markersummaries */
 	setnow(&proc_lock_stt);
 	K_WLOCK(process_pplns_free);
+	setnow(&proc_lock_got);
 	ok = sharesummaries_to_markersummaries(conn, workmarkers, by, code,
 						inet, &now, trf_root);
 	K_WUNLOCK(process_pplns_free);
 	setnow(&proc_lock_fin);
-	LOGWARNING("%s() pplns lock time %.3fs",
-		   __func__, tvdiff(&proc_lock_fin, &proc_lock_stt));
+	LOGWARNING("%s() pplns lock time %.3fs+%.3fs",
+		   __func__, tvdiff(&proc_lock_got, &proc_lock_stt),
+		   tvdiff(&proc_lock_fin, &proc_lock_got));
 
 flailed:
 	PQfinish(conn);

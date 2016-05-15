@@ -4448,7 +4448,11 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	char *reason = NULL;
 	int ss_count, ms_count;
 	char *st = NULL;
-	tv_t db_stt, db_fin, lck_stt, lck_fin;
+	tv_t add_stt, db_stt, db_fin, lck_stt, lck_got, lck_fin;
+
+	DATE_ZERO(&add_stt);
+	DATE_ZERO(&db_stt);
+	DATE_ZERO(&db_fin);
 
 	LOGWARNING("%s() Processing: workmarkers %"PRId64"/%s/"
 		   "End %"PRId64"/Stt %"PRId64"/%s/%s",
@@ -4474,6 +4478,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		goto flail;
 	}
 
+	setnow(&add_stt);
 	// Check there aren't already any matching markersummaries
 	lookmarkersummary.markerid = workmarkers->markerid;
 	lookmarkersummary.userid = 0;
@@ -4495,6 +4500,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		 *  so this will continue and regenerate the markersummaries
 		 */
 		reason = "markersummaries already exist";
+		setnow(&add_stt);
 		goto flail;
 	}
 
@@ -4677,6 +4683,7 @@ flail:
 		K_WLOCK(sharesummary_free);
 		K_WLOCK(markersummary_free);
 		K_RLOCK(workmarkers_free);
+		setnow(&lck_got);
 		ms_item = STORE_HEAD_NOLOCK(new_markersummary_store);
 		while (ms_item) {
 			// move the new markersummaries into the trees/stores
@@ -4730,15 +4737,17 @@ flail:
 
 		LOGWARNING("%s() Processed: %d ms %d ss %"PRId64" shares "
 			   "%"PRId64" diff for workmarkers %"PRId64"/%s/"
-			   "End %"PRId64"/Stt %"PRId64"/%s/%s db %.3fs "
-			   "lck %.3fs",
+			   "End %"PRId64"/Stt %"PRId64"/%s/%s add %.3f "
+			   "db %.3fs lck %.3fs+%.3f",
 			   shortname, ms_count, ss_count, shareacc, diffacc,
 			   workmarkers->markerid, workmarkers->poolinstance,
 			   workmarkers->workinfoidend,
 			   workmarkers->workinfoidstart,
 			   workmarkers->description,
-			   workmarkers->status, tvdiff(&db_fin, &db_stt),
-			   tvdiff(&lck_fin, &lck_stt));
+			   workmarkers->status, tvdiff(&db_stt, &add_stt),
+			   tvdiff(&db_fin, &db_stt),
+			   tvdiff(&lck_got, &lck_stt),
+			   tvdiff(&lck_fin, &lck_got));
 	}
 	free_ktree(ms_root, NULL);
 	new_markersummary_store = k_free_store(new_markersummary_store);
