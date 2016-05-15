@@ -2101,7 +2101,7 @@ static bool setup_data()
 	LOGWARNING("reload complete %.0fm %.3fs", min, sec);
 
 	// full lock access since mark processing can occur
-	K_WLOCK(process_pplns_free);
+	K_KLONGWLOCK(process_pplns_free);
 
 	K_WLOCK(workerstatus_free);
 	K_RLOCK(sharesummary_free);
@@ -3945,7 +3945,7 @@ static void summarise_blocks()
 	ss_look.data = (void *)(&looksharesummary);
 
 	// We don't want them in an indeterminate state due to pplns
-	K_WLOCK(process_pplns_free);
+	K_KLONGWLOCK(process_pplns_free);
 
 	// For now, just lock all 3
 	K_RLOCK(sharesummary_free);

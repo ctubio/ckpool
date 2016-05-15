@@ -176,6 +176,66 @@ extern K_LISTS *all_klists;
  */
 #define K_STORE K_LIST
 
+// Extended ck wlock to allow >1 minute
+#define SINGLE_TIMEOUT_S 10
+/* 5mins - should never happen, but the longest lock: shift summarisation,
+ *  will get slower over time as the share rate rises
+ * Currently, only the code that uses the process_pplns_free lock,
+ *  uses the k_longwlock function to acquire the lock, so that CKDB doesn't
+ *  exit if a shift summarisation takes longer than the normal timeout limit
+ * Nothing else should need to */
+#define TIMEOUT_RETRIES 30
+static inline int wr_timedlock(pthread_rwlock_t *lock, int timeout)
+{
+	tv_t now;
+	ts_t abs;
+	int ret;
+
+	tv_time(&now);
+	tv_to_ts(&abs, &now);
+	abs.tv_sec += timeout;
+
+	ret = pthread_rwlock_timedwrlock(lock, &abs);
+
+	return ret;
+}
+
+static inline void k_longwlock(cklock_t *lock, KLIST_FFL_ARGS)
+{
+	int ret, retries = 0;
+
+retrym:
+	ret = _mutex_timedlock(&(lock->mutex), SINGLE_TIMEOUT_S, file, func, line);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged mutex longlock contention from %s %s:%d, held by %s %s:%d",
+			       file, func, line, lock->mutex.file, lock->mutex.func, lock->mutex.line);
+			if (++retries < TIMEOUT_RETRIES)
+				goto retrym;
+			quitfrom(1, file, func, line, "FAILED TO GRAB LONGMUTEX!");
+		}
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LONGLOCK!");
+	}
+
+	retries = 0;
+retry:
+	ret = wr_timedlock(&(lock->rwlock.rwlock), SINGLE_TIMEOUT_S);
+	if (unlikely(ret)) {
+		if (likely(ret == ETIMEDOUT)) {
+			LOGERR("WARNING: Prolonged longwrite lock contention from %s %s:%d, held by %s %s:%d",
+			       file, func, line, lock->rwlock.file, lock->rwlock.func, lock->rwlock.line);
+			if (++retries < TIMEOUT_RETRIES)
+				goto retry;
+			quitfrom(1, file, func, line, "FAILED TO GRAB LONGWRITE LOCK!");
+		}
+		quitfrom(1, file, func, line, "WTF ERROR ON LONGWRITE LOCK!");
+	}
+	lock->rwlock.file = file;
+	lock->rwlock.func = func;
+	lock->rwlock.line = line;
+}
+#define ck_KLONGW(_lock) k_longwlock(_lock, __FILE__, __func__, __LINE__)
+
 #if LOCK_CHECK
 #define LOCK_MAYBE
 /* The simple lock_check_init check is in case someone incorrectly changes ckdb.c ...
@@ -407,6 +467,8 @@ extern K_LISTS *all_klists;
 
 #define CHECK_WLOCK(_list) CHECK_LOCK(_list, wlock, \
 					LOCK_MODE_LOCK, LOCK_TYPE_WRITE)
+#define CHECK_KLONGWLOCK(_list) CHECK_LOCK(_list, KLONGW, \
+					LOCK_MODE_LOCK, LOCK_TYPE_WRITE)
 #define CHECK_WUNLOCK(_list) CHECK_LOCK(_list, wunlock, \
 					LOCK_MODE_UNLOCK, LOCK_TYPE_WRITE)
 #define CHECK_RLOCK(_list) CHECK_LOCK(_list, rlock, \
@@ -535,6 +597,7 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 		lock_check_init = true; \
 	} while (0)
 #define CHECK_WLOCK(_list) ck_wlock((_list)->lock)
+#define CHECK_KLONGWLOCK(_list) ck_KLONGW((_list)->lock)
 #define CHECK_WUNLOCK(_list) ck_wunlock((_list)->lock)
 #define CHECK_RLOCK(_list) ck_rlock((_list)->lock)
 #define CHECK_RUNLOCK(_list) ck_runlock((_list)->lock)
@@ -562,6 +625,10 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 #define K_WLOCK(_list) do { \
 		CHECK_lock(_list); \
 		CHECK_WLOCK(_list); \
+	} while (0)
+#define K_KLONGWLOCK(_list) do { \
+		CHECK_lock(_list); \
+		CHECK_KLONGWLOCK(_list); \
 	} while (0)
 #define K_WUNLOCK(_list) do { \
 		CHECK_lock(_list); \

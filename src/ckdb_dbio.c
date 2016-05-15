@@ -6398,7 +6398,7 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 
 	// If not already done before calling
 	if (lock)
-		K_WLOCK(process_pplns_free);
+		K_KLONGWLOCK(process_pplns_free);
 
 	// This will be rare so a full lock is best
 	K_WLOCK(payouts_free);

@@ -3711,7 +3711,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	 *  and simply avoids the problems that would cause without much more
 	 *  strict locking than is used already
 	 */
-	K_WLOCK(process_pplns_free);
+	K_KLONGWLOCK(process_pplns_free);
 
 	setnow(&now);
 
@@ -5636,7 +5636,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 	 *  payout is being generated
 	 * N.B. this is a long lock since it stores the markersummaries */
 	setnow(&proc_lock_stt);
-	K_WLOCK(process_pplns_free);
+	K_KLONGWLOCK(process_pplns_free);
 	setnow(&proc_lock_got);
 	ok = sharesummaries_to_markersummaries(conn, workmarkers, by, code,
 						inet, &now, trf_root);
