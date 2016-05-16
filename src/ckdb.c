@@ -535,6 +535,7 @@ K_ITEM *workinfo_current;
 tv_t last_bc;
 // current network diff
 double current_ndiff;
+bool txn_tree_store = true;
 
 // SHARES shares.id.json={...}
 K_TREE *shares_root;
@@ -2053,6 +2054,8 @@ static bool setup_data()
 	LOGWARNING("%sStartup mark generation state is %s",
 		   markersummary_auto ? "" : "WARNING: ",
 		   markersummary_auto ? "On" : "Off");
+	LOGWARNING("Workinfo transaction storage is %s",
+		   txn_tree_store ? "On" : "Off");
 
 	alloc_storage();
 
@@ -7217,6 +7220,8 @@ static struct option long_options[] = {
 	{ "sockdir",		required_argument,	0,	's' },
 	{ "btc-server",		required_argument,	0,	'S' },
 	{ "btc-timeout",	required_argument,	0,	't' },
+	// Don't store the workinfo txn tree in the DB
+	{ "no-txn-store",	no_argument,		0,	'T' },
 	{ "dbuser",		required_argument,	0,	'u' },
 	{ "btc-user",		required_argument,	0,	'U' },
 	{ "version",		no_argument,		0,	'v' },
@@ -7259,7 +7264,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:ghi:Ikl:mM:n:p:P:r:R:s:S:t:u:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:ghi:Ikl:mM:n:p:P:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case 'a':
 				len = strlen(optarg);
@@ -7422,6 +7427,9 @@ int main(int argc, char **argv)
 				break;
 			case 'S':
 				btc_server = strdup(optarg);
+				break;
+			case 'T':
+				txn_tree_store = false;
 				break;
 			case 't':
 				btc_timeout = atoi(optarg);

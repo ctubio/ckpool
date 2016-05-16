@@ -2526,6 +2526,7 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		K_ITEM *i_prevhash, *i_coinbase1, *i_coinbase2, *i_version, *i_bits;
 		K_ITEM *i_ntime, *i_reward;
 		bool igndup = false;
+		char *txn_tree;
 
 		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
 		if (!i_poolinstance)
@@ -2556,6 +2557,10 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		i_transactiontree = require_name(trf_root, "transactiontree", 0, NULL, reply, siz);
 		if (!i_transactiontree)
 			return strdup(reply);
+		if (txn_tree_store)
+			txn_tree = transfer_data(i_transactiontree);
+		else
+			txn_tree = EMPTY;
 
 		i_merklehash = require_name(trf_root, "merklehash", 0, NULL, reply, siz);
 		if (!i_merklehash)
@@ -2591,7 +2596,7 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 
 		workinfoid = workinfo_add(conn, transfer_data(i_workinfoid),
 						transfer_data(i_poolinstance),
-						transfer_data(i_transactiontree),
+						txn_tree,
 						transfer_data(i_merklehash),
 						transfer_data(i_prevhash),
 						transfer_data(i_coinbase1),
