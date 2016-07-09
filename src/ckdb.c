@@ -711,6 +711,16 @@ K_STORE *markersummary_pool_store;
 char mark_start_type = '\0';
 int64_t mark_start = -1;
 
+// KEYSHARESUMMARY
+K_TREE *keysharesummary_root;
+K_LIST *keysharesummary_free;
+K_STORE *keysharesummary_store;
+
+// KEYSUMMARY
+K_TREE *keysummary_root;
+K_LIST *keysummary_free;
+K_STORE *keysummary_store;
+
 // WORKMARKERS
 K_TREE *workmarkers_root;
 K_TREE *workmarkers_workinfoid_root;
@@ -1617,6 +1627,20 @@ static void alloc_storage()
 					    cmp_markersummary,
 					    markersummary_free);
 
+	keysharesummary_free = k_new_list("KeyShareSummary",
+					  sizeof(KEYSHARESUMMARY),
+					  ALLOC_KEYSHARESUMMARY,
+					  LIMIT_KEYSHARESUMMARY, true);
+	keysharesummary_store = k_new_store(keysharesummary_free);
+	keysharesummary_root = new_ktree(NULL, cmp_keysharesummary,
+					 keysharesummary_free);
+
+	keysummary_free = k_new_list("KeySummary", sizeof(KEYSUMMARY),
+					ALLOC_KEYSUMMARY, LIMIT_KEYSUMMARY,
+					true);
+	keysummary_store = k_new_store(keysummary_free);
+	keysummary_root = new_ktree(NULL, cmp_keysummary, keysummary_free);
+
 	workmarkers_free = k_new_list("WorkMarkers", sizeof(WORKMARKERS),
 					ALLOC_WORKMARKERS, LIMIT_WORKMARKERS, true);
 	workmarkers_store = k_new_store(workmarkers_free);
@@ -1649,8 +1673,10 @@ static void alloc_storage()
 
 	DLPRIO(workerstatus, 69);
 	DLPRIO(sharesummary, 68);
-	DLPRIO(markersummary, 67);
-	DLPRIO(workmarkers, 66);
+	DLPRIO(keysharesummary, 67);
+	DLPRIO(markersummary, 65);
+	DLPRIO(keysummary, 64);
+	DLPRIO(workmarkers, 62);
 
 	DLPRIO(marks, 60);
 
@@ -1855,9 +1881,17 @@ static void dealloc_storage()
 	FREE_LIST_DATA(workmarkers);
 
 	if (free_mode != FREE_MODE_ALL)
-		LOGWARNING("%s() markersummary skipped", __func__);
+		LOGWARNING("%s() key/markersummary skipped", __func__);
 	else {
-		LOGWARNING("%s() markersummary ...", __func__);
+		LOGWARNING("%s() key/markersummary ...", __func__);
+
+		FREE_TREE(keysummary);
+		FREE_STORE_DATA(keysummary);
+		FREE_LIST(keysummary);
+
+		FREE_TREE(keysharesummary);
+		FREE_STORE_DATA(keysharesummary);
+		FREE_LIST(keysharesummary);
 
 		FREE_TREE(markersummary_pool);
 		k_list_transfer_to_tail_nolock(markersummary_pool_store,
@@ -4161,7 +4195,7 @@ static void *summariser(__maybe_unused void *arg)
 #define SHIFT_WORDS 26
 static char *shift_words[] =
 {
-	"akatsuki",
+	"ako",
 	"belldandy",
 	"charlotte",
 	"darkchii",
@@ -4277,7 +4311,9 @@ static void make_a_shift_mark()
 	}
 
 	/* Find the last !new sharesummary workinfoid
-	 * If the shift needs to go beyond this, then it's not ready yet */
+	 * If the shift needs to go beyond this, then it's not ready yet
+	 * keysharesummaries will have the same workinfoid,
+	 *  so don't need checking */
 	ss_age_wid = 0;
 	K_RLOCK(sharesummary_free);
 	ss_item = first_in_ktree(sharesummary_workinfoid_root, ss_ctx);
@@ -4499,7 +4535,9 @@ static void make_a_shift_mark()
 				was_block = true;
 				break;
 			}
-			// Does workinfo have (aged) sharesummaries?
+			/* Does workinfo have (aged) sharesummaries?
+			 * keysharesummary will be the same,
+			 *  so doesn't need checking (and doesn't matter) */
 			looksharesummary.workinfoid = workinfo->workinfoid;
 			looksharesummary.userid = MAXID;
 			looksharesummary.workername = EMPTY;

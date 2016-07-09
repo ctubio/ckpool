@@ -6476,7 +6476,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 		 *  Of course if you don't have ALL the necessary shares in
 		 *   the CCLs then you'd lose data doing this
 		 *
-		 * SS_to_MS will complain if any markersummaries already exist
+		 * K/SS_to_K/MS will complain if any markersummaries already exist
 		 *  when processing a workmarker
 		 * Normally you would use 'processed' if the markersummaries
 		 *  are OK, and just the workmarker failed to be updated to

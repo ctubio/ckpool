@@ -9,8 +9,8 @@
 
 #include "ktree.h"
 
-static const int dbg = 0;
-#define DBG	if (dbg != 0) printf
+//static const int dbg = 0;
+//#define DBG	if (dbg != 0) printf
 
 #define FAIL(fmt, ...) do \
 	{ \

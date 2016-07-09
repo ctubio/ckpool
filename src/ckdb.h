@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.114"
+#define CKDB_VERSION DB_VERSION"-2.200"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -830,26 +830,47 @@ enum cmd_values {
 	char createby[TXT_SML+1]; \
 	char createcode[TXT_MED+1]; \
 	char createinet[TXT_MED+1]; \
-	tv_t expirydate
+	tv_t expirydate; \
+	bool buffers
+#define HISTORYDATECONTROLPOINTERS \
+	tv_t createdate; \
+	char *createby; \
+	char *createcode; \
+	char *createinet; \
+	tv_t expirydate; \
+	bool pointers
 
 #define HISTORYDATEINIT(_row, _cd, _by, _code, _inet) do { \
-		_row->createdate.tv_sec = (_cd)->tv_sec; \
-		_row->createdate.tv_usec = (_cd)->tv_usec; \
-		STRNCPY(_row->createby, _by); \
-		STRNCPY(_row->createcode, _code); \
-		STRNCPY(_row->createinet, _inet); \
-		_row->expirydate.tv_sec = default_expiry.tv_sec; \
-		_row->expirydate.tv_usec = default_expiry.tv_usec; \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY((_row)->createby, _by); \
+		STRNCPY((_row)->createcode, _code); \
+		STRNCPY((_row)->createinet, _inet); \
+		(_row)->expirydate.tv_sec = default_expiry.tv_sec; \
+		(_row)->expirydate.tv_usec = default_expiry.tv_usec; \
+		(_row)->buffers = (_row)->buffers; \
 	} while (0)
 
 #define HISTORYDATEDEFAULT(_row, _cd) do { \
-		_row->createdate.tv_sec = (_cd)->tv_sec; \
-		_row->createdate.tv_usec = (_cd)->tv_usec; \
-		STRNCPY(_row->createby, by_default); \
-		STRNCPY(_row->createcode, (char *)__func__); \
-		STRNCPY(_row->createinet, inet_default); \
-		_row->expirydate.tv_sec = default_expiry.tv_sec; \
-		_row->expirydate.tv_usec = default_expiry.tv_usec; \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY((_row)->createby, by_default); \
+		STRNCPY((_row)->createcode, (char *)__func__); \
+		STRNCPY((_row)->createinet, inet_default); \
+		(_row)->expirydate.tv_sec = default_expiry.tv_sec; \
+		(_row)->expirydate.tv_usec = default_expiry.tv_usec; \
+		(_row)->buffers = (_row)->buffers; \
+	} while (0)
+
+#define HISTORYDATEPOINTERS(_list, _row, _cd, _by, _code, _inet) do { \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		SET_CREATEBY(_list, (_row)->createby, _by); \
+		SET_CREATECODE(_list, (_row)->createcode, _code); \
+		SET_CREATEINET(_list, (_row)->createinet, _inet); \
+		(_row)->expirydate.tv_sec = default_expiry.tv_sec; \
+		(_row)->expirydate.tv_usec = default_expiry.tv_usec; \
+		(_row)->pointers = (_row)->pointers; \
 	} while (0)
 
 /* Override _row defaults if transfer fields are present
@@ -875,6 +896,7 @@ enum cmd_values {
 				DATA_TRANSFER(__transfer, __item); \
 				STRNCPY((_row)->createinet, __transfer->mvalue); \
 			} \
+			(_row)->buffers = (_row)->buffers; \
 		} \
 	} while (0)
 
@@ -891,7 +913,7 @@ enum cmd_values {
 	char modifyby[TXT_SML+1]; \
 	char modifycode[TXT_MED+1]; \
 	char modifyinet[TXT_MED+1]; \
-	bool buffers;
+	bool buffers
 #define MODIFYDATECONTROLPOINTERS \
 	tv_t createdate; \
 	char *createby; \
@@ -901,50 +923,50 @@ enum cmd_values {
 	char *modifyby; \
 	char *modifycode; \
 	char *modifyinet; \
-	bool pointers;
+	bool pointers
 
 #define MODIFYDATEINIT(_row, _cd, _by, _code, _inet) do { \
-		_row->createdate.tv_sec = (_cd)->tv_sec; \
-		_row->createdate.tv_usec = (_cd)->tv_usec; \
-		STRNCPY(_row->createby, _by); \
-		STRNCPY(_row->createcode, _code); \
-		STRNCPY(_row->createinet, _inet); \
-		DATE_ZERO(&(_row->modifydate)); \
-		_row->modifyby[0] = '\0'; \
-		_row->modifycode[0] = '\0'; \
-		_row->modifyinet[0] = '\0'; \
-		_row->buffers = _row->buffers; \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY((_row)->createby, _by); \
+		STRNCPY((_row)->createcode, _code); \
+		STRNCPY((_row)->createinet, _inet); \
+		DATE_ZERO(&((_row)->modifydate)); \
+		(_row)->modifyby[0] = '\0'; \
+		(_row)->modifycode[0] = '\0'; \
+		(_row)->modifyinet[0] = '\0'; \
+		(_row)->buffers = (_row)->buffers; \
 	} while (0)
 
 #define MODIFYUPDATE(_row, _cd, _by, _code, _inet) do { \
-		_row->modifydate.tv_sec = (_cd)->tv_sec; \
-		_row->modifydate.tv_usec = (_cd)->tv_usec; \
-		STRNCPY(_row->modifyby, _by); \
-		STRNCPY(_row->modifycode, _code); \
-		STRNCPY(_row->modifyinet, _inet); \
-		_row->buffers = _row->buffers; \
+		(_row)->modifydate.tv_sec = (_cd)->tv_sec; \
+		(_row)->modifydate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY((_row)->modifyby, _by); \
+		STRNCPY((_row)->modifycode, _code); \
+		STRNCPY((_row)->modifyinet, _inet); \
+		(_row)->buffers = (_row)->buffers; \
 	} while (0)
 
 #define MODIFYDATEPOINTERS(_list, _row, _cd, _by, _code, _inet) do { \
-		_row->createdate.tv_sec = (_cd)->tv_sec; \
-		_row->createdate.tv_usec = (_cd)->tv_usec; \
-		SET_CREATEBY(_list, _row->createby, _by); \
-		SET_CREATECODE(_list, _row->createcode, _code); \
-		SET_CREATEINET(_list, _row->createinet, _inet); \
-		DATE_ZERO(&(_row->modifydate)); \
-		SET_MODIFYBY(_list, _row->modifyby, EMPTY); \
-		SET_MODIFYCODE(_list, _row->modifycode, EMPTY); \
-		SET_MODIFYINET(_list, _row->modifyinet, EMPTY); \
-		_row->pointers = _row->pointers; \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		SET_CREATEBY(_list, (_row)->createby, _by); \
+		SET_CREATECODE(_list, (_row)->createcode, _code); \
+		SET_CREATEINET(_list, (_row)->createinet, _inet); \
+		DATE_ZERO(&((_row)->modifydate)); \
+		SET_MODIFYBY(_list, (_row)->modifyby, EMPTY); \
+		SET_MODIFYCODE(_list, (_row)->modifycode, EMPTY); \
+		SET_MODIFYINET(_list, (_row)->modifyinet, EMPTY); \
+		(_row)->pointers = (_row)->pointers; \
 	} while (0)
 
 #define MODIFYUPDATEPOINTERS(_list, _row, _cd, _by, _code, _inet) do { \
-		_row->modifydate.tv_sec = (_cd)->tv_sec; \
-		_row->modifydate.tv_usec = (_cd)->tv_usec; \
-		SET_MODIFYBY(_list, _row->modifyby, _by); \
-		SET_MODIFYCODE(_list, _row->modifycode, _code); \
-		SET_MODIFYINET(_list, _row->modifyinet, _inet); \
-		_row->pointers = _row->pointers; \
+		(_row)->modifydate.tv_sec = (_cd)->tv_sec; \
+		(_row)->modifydate.tv_usec = (_cd)->tv_usec; \
+		SET_MODIFYBY(_list, (_row)->modifyby, _by); \
+		SET_MODIFYCODE(_list, (_row)->modifycode, _code); \
+		SET_MODIFYINET(_list, (_row)->modifyinet, _inet); \
+		(_row)->pointers = (_row)->pointers; \
 	} while (0)
 
 /* Override _row defaults if transfer fields are present
@@ -959,19 +981,19 @@ enum cmd_values {
 			__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
-				SET_CREATEBY(_list, _row->createby, __transfer->mvalue); \
+				SET_CREATEBY(_list, (_row)->createby, __transfer->mvalue); \
 			} \
 			__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
-				SET_CREATECODE(_list, _row->createcode, __transfer->mvalue); \
+				SET_CREATECODE(_list, (_row)->createcode, __transfer->mvalue); \
 			} \
 			__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
 			if (__item) { \
 				DATA_TRANSFER(__transfer, __item); \
-				SET_CREATEINET(_list, _row->createinet, __transfer->mvalue); \
+				SET_CREATEINET(_list, (_row)->createinet, __transfer->mvalue); \
 			} \
-			_row->pointers = _row->pointers; \
+			(_row)->pointers = (_row)->pointers; \
 		} \
 	} while (0)
 
@@ -981,22 +1003,40 @@ enum cmd_values {
 	tv_t createdate; \
 	char createby[TXT_SML+1]; \
 	char createcode[TXT_MED+1]; \
-	char createinet[TXT_MED+1]
+	char createinet[TXT_MED+1]; \
+	bool buffers
+#define SIMPLEDATECONTROLPOINTERS \
+	tv_t createdate; \
+	char *createby; \
+	char *createcode; \
+	char *createinet; \
+	bool pointers
 
 #define SIMPLEDATEINIT(_row, _cd, _by, _code, _inet) do { \
-		_row->createdate.tv_sec = (_cd)->tv_sec; \
-		_row->createdate.tv_usec = (_cd)->tv_usec; \
-		STRNCPY(_row->createby, _by); \
-		STRNCPY(_row->createcode, _code); \
-		STRNCPY(_row->createinet, _inet); \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY((_row)->createby, _by); \
+		STRNCPY((_row)->createcode, _code); \
+		STRNCPY((_row)->createinet, _inet); \
+		(_row)->buffers = (_row)->buffers; \
 	} while (0)
 
 #define SIMPLEDATEDEFAULT(_row, _cd) do { \
-		_row->createdate.tv_sec = (_cd)->tv_sec; \
-		_row->createdate.tv_usec = (_cd)->tv_usec; \
-		STRNCPY(_row->createby, by_default); \
-		STRNCPY(_row->createcode, (char *)__func__); \
-		STRNCPY(_row->createinet, inet_default); \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		STRNCPY((_row)->createby, by_default); \
+		STRNCPY((_row)->createcode, (char *)__func__); \
+		STRNCPY((_row)->createinet, inet_default); \
+		(_row)->buffers = (_row)->buffers; \
+	} while (0)
+
+#define SIMPLEDATEPOINTERS(_list, _row, _cd, _by, _code, _inet) do { \
+		(_row)->createdate.tv_sec = (_cd)->tv_sec; \
+		(_row)->createdate.tv_usec = (_cd)->tv_usec; \
+		SET_CREATEBY(_list, (_row)->createby, _by); \
+		SET_CREATECODE(_list, (_row)->createcode, _code); \
+		SET_CREATEINET(_list, (_row)->createinet, _inet); \
+		(_row)->pointers = (_row)->pointers; \
 	} while (0)
 
 /* Override _row defaults if transfer fields are present
@@ -1009,18 +1049,42 @@ enum cmd_values {
 		__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
 		if (__item) { \
 			DATA_TRANSFER(__transfer, __item); \
-			STRNCPY(_row->createby, __transfer->mvalue); \
+			STRNCPY((_row)->createby, __transfer->mvalue); \
 		} \
 		__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
 		if (__item) { \
 			DATA_TRANSFER(__transfer, __item); \
-			STRNCPY(_row->createcode, __transfer->mvalue); \
+			STRNCPY((_row)->createcode, __transfer->mvalue); \
 		} \
 		__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
 		if (__item) { \
 			DATA_TRANSFER(__transfer, __item); \
-			STRNCPY(_row->createinet, __transfer->mvalue); \
+			STRNCPY((_row)->createinet, __transfer->mvalue); \
 		} \
+		(_row)->buffers = (_row)->buffers; \
+	} while (0)
+
+#define SIMPLEDATEPTRTRANSFER(_list, _root, _row) do { \
+		char __reply[16]; \
+		size_t __siz = sizeof(__reply); \
+		K_ITEM *__item; \
+		TRANSFER *__transfer; \
+		__item = optional_name(_root, BYTRF, 1, NULL, __reply, __siz); \
+		if (__item) { \
+			DATA_TRANSFER(__transfer, __item); \
+			SET_CREATEBY(_list, (_row)->createby, __transfer->mvalue); \
+		} \
+		__item = optional_name(_root, CODETRF, 1, NULL, __reply, __siz); \
+		if (__item) { \
+			DATA_TRANSFER(__transfer, __item); \
+			SET_CREATECODE(_list, (_row)->createcode, __transfer->mvalue); \
+		} \
+		__item = optional_name(_root, INETTRF, 1, NULL, __reply, __siz); \
+		if (__item) { \
+			DATA_TRANSFER(__transfer, __item); \
+			SET_CREATEINET(_list, (_row)->createinet, __transfer->mvalue); \
+		} \
+		(_row)->pointers = (_row)->pointers; \
 	} while (0)
 
 // LOGQUEUE
@@ -2601,6 +2665,84 @@ extern K_STORE *markersummary_pool_store;
 extern char mark_start_type;
 extern int64_t mark_start;
 
+// KEYSHARESUMMARY
+typedef struct keysharesummary {
+	int64_t workinfoid;
+	char keytype[TXT_FLAG+1];
+	char *key;
+	double diffacc;
+	double diffsta;
+	double diffdup;
+	double diffhi;
+	double diffrej;
+	double shareacc;
+	double sharesta;
+	double sharedup;
+	double sharehi;
+	double sharerej;
+	int64_t sharecount;
+	int64_t errorcount;
+	tv_t firstshare;
+	tv_t lastshare;
+	tv_t firstshareacc;
+	tv_t lastshareacc;
+	double lastdiffacc;
+	char complete[TXT_FLAG+1];
+	SIMPLEDATECONTROLPOINTERS;
+} KEYSHARESUMMARY;
+
+#define ALLOC_KEYSHARESUMMARY 1000
+#define LIMIT_KEYSHARESUMMARY 0
+#define INIT_KEYSHARESUMMARY(_item) INIT_GENERIC(_item, keysharesummary)
+#define DATA_KEYSHARESUMMARY(_var, _item) DATA_GENERIC(_var, _item, keysharesummary, true)
+#define DATA_KEYSHARESUMMARY_NULL(_var, _item) DATA_GENERIC(_var, _item, keysharesummary, false)
+
+extern K_TREE *keysharesummary_root;
+extern K_LIST *keysharesummary_free;
+extern K_STORE *keysharesummary_store;
+
+// KEYSUMMARY
+typedef struct keysummary {
+	int64_t markerid;
+	char keytype[TXT_FLAG+1];
+	char *key;
+	double diffacc;
+	double diffsta;
+	double diffdup;
+	double diffhi;
+	double diffrej;
+	double shareacc;
+	double sharesta;
+	double sharedup;
+	double sharehi;
+	double sharerej;
+	int64_t sharecount;
+	int64_t errorcount;
+	tv_t firstshare;
+	tv_t lastshare;
+	tv_t firstshareacc;
+	tv_t lastshareacc;
+	double lastdiffacc;
+	SIMPLEDATECONTROLPOINTERS;
+} KEYSUMMARY;
+
+#define ALLOC_KEYSUMMARY 1000
+#define LIMIT_KEYSUMMARY 0
+#define INIT_KEYSUMMARY(_item) INIT_GENERIC(_item, keysummary)
+#define DATA_KEYSUMMARY(_var, _item) DATA_GENERIC(_var, _item, keysummary, true)
+#define DATA_KEYSUMMARY_NULL(_var, _item) DATA_GENERIC(_var, _item, keysummary, false)
+
+extern K_TREE *keysummary_root;
+extern K_LIST *keysummary_free;
+extern K_STORE *keysummary_store;
+
+#define KEYTYPE_IP 'i'
+#define KEYTYPE_IP_STR "i"
+#define KEYIP(_keytype) (tolower((_keytype)[0]) == KEYTYPE_IP)
+#define KEYTYPE_AGENT 'a'
+#define KEYTYPE_AGENT_STR "a"
+#define KEYAGENT(_keytype) (tolower((_keytype)[0]) == KEYTYPE_AGENT)
+
 // WORKMARKERS
 typedef struct workmarkers {
 	int64_t markerid;
@@ -2811,6 +2953,8 @@ extern void free_payouts_data(K_ITEM *item);
 extern void free_ips_data(K_ITEM *item);
 extern void free_optioncontrol_data(K_ITEM *item);
 extern void free_markersummary_data(K_ITEM *item);
+extern void free_keysharesummary_data(K_ITEM *item);
+extern void free_keysummary_data(K_ITEM *item);
 extern void free_workmarkers_data(K_ITEM *item);
 extern void free_marks_data(K_ITEM *item);
 #define free_seqset_data(_item) _free_seqset_data(_item)
@@ -3101,6 +3245,10 @@ extern K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 				   int64_t userid, char *workername, bool pool);
 extern bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 				 tv_t *cd, K_TREE *trf_root);
+extern cmp_t cmp_keysharesummary(K_ITEM *a, K_ITEM *b);
+extern void zero_keysharesummary(KEYSHARESUMMARY *row);
+extern K_ITEM *find_keysharesummary(int64_t workinfoid, char keytype, char *key);
+extern cmp_t cmp_keysummary(K_ITEM *a, K_ITEM *b);
 extern void dsp_workmarkers(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_workmarkers(K_ITEM *a, K_ITEM *b);
 extern cmp_t cmp_workmarkers_workinfoid(K_ITEM *a, K_ITEM *b);
@@ -3264,6 +3412,7 @@ extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 	_sharesummary_age(_ss_item, _by, _code, _inet, _cd, WHERE_FFL_HERE)
 extern bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
 				tv_t *cd, WHERE_FFL_ARGS);
+extern bool keysharesummary_age(K_ITEM *kss_item);
 extern bool sharesummary_fill(PGconn *conn);
 extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 			 double diffacc, double diffinv, double shareacc,
@@ -3325,6 +3474,8 @@ extern bool userstats_fill(PGconn *conn);
 extern bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 				char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool markersummary_fill(PGconn *conn);
+extern bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
+			   char *inet, tv_t *cd, K_TREE *trf_root);
 #define workmarkers_process(_conn, _already, _add, _markerid, _poolinstance, \
 			    _workinfoidend, _workinfoidstart, _description, \
 			    _status, _by, _code, _inet, _cd, _trf_root) \

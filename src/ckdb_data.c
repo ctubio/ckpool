@@ -121,6 +121,30 @@ void free_markersummary_data(K_ITEM *item)
 	SET_MODIFYINET(markersummary_free, markersummary->modifyinet, EMPTY);
 }
 
+void free_keysharesummary_data(K_ITEM *item)
+{
+	KEYSHARESUMMARY *keysharesummary;
+
+	DATA_KEYSHARESUMMARY(keysharesummary, item);
+	LIST_MEM_SUB(keysharesummary_free, keysharesummary->key);
+	FREENULL(keysharesummary->key);
+	SET_CREATEBY(keysharesummary_free, keysharesummary->createby, EMPTY);
+	SET_CREATECODE(keysharesummary_free, keysharesummary->createcode, EMPTY);
+	SET_CREATEINET(keysharesummary_free, keysharesummary->createinet, EMPTY);
+}
+
+void free_keysummary_data(K_ITEM *item)
+{
+	KEYSUMMARY *keysummary;
+
+	DATA_KEYSUMMARY(keysummary, item);
+	LIST_MEM_SUB(keysummary_free, keysummary->key);
+	FREENULL(keysummary->key);
+	SET_CREATEBY(keysummary_free, keysummary->createby, EMPTY);
+	SET_CREATECODE(keysummary_free, keysummary->createcode, EMPTY);
+	SET_CREATEINET(keysummary_free, keysummary->createinet, EMPTY);
+}
+
 void free_workmarkers_data(K_ITEM *item)
 {
 	WORKMARKERS *workmarkers;
@@ -2111,15 +2135,17 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		  int64_t *ss_count, int64_t *s_count, int64_t *s_diff)
 {
 	K_ITEM *wi_item, ss_look, *ss_item, s_look, *s_item;
-	K_ITEM *wm_item, *tmp_item;
-	K_TREE_CTX ss_ctx[1], s_ctx[1];
+	K_ITEM ks_look, *ks_item, *wm_item, *tmp_item;
+	K_TREE_CTX ss_ctx[1], s_ctx[1], ks_ctx[1];
 	char cd_buf[DATE_BUFSIZ];
 	int64_t ss_tot, ss_already, ss_failed, shares_tot, shares_dumped;
+	int64_t ks_tot, ks_already, ks_failed;
 	int64_t diff_tot;
+	KEYSHARESUMMARY lookkeysharesummary, *keysharesummary;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKINFO *workinfo;
 	SHARES lookshares, *shares;
-	bool ok = false, skipupdate;
+	bool ok = false, ksok = false, skipupdate;
 	char error[1024];
 
 	LOGDEBUG("%s(): age", __func__);
@@ -2280,8 +2306,70 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 				shares_dumped, diff_tot);
 		}
 	}
+
+	INIT_KEYSHARESUMMARY(&ks_look);
+
+	// Find the first matching keysharesummary
+	lookkeysharesummary.workinfoid = workinfoid;
+	lookkeysharesummary.keytype[0] = '\0';
+	lookkeysharesummary.key = EMPTY;
+
+	ksok = true;
+	ks_tot = ks_already = ks_failed = 0;
+	ks_look.data = (void *)(&lookkeysharesummary);
+	K_RLOCK(keysharesummary_free);
+	ks_item = find_after_in_ktree(keysharesummary_root, &ks_look, ks_ctx);
+	K_RUNLOCK(keysharesummary_free);
+	DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
+	while (ks_item && keysharesummary->workinfoid == workinfoid) {
+		ks_tot++;
+		skipupdate = false;
+		/* Reloading during a confirm will not have any old data
+		 *  so finding an aged keysharesummary here is an error
+		 * N.B. this can only happen with (very) old reload files */
+		if (reloading) {
+			if (keysharesummary->complete[0] == SUMMARY_COMPLETE) {
+				ks_already++;
+				skipupdate = true;
+				if (confirm_sharesummary) {
+					LOGERR("%s(): Duplicate %s found during confirm %"PRId64"/%s/%s",
+						__func__, __func__,
+						keysharesummary->workinfoid,
+						keysharesummary->keytype,
+						keysharesummary->key);
+				}
+			}
+		}
+
+		if (!skipupdate) {
+			if (!keysharesummary_age(ks_item)) {
+				ks_failed++;
+				LOGERR("%s(): Failed to age keysharesummary %"PRId64"/%s/%s",
+					__func__, keysharesummary->workinfoid,
+					keysharesummary->keytype,
+					keysharesummary->key);
+				ksok = false;
+			}
+		}
+
+		/* All shares should have been discarded during sharesummary
+		 * processing above */
+
+		K_RLOCK(keysharesummary_free);
+		ks_item = next_in_ktree(ks_ctx);
+		K_RUNLOCK(keysharesummary_free);
+		DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
+	}
+
+	if (ks_already) {
+		LOGNOTICE("%s(): Keysummary aging of %"PRId64"/%s "
+			  "kstotal=%"PRId64" already=%"PRId64" failed=%"PRId64,
+			  __func__, workinfoid, poolinstance,
+			  ks_tot, ks_already, ks_failed);
+	}
+
 bye:
-	return ok;
+	return (ok && ksok);
 }
 
 // Block height coinbase reward value
@@ -2533,7 +2621,8 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 
 	age_id = prev_found;
 
-	// Find the oldest 'unaged' sharesummary < workinfoid and >= prev_found
+	/* Find the oldest 'unaged' sharesummary < workinfoid and >= prev_found
+	 * Unaged keysharesummaries will have the same workinfoids */
 	looksharesummary.workinfoid = prev_found;
 	looksharesummary.userid = -1;
 	looksharesummary.workername = EMPTY;
@@ -2571,6 +2660,7 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 		 *  been missed and can report the range of data that was aged,
 		 *  which would normally just be an approx 10min set of workinfoids
 		 *  from the last time ckpool stopped
+		 * workinfo_age also processes the matching keysharesummaries
 		 * Each next group of unaged sharesummaries following this, will be
 		 *  picked up by each next aging */
 		wid_count = 0;
@@ -2869,8 +2959,9 @@ void set_block_share_counters()
 
 	ws_item = NULL;
 	/* From the end backwards so we can skip the workinfoid's we don't
-	 * want by jumping back to just before the current worker when the
-	 * workinfoid goes below the limit */
+	 *  want by jumping back to just before the current worker when the
+	 *  workinfoid goes below the limit
+	 * N.B. keysharesummaries duplicate the totals, so are ignored */
 	ss_item = last_in_ktree(sharesummary_root, ctx);
 	while (ss_item) {
 		DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -5655,6 +5746,69 @@ flailed:
 	}
 
 	return ok;
+}
+
+// order by workinfoid asc,keytype asc,key asc (has no expirydate)
+cmp_t cmp_keysharesummary(K_ITEM *a, K_ITEM *b)
+{
+	KEYSHARESUMMARY *ka, *kb;
+	DATA_KEYSHARESUMMARY(ka, a);
+	DATA_KEYSHARESUMMARY(kb, b);
+	cmp_t c = CMP_BIGINT(ka->workinfoid, kb->workinfoid);
+	if (c == 0) {
+		c = CMP_STR(ka->keytype, kb->keytype);
+		if (c == 0)
+			c = CMP_STR(ka->key, kb->key);
+	}
+	return c;
+}
+
+void zero_keysharesummary(KEYSHARESUMMARY *row)
+{
+	LIST_WRITE(keysharesummary_free);
+	row->diffacc = row->diffsta = row->diffdup = row->diffhi =
+	row->diffrej = row->shareacc = row->sharesta = row->sharedup =
+	row->sharehi = row->sharerej = 0.0;
+	row->sharecount = row->errorcount = 0;
+	DATE_ZERO(&(row->firstshare));
+	DATE_ZERO(&(row->lastshare));
+	DATE_ZERO(&(row->firstshareacc));
+	DATE_ZERO(&(row->lastshareacc));
+	row->lastdiffacc = 0;
+	row->complete[0] = SUMMARY_NEW;
+	row->complete[1] = '\0';
+}
+
+// Must be R or W locked
+K_ITEM *find_keysharesummary(int64_t workinfoid, char keytype, char *key)
+{
+	KEYSHARESUMMARY keysharesummary;
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+
+	keysharesummary.workinfoid = workinfoid;
+	keysharesummary.keytype[0] = keytype;
+	keysharesummary.keytype[1] = '\0';
+	keysharesummary.key = key;
+
+	INIT_KEYSHARESUMMARY(&look);
+	look.data = (void *)(&keysharesummary);
+	return find_in_ktree(keysharesummary_root, &look, ctx);
+}
+
+// order by markerid asc,keytype asc,key asc (has no expirydate)
+cmp_t cmp_keysummary(K_ITEM *a, K_ITEM *b)
+{
+	KEYSUMMARY *ka, *kb;
+	DATA_KEYSUMMARY(ka, a);
+	DATA_KEYSUMMARY(kb, b);
+	cmp_t c = CMP_BIGINT(ka->markerid, kb->markerid);
+	if (c == 0) {
+		c = CMP_STR(ka->keytype, kb->keytype);
+		if (c == 0)
+			c = CMP_STR(ka->key, kb->key);
+	}
+	return c;
 }
 
 void dsp_workmarkers(K_ITEM *item, FILE *stream)
