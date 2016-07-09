@@ -4661,6 +4661,8 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	setnow(&add_fin);
 
 	setnow(&kadd_stt);
+	INIT_KEYSUMMARY(&ks_look);
+
 	ks_item = NULL;
 
 	lookkeysharesummary.workinfoid = workmarkers->workinfoidend;
@@ -4790,8 +4792,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	setnow(&kdb_stt);
 	ks_item = STORE_HEAD_NOLOCK(new_keysummary_store);
 	while (ks_item) {
-		if (!(keysummary_add(conn, ks_item, by, code, inet,
-				     cd, trf_root))) {
+		if (!(keysummary_add(conn, ks_item, by, code, inet, cd))) {
 			reason = "db error";
 			setnow(&kdb_fin);
 			goto rollback;
@@ -8489,7 +8490,7 @@ flail:
 }
 
 bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
-		    char *inet, tv_t *cd, K_TREE *trf_root)
+		    char *inet, tv_t *cd)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -8506,7 +8507,6 @@ bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
 	DATA_KEYSUMMARY(row, ks_item);
 
 	SIMPLEDATEPOINTERS(markersummary_free, row, cd, by, code, inet);
-	SIMPLEDATEPTRTRANSFER(markersummary_free, trf_root, row);
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->markerid, NULL, 0);

@@ -52,7 +52,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.201"
+#define CKDB_VERSION DB_VERSION"-2.202"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -3475,7 +3475,7 @@ extern bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *cod
 				char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool markersummary_fill(PGconn *conn);
 extern bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
-			   char *inet, tv_t *cd, K_TREE *trf_root);
+			   char *inet, tv_t *cd);
 #define workmarkers_process(_conn, _already, _add, _markerid, _poolinstance, \
 			    _workinfoidend, _workinfoidstart, _description, \
 			    _status, _by, _code, _inet, _cd, _trf_root) \
