@@ -4235,6 +4235,8 @@ ASSERT4((sizeof(shift_words) == (sizeof(char *) * SHIFT_WORDS)));
 // optioncontrol name to override the SHIFT_DIFF_BLOCK value
 #define SHIFT_DIFF_BLOCK_STR "ShiftDiffBlock"
 
+#define BLOCK_HALVING 210000
+
 static void make_a_shift_mark()
 {
 	K_TREE_CTX ss_ctx[1], m_ctx[1], wi_ctx[1], b_ctx[1];
@@ -4499,7 +4501,7 @@ static void make_a_shift_mark()
 				 *  changed */
 				if (strcmp(wi_bits, workinfo->bits) != 0) {
 					if (workinfo->height > (int32_t)shiftdiffblock) {
-						LOGDEBUG("%s() OK shift stops at diff"
+						LOGDEBUG("%s() OK shift stops for a diff"
 							 " change '%s->%s' %"PRId64
 							 "->%"PRId64" height %"PRId32
 							 " limit %"PRId64,
@@ -4511,6 +4513,19 @@ static void make_a_shift_mark()
 						marks_wid = prev_wid;
 						break;
 					}
+				}
+				// Halving? Stop at the last workinfo before it
+				if ((workinfo->height % BLOCK_HALVING) == 0) {
+					LOGDEBUG("%s() OK shift stops for a "
+						 "halving wid %"PRId64
+						 "->%"PRId64" height %"PRId32
+						 " halving every %d",
+						 __func__, prev_wid,
+						 workinfo->workinfoid,
+						 workinfo->height,
+						 BLOCK_HALVING);
+					marks_wid = prev_wid;
+					break;
 				}
 			}
 			/* Did we find a pool restart? i.e. a wid skip
