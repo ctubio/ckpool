@@ -4519,7 +4519,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	K_STORE *new_markersummary_store = k_new_store(markersummary_free);
 	K_STORE *new_keysummary_store = k_new_store(keysummary_free);
 
-	/* Use the master size for this local trees since
+	/* Use the master size for these local trees since
 	 *  they're large and doesn't get created often */
 	K_TREE *ms_root = new_ktree_local(sshortname, cmp_markersummary,
 					  markersummary_free);
@@ -4665,8 +4665,9 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 	ks_item = NULL;
 
-	lookkeysharesummary.workinfoid = workmarkers->workinfoidend;
-	lookkeysharesummary.keytype[0] = '\0';;
+	// find before the minimum next kss after what we want
+	lookkeysharesummary.workinfoid = workmarkers->workinfoidend+1;
+	lookkeysharesummary.keytype[0] = '\0';
 	lookkeysharesummary.key = EMPTY;
 
 	INIT_KEYSHARESUMMARY(&kss_look);
@@ -4955,11 +4956,14 @@ flail:
 
 		LOGWARNING("%s() Processed: %d ms %d ks %d ss %d kss "
 			   "%"PRId64" shares %"PRId64" diff "
-			   "k(%"PRId64"/%"PRId64") for workmarkers %"PRId64"/%s/"
-			   "End %"PRId64"/Stt %"PRId64"/%s/%s add=%.3fs "
-			   "kadd=%.3fs db=%.3fs kdb=%.3fs lck=%.3f+%.3fs",
+			   "k(2*%"PRId64"%s/2*%"PRId64"%s) for workmarkers "
+			   "%"PRId64"/%s/End %"PRId64"/Stt %"PRId64"/%s/%s "
+			   "add=%.3fs kadd=%.3fs db=%.3fs kdb=%.3fs "
+			   "lck=%.3f+%.3fs",
 			   shortname, ms_count, ks_count, ss_count, kss_count,
-			   shareacc, diffacc, kshareacc, kdiffacc,
+			   shareacc, diffacc,
+			   kshareacc >> 1, (kshareacc & 1) ? ".5" : "",
+			   kdiffacc >> 1, (kdiffacc & 1) ? ".5" : "",
 			   workmarkers->markerid, workmarkers->poolinstance,
 			   workmarkers->workinfoidend,
 			   workmarkers->workinfoidstart,
@@ -5292,7 +5296,7 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 	WORKMARKERS *wm;
 	SHARESUMMARY *row, *p_row;
 	KEYSHARESUMMARY *ki_row = NULL, *ka_row = NULL;
-	K_ITEM *ss_item, *kiss_item, *kass_item, *wm_item, *p_item = NULL;
+	K_ITEM *ss_item, *kiss_item = NULL, *kass_item = NULL, *wm_item, *p_item = NULL;
 	bool new = false, p_new = false, ki_new = false, ka_new = false;
 	int64_t userid, workinfoid;
 	char *workername, *address = NULL, *agent = NULL;
