@@ -246,7 +246,7 @@ function pgtop($alert_marker, $info, $dotop, $user, $douser)
 		if ($nlb != '?')
 		{
 			$sec = $now - $nlb;
-			$min = round($sec / 60);
+			$min = floor($sec / 60);
 			$nlb = $min.'m';
 			$s = $sec - $min * 60;
 			if ($s > 0)
