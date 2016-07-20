@@ -852,6 +852,7 @@ K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 				"from %s():%d",
 				__func__, name, st = safe_text_nonull(mvalue),
 				(dlen > 20) ? "..." : EMPTY, func, line);
+			FREENULL(st);
 			snprintf(reply, siz, "failed.invalid %s", name);
 			return NULL;
 		}
