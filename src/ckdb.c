@@ -4249,6 +4249,7 @@ static void make_a_shift_mark()
 	MARKS *marks = NULL, *sh_marks = NULL;
 	int64_t ss_age_wid, last_marks_wid, marks_wid, prev_wid;
 	int64_t shiftdiffblock = SHIFT_DIFF_BLOCK;
+	int32_t prev_height;
 	char wi_bits[TXT_SML+1];
 	bool was_block = false, ok, oc_look = true;
 	char cd_buf[DATE_BUFSIZ], cd_buf2[DATE_BUFSIZ], cd_buf3[DATE_BUFSIZ];
@@ -4465,6 +4466,7 @@ static void make_a_shift_mark()
 	used_wid = 0;
 	prev_wid = 0;
 	wi_bits[0] = '\0';
+	prev_height = 0;
 	while (wi_item) {
 		DATA_WORKINFO(workinfo, wi_item);
 		if (CURRENT(&(workinfo->expirydate))) {
@@ -4515,7 +4517,8 @@ static void make_a_shift_mark()
 					}
 				}
 				// Halving? Stop at the last workinfo before it
-				if ((workinfo->height % BLOCK_HALVING) == 0) {
+				if (workinfo->height != prev_height &&
+				    (workinfo->height % BLOCK_HALVING) == 0) {
 					LOGDEBUG("%s() OK shift stops for a "
 						 "halving wid %"PRId64
 						 "->%"PRId64" height %"PRId32
@@ -4542,6 +4545,7 @@ static void make_a_shift_mark()
 				break;
 			}
 			prev_wid = workinfo->workinfoid;
+			prev_height = workinfo->height;
 			// Did we hit the next block?
 			if (b_item && workinfo->workinfoid == blocks->workinfoid) {
 				LOGDEBUG("%s() OK shift stops at block limit",
