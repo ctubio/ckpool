@@ -193,7 +193,7 @@ void _free_seqset_data(K_ITEM *item)
 }
 
 /* Data copy functions (added here as needed)
-   All pointers need to initialised since DUP_POINTER will free them */
+   All pointers need to be initialised since DUP_POINTER will free them */
 
 void copy_users(USERS *newu, USERS *oldu)
 {
@@ -828,7 +828,7 @@ K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 		dlen = 0;
 	if (!mvalue || (int)dlen < len) {
 		LOGERR("%s(): failed, field '%s' short (%s%d<%d) from %s():%d",
-			__func__, name, mvalue ? EMPTY : "null",
+			__func__, name, mvalue ? EMPTY : "null ",
 			(int)dlen, len, func, line);
 		snprintf(reply, siz, "failed.short %s", name);
 		return NULL;
@@ -847,8 +847,11 @@ K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 		regfree(&re);
 
 		if (ret != 0) {
-			LOGERR("%s(): failed, field '%s' invalid from %s():%d",
-				__func__, name, func, line);
+			char *st = NULL;
+			LOGERR("%s(): failed, field '%s'='%.20s%s' invalid "
+				"from %s():%d",
+				__func__, name, st = safe_text_nonull(mvalue),
+				(dlen > 20) ? "..." : EMPTY, func, line);
 			snprintf(reply, siz, "failed.invalid %s", name);
 			return NULL;
 		}
