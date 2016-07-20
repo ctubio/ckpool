@@ -4492,7 +4492,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	K_ITEM *ks_item, ks_look;
 	bool ok = false, conned = false;
 	int64_t diffacc = 0, shareacc = 0;
-	int64_t kdiffacc= 0, kshareacc = 0;
+	int64_t kdiffacc = 0, kshareacc = 0;
 	char *reason = NULL;
 	int ss_count, kss_count, ms_count, ks_count;
 	char *st = NULL;
@@ -4974,6 +4974,12 @@ flail:
 			   tvdiff(&kdb_fin, &kdb_stt),
 			   tvdiff(&lck_got, &lck_stt),
 			   tvdiff(&lck_fin, &lck_got));
+
+		// This should never happen
+		if (kshareacc != (shareacc << 1) || kdiffacc != (diffacc << 1)) {
+			LOGERR("%s() CODE BUG: keysummary share/diff counts "
+				"are wrong!", shortname);
+		}
 	}
 	free_ktree(ms_root, NULL);
 	free_ktree(ks_root, NULL);
