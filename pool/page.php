@@ -227,7 +227,7 @@ function pgtop($alert_marker, $info, $dotop, $user, $douser)
 				else
 				{
 					$min = round($sec / 60);
-					$hr = round($min / 60);
+					$hr = floor($min / 60);
 					$min -= ($hr * 60);
 					$plb = $hr.'h';
 					if ($min > 0)
@@ -247,10 +247,15 @@ function pgtop($alert_marker, $info, $dotop, $user, $douser)
 		{
 			$sec = $now - $nlb;
 			$min = floor($sec / 60);
-			$nlb = $min.'m';
-			$s = $sec - $min * 60;
-			if ($s > 0)
-				$nlb .= "&nbsp;${s}s";
+			if ($min > 0)
+			{
+				$nlb = $min.'m';
+				$s = $sec - ($min * 60);
+				if ($s > 0)
+					$nlb .= "&nbsp;${s}s";
+			}
+			else
+				$nlb = "${sec}s";
 		}
 	}
 
