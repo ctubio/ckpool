@@ -335,6 +335,12 @@ function loginStr($str)
  return preg_replace($all, '', $str);
 }
 #
+function deworker($str)
+{
+ $work = '/[\._].*$/';
+ return preg_replace($work, '', $str);
+}
+#
 function trn($str)
 {
  $rep = str_replace(array('<', '>'), array('&lt;', '&gt;'), $str);
