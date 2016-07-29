@@ -777,30 +777,31 @@ out:
 static void _ckdbq_add(ckpool_t *ckp, const int idtype, json_t *val, const char *file,
 		       const char *func, const int line)
 {
-	static time_t time_counter;
 	sdata_t *sdata = ckp->sdata;
+	static time_t time_counter;
 	static int counter = 0;
 	char *json_msg;
-	time_t now_t;
-	char ch;
 
 	if (unlikely(!val)) {
 		LOGWARNING("Invalid json sent to ckdbq_add from %s %s:%d", file, func, line);
 		return;
 	}
 
-	now_t = time(NULL);
-	if (now_t != time_counter) {
-		pool_stats_t *stats = &sdata->stats;
-		char hashrate[16];
+	if (!ckp->quiet) {
+		time_t now_t = time(NULL);
 
-		/* Rate limit to 1 update per second */
-		time_counter = now_t;
-		suffix_string(stats->dsps1 * nonces, hashrate, 16, 3);
-		ch = status_chars[(counter++) & 0x3];
-		fprintf(stdout, "\33[2K\r%c %sH/s  %.1f SPS  %d users  %d workers",
-			ch, hashrate, stats->sps1, stats->users, stats->workers);
-		fflush(stdout);
+		if (now_t != time_counter) {
+			pool_stats_t *stats = &sdata->stats;
+			char hashrate[16], ch;
+
+			/* Rate limit to 1 update per second */
+			time_counter = now_t;
+			suffix_string(stats->dsps1 * nonces, hashrate, 16, 3);
+			ch = status_chars[(counter++) & 0x3];
+			fprintf(stdout, "\33[2K\r%c %sH/s  %.1f SPS  %d users  %d workers",
+				ch, hashrate, stats->sps1, stats->users, stats->workers);
+			fflush(stdout);
+		}
 	}
 
 	if (CKP_STANDALONE(ckp))

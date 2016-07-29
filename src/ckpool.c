@@ -1542,6 +1542,7 @@ static struct option long_options[] = {
 	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"quiet",	no_argument,		0,	'q'},
 	{"redirector",	no_argument,		0,	'R'},
 	{"ckdb-sockdir",required_argument,	0,	'S'},
 	{"sockdir",	required_argument,	0,	's'},
@@ -1563,6 +1564,7 @@ static struct option long_options[] = {
 	{"node",	no_argument,		0,	'N'},
 	{"passthrough",	no_argument,		0,	'P'},
 	{"proxy",	no_argument,		0,	'p'},
+	{"quiet",	no_argument,		0,	'q'},
 	{"redirector",	no_argument,		0,	'R'},
 	{"sockdir",	required_argument,	0,	's'},
 	{"trusted",	no_argument,		0,	't'},
@@ -1610,7 +1612,7 @@ int main(int argc, char **argv)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
 	ckp.initial_args[ckp.args] = NULL;
 
-	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:Nn:PpRS:s:tu", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "Ac:Dd:g:HhkLl:Nn:PpqRS:s:tu", long_options, &i)) != -1) {
 		switch (c) {
 			case 'A':
 				ckp.standalone = true;
@@ -1678,6 +1680,9 @@ int main(int argc, char **argv)
 				if (ckp.passthrough || ckp.redirector || ckp.userproxy || ckp.node)
 					quit(1, "Cannot set another proxy type or redirector and proxy mode");
 				ckp.proxy = true;
+				break;
+			case 'q':
+				ckp.quiet = true;
 				break;
 			case 'R':
 				if (ckp.proxy || ckp.passthrough || ckp.userproxy || ckp.node)
