@@ -366,6 +366,7 @@ struct proxy_base {
 	proxy_t *subproxies; /* Hashlist of subproxies sorted by subid */
 	sdata_t *sdata; /* Unique stratifer data for each subproxy */
 	bool dead;
+	bool deleted;
 };
 
 typedef struct session session_t;
@@ -2283,7 +2284,7 @@ static void check_bestproxy(sdata_t *sdata)
 		LOGNOTICE("Stratifier setting active proxy to %d", changed_id);
 }
 
-static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bool replaced)
+static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bool replaced, const bool deleted)
 {
 	stratum_instance_t *client, *tmp;
 	int reconnects = 0, proxyid = 0;
@@ -2293,6 +2294,7 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bo
 	proxy = existing_subproxy(sdata, id, subid);
 	if (proxy) {
 		proxy->dead = true;
+		proxy->deleted = deleted;
 		if (!replaced && proxy->global)
 			check_bestproxy(sdata);
 	}
@@ -2374,7 +2376,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 	/* Is this a replacement for an existing proxy id? */
 	old = existing_subproxy(sdata, id, subid);
 	if (old) {
-		dead_proxyid(sdata, id, subid, true);
+		dead_proxyid(sdata, id, subid, true, false);
 		proxy = old;
 		proxy->dead = false;
 	} else
@@ -2729,7 +2731,7 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 			free_proxy(subproxy);
 		}
 		/* Should we reap the parent proxy too?*/
-		if (!proxy->dead || proxy->subproxy_count > 1 || proxy->bound_clients)
+		if (!proxy->deleted || proxy->subproxy_count > 1 || proxy->bound_clients)
 			continue;
 		HASH_DELETE(hh, sdata->proxies, proxy);
 		free_proxy(proxy);
@@ -3425,7 +3427,16 @@ static void dead_proxy(ckpool_t *ckp, sdata_t *sdata, const char *buf)
 	int id = 0, subid = 0;
 
 	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
-	dead_proxyid(sdata, id, subid, false);
+	dead_proxyid(sdata, id, subid, false, false);
+	reap_proxies(ckp, sdata);
+}
+
+static void del_proxy(ckpool_t *ckp, sdata_t *sdata, const char *buf)
+{
+	int id = 0, subid = 0;
+
+	sscanf(buf, "delproxy=%d:%d", &id, &subid);
+	dead_proxyid(sdata, id, subid, false, true);
 	reap_proxies(ckp, sdata);
 }
 
@@ -4116,6 +4127,8 @@ retry:
 		request_reconnect(sdata, buf);
 	} else if (cmdmatch(buf, "deadproxy")) {
 		dead_proxy(ckp, sdata, buf);
+	} else if (cmdmatch(buf, "delproxy")) {
+		del_proxy(ckp, sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ckdbflush")) {
