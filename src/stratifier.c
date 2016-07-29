@@ -2727,6 +2727,11 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 			proxy->subproxy_count--;
 			free_proxy(subproxy);
 		}
+		/* Should we reap the parent proxy too?*/
+		if (!proxy->dead || proxy->subproxy_count > 1 || proxy->bound_clients)
+			continue;
+		HASH_DELETE(hh, sdata->proxies, proxy);
+		free_proxy(proxy);
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
@@ -3414,12 +3419,13 @@ static void reconnect_client(sdata_t *sdata, stratum_instance_t *client)
 	stratum_add_send(sdata, json_msg, client->id, SM_RECONNECT);
 }
 
-static void dead_proxy(sdata_t *sdata, const char *buf)
+static void dead_proxy(ckpool_t *ckp, sdata_t *sdata, const char *buf)
 {
 	int id = 0, subid = 0;
 
 	sscanf(buf, "deadproxy=%d:%d", &id, &subid);
 	dead_proxyid(sdata, id, subid, false);
+	reap_proxies(ckp, sdata);
 }
 
 static void reconnect_client_id(sdata_t *sdata, const int64_t client_id)
@@ -4108,7 +4114,7 @@ retry:
 	} else if (cmdmatch(buf, "reconnect")) {
 		request_reconnect(sdata, buf);
 	} else if (cmdmatch(buf, "deadproxy")) {
-		dead_proxy(sdata, buf);
+		dead_proxy(ckp, sdata, buf);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ckdbflush")) {
