@@ -2760,7 +2760,7 @@ static void __inc_instance_ref(stratum_instance_t *client)
 /* Find an __instance_by_id and increase its reference count allowing us to
  * use this instance outside of instance_lock without fear of it being
  * dereferenced. Does not return dropped clients still on the list. */
-static stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
+static inline stratum_instance_t *ref_instance_by_id(sdata_t *sdata, const int64_t id)
 {
 	stratum_instance_t *client;
 
