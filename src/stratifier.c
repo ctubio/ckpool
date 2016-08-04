@@ -7108,6 +7108,35 @@ static void upstream_workers(ckpool_t *ckp, user_instance_t *user)
 	send_proc(ckp->connector, buf);
 }
 
+
+/* To iterate over all users, if user is initially NULL, this will return the first entry,
+ * otherwise it will return the entry after user, and NULL if there are no more entries.
+ * Allows us to grab and drop the lock on each iteration. */
+static user_instance_t *next_user(sdata_t *sdata, user_instance_t *user)
+{
+	ck_rlock(&sdata->instance_lock);
+	if (unlikely(!user))
+		user = sdata->user_instances;
+	else
+		user = user->hh.next;
+	ck_runlock(&sdata->instance_lock);
+
+	return user;
+}
+
+/* Ditto for worker */
+static worker_instance_t *next_worker(sdata_t *sdata, user_instance_t *user, worker_instance_t *worker)
+{
+	ck_rlock(&sdata->instance_lock);
+	if (!worker)
+		worker = user->worker_instances;
+	else
+		worker = worker->next;
+	ck_runlock(&sdata->instance_lock);
+
+	return worker;
+}
+
 static void *statsupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
@@ -7126,9 +7155,9 @@ static void *statsupdate(void *arg)
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
 		log_entry_t *log_entries = NULL;
-		user_instance_t *user, *tmpuser;
 		char_entry_t *char_list = NULL;
 		stratum_instance_t *client;
+		user_instance_t *user;
 		int idle_workers = 0;
 		char *fname, *s, *sp;
 		tv_t now, diff;
@@ -7148,6 +7177,7 @@ static void *statsupdate(void *arg)
 		ck_wunlock(&sdata->instance_lock);
 
 		while (client) {
+			tv_time(&now);
 			/* Look for clients that may have been dropped which the
 			 * stratifier has not been informed about and ask the
 			 * connector if they still exist */
@@ -7188,17 +7218,20 @@ static void *statsupdate(void *arg)
 			ck_wunlock(&sdata->instance_lock);
 		}
 
-		/* Drop and regain lock to minimise lock hold time */
-		ck_rlock(&sdata->instance_lock);
-		HASH_ITER(hh, sdata->user_instances, user, tmpuser) {
+		user = NULL;
+
+		while ((user = next_user(sdata, user)) != NULL) {
 			worker_instance_t *worker;
 			bool idle = false;
 
 			if (!user->authorised)
 				continue;
 
+			worker = NULL;
+			tv_time(&now);
+
 			/* Decay times per worker */
-			DL_FOREACH(user->worker_instances, worker) {
+			while ((worker = next_worker(sdata, user, worker)) != NULL) {
 				per_tdiff = tvdiff(&now, &worker->last_share);
 				if (per_tdiff > 60) {
 					decay_worker(worker, 0, &now);
@@ -7287,7 +7320,6 @@ static void *statsupdate(void *arg)
 			if (ckp->remote)
 				upstream_workers(ckp, user);
 		}
-		ck_runlock(&sdata->instance_lock);
 
 		/* Dump log entries out of instance_lock */
 		dump_log_entries(&log_entries);
