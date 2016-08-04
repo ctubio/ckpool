@@ -7140,60 +7140,52 @@ static void *statsupdate(void *arg)
 		tv_time(&now);
 		timersub(&now, &stats->start_time, &diff);
 
+		ck_wlock(&sdata->instance_lock);
+		/* Grab the first entry */
+		client = sdata->stratum_instances;
+		if (likely(client))
+			__inc_instance_ref(client);
+		ck_wunlock(&sdata->instance_lock);
+
 		while (client) {
-			ck_wlock(&sdata->instance_lock);
-			if (unlikely(!client)) {
-				/* Grab the first entry */
-				client = sdata->stratum_instances;
+			/* Look for clients that may have been dropped which the
+			 * stratifier has not been informed about and ask the
+			 * connector if they still exist */
+			if (client->dropped)
+				connector_test_client(ckp, client->id);
+			else if (client->node || client->remote) {
+				/* Do nothing to these */
+			} else if (!client->authorised) {
+				/* Test for clients that haven't authed in over a minute
+				 * and drop them lazily */
+				if (now.tv_sec > client->start_time + 60) {
+					client->dropped = true;
+					connector_drop_client(ckp, client->id);
+				}
 			} else {
-				/* Drop the reference of the last entry we examined,
-				 * then grab the next client. */
-				__dec_instance_ref(client);
-				client = client->hh.next;
+				per_tdiff = tvdiff(&now, &client->last_share);
+				/* Decay times per connected instance */
+				if (per_tdiff > 60) {
+					/* No shares for over a minute, decay to 0 */
+					decay_client(client, 0, &now);
+					idle_workers++;
+					if (per_tdiff > 600)
+						client->idle = true;
+					/* Test idle clients are still connected */
+					connector_test_client(ckp, client->id);
+				}
 			}
+
+			ck_wlock(&sdata->instance_lock);
+			/* Drop the reference of the last entry we examined,
+			 * then grab the next client. */
+			__dec_instance_ref(client);
+			client = client->hh.next;
 			/* Grab a reference to this client allowing us to examine
 			 * it without holding the lock */
 			if (likely(client))
 				__inc_instance_ref(client);
 			ck_wunlock(&sdata->instance_lock);
-
-			/* Reached last entry */
-			if (unlikely(!client))
-				break;
-
-			/* Look for clients that may have been dropped which the
-			 * stratifier has not been informed about and ask the
-			 * connector if they still exist */
-			if (client->dropped) {
-				connector_test_client(ckp, client->id);
-				continue;
-			}
-
-			if (client->node || client->remote)
-				continue;
-
-			/* Test for clients that haven't authed in over a minute
-			 * and drop them lazily */
-			if (!client->authorised) {
-				if (now.tv_sec > client->start_time + 60) {
-					client->dropped = true;
-					connector_drop_client(ckp, client->id);
-				}
-				continue;
-			}
-
-			per_tdiff = tvdiff(&now, &client->last_share);
-			/* Decay times per connected instance */
-			if (per_tdiff > 60) {
-				/* No shares for over a minute, decay to 0 */
-				decay_client(client, 0, &now);
-				idle_workers++;
-				if (per_tdiff > 600)
-					client->idle = true;
-				/* Test idle clients are still connected */
-				connector_test_client(ckp, client->id);
-				continue;
-			}
 		}
 
 		/* Drop and regain lock to minimise lock hold time */
