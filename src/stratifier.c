@@ -7135,7 +7135,7 @@ static void *statsupdate(void *arg)
 		tv_time(&now);
 		timersub(&now, &stats->start_time, &diff);
 
-		/* Use this locking as an opportunity to test clients. */
+		/* Test clients. */
 		ck_rlock(&sdata->instance_lock);
 		HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
 			/* Look for clients that may have been dropped which the
@@ -7172,7 +7172,10 @@ static void *statsupdate(void *arg)
 				continue;
 			}
 		}
+		ck_runlock(&sdata->instance_lock);
 
+		/* Drop and regain lock to minimise lock hold time */
+		ck_rlock(&sdata->instance_lock);
 		HASH_ITER(hh, sdata->user_instances, user, tmpuser) {
 			worker_instance_t *worker;
 			bool idle = false;
