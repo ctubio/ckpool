@@ -5506,7 +5506,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		*err_val = JSON_ERR(err);
 		goto out;
 	}
-	if (unlikely(json_array_size(params_val) != 5)) {
+	if (unlikely(json_array_size(params_val) < 5)) {
 		err = SE_INVALID_SIZE;
 		*err_val = JSON_ERR(err);
 		goto out;
