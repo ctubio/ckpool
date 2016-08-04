@@ -2803,6 +2803,11 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazil
 	__kill_instance(sdata, client);
 }
 
+static int __dec_instance_ref(stratum_instance_t *client)
+{
+	return --client->ref;
+}
+
 /* Decrease the reference count of instance. */
 static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const char *file,
 			      const char *func, const int line)
@@ -2813,7 +2818,7 @@ static void _dec_instance_ref(sdata_t *sdata, stratum_instance_t *client, const 
 	int ref;
 
 	ck_wlock(&sdata->instance_lock);
-	ref = --client->ref;
+	ref = __dec_instance_ref(client);
 	/* See if there are any instances that were dropped that could not be
 	 * moved due to holding a reference and drop them now. */
 	if (unlikely(client->dropped && !ref)) {
@@ -7120,10 +7125,10 @@ static void *statsupdate(void *arg)
 		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
-		stratum_instance_t *client, *tmp;
 		log_entry_t *log_entries = NULL;
 		user_instance_t *user, *tmpuser;
 		char_entry_t *char_list = NULL;
+		stratum_instance_t *client;
 		int idle_workers = 0;
 		char *fname, *s, *sp;
 		tv_t now, diff;
@@ -7135,9 +7140,27 @@ static void *statsupdate(void *arg)
 		tv_time(&now);
 		timersub(&now, &stats->start_time, &diff);
 
-		/* Test clients. */
-		ck_rlock(&sdata->instance_lock);
-		HASH_ITER(hh, sdata->stratum_instances, client, tmp) {
+		while (client) {
+			ck_wlock(&sdata->instance_lock);
+			if (unlikely(!client)) {
+				/* Grab the first entry */
+				client = sdata->stratum_instances;
+			} else {
+				/* Drop the reference of the last entry we examined,
+				 * then grab the next client. */
+				__dec_instance_ref(client);
+				client = client->hh.next;
+			}
+			/* Grab a reference to this client allowing us to examine
+			 * it without holding the lock */
+			if (likely(client))
+				__inc_instance_ref(client);
+			ck_wunlock(&sdata->instance_lock);
+
+			/* Reached last entry */
+			if (unlikely(!client))
+				break;
+
 			/* Look for clients that may have been dropped which the
 			 * stratifier has not been informed about and ask the
 			 * connector if they still exist */
@@ -7172,7 +7195,6 @@ static void *statsupdate(void *arg)
 				continue;
 			}
 		}
-		ck_runlock(&sdata->instance_lock);
 
 		/* Drop and regain lock to minimise lock hold time */
 		ck_rlock(&sdata->instance_lock);
