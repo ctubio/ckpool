@@ -142,6 +142,7 @@ static char *db_pass;
 static char *status_chars = "|/-\\";
 
 static char *restorefrom;
+static char *restorename;
 
 static bool ignore_seq = false;
 static bool ignore_seqall = false;
@@ -779,6 +780,62 @@ static char logname_io[512];
 static char *dbcode;
 static bool no_data_log = false;
 
+/* added before the hour filename - can include:
+ *'%yyy' replaced with 4 digit year
+ * '%m' replaced with 2 digit month
+ * '%d' replaced with 2 digit day
+ * and must exactly match the above strings
+ * e.g. '%yyy/%m/' if the CCLs are in yearly+monthly sub-directories of
+ *	'restorefrom/'  */
+static char *logpath;
+
+static void replace_ymd(char *srch, char *match, int val)
+{
+	char buf[32], *ptr, *found;
+	size_t len;
+
+	len = strlen(match);
+	snprintf(buf, sizeof(buf), "%0*d", (int)len, val);
+	if (strlen(buf) != len) {
+		quithere(1, "ERR: val=%d conversion '%%0*d' failed to be "
+				"length %d '%s'=%d", val, (int)len,
+				buf, (int)strlen(buf));
+	}
+	found = srch;
+	while (found && *found) {
+		ptr = strstr(found, match);
+		if (ptr) {
+			memcpy(ptr, buf, len);
+			found = ptr + len;
+		} else
+			found = NULL;
+	}
+}
+
+static char *hour_filename(const char *path, const char *name, time_t when)
+{
+	char *filename;
+	struct tm tm;
+	char log_path[1024];
+
+	gmtime_r(&when, &tm);
+	if (!logpath)
+		log_path[0] = '\0';
+	else {
+		STRNCPY(log_path, logpath);
+		replace_ymd(log_path, "%yyy", tm.tm_year + 1900);
+		replace_ymd(log_path, "%m", tm.tm_mon + 1);
+		replace_ymd(log_path, "%d", tm.tm_mday);
+	}
+	ASPRINTF(&filename, "%s%s%s%04d%02d%02d%02d.log",
+				path, log_path, name,
+				tm.tm_year + 1900,
+				tm.tm_mon + 1,
+				tm.tm_mday,
+				tm.tm_hour);
+	return filename;
+}
+
 // low spec version of rotating_log() - no locking
 static bool rotating_log_nolock(char *msg, char *prefix)
 {
@@ -935,7 +992,7 @@ static void check_createdate_ccl(char *cmd, tv_t *cd)
 		td = tvdiff(cd, &reload_timestamp);
 		if (td < -1 || td > ROLL_S + 1) {
 			ccl_mismatch++;
-			filename = rotating_filename("", reload_timestamp.tv_sec);
+			filename = hour_filename("", "", reload_timestamp.tv_sec);
 			tv_to_buf(cd, cd_buf1, sizeof(cd_buf1));
 			LOGERR("%s(): CCL contains mismatch data: cmd:%s CCL:%.10s cd:%s",
 				__func__, cmd, filename, cd_buf1);
@@ -1308,7 +1365,7 @@ static bool reload()
 	if (start.tv_sec < DATE_BEGIN) {
 		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
-		filename = rotating_filename(restorefrom, start.tv_sec);
+		filename = hour_filename(restorefrom, restorename, start.tv_sec);
 		fp = fopen(filename, "re");
 		if (fp)
 			fclose(fp);
@@ -6227,7 +6284,7 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 	tv_to_buf(&reload_timestamp, run, sizeof(run));
 	LOGWARNING("%s(): from %s (stamp %s)", __func__, buf, run);
 
-	filename = rotating_filename(restorefrom, reload_timestamp.tv_sec);
+	filename = hour_filename(restorefrom, restorename, reload_timestamp.tv_sec);
 	if (!logopen(&filename, &fp, &apipe))
 		quithere(1, "Failed to open '%s'", filename);
 
@@ -6319,7 +6376,7 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 				reloaded_N_files = true;
 		}
 
-		filename = rotating_filename(restorefrom, reload_timestamp.tv_sec);
+		filename = hour_filename(restorefrom, restorename, reload_timestamp.tv_sec);
 		ok = logopen(&filename, &fp, &apipe);
 		if (!ok) {
 			missingfirst = strdup(filename);
@@ -6339,7 +6396,7 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 					finished = true;
 					break;
 				}
-				filename = rotating_filename(restorefrom, reload_timestamp.tv_sec);
+				filename = hour_filename(restorefrom, restorename, reload_timestamp.tv_sec);
 				ok = logopen(&filename, &fp, &apipe);
 				if (ok)
 					break;
@@ -7448,7 +7505,7 @@ static void confirm_reload()
 	if (start.tv_sec < DATE_BEGIN) {
 		start.tv_sec = DATE_BEGIN;
 		start.tv_usec = 0L;
-		filename = rotating_filename(restorefrom, start.tv_sec);
+		filename = hour_filename(restorefrom, restorename, start.tv_sec);
 		fp = fopen(filename, "re");
 		if (fp)
 			fclose(fp);
@@ -7618,11 +7675,7 @@ static void check_restore_dir(char *name)
 	if (stat(restorefrom, &statbuf))
 		quit(1, "ERR: -r '%s' directory doesn't exist", restorefrom);
 
-	restorefrom = realloc(restorefrom, strlen(restorefrom)+strlen(name)+1);
-	if (!restorefrom)
-		quithere(1, "OOM");
-
-	strcat(restorefrom, name);
+	restorename = name;
 }
 
 static struct option long_options[] = {
@@ -7647,6 +7700,7 @@ static struct option long_options[] = {
 	// Generate old keysummary records
 	{ "key",		required_argument,	0,	'K' },
 	{ "loglevel",		required_argument,	0,	'l' },
+	{ "logpath",		required_argument,	0,	'L' },
 	// marker = enable mark/workmarker/markersummary auto generation
 	{ "marker",		no_argument,		0,	'm' },
 	{ "markstart",		required_argument,	0,	'M' },
@@ -7702,7 +7756,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:ghi:IkK:l:mM:n:p:P:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:ghi:IkK:l:L:mM:n:p:P:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case '?':
 			case ':':
@@ -7814,6 +7868,9 @@ int main(int argc, char **argv)
 					quit(1, "Invalid loglevel (range %d - %d): %d",
 					     LOG_EMERG, LOG_DEBUG, ckp.loglevel);
 				}
+				break;
+			case 'L':
+				logpath = strdup(optarg);
 				break;
 			case 'm':
 				markersummary_auto = true;
