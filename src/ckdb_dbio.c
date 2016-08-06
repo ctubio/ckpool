@@ -3219,12 +3219,14 @@ bool workinfo_fill(PGconn *conn)
 		return false;
 	}
 
-	res = PQexec(conn, "Lock table workinfo in access exclusive mode", CKPQ_READ);
-	rescode = PQresultStatus(res);
-	PQclear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Lock", rescode, conn);
-		goto flail;
+	if (exclusive_db) {
+		res = PQexec(conn, "Lock table workinfo in access exclusive mode", CKPQ_READ);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Lock", rescode, conn);
+			goto flail;
+		}
 	}
 
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
@@ -3456,7 +3458,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 		return false;
 	}
 
-	if (reloading && !confirm_sharesummary) {
+	if (reloading && !key_update && !confirm_sharesummary) {
 		// We only need to know if the workmarker is processed
 		K_RLOCK(workmarkers_free);
 		wm_item = find_workmarkers(shares->workinfoid, false,
@@ -3494,7 +3496,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 		}
 	}
 
-	if (!confirm_sharesummary) {
+	if (!key_update && !confirm_sharesummary) {
 		workerstatus_update(NULL, shares, NULL);
 		K_WLOCK(userinfo_free);
 		userinfo_update(shares, NULL, NULL, false);
@@ -3949,12 +3951,14 @@ bool shares_fill(PGconn *conn)
 		return false;
 	}
 
-	res = PQexec(conn, "Lock table shares in access exclusive mode", CKPQ_READ);
-	rescode = PQresultStatus(res);
-	PQclear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Lock", rescode, conn);
-		goto flail;
+	if (exclusive_db) {
+		res = PQexec(conn, "Lock table shares in access exclusive mode", CKPQ_READ);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Lock", rescode, conn);
+			goto flail;
+		}
 	}
 
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
@@ -4157,6 +4161,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 		return false;
 	}
 
+	// key_update skips shareerrors
 	if (reloading && !confirm_sharesummary) {
 		// We only need to know if the workmarker is processed
 		K_RLOCK(workmarkers_free);
@@ -4490,7 +4495,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	K_ITEM *kss_item, *kss_prev, kss_look;
 	K_ITEM *ms_item, ms_look, *p_ss_item, *p_ms_item;
 	K_ITEM *ks_item, ks_look;
-	bool ok = false, conned = false;
+	bool ok = false, conned = false, nonblank = false;
 	int64_t diffacc = 0, shareacc = 0;
 	int64_t kdiffacc = 0, kshareacc = 0;
 	char *reason = NULL;
@@ -4520,7 +4525,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	K_STORE *new_keysummary_store = k_new_store(keysummary_free);
 
 	/* Use the master size for these local trees since
-	 *  they're large and doesn't get created often */
+	 *  they're large and don't get created often */
 	K_TREE *ms_root = new_ktree_local(sshortname, cmp_markersummary,
 					  markersummary_free);
 	K_TREE *ks_root = new_ktree_local(kshortname, cmp_keysummary,
@@ -4535,6 +4540,9 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		reason = "not ready";
 		goto flail;
 	}
+
+	if (key_update)
+		goto dokey;
 
 	setnow(&add_stt);
 	/* Check there aren't already any matching markersummaries
@@ -4660,6 +4668,8 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	}
 	setnow(&add_fin);
 
+dokey:
+
 	setnow(&kadd_stt);
 	INIT_KEYSUMMARY(&ks_look);
 
@@ -4684,6 +4694,8 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		DATA_KEYSHARESUMMARY(keysharesummary, kss_item);
 		if (keysharesummary->workinfoid < workmarkers->workinfoidstart)
 			break;
+		if (keysharesummary->key[0])
+			nonblank = true;
 		K_RLOCK(keysharesummary_free);
 		kss_prev = prev_in_ktree(kss_ctx);
 		K_RUNLOCK(keysharesummary_free);
@@ -4801,14 +4813,19 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 		ks_item = ks_item->next;
 	}
 
-	ok = workmarkers_process(conn, true, true,
-				 workmarkers->markerid,
-				 workmarkers->poolinstance,
-				 workmarkers->workinfoidend,
-				 workmarkers->workinfoidstart,
-				 workmarkers->description,
-				 MARKER_PROCESSED_STR,
-				 by, code, inet, cd, trf_root);
+	if (!key_update) {
+		ok = workmarkers_process(conn, true, true,
+					 workmarkers->markerid,
+					 workmarkers->poolinstance,
+					 workmarkers->workinfoidend,
+					 workmarkers->workinfoidstart,
+					 workmarkers->description,
+					 MARKER_PROCESSED_STR,
+					 by, code, inet, cd, trf_root);
+	} else {
+		// Not part of either tree key
+		STRNCPY(workmarkers->status, MARKER_PROCESSED_STR);
+	}
 	setnow(&kdb_fin);
 rollback:
 	if (ok)
@@ -4959,7 +4976,7 @@ flail:
 			   "k(2*%"PRId64"%s/2*%"PRId64"%s) for workmarkers "
 			   "%"PRId64"/%s/End %"PRId64"/Stt %"PRId64"/%s/%s "
 			   "add=%.3fs kadd=%.3fs db=%.3fs kdb=%.3fs "
-			   "lck=%.3f+%.3fs",
+			   "lck=%.3f+%.3fs%s",
 			   shortname, ms_count, ks_count, ss_count, kss_count,
 			   shareacc, diffacc,
 			   kshareacc >> 1, (kshareacc & 1) ? ".5" : "",
@@ -4973,7 +4990,8 @@ flail:
 			   tvdiff(&db_fin, &db_stt),
 			   tvdiff(&kdb_fin, &kdb_stt),
 			   tvdiff(&lck_got, &lck_stt),
-			   tvdiff(&lck_fin, &lck_got));
+			   tvdiff(&lck_fin, &lck_got),
+			   nonblank ? EMPTY : " ONLY BLANK KEYS");
 
 		// This should never happen
 		if (kshareacc != (shareacc << 1) || kdiffacc != (diffacc << 1)) {
@@ -6489,12 +6507,14 @@ bool miningpayouts_fill(PGconn *conn)
 		return false;
 	}
 
-	res = PQexec(conn, "Lock table miningpayouts in access exclusive mode", CKPQ_READ);
-	rescode = PQresultStatus(res);
-	PQclear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Lock", rescode, conn);
-		goto flail;
+	if (exclusive_db) {
+		res = PQexec(conn, "Lock table miningpayouts in access exclusive mode", CKPQ_READ);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Lock", rescode, conn);
+			goto flail;
+		}
 	}
 
 	res = PQexec(conn, sel, CKPQ_READ);
@@ -8264,12 +8284,14 @@ bool markersummary_fill(PGconn *conn)
 		return false;
 	}
 
-	res = PQexec(conn, "Lock table markersummary in access exclusive mode", CKPQ_READ);
-	rescode = PQresultStatus(res);
-	PQclear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Lock", rescode, conn);
-		goto flail;
+	if (exclusive_db) {
+		res = PQexec(conn, "Lock table markersummary in access exclusive mode", CKPQ_READ);
+		rescode = PQresultStatus(res);
+		PQclear(res);
+		if (!PGOK(rescode)) {
+			PGLOGERR("Lock", rescode, conn);
+			goto flail;
+		}
 	}
 
 	res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
@@ -8564,6 +8586,10 @@ bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Insert", rescode, conn);
+		/* Don't fail on a duplicate during key_update
+		 * TODO: should only be on a duplicate ... */
+		if (key_update)
+			ok = true;
 		goto unparam;
 	}
 

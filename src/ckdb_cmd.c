@@ -2528,6 +2528,10 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		bool igndup = false;
 		char *txn_tree;
 
+		// nothing needed by key_update is triggered by the workinfo data
+		if (key_update)
+			goto wiconf;
+
 		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
 		if (!i_poolinstance)
 			return strdup(reply);
@@ -2637,7 +2641,7 @@ wiconf:
 
 		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
 
-		if (reloading && !confirm_sharesummary) {
+		if (reloading && !key_update && !confirm_sharesummary) {
 			/* ISDR (Ignored shares during reload)
 			 * This will discard any shares older than the newest
 			 *  workinfoidend of any workmarker - including ready
@@ -2654,6 +2658,11 @@ wiconf:
 			 */
 			if (workinfoid <= dbstatus.newest_workmarker_workinfoid)
 				return NULL;
+		}
+
+		if (key_update) {
+			if (workinfoid < key_wi_stt || workinfoid > key_wi_fin)
+				goto sconf;
 		}
 
 		if (confirm_sharesummary) {
@@ -2753,6 +2762,10 @@ sconf:
 		K_ITEM *i_error, *i_secondaryuserid;
 		bool ok;
 
+		// not summarised in keysummaries
+		if (key_update)
+			goto wiconf;
+
 		i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
 		if (!i_username)
 			return strdup(reply);
@@ -2834,15 +2847,18 @@ seconf:
 
 		TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
 
-		if (reloading && !confirm_sharesummary) {
+		if (reloading && !key_update && !confirm_sharesummary) {
 			// This excludes any already summarised
 			if (workinfoid <= dbstatus.newest_workmarker_workinfoid)
 				return NULL;
 		}
 
-		if (confirm_sharesummary) {
-			TXT_TO_BIGINT("workinfoid", transfer_data(i_workinfoid), workinfoid);
+		if (key_update) {
+			if (workinfoid < key_wi_stt || workinfoid > key_wi_fin)
+				goto awconf;
+		}
 
+		if (confirm_sharesummary) {
 			if (workinfoid < confirm_first_workinfoid ||
 			    workinfoid > confirm_last_workinfoid)
 				goto awconf;
@@ -2856,7 +2872,7 @@ seconf:
 			return strdup("failed.DATA");
 		} else {
 			/* Don't slow down the reload - do them later */
-			if (!reloading) {
+			if (!reloading || key_update) {
 				// Aging is a queued item thus the reply is ignored
 				auto_age_older(workinfoid,
 						transfer_data(i_poolinstance),

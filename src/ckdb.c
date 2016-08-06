@@ -144,8 +144,10 @@ static char *status_chars = "|/-\\";
 static char *restorefrom;
 
 static bool ignore_seq = false;
+static bool ignore_seqall = false;
 bool genpayout_auto;
 bool markersummary_auto;
+bool exclusive_db = true;
 
 enum free_modes free_mode = FREE_MODE_FAST;
 
@@ -209,6 +211,24 @@ const tv_t default_expiry = { DEFAULT_EXPIRY, 0L };
 const tv_t date_eot = { DATE_S_EOT, DATE_uS_EOT };
 const tv_t date_begin = { DATE_BEGIN, 0L };
 
+// argv -K - don't run in ckdb mode, just update keysummary
+bool key_update;
+/* Requires all workmarkers and workinfo present in the database
+ *  they are all loaded during startup, but you can limit the
+ *  workinfo loaded with -w - if any required are missing,
+ *  it will stop with an error saying what was missing
+ * keysummary records are not loaded, but SQL stores of duplicate
+ *  keysummary records are reported and ignored
+ *
+ * Valid options are:
+ *	mNNN-MMM workmarker markerid range to process
+ *		 this determines the CCL file range loaded
+ *		 and the workinfoid range processed
+ */
+static char *key_range;
+int64_t key_wi_stt;
+int64_t key_wi_fin;
+
 // argv -y - don't run in ckdb mode, just confirm sharesummaries
 bool confirm_sharesummary;
 
@@ -252,7 +272,6 @@ int64_t confirm_last_workinfoid;
 /* Stop the reload 11min after the 'last' workinfoid+1 appears
  * ckpool uses 10min - but add 1min to be sure */
 #define WORKINFO_AGE 660
-static tv_t confirm_finish;
 
 static tv_t reload_timestamp;
 
@@ -758,6 +777,7 @@ K_STORE *userinfo_store;
 static char logname_db[512];
 static char logname_io[512];
 static char *dbcode;
+static bool no_data_log = false;
 
 // low spec version of rotating_log() - no locking
 static bool rotating_log_nolock(char *msg, char *prefix)
@@ -786,6 +806,9 @@ static void log_queue_message(char *msg, bool db)
 {
 	K_ITEM *lq_item;
 	LOGQUEUE *lq;
+
+	if (no_data_log)
+		return;
 
 	K_WLOCK(logqueue_free);
 	lq_item = k_unlink_head(logqueue_free);
@@ -1202,7 +1225,7 @@ static bool getdata3()
 	PGconn *conn = dbconnect();
 	bool ok = true;
 
-	if (!confirm_sharesummary) {
+	if (!key_update && !confirm_sharesummary) {
 		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
 			goto sukamudai;
 		/* FYI must be after blocks */
@@ -1222,21 +1245,25 @@ static bool getdata3()
 	/* must be after workinfo */
 	if (!(ok = workmarkers_fill(conn)) || everyone_die)
 		goto sukamudai;
-	if (!confirm_sharesummary) {
+	if (!key_update && !confirm_sharesummary) {
 		/* must be after workmarkers */
 		if (!(ok = payouts_fill(conn)) || everyone_die)
 			goto sukamudai;
 	}
 	PQfinish(conn);
 	conn = dbconnect();
-	if (!(ok = markersummary_fill(conn)) || everyone_die)
-		goto sukamudai;
+	if (!key_update) {
+		if (!(ok = markersummary_fill(conn)) || everyone_die)
+			goto sukamudai;
+	}
 	PQfinish(conn);
 	conn = dbconnect();
-	if (!(ok = shares_fill(conn)) || everyone_die)
-		goto sukamudai;
-	if (!confirm_sharesummary && !everyone_die)
-		ok = poolstats_fill(conn);
+	if (!key_update) {
+		if (!(ok = shares_fill(conn)) || everyone_die)
+			goto sukamudai;
+		if (!confirm_sharesummary && !everyone_die)
+			ok = poolstats_fill(conn);
+	}
 
 sukamudai:
 
@@ -1244,7 +1271,7 @@ sukamudai:
 	return ok;
 }
 
-static bool reload_from(tv_t *start);
+static bool reload_from(tv_t *start, const tv_t *finish);
 
 static bool reload()
 {
@@ -1297,7 +1324,7 @@ static bool reload()
 		}
 		free(filename);
 	}
-	return reload_from(&start);
+	return reload_from(&start, &date_eot);
 }
 
 /* Open the file in path, check if there is a pid in there that still exists
@@ -1865,10 +1892,12 @@ static void dealloc_storage()
 		return;
 	}
 
-	LOGWARNING("%s() logqueue ...", __func__);
+	if (logqueue_free) {
+		LOGWARNING("%s() logqueue ...", __func__);
+		FREE_LISTS(logqueue);
+	}
 
-	FREE_LISTS(logqueue);
-
+	LOGWARNING("%s() user/marks ...", __func__);
 	FREE_ALL(userinfo);
 
 	FREE_TREE(marks);
@@ -1933,71 +1962,72 @@ static void dealloc_storage()
 	FREE_ALL(miningpayouts);
 	FREE_ALL(blocks);
 
-	LOGWARNING("%s() sharesummary ...", __func__);
-
-	FREE_TREE(sharesummary_pool);
-	k_list_transfer_to_tail_nolock(sharesummary_pool_store,
-				       sharesummary_store);
-	FREE_STORE(sharesummary_pool);
-	FREE_TREE(sharesummary_workinfoid);
-	FREE_TREE(sharesummary);
-	FREE_STORE_DATA(sharesummary);
-	FREE_LIST_DATA(sharesummary);
-
-	LOGWARNING("%s() shares ...", __func__);
-
-	if (shareerrors_early_store->count > 0) {
-		LOGERR("%s() *** shareerrors_early count %d ***",
-			__func__, shareerrors_early_store->count);
-		s_item = STORE_HEAD_NOLOCK(shareerrors_early_store);
-		while (s_item) {
-			DATA_SHAREERRORS(shareerrors, s_item);
-			LOGERR("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
-				__func__,
-				shareerrors->workinfoid,
-				st = safe_text_nonull(shareerrors->workername),
-				shareerrors->errn,
-				shareerrors->error,
-				shareerrors->createdate.tv_sec,
-				shareerrors->createdate.tv_usec);
-			FREENULL(st);
-			s_item = s_item->next;
-		}
+	if (sharesummary_free) {
+		LOGWARNING("%s() sharesummary ...", __func__);
+		FREE_TREE(sharesummary_pool);
+		k_list_transfer_to_tail_nolock(sharesummary_pool_store,
+					       sharesummary_store);
+		FREE_STORE(sharesummary_pool);
+		FREE_TREE(sharesummary_workinfoid);
+		FREE_TREE(sharesummary);
+		FREE_STORE_DATA(sharesummary);
+		FREE_LIST_DATA(sharesummary);
 	}
-	FREE_TREE(shareerrors_early);
-	FREE_STORE(shareerrors_early);
-	FREE_ALL(shareerrors);
 
-	FREE_TREE(shares_hi);
-	FREE_TREE(shares_db);
-	FREE_STORE(shares_hi);
-	if (shares_early_store->count > 0) {
-		LOGERR("%s() *** shares_early count %d ***",
-			__func__, shares_early_store->count);
-		s_item = STORE_HEAD_NOLOCK(shares_early_store);
-		while (s_item) {
-			DATA_SHARES(shares, s_item);
-			LOGERR("%s(): %"PRId64"/%s/%s/%"PRId32"/%ld,%ld",
-				__func__,
-				shares->workinfoid,
-				st = safe_text_nonull(shares->workername),
-				shares->nonce,
-				shares->errn,
-				shares->createdate.tv_sec,
-				shares->createdate.tv_usec);
-			FREENULL(st);
-			s_item = s_item->next;
+	if (shares_free) {
+		LOGWARNING("%s() shares ...", __func__);
+		if (shareerrors_early_store->count > 0) {
+			LOGERR("%s() *** shareerrors_early count %d ***",
+				__func__, shareerrors_early_store->count);
+			s_item = STORE_HEAD_NOLOCK(shareerrors_early_store);
+			while (s_item) {
+				DATA_SHAREERRORS(shareerrors, s_item);
+				LOGERR("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
+					__func__,
+					shareerrors->workinfoid,
+					st = safe_text_nonull(shareerrors->workername),
+					shareerrors->errn,
+					shareerrors->error,
+					shareerrors->createdate.tv_sec,
+					shareerrors->createdate.tv_usec);
+				FREENULL(st);
+				s_item = s_item->next;
+			}
 		}
+		FREE_TREE(shareerrors_early);
+		FREE_STORE(shareerrors_early);
+		FREE_ALL(shareerrors);
+
+		FREE_TREE(shares_hi);
+		FREE_TREE(shares_db);
+		FREE_STORE(shares_hi);
+		if (shares_early_store->count > 0) {
+			LOGERR("%s() *** shares_early count %d ***",
+				__func__, shares_early_store->count);
+			s_item = STORE_HEAD_NOLOCK(shares_early_store);
+			while (s_item) {
+				DATA_SHARES(shares, s_item);
+				LOGERR("%s(): %"PRId64"/%s/%s/%"PRId32"/%ld,%ld",
+					__func__,
+					shares->workinfoid,
+					st = safe_text_nonull(shares->workername),
+					shares->nonce,
+					shares->errn,
+					shares->createdate.tv_sec,
+					shares->createdate.tv_usec);
+				FREENULL(st);
+				s_item = s_item->next;
+			}
+		}
+		FREE_TREE(shares_early);
+		FREE_STORE(shares_early);
+		FREE_ALL(shares);
 	}
-	FREE_TREE(shares_early);
-	FREE_STORE(shares_early);
-	FREE_ALL(shares);
 
 	if (free_mode != FREE_MODE_ALL)
 		LOGWARNING("%s() workinfo skipped", __func__);
 	else {
 		LOGWARNING("%s() workinfo ...", __func__);
-
 		FREE_TREE(workinfo_height);
 		FREE_TREE(workinfo);
 		FREE_STORE_DATA(workinfo);
@@ -2048,21 +2078,23 @@ static void dealloc_storage()
 	FREE_LIST(breakqueue);
 	FREE_LISTS(msgline);
 
-	if (free_mode != FREE_MODE_ALL)
-		LOGWARNING("%s() seqset skipped", __func__);
-	else {
-		LOGWARNING("%s() seqset ...", __func__);
-		sequence_report(false);
+	if (seqset_free) {
+		if (free_mode != FREE_MODE_ALL)
+			LOGWARNING("%s() seqset skipped", __func__);
+		else {
+			LOGWARNING("%s() seqset ...", __func__);
+			sequence_report(false);
 
-		FREE_STORE_DATA(seqset);
-		FREE_LIST_DATA(seqset);
-		FREE_LISTS(seqset);
+			FREE_STORE_DATA(seqset);
+			FREE_LIST_DATA(seqset);
+			FREE_LISTS(seqset);
 
-		// Must be after seqset
-		FREE_LIST(seqtrans);
+			// Must be after seqset
+			FREE_LIST(seqtrans);
 
-		for (seq = 0; seq < SEQ_MAX; seq++)
-			FREENULL(seqnam[seq]);
+			for (seq = 0; seq < SEQ_MAX; seq++)
+				FREENULL(seqnam[seq]);
+		}
 	}
 
 	LOGWARNING("%s() finished", __func__);
@@ -3100,7 +3132,7 @@ setitemdata:
 
 static enum cmd_values process_seq(MSGLINE *msgline)
 {
-	bool dupall, dupcmd;
+	bool dupall = false, dupcmd = false;
 	char *st = NULL;
 
 	if (ignore_seq)
@@ -3125,15 +3157,21 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 			  msgline->n_seqpid);
 	}
 
-	dupall = update_seq(SEQ_ALL, msgline->n_seqall, msgline->n_seqstt,
-			    msgline->n_seqpid, SEQALL, &(msgline->now),
-			    &(msgline->cd), msgline->code,
-			    msgline->seqentryflags, msgline->msg);
+	if (!ignore_seqall) {
+		dupall = update_seq(SEQ_ALL, msgline->n_seqall,
+				    msgline->n_seqstt, msgline->n_seqpid,
+				    SEQALL, &(msgline->now), &(msgline->cd),
+				    msgline->code, msgline->seqentryflags,
+				    msgline->msg);
+	}
 	dupcmd = update_seq(ckdb_cmds[msgline->which_cmds].seq,
 			    msgline->n_seqcmd, msgline->n_seqstt,
 			    msgline->n_seqpid, msgline->seqcmdnam,
 			    &(msgline->now), &(msgline->cd), msgline->code,
 			    msgline->seqentryflags, msgline->msg);
+
+	if (ignore_seqall)
+		dupall = dupcmd;
 
 	if (dupall != dupcmd) {
 		// Bad/corrupt data or a code bug
@@ -4212,7 +4250,7 @@ static char *shift_words[] =
 	"origami",
 	"paru",
 	"quinn",
-	"rika",
+	"rem",
 	"sena",
 	"tenshi",
 	"ur",
@@ -5933,13 +5971,15 @@ static void *process_reload(__maybe_unused void *arg)
 					st = safe_text(msgline->msg));
 				FREENULL(st);
 				break;
-			case CMD_AUTH:
-			case CMD_ADDRAUTH:
 			case CMD_HEARTBEAT:
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
 			case CMD_WORKERSTAT:
 			case CMD_BLOCK:
+				if (key_update)
+					break;
+			case CMD_AUTH:
+			case CMD_ADDRAUTH:
 				if (confirm_sharesummary)
 					break;
 			case CMD_SHARELOG:
@@ -6153,7 +6193,7 @@ static bool logopen(char **filename, FILE **fp, bool *apipe)
 /* If the reload start file is missing and -r was specified correctly:
  *	touch the filename reported in "Failed to open 'filename'",
  *	if ckdb aborts at the beginning of the reload, then start again */
-static bool reload_from(tv_t *start)
+static bool reload_from(tv_t *start, const tv_t *finish)
 {
 	// proc_pt could exit after this returns
 	static pthread_t proc_pt;
@@ -6265,8 +6305,10 @@ static bool reload_from(tv_t *start)
 		if (everyone_die)
 			break;
 		reload_timestamp.tv_sec += ROLL_S;
-		if (confirm_sharesummary && tv_newer(&confirm_finish, &reload_timestamp)) {
-			LOGWARNING("%s(): confirm range complete", __func__);
+		if (tv_newer(finish, &reload_timestamp)) {
+			tv_to_buf(&reload_timestamp, buf, sizeof(buf));
+			LOGWARNING("%s(): finish range (%s) exceeded",
+				   __func__, buf);
 			break;
 		}
 
@@ -6495,9 +6537,11 @@ static void *listener(void *arg)
 	for (i = 0; i < breakdown_threads; i++)
 		create_pthread(&break_pt, breaker, &cmder);
 
-	create_pthread(&log_pt, logger, NULL);
+	if (no_data_log == false)
+		create_pthread(&log_pt, logger, NULL);
 
-	create_pthread(&sock_pt, socketer, arg);
+	if (!confirm_sharesummary)
+		create_pthread(&sock_pt, socketer, arg);
 
 	create_pthread(&summ_pt, summariser, NULL);
 
@@ -6672,6 +6716,341 @@ sayonara:
 	return NULL;
 }
 
+static bool make_keysummaries()
+{
+	K_TREE_CTX ctx[1];
+	WORKMARKERS *workmarkers;
+	K_ITEM *wm_item, *wm_last = NULL;
+	tv_t proc_lock_stt, proc_lock_got, proc_lock_fin, now;
+	bool ok = false;
+
+	K_RLOCK(workmarkers_free);
+	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
+	while (wm_item) {
+		DATA_WORKMARKERS(workmarkers, wm_item);
+		if (!CURRENT(&(workmarkers->expirydate)))
+			break;
+		// find the oldest READY workinfoid
+		if (WMREADY(workmarkers->status))
+			wm_last = wm_item;
+		wm_item = prev_in_ktree(ctx);
+	}
+	K_RUNLOCK(workmarkers_free);
+
+	if (!wm_last)
+		return false;
+
+	DATA_WORKMARKERS(workmarkers, wm_last);
+
+	LOGDEBUG("%s() processing workmarkers %"PRId64"/%s/End %"PRId64"/"
+		 "Stt %"PRId64"/%s/%s",
+		 __func__, workmarkers->markerid, workmarkers->poolinstance,
+		 workmarkers->workinfoidend, workmarkers->workinfoidstart,
+		 workmarkers->description, workmarkers->status);
+
+	setnow(&now);
+	setnow(&proc_lock_stt);
+	K_KLONGWLOCK(process_pplns_free);
+	setnow(&proc_lock_got);
+	ok = sharesummaries_to_markersummaries(NULL, workmarkers, by_default,
+						(char *)__func__, inet_default,
+						&now, NULL);
+	K_WUNLOCK(process_pplns_free);
+	setnow(&proc_lock_fin);
+	LOGWARNING("%s() pplns lock time %.3fs+%.3fs",
+		   __func__, tvdiff(&proc_lock_got, &proc_lock_stt),
+		   tvdiff(&proc_lock_fin, &proc_lock_got));
+
+	return ok;
+}
+
+static void *keymarker(__maybe_unused void *arg)
+{
+	pthread_detach(pthread_self());
+	bool ok = true;
+
+	LOCK_INIT("db_keymarker");
+	rename_proc("db_keymarker");
+
+	if (!everyone_die) {
+		LOGWARNING("%s() Start key processing...", __func__);
+		marker_using_data = true;
+	}
+
+	while (!everyone_die && ok) {
+		if (!everyone_die)
+			sleep(1);
+		if (!everyone_die)
+			ok = make_keysummaries();
+	}
+
+	marker_using_data = false;
+
+	// No unprocessed workmarkers, or an error
+	everyone_die = true;
+
+	return NULL;
+}
+
+static void update_reload(WORKINFO *wi_stt, WORKINFO *wi_fin)
+{
+	K_TREE_CTX ctx[1];
+	WORKMARKERS *workmarkers;
+	K_ITEM *wm_item, *wm_prev;
+	pthread_t keymark_pt;
+	tv_t *start;
+	tv_t finish;
+	int counter;
+	bool status_failure = false;
+
+	/* Now that we know the workmarkers of interest,
+	 *  switch them from MARKER_PROCESSED to MARKER_READY
+	 *  and remove all after
+	 * The markersummaries already exist
+	 *  We are generating the missing keysummaries */
+	K_WLOCK(workmarkers_free);
+	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
+	while (wm_item) {
+		wm_prev = prev_in_ktree(ctx);
+		DATA_WORKMARKERS(workmarkers, wm_item);
+		if (CURRENT(&(workmarkers->expirydate))) {
+			if (workmarkers->workinfoidstart > wi_fin->workinfoid) {
+				remove_from_ktree(workmarkers_workinfoid_root,
+						  wm_item);
+				remove_from_ktree(workmarkers_root, wm_item);
+				free_workmarkers_data(wm_item);
+				k_unlink_item(workmarkers_store, wm_item);
+				k_add_head(workmarkers_free, wm_item);
+			} else if (workmarkers->workinfoidstart >=
+				   wi_stt->workinfoid) {
+				if (!WMPROCESSED(workmarkers->status)) {
+					status_failure = true;
+					LOGERR("%s() workmarker %"PRId64
+						" invalid status '%s' != %c",
+						__func__,
+						workmarkers->markerid,
+						workmarkers->status,
+						MARKER_PROCESSED);
+				} else {
+					// Not part of either tree key
+					STRNCPY(workmarkers->status, MARKER_READY_STR);
+				}
+			} else
+				break;
+		}
+		wm_item = wm_prev;
+	}
+	K_WUNLOCK(workmarkers_free);
+
+	if (status_failure) {
+		LOGERR("%s() Aborting ...", __func__);
+		return;
+	}
+
+	create_pthread(&keymark_pt, keymarker, NULL);
+
+	start = &(wi_stt->createdate);
+	if (start->tv_sec < DATE_BEGIN)
+		start = (tv_t *)&date_begin;
+
+	copy_tv(&finish, &(wi_fin->createdate));
+	// include the reload file after wi_fin
+	finish.tv_sec += ROLL_S;
+
+	reload_from(start, &finish);
+
+	// wait for all loaded data to be used
+	while (!everyone_die) {
+		K_RLOCK(breakqueue_free);
+		counter = reload_done_breakqueue_store->count +
+			  reload_breakqueue_store->count + reload_processing;
+		K_RUNLOCK(breakqueue_free);
+		if (counter == 0)
+			break;
+		cksleep_ms(142);
+	}
+
+	while (!everyone_die)
+		cksleep_ms(142);
+}
+
+static void update_check(int64_t markerid_stt, int64_t markerid_fin)
+{
+	K_ITEM *wm_stt_item, *wm_fin_item, *wi_stt_item, *wi_fin_item;
+	char buf[DATE_BUFSIZ+1], buf2[DATE_BUFSIZ+1];
+	WORKMARKERS *wm_stt = NULL, *wm_fin = NULL;
+	WORKINFO *wi_stt = NULL, *wi_fin = NULL;
+	tv_t up_stt, up_fin;
+	double min, sec;
+
+	K_RLOCK(workmarkers_free);
+	wm_stt_item = find_workmarkerid(markerid_stt, false, MARKER_PROCESSED);
+	wm_fin_item = find_workmarkerid(markerid_fin, false, MARKER_PROCESSED);
+	K_RUNLOCK(workmarkers_free);
+
+	if (!wm_stt_item || !wm_fin_item) {
+		if (!wm_stt_item) {
+			LOGERR("%s() unknown start markerid %"PRId64,
+				__func__, markerid_stt);
+		}
+		if (!wm_fin_item) {
+			LOGERR("%s() unknown finish markerid %"PRId64,
+				__func__, markerid_fin);
+		}
+		return;
+	}
+
+	DATA_WORKMARKERS(wm_stt, wm_stt_item);
+	DATA_WORKMARKERS(wm_fin, wm_fin_item);
+
+	key_wi_stt = wm_stt->workinfoidstart;
+	key_wi_fin = wm_fin->workinfoidend;
+
+	wi_stt_item = find_workinfo(key_wi_stt, NULL);
+	wi_fin_item = find_workinfo(key_wi_fin, NULL);
+
+	if (!wi_stt_item || !wi_fin_item) {
+		if (!wi_stt_item) {
+			LOGEMERG("%s() missing workinfoid data! %"PRId64
+				 " for start markerid %"PRId64,
+				 __func__, key_wi_stt, markerid_stt);
+		}
+		if (!wi_fin_item) {
+			LOGEMERG("%s() missing workinfoid data! %"PRId64
+				 " for finish markerid %"PRId64,
+				 __func__, key_wi_fin, markerid_fin);
+		}
+		return;
+	}
+
+	DATA_WORKINFO(wi_stt, wi_stt_item);
+	DATA_WORKINFO(wi_fin, wi_fin_item);
+
+	tv_to_buf(&(wi_stt->createdate), buf, sizeof(buf));
+	tv_to_buf(&(wi_fin->createdate), buf2, sizeof(buf2));
+	LOGWARNING("%s() processing from start markerid %"PRId64" %s to "
+		   "finish markerid %"PRId64" %s",
+		   __func__, markerid_stt, buf, markerid_fin, buf2);
+
+	setnow(&up_stt);
+
+	update_reload(wi_stt, wi_fin);
+
+	POOLINSTANCE_RESET_MSG("reload");
+	setnow(&up_fin);
+	sec = tvdiff(&up_fin, &up_stt);
+	min = floor(sec / 60.0);
+	sec -= min * 60.0;
+	LOGWARNING("update complete %.0fm %.3fs", min, sec);
+}
+
+static void update_keysummary()
+{
+	int64_t markerid_stt, markerid_fin;
+	char *tmp, *minus;
+	tv_t db_stt, db_fin;
+	pthread_t break_pt;
+	double min, sec;
+	bool reloader;
+	int cpus, i;
+
+	// Simple value check to abort early
+	if (!key_range || !(*key_range)) {
+		LOGEMERG("%s() -K option can't be blank", __func__);
+		return;
+	}
+
+	switch(tolower(key_range[0])) {
+		case 'm':
+			tmp = strdup(key_range);
+			minus = strchr(tmp+1, '-');
+			if (!minus || minus == tmp+1) {
+				LOGEMERG("%s() invalid workmarker range '%s' "
+					 "- must be %cNNN-MMM",
+					 __func__, key_range, tolower(key_range[0]));
+				return;
+			}
+			*(minus++) = '\0';
+			markerid_stt = atoll(tmp+1);
+			if (markerid_stt <= 0) {
+				LOGEMERG("%s() invalid markerid start in '%s' "
+					 "- must be >0",
+					 __func__, key_range);
+				return;
+			}
+			markerid_fin = atoll(minus);
+			if (markerid_fin <= 0) {
+				LOGEMERG("%s() invalid markerid finish in '%s' "
+					 "- must be >0",
+					 __func__, key_range);
+				return;
+			}
+			if (markerid_fin < markerid_stt) {
+				LOGEMERG("%s() invalid markerid range in '%s' "
+					 "- finish < start",
+					 __func__, key_range);
+				return;
+			}
+			free(tmp);
+			break;
+		default:
+			LOGEMERG("%s() unknown key range '%c' in '%s'",
+				 __func__, key_range[0], key_range);
+			return;
+	}
+
+	LOCK_INIT("dbk_updater");
+	rename_proc("dbk_updater");
+
+	breakqueue_free = k_new_list("BreakQueue", sizeof(BREAKQUEUE),
+					ALLOC_BREAKQUEUE, LIMIT_BREAKQUEUE, true);
+	reload_breakqueue_store = k_new_store(breakqueue_free);
+	reload_done_breakqueue_store = k_new_store(breakqueue_free);
+
+#if LOCK_CHECK
+	DLPRIO(breakqueue, PRIO_TERMINAL);
+#endif
+	if (breakdown_threads <= 0) {
+		cpus = sysconf(_SC_NPROCESSORS_ONLN) ? : 1;
+		breakdown_threads = (int)(cpus / 3) ? : 1;
+	}
+	LOGWARNING("%s(): creating %d breaker threads ...",
+		   __func__, breakdown_threads);
+	reloader = true;
+	for (i = 0; i < breakdown_threads; i++)
+		create_pthread(&break_pt, breaker, &reloader);
+
+	alloc_storage();
+
+	setnow(&db_stt);
+
+	if (!getdata1() || everyone_die)
+		return;
+
+	db_users_complete = true;
+
+	if (!getdata2() || everyone_die)
+		return;
+
+	if (dbload_workinfoid_start != -1) {
+		LOGWARNING("WARNING: dbload starting at workinfoid %"PRId64,
+			   dbload_workinfoid_start);
+	}
+
+	if (!getdata3() || everyone_die)
+		return;
+
+	POOLINSTANCE_RESET_MSG("dbload");
+	setnow(&db_fin);
+	sec = tvdiff(&db_fin, &db_stt);
+	min = floor(sec / 60.0);
+	sec -= min * 60.0;
+	LOGWARNING("dbload complete %.0fm %.3fs", min, sec);
+
+	db_load_complete = true;
+
+	update_check(markerid_stt, markerid_fin);
+}
 #if 0
 /* TODO: This will be way faster traversing both trees simultaneously
  *  rather than traversing one and searching the other, then repeating
@@ -7086,7 +7465,7 @@ static void confirm_reload()
 		free(filename);
 	}
 
-	if (!reload_from(&start)) {
+	if (!reload_from(&start, &date_eot)) {
 		LOGEMERG("%s() ABORTING from reload_from()", __func__);
 		return;
 	}
@@ -7265,6 +7644,8 @@ static struct option long_options[] = {
 	// DON'T use when connected to ckpool
 	{ "ignore-seq",		required_argument,	0,	'I' },
 	{ "killold",		no_argument,		0,	'k' },
+	// Generate old keysummary records
+	{ "key",		required_argument,	0,	'K' },
 	{ "loglevel",		required_argument,	0,	'l' },
 	// marker = enable mark/workmarker/markersummary auto generation
 	{ "marker",		no_argument,		0,	'm' },
@@ -7321,8 +7702,12 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:ghi:Ikl:mM:n:p:P:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:ghi:IkK:l:mM:n:p:P:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
+			case '?':
+			case ':':
+				quit(1, "exiting");
+				break;
 			case 'a':
 				len = strlen(optarg);
 				if (len > MAX_ALERT_CMD)
@@ -7418,6 +7803,10 @@ int main(int argc, char **argv)
 				break;
 			case 'k':
 				ckp.killold = true;
+				break;
+			case 'K':
+				key_range = strdup(optarg);
+				key_update = true;
 				break;
 			case 'l':
 				ckp.loglevel = atoi(optarg);
@@ -7540,10 +7929,20 @@ int main(int argc, char **argv)
 	btc_auth = http_base64(buf);
 	bzero(buf, sizeof(buf));
 
-	if (confirm_sharesummary)
-		dbcode = "y";
-	else
-		dbcode = "";
+	if (key_update) {
+		dbcode = "k";
+		no_data_log = true;
+		ignore_seqall = true;
+		exclusive_db = false;
+	} else {
+		if (confirm_sharesummary) {
+			dbcode = "y";
+			no_data_log = true;
+			ignore_seqall = true;
+			exclusive_db = false;
+		} else
+			dbcode = "";
+	}
 
 	if (!db_name)
 		db_name = "ckdb";
@@ -7650,7 +8049,10 @@ int main(int argc, char **argv)
 			o_limits_max_lifetime = o_limits[i].lifetime;
 	}
 
-	if (confirm_sharesummary) {
+	if (key_update) {
+		update_keysummary();
+		everyone_die = true;
+	} else if (confirm_sharesummary) {
 		// TODO: add a system lock to stop running 2 at once?
 		confirm_summaries();
 		everyone_die = true;

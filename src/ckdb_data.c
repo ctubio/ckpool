@@ -1611,16 +1611,17 @@ K_ITEM *new_worker(PGconn *conn, bool update, int64_t userid, char *workername,
 
 	item = find_workers(false, userid, workername);
 	if (item) {
-		if (!confirm_sharesummary && update) {
+		if (!key_update && !confirm_sharesummary && update) {
 			workers_update(conn, item, diffdef, idlenotificationenabled,
 				       idlenotificationtime, by, code, inet, cd,
 				       trf_root, true);
 		}
 	} else {
-		if (confirm_sharesummary) {
-			// Shouldn't be possible since the sharesummary is already aged
-			LOGERR("%s() %"PRId64"/%s workername not found during confirm",
-				__func__, userid, workername);
+		if (key_update || confirm_sharesummary) {
+			// Shouldn't be possible with old data
+			LOGERR("%s() %"PRId64"/%s workername not found during %s",
+				__func__, userid, workername,
+				key_update ? "keyupdate" : "confirm" );
 			return NULL;
 		}
 
@@ -2133,14 +2134,74 @@ K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 	return item;
 }
 
+#define DISCARD_ALL -1
+// userid = DISCARD_ALL will dump all shares for the given workinfoid
+static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
+			   int64_t *diff_tot, bool skipupdate,
+			   int64_t workinfoid, int64_t userid, char *workername)
+{
+	K_ITEM s_look, *s_item, *tmp_item;
+	SHARES lookshares, *shares;
+	K_TREE_CTX s_ctx[1];
+	char error[1024];
+
+	error[0] = '\0';
+	INIT_SHARES(&s_look);
+
+	lookshares.workinfoid = workinfoid;
+	lookshares.userid = userid;
+	strcpy(lookshares.workername, workername);
+	DATE_ZERO(&(lookshares.createdate));
+
+	s_look.data = (void *)(&lookshares);
+	K_WLOCK(shares_free);
+	s_item = find_after_in_ktree(shares_root, &s_look, s_ctx);
+	while (s_item) {
+		DATA_SHARES(shares, s_item);
+		if (shares->workinfoid != workinfoid)
+			break;
+
+		if (userid != DISCARD_ALL) {
+			if (shares->userid != userid ||
+			    strcmp(shares->workername, workername) != 0)
+			break;
+		}
+
+		(*shares_tot)++;
+		if (shares->errn == SE_NONE)
+			(*diff_tot) += shares->diff;
+		tmp_item = next_in_ktree(s_ctx);
+		remove_from_ktree(shares_root, s_item);
+		k_unlink_item(shares_store, s_item);
+		if (reloading && skipupdate)
+			(*shares_dumped)++;
+		if (reloading && skipupdate && !error[0]) {
+			snprintf(error, sizeof(error),
+				 "reload found aged share: %"PRId64
+				 "/%"PRId64"/%s/%s%.0f",
+				 shares->workinfoid,
+				 shares->userid,
+				 shares->workername,
+				 (shares->errn == SE_NONE) ? "" : "*",
+				 shares->diff);
+		}
+		k_add_head(shares_free, s_item);
+		s_item = tmp_item;
+	}
+	K_WUNLOCK(shares_free);
+
+	if (error[0])
+		LOGERR("%s(): %s", __func__, error);
+}
+
 // Duplicates during a reload are set to not show messages
 bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		  char *inet, tv_t *cd, tv_t *ss_first, tv_t *ss_last,
 		  int64_t *ss_count, int64_t *s_count, int64_t *s_diff)
 {
-	K_ITEM *wi_item, ss_look, *ss_item, s_look, *s_item;
-	K_ITEM ks_look, *ks_item, *wm_item, *tmp_item;
-	K_TREE_CTX ss_ctx[1], s_ctx[1], ks_ctx[1];
+	K_ITEM *wi_item, ss_look, *ss_item;
+	K_ITEM ks_look, *ks_item, *wm_item;
+	K_TREE_CTX ss_ctx[1], ks_ctx[1];
 	char cd_buf[DATE_BUFSIZ];
 	int64_t ss_tot, ss_already, ss_failed, shares_tot, shares_dumped;
 	int64_t ks_tot, ks_already, ks_failed;
@@ -2148,9 +2209,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	KEYSHARESUMMARY lookkeysharesummary, *keysharesummary;
 	SHARESUMMARY looksharesummary, *sharesummary;
 	WORKINFO *workinfo;
-	SHARES lookshares, *shares;
-	bool ok = false, ksok = false, skipupdate;
-	char error[1024];
+	bool ok = false, ksok = false, skipupdate = false;
 
 	LOGDEBUG("%s(): age", __func__);
 
@@ -2193,17 +2252,20 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		goto bye;
 	}
 
+	ok = true;
+	ss_tot = ss_already = ss_failed = shares_tot = shares_dumped =
+	diff_tot = 0;
+
+	if (key_update)
+		goto skip_ss;
+
 	INIT_SHARESUMMARY(&ss_look);
-	INIT_SHARES(&s_look);
 
 	// Find the first matching sharesummary
 	looksharesummary.workinfoid = workinfoid;
 	looksharesummary.userid = -1;
 	looksharesummary.workername = EMPTY;
 
-	ok = true;
-	ss_tot = ss_already = ss_failed = shares_tot = shares_dumped =
-	diff_tot = 0;
 	ss_look.data = (void *)(&looksharesummary);
 	K_RLOCK(sharesummary_free);
 	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &ss_look, ss_ctx);
@@ -2211,7 +2273,6 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	while (ss_item && sharesummary->workinfoid == workinfoid) {
 		ss_tot++;
-		error[0] = '\0';
 		skipupdate = false;
 		/* Reloading during a confirm will not have any old data
 		 *  so finding an aged sharesummary here is an error
@@ -2251,50 +2312,14 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		}
 
 		// Discard the shares either way
-		lookshares.workinfoid = workinfoid;
-		lookshares.userid = sharesummary->userid;
-		strcpy(lookshares.workername, sharesummary->workername);
-		DATE_ZERO(&(lookshares.createdate));
+		discard_shares(&shares_tot, &shares_dumped, &diff_tot, skipupdate,
+				workinfoid, sharesummary->userid,
+				sharesummary->workername);
 
-		s_look.data = (void *)(&lookshares);
-		K_WLOCK(shares_free);
-		s_item = find_after_in_ktree(shares_root, &s_look, s_ctx);
-		while (s_item) {
-			DATA_SHARES(shares, s_item);
-			if (shares->workinfoid != workinfoid ||
-			    shares->userid != lookshares.userid ||
-			    strcmp(shares->workername, lookshares.workername) != 0)
-				break;
-
-			shares_tot++;
-			if (shares->errn == SE_NONE)
-				diff_tot += shares->diff;
-			tmp_item = next_in_ktree(s_ctx);
-			remove_from_ktree(shares_root, s_item);
-			k_unlink_item(shares_store, s_item);
-			if (reloading && skipupdate)
-				shares_dumped++;
-			if (reloading && skipupdate && !error[0]) {
-				snprintf(error, sizeof(error),
-					 "reload found aged share: %"PRId64
-					 "/%"PRId64"/%s/%s%.0f",
-					 shares->workinfoid,
-					 shares->userid,
-					 shares->workername,
-					 (shares->errn == SE_NONE) ? "" : "*",
-					 shares->diff);
-			}
-			k_add_head(shares_free, s_item);
-			s_item = tmp_item;
-		}
-		K_WUNLOCK(shares_free);
 		K_RLOCK(sharesummary_free);
 		ss_item = next_in_ktree(ss_ctx);
 		K_RUNLOCK(sharesummary_free);
 		DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
-
-		if (error[0])
-			LOGERR("%s(): %s", __func__, error);
 	}
 
 	if (ss_already || ss_failed || shares_dumped) {
@@ -2310,6 +2335,8 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 				shares_dumped, diff_tot);
 		}
 	}
+
+skip_ss:
 
 	INIT_KEYSHARESUMMARY(&ks_look);
 
@@ -2331,7 +2358,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		/* Reloading during a confirm will not have any old data
 		 *  so finding an aged keysharesummary here is an error
 		 * N.B. this can only happen with (very) old reload files */
-		if (reloading) {
+		if (reloading && !key_update) {
 			if (keysharesummary->complete[0] == SUMMARY_COMPLETE) {
 				ks_already++;
 				skipupdate = true;
@@ -2356,13 +2383,17 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 			}
 		}
 
-		/* All shares should have been discarded during sharesummary
-		 * processing above */
-
 		K_RLOCK(keysharesummary_free);
 		ks_item = next_in_ktree(ks_ctx);
 		K_RUNLOCK(keysharesummary_free);
 		DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
+	}
+
+	/* All shares should have been discarded during sharesummary
+	 * processing above except during a key_update */
+	if (key_update) {
+		discard_shares(&shares_tot, &shares_dumped, &diff_tot, skipupdate,
+				workinfoid, -1, EMPTY);
 	}
 
 	if (ks_already) {

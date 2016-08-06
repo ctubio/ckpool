@@ -11,6 +11,8 @@
 #ifndef CKDB_H
 #define CKDB_H
 
+#pragma GCC diagnostic ignored "-Wtautological-compare"
+
 #include "config.h"
 
 #include <sys/ioctl.h>
@@ -52,7 +54,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.206"
+#define CKDB_VERSION DB_VERSION"-2.300"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -98,6 +100,7 @@ extern int switch_state;
 
 extern bool genpayout_auto;
 extern bool markersummary_auto;
+extern bool exclusive_db;
 
 enum free_modes {
 	FREE_MODE_ALL,
@@ -298,6 +301,11 @@ extern const tv_t date_begin;
 #define DATE_ZERO(_tv) (_tv)->tv_sec = (_tv)->tv_usec = 0L
 
 #define BTC_TO_D(_amt) ((double)((_amt) / 100000000.0))
+
+// argv -K - don't run in ckdb mode, just update keysummaries
+extern bool key_update;
+extern int64_t key_wi_stt;
+extern int64_t key_wi_fin;
 
 // argv -y - don't run in ckdb mode, just confirm sharesummaries
 extern bool confirm_sharesummary;
