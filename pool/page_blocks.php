@@ -99,6 +99,13 @@ function doblocks($data, $user)
 		$pg .= "<td class=dr>Mean%</td>";
 		$pg .= "<td class=dr>CDF[Erl]</td>";
 		$pg .= "<td class=dr>Luck%</td>";
+
+		$tt = "<span class=q onclick='tip(\"ppst\",6000)'>";
+		$tt .= '?</span><span class=tip0>';
+		$tt .= "<span class=notip id=ppst>";
+		$tt .= "Pool PPS%: MeanTx% * Luck% minus the pool fee</span></span>";
+
+		$pg .= "<td class=dr>${tt}PPS%</td>";
 		$pg .= "</tr></thead><tbody>\n";
 
 		$since = $data['info']['lastblock'];
@@ -124,6 +131,9 @@ function doblocks($data, $user)
 			$luck = number_format(100 * $ans['s_luck:'.$i], 2);
 			$txm = number_format(100 * $ans['s_txmean:'.$i], 1);
 
+			$poolfee = 0.9; # pool fee as a % out of 100
+			$o = number_format((100 - $poolfee) * $ans['s_txmean:'.$i] / $ans['s_diffmean:'.$i], 2);
+
 			$pg .= "<tr class=$row>";
 			$pg .= "<td class=dl>$desc Blocks</td>";
 			$pg .= "<td class=dr>$age</td>";
@@ -132,6 +142,7 @@ function doblocks($data, $user)
 			$pg .= "<td class=dr>$mean%</td>";
 			$pg .= "<td class=dr$bg>$cdferldsp</td>";
 			$pg .= "<td class=dr>$luck%</td>";
+			$pg .= "<td class=dr>$o%</td>";
 			$pg .= "</tr>\n";
 		}
 		$pg .= "</tbody></table>\n";
