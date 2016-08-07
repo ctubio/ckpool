@@ -209,6 +209,9 @@ struct ckpool_instance {
 	/* Should we daemonise the ckpool process */
 	bool daemon;
 
+	/* Should we disable the throbber */
+	bool quiet;
+
 	/* Have we given warnings about the inability to raise buf sizes */
 	bool wmem_warn;
 	bool rmem_warn;
