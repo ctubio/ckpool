@@ -746,6 +746,8 @@ K_TREE *workmarkers_root;
 K_TREE *workmarkers_workinfoid_root;
 K_LIST *workmarkers_free;
 K_STORE *workmarkers_store;
+// static for key_update
+static K_STORE *workmarkers_key_store;
 
 // MARKS
 K_TREE *marks_root;
@@ -1963,6 +1965,10 @@ static void dealloc_storage()
 
 	FREE_TREE(workmarkers_workinfoid);
 	FREE_TREE(workmarkers);
+	if (workmarkers_key_store) {
+		k_list_transfer_to_tail_nolock(workmarkers_key_store,
+					       workmarkers_store);
+	}
 	FREE_STORE_DATA(workmarkers);
 	FREE_LIST_DATA(workmarkers);
 
@@ -6776,28 +6782,71 @@ sayonara:
 static bool make_keysummaries()
 {
 	K_TREE_CTX ctx[1];
+	KEYSHARESUMMARY *keysharesummary;
 	WORKMARKERS *workmarkers;
-	K_ITEM *wm_item, *wm_last = NULL;
+	K_ITEM *kss_item, *wm_item, *wm_last = NULL;
 	tv_t proc_lock_stt, proc_lock_got, proc_lock_fin, now;
-	bool ok = false;
+	int64_t kss_ready_wid;
+	bool ok = false, pending;
 
+	// Find the highest complete keysharesummary workinfoid
+	kss_ready_wid = 0;
+	K_RLOCK(keysharesummary_free);
+	kss_item = first_in_ktree(keysharesummary_root, ctx);
+	while (kss_item) {
+		DATA_KEYSHARESUMMARY(keysharesummary, kss_item);
+		if (keysharesummary->complete[0] == SUMMARY_COMPLETE &&
+		    kss_ready_wid < keysharesummary->workinfoid) {
+			kss_ready_wid = keysharesummary->workinfoid;
+		}
+		kss_item = next_in_ktree(ctx);
+	}
+	K_RUNLOCK(keysharesummary_free);
+
+	if (kss_ready_wid > 0 && workmarkers_key_store->count > 0) {
+		pending = true;
+		wm_item = STORE_HEAD_NOLOCK(workmarkers_key_store);
+		while (wm_item) {
+			DATA_WORKMARKERS(workmarkers, wm_item);
+			if (workmarkers->workinfoidend > kss_ready_wid)
+				break;
+			// move the item into the processing trees/store
+			k_unlink_item_nolock(workmarkers_key_store, wm_item);
+			K_WLOCK(workmarkers_free);
+			add_to_ktree(workmarkers_root, wm_item);
+			add_to_ktree(workmarkers_workinfoid_root, wm_item);
+			k_add_head(workmarkers_store, wm_item);
+			K_WUNLOCK(workmarkers_free);
+			wm_item = STORE_HEAD_NOLOCK(workmarkers_key_store);
+		}
+	}
+
+	pending = false;
 	K_RLOCK(workmarkers_free);
+	// Any workmarkers still pending in the key_store?
+	if (workmarkers_key_store->count > 0)
+		pending = true;
 	wm_item = last_in_ktree(workmarkers_workinfoid_root, ctx);
 	while (wm_item) {
 		DATA_WORKMARKERS(workmarkers, wm_item);
 		if (!CURRENT(&(workmarkers->expirydate)))
 			break;
-		// find the oldest READY workinfoid
+		// find the oldest READY workmarker
 		if (WMREADY(workmarkers->status))
 			wm_last = wm_item;
 		wm_item = prev_in_ktree(ctx);
 	}
 	K_RUNLOCK(workmarkers_free);
 
+	// all false means we've finished
 	if (!wm_last)
-		return false;
+		return (pending || reloading);
 
 	DATA_WORKMARKERS(workmarkers, wm_last);
+
+	// Not ready to be processed yet
+	if (kss_ready_wid < workmarkers->workinfoidend)
+		return true;
 
 	LOGDEBUG("%s() processing workmarkers %"PRId64"/%s/End %"PRId64"/"
 		 "Stt %"PRId64"/%s/%s",
@@ -6861,8 +6910,9 @@ static void update_reload(WORKINFO *wi_stt, WORKINFO *wi_fin)
 	bool status_failure = false;
 
 	/* Now that we know the workmarkers of interest,
-	 *  switch them from MARKER_PROCESSED to MARKER_READY
-	 *  and remove all after
+	 *  switch them from MARKER_PROCESSED to MARKER_READY,
+	 *  remove them and add them to key_store,
+	 *  then remove all after them
 	 * The markersummaries already exist
 	 *  We are generating the missing keysummaries */
 	K_WLOCK(workmarkers_free);
@@ -6889,8 +6939,13 @@ static void update_reload(WORKINFO *wi_stt, WORKINFO *wi_fin)
 						workmarkers->status,
 						MARKER_PROCESSED);
 				} else {
-					// Not part of either tree key
+					remove_from_ktree(workmarkers_workinfoid_root,
+							  wm_item);
+					remove_from_ktree(workmarkers_root, wm_item);
+					k_unlink_item(workmarkers_store, wm_item);
 					STRNCPY(workmarkers->status, MARKER_READY_STR);
+					// key_store will be in workinfoid ascending order
+					k_add_head(workmarkers_key_store, wm_item);
 				}
 			} else
 				break;
@@ -7063,6 +7118,9 @@ static void update_keysummary()
 					ALLOC_BREAKQUEUE, LIMIT_BREAKQUEUE, true);
 	reload_breakqueue_store = k_new_store(breakqueue_free);
 	reload_done_breakqueue_store = k_new_store(breakqueue_free);
+	// Must exist (but will be empty)
+	cmd_breakqueue_store = k_new_store(breakqueue_free);
+	cmd_done_breakqueue_store = k_new_store(breakqueue_free);
 
 #if LOCK_CHECK
 	DLPRIO(breakqueue, PRIO_TERMINAL);
@@ -7078,6 +7136,8 @@ static void update_keysummary()
 		create_pthread(&break_pt, breaker, &reloader);
 
 	alloc_storage();
+
+	workmarkers_key_store = k_new_store(workmarkers_free);
 
 	setnow(&db_stt);
 

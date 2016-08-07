@@ -2631,6 +2631,151 @@ K_ITEM *find_last_sharesummary(int64_t userid, char *workername)
 	return item;
 }
 
+// key_update must age keysharesummary directly
+static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
+				char *code, char *inet, tv_t *cd)
+{
+	static int64_t last_attempted_id = -1;
+	static int64_t prev_found = 0;
+	static int repeat;
+
+	char min_buf[DATE_BUFSIZ], max_buf[DATE_BUFSIZ];
+	int64_t kss_count_tot, s_count_tot, s_diff_tot;
+	int64_t kss_count, s_count, s_diff;
+	tv_t kss_first_min, kss_last_max;
+	tv_t kss_first, kss_last;
+	int32_t wid_count;
+	KEYSHARESUMMARY lookkeysharesummary, *keysharesummary;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *kss_item;
+	int64_t age_id, do_id, to_id;
+	bool ok, found;
+
+	LOGDEBUG("%s(): workinfoid=%"PRId64" prev=%"PRId64, __func__, workinfoid, prev_found);
+
+	age_id = prev_found;
+
+	/* Find the oldest 'unaged'
+	 *  keysharesummary < workinfoid and >= prev_found */
+	lookkeysharesummary.workinfoid = prev_found;
+	lookkeysharesummary.keytype[0] = '\0';
+	lookkeysharesummary.key = EMPTY;
+	INIT_KEYSHARESUMMARY(&look);
+	look.data = (void *)(&lookkeysharesummary);
+
+	K_RLOCK(keysharesummary_free);
+	kss_item = find_after_in_ktree(keysharesummary_root, &look, ctx);
+	DATA_KEYSHARESUMMARY_NULL(keysharesummary, kss_item);
+
+	DATE_ZERO(&kss_first_min);
+	DATE_ZERO(&kss_last_max);
+	kss_count_tot = s_count_tot = s_diff_tot = 0;
+
+	found = false;
+	while (kss_item && keysharesummary->workinfoid < workinfoid) {
+		if (keysharesummary->complete[0] == SUMMARY_NEW) {
+			age_id = keysharesummary->workinfoid;
+			prev_found = age_id;
+			found = true;
+			break;
+		}
+		kss_item = next_in_ktree(ctx);
+		DATA_KEYSHARESUMMARY_NULL(keysharesummary, kss_item);
+	}
+	K_RUNLOCK(keysharesummary_free);
+
+	LOGDEBUG("%s(): age_id=%"PRId64" found=%d", __func__, age_id, found);
+	// Don't repeat searching old items to avoid accessing their ram
+	if (!found)
+		prev_found = workinfoid;
+	else {
+		/* Process all the consecutive keysharesummaries that's aren't aged
+		 * This way we find each oldest 'batch' of keysharesummaries that have
+		 *  been missed and can report the range of data that was aged,
+		 *  which would normally just be an approx 10min set of workinfoids
+		 *  from the last time ckpool stopped
+		 * Each next group of unaged keysharesummaries following this, will be
+		 *  picked up by each next aging */
+		wid_count = 0;
+		do_id = age_id;
+		to_id = 0;
+		do {
+			ok = workinfo_age(do_id, poolinstance, by, code, inet,
+					  cd, &kss_first, &kss_last, &kss_count,
+					  &s_count, &s_diff);
+
+			kss_count_tot += kss_count;
+			s_count_tot += s_count;
+			s_diff_tot += s_diff;
+			if (kss_first_min.tv_sec == 0 || !tv_newer(&kss_first_min, &kss_first))
+				copy_tv(&kss_first_min, &kss_first);
+			if (tv_newer(&kss_last_max, &kss_last))
+				copy_tv(&kss_last_max, &kss_last);
+
+			if (!ok)
+				break;
+
+			to_id = do_id;
+			wid_count++;
+			K_RLOCK(keysharesummary_free);
+			while (kss_item && keysharesummary->workinfoid == to_id) {
+				kss_item = next_in_ktree(ctx);
+				DATA_KEYSHARESUMMARY_NULL(keysharesummary, kss_item);
+			}
+			K_RUNLOCK(keysharesummary_free);
+
+			if (kss_item) {
+				do_id = keysharesummary->workinfoid;
+				if (do_id >= workinfoid)
+					break;
+				if (keysharesummary->complete[0] != SUMMARY_NEW)
+					break;
+			}
+		} while (kss_item);
+		if (to_id == 0) {
+			if (last_attempted_id != age_id || ++repeat >= 10) {
+				// Approx once every 5min since workinfo defaults to ~30s
+				LOGWARNING("%s() Auto-age failed to age %"PRId64,
+					   __func__, age_id);
+				last_attempted_id = age_id;
+				repeat = 0;
+			}
+		} else {
+			char idrange[64];
+			char keysharerange[256];
+			if (to_id != age_id) {
+				snprintf(idrange, sizeof(idrange),
+					 "from %"PRId64" to %"PRId64,
+					 age_id, to_id);
+			} else {
+				snprintf(idrange, sizeof(idrange),
+					 "%"PRId64, age_id);
+			}
+			tv_to_buf(&kss_first_min, min_buf, sizeof(min_buf));
+			if (tv_equal(&kss_first_min, &kss_last_max)) {
+				snprintf(keysharerange, sizeof(keysharerange),
+					 "share date %s", min_buf);
+			} else {
+				tv_to_buf(&kss_last_max, max_buf, sizeof(max_buf));
+				snprintf(keysharerange, sizeof(keysharerange),
+					 "share dates %s to %s",
+					 min_buf, max_buf);
+			}
+			LOGWARNING("%s() Auto-aged %"PRId64"(%"PRId64") "
+				   "share%s %"PRId64" keysharesummar%s %"PRId32
+				   " workinfoid%s %s %s",
+				   __func__,
+				   s_count_tot, s_diff_tot,
+				   (s_count_tot == 1) ? "" : "s",
+				   kss_count_tot,
+				   (kss_count_tot == 1) ? "y" : "ies",
+				   wid_count,
+				   (wid_count == 1) ? "" : "s",
+				   idrange, keysharerange);
+		}
+	}
+}
+
 /* TODO: markersummary checking?
  * However, there should be no issues since the sharesummaries are removed */
 void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
@@ -2651,6 +2796,11 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 	K_ITEM look, *ss_item;
 	int64_t age_id, do_id, to_id;
 	bool ok, found;
+
+	if (key_update) {
+		key_auto_age_older(workinfoid, poolinstance, by, code, inet, cd);
+		return;
+	}
 
 	LOGDEBUG("%s(): workinfoid=%"PRId64" prev=%"PRId64, __func__, workinfoid, prev_found);
 

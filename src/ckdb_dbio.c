@@ -3188,9 +3188,10 @@ bool workinfo_fill(PGconn *conn)
 			" from workinfo where "EDDB"=$1 and"
 			" ((workinfoid>=$2 and workinfoid<=$3)");
 
-	// If we aren't loading the full range, ensure the necessary ones are loaded
-	if ((!dbload_only_sharesummary && dbload_workinfoid_start != -1) ||
-	    dbload_workinfoid_finish != MAXID) {
+	/* If we aren't loading the full range, ensure the necessary ones are loaded
+	 * However, don't for key_update to allow a possible lower memory profile */
+	if (((!dbload_only_sharesummary && dbload_workinfoid_start != -1) ||
+	    dbload_workinfoid_finish != MAXID) && !key_update) {
 		APPEND_REALLOC(sel, off, len,
 				// we need all blocks workinfoids
 				" or workinfoid in (select workinfoid from blocks)"
@@ -4825,6 +4826,7 @@ dokey:
 	} else {
 		// Not part of either tree key
 		STRNCPY(workmarkers->status, MARKER_PROCESSED_STR);
+		ok = true;
 	}
 	setnow(&kdb_fin);
 rollback:
@@ -8831,7 +8833,8 @@ bool workmarkers_fill(PGconn *conn)
 	PGresult *res;
 	K_ITEM *item, *wi_item;
 	WORKINFO *workinfo;
-	int n, i;
+	char *params[1];
+	int n, i, par = 0;
 	WORKMARKERS *row;
 	char *field;
 	char *sel;
@@ -8840,13 +8843,25 @@ bool workmarkers_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
-	// TODO: limit how far back
-	sel = "select "
-		"markerid,poolinstance,workinfoidend,workinfoidstart,"
-		"description,status"
-		HISTORYDATECONTROL
-		" from workmarkers";
-	res = PQexec(conn, sel, CKPQ_READ);
+	// Allow limiting the load for key_update
+	if (key_update && dbload_workinfoid_start != -1) {
+		sel = "select "
+			"markerid,poolinstance,workinfoidend,workinfoidstart,"
+			"description,status"
+			HISTORYDATECONTROL
+			" from workmarkers where workinfoidstart>=$1";
+		par = 0;
+		params[par++] = bigint_to_buf(dbload_workinfoid_start, NULL, 0);
+		PARCHK(par, params);
+		res = PQexecParams(conn, sel, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_READ);
+	} else {
+		sel = "select "
+			"markerid,poolinstance,workinfoidend,workinfoidstart,"
+			"description,status"
+			HISTORYDATECONTROL
+			" from workmarkers";
+		res = PQexec(conn, sel, CKPQ_READ);
+	}
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
 		PGLOGERR("Select", rescode, conn);
@@ -8974,6 +8989,9 @@ bool workmarkers_fill(PGconn *conn)
 
 	K_WUNLOCK(workmarkers_free);
 	PQclear(res);
+	for (i = 0; i < par; i++)
+		free(params[i]);
+	par = 0;
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
