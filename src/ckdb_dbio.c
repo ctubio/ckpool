@@ -4924,13 +4924,26 @@ flail:
 		}
 		k_list_transfer_to_head(new_markersummary_store, markersummary_store);
 
-		ks_item = STORE_HEAD_NOLOCK(new_keysummary_store);
-		while (ks_item) {
-			// move the new keysummaries into the tree
-			add_to_ktree(keysummary_root, ks_item);
-			ks_item = ks_item->next;
+		if (!key_update) {
+			ks_item = STORE_HEAD_NOLOCK(new_keysummary_store);
+			while (ks_item) {
+				// move the new keysummaries into the tree
+				add_to_ktree(keysummary_root, ks_item);
+				ks_item = ks_item->next;
+			}
+			k_list_transfer_to_head(new_keysummary_store,
+						keysummary_store);
+		} else {
+			/* Discard the new data to save RAM,
+			 *  since we don't actually use it in key_update */
+			ks_item = STORE_HEAD_NOLOCK(new_keysummary_store);
+			while (ks_item) {
+				free_keysummary_data(ks_item);
+				ks_item = ks_item->next;
+			}
+			k_list_transfer_to_head(new_keysummary_store,
+						keysummary_free);
 		}
-		k_list_transfer_to_head(new_keysummary_store, keysummary_store);
 
 		/* For normal shift processing this wont be very quick
 		 *  so it will be a 'long' LOCK */
@@ -4996,7 +5009,8 @@ flail:
 			   nonblank ? EMPTY : " ONLY BLANK KEYS");
 
 		// This should never happen
-		if (kshareacc != (shareacc << 1) || kdiffacc != (diffacc << 1)) {
+		if (!key_update && (kshareacc != (shareacc << 1) ||
+				     kdiffacc != (diffacc << 1))) {
 			LOGERR("%s() CODE BUG: keysummary share/diff counts "
 				"are wrong!", shortname);
 		}
