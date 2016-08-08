@@ -6267,7 +6267,7 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 	bool finished = false, ret = true, ok, apipe = false;
 	char *filename = NULL;
 	uint64_t count, total;
-	tv_t now, begin, file_begin;
+	tv_t now, begin, file_begin, file_end;
 	double diff;
 	FILE *fp = NULL;
 	int file_N_limit;
@@ -6296,7 +6296,6 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 
 	setnow(&now);
 	copy_tv(&begin, &now);
-	copy_tv(&file_begin, &now);
 	tvs_to_buf(&now, run, sizeof(run));
 	snprintf(reload_buf, MAX_READ, "reload.%s.s0", run);
 	LOGQUE(reload_buf, true);
@@ -6312,6 +6311,7 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 		LOGWARNING("%s(): processing %s", __func__, filename);
 		processing++;
 		count = 0;
+		setnow(&file_begin);
 
 		/* Don't abort when matched since breakdown() will remove
 		 *  the matching message sequence numbers queued from ckpool
@@ -6349,8 +6349,8 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 			}
 		}
 
-		setnow(&now);
-		diff = tvdiff(&now, &file_begin);
+		setnow(&file_end);
+		diff = tvdiff(&file_end, &file_begin);
 		if (diff == 0)
 			diff = 1;
 
@@ -6410,10 +6410,8 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 				}
 				filename = hour_filename(restorefrom, restorename, reload_timestamp.tv_sec);
 				ok = logopen(&filename, &fp, &apipe);
-				if (ok) {
-					setnow(&file_begin);
+				if (ok)
 					break;
-				}
 				errno = 0;
 				if (missing_count++ > 1)
 					free(missinglast);
