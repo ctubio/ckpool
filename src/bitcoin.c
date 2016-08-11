@@ -105,6 +105,7 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	const char *flags;
 	const char *bits;
 	const char *rule;
+	const char *witnessdata_check;
 	int version;
 	int curtime;
 	int height;
@@ -142,6 +143,7 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	bits = json_string_value(json_object_get(res_val, "bits"));
 	height = json_integer_value(json_object_get(res_val, "height"));
 	coinbasevalue = json_integer_value(json_object_get(res_val, "coinbasevalue"));
+	witnessdata_check = json_string_value(json_object_get(res_val, "default_witness_commitment"));
 	coinbase_aux = json_object_get(res_val, "coinbaseaux");
 	flags = json_string_value(json_object_get(coinbase_aux, "flags"));
 
@@ -192,6 +194,11 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	json_object_set_new_nocheck(gbt->json, "transactions", json_deep_copy(txn_array));
 
 	json_object_set_new_nocheck(gbt->json, "rules", json_deep_copy(rules_array));
+
+	// Bitcoind includes the default commitment, though it's not part of the
+	// BIP145 spec. As long as transactions aren't being filtered, it's useful
+	// To check against this during segwit's deployment.
+	json_object_set_new_nocheck(gbt->json, "default_witness_commitment", json_string_nocheck(witnessdata_check ? witnessdata_check : ""));
 
 	ret = true;
 

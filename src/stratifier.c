@@ -111,6 +111,8 @@ struct workbase {
 	int txns;
 	char *txn_data;
 	char *txn_hashes;
+	char witnessdata[73]; //null-terminated ascii
+	bool insert_witness;
 	int merkles;
 	char merklehash[16][68];
 	char merklebin[16][32];
@@ -649,9 +651,9 @@ static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 	if (ckp->donvalid) {
 		d64 = g64 / 200; // 0.5% donation
 		g64 -= d64; // To guarantee integers add up to the original coinbasevalue
-		wb->coinb2bin[wb->coinb2len++] = 2; // 2 transactions
+		wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
 	} else
-		wb->coinb2bin[wb->coinb2len++] = 1; // 2 transactions
+		wb->coinb2bin[wb->coinb2len++] = 1 + wb->insert_witness;
 
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
 	*u64 = htole64(g64);
@@ -660,6 +662,20 @@ static void generate_coinbase(const ckpool_t *ckp, workbase_t *wb)
 	wb->coinb2bin[wb->coinb2len++] = sdata->pubkeytxnlen;
 	memcpy(wb->coinb2bin + wb->coinb2len, sdata->pubkeytxnbin, sdata->pubkeytxnlen);
 	wb->coinb2len += sdata->pubkeytxnlen;
+
+	if(wb->insert_witness) {
+		// 0 value
+		wb->coinb2len += 8;
+
+		static const int witnessdata_size = 36; // commitment header + hash
+
+		wb->coinb2bin[wb->coinb2len++] = witnessdata_size + 2; // total scriptPubKey size
+		wb->coinb2bin[wb->coinb2len++] = 0x6a; // OP_RETURN
+		wb->coinb2bin[wb->coinb2len++] = witnessdata_size;
+
+		hex2bin(&wb->coinb2bin[wb->coinb2len], wb->witnessdata, witnessdata_size);
+		wb->coinb2len += witnessdata_size;
+	}
 
 	if (ckp->donvalid) {
 		u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
@@ -1224,35 +1240,30 @@ static void wb_merkle_bins(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, json_t
 
 		for (i = 0; i < wb->txns; i++) {
 			char binswap[32];
+			const char *txid;
 			const char *hash;
 
 			arr_val = json_array_get(txn_array, i);
+
+			// Post-segwit, txid returns the tx hash without witness data
+			txid = json_string_value(json_object_get(arr_val, "txid"));
 			hash = json_string_value(json_object_get(arr_val, "hash"));
+			if(!txid)
+				txid = hash;
+			if (!txid) {
+				LOGERR("missing txid for transaction");
+				return;
+			}
 			txn = json_string_value(json_object_get(arr_val, "data"));
 			add_txn(ckp, sdata, &txns, hash, txn);
 			len = strlen(txn);
 			memcpy(wb->txn_data + ofs, txn, len);
 			ofs += len;
-#if 0
-			/* In case we ever want to be a gbt poolproxy */
-			if (!hash) {
-				char *txn_bin;
-				int txn_len;
-
-				txn_len = len / 2;
-				txn_bin = ckalloc(txn_len);
-				hex2bin(txn_bin, txn, txn_len);
-				/* This is needed for pooled mining since only
-				 * transaction data and not hashes are sent */
-				gen_hash(txn_bin, hashbin + 32 + 32 * i, txn_len);
-				continue;
-			}
-#endif
-			if (!hex2bin(binswap, hash, 32)) {
+			if (!hex2bin(binswap, txid, 32)) {
 				LOGERR("Failed to hex2bin hash in gbt_merkle_bins");
 				return;
 			}
-			memcpy(wb->txn_hashes + i * 65, hash, 64);
+			memcpy(wb->txn_hashes + i * 65, txid, 64);
 			bswap_256(hashbin + 32 + 32 * i, binswap);
 		}
 	} else
@@ -1315,21 +1326,72 @@ static void wb_merkle_bins(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, json_t
 		LOGINFO("Stratifier added %d transactions and purged %d", added, purged);
 }
 
+static const unsigned char witness_nonce[32] = {0};
+static const unsigned char witness_header[] = {0xaa, 0x21, 0xa9, 0xed};
+static void gbt_witness_data(workbase_t *wb, json_t *txn_array)
+{
+	int i, binlen, binleft, txncount;
+	json_t *arr_val;
+	uchar *hashbin;
+	const char* hash;
+
+	txncount = json_array_size(txn_array);
+	binlen = txncount * 32 + 32;
+	hashbin = alloca(binlen + 32);
+	memset(hashbin, 0, 32);
+	binleft = binlen / 32;
+
+	for (i = 0; i < txncount; i++) {
+		char binswap[32];
+		arr_val = json_array_get(txn_array, i);
+		hash = json_string_value(json_object_get(arr_val, "hash"));
+		if(!hash) {
+			LOGERR("Hash missing for transaction");
+			return;
+		}
+		if (!hex2bin(binswap, hash, 32)) {
+			LOGERR("Failed to hex2bin hash in gbt_witness_data");
+			return;
+		}
+		bswap_256(hashbin + 32 + 32 * i, binswap);
+	}
+
+	// Build merkle root (copied from libblkmaker)
+	for (txncount++ ; txncount > 1 ; txncount /= 2) {
+		if (txncount % 2 == 1) {
+			// Odd number, duplicate the last
+			memcpy(hashbin + 32 * txncount, hashbin + 32 * (txncount - 1), 32);
+			txncount++;
+		}
+		for (i = 0; i < txncount; i += 2) {
+			// We overlap input and output here, on the first pair
+			gen_hash(hashbin + 32 * i, hashbin + 32 * (i / 2), 64);
+		}
+	}
+
+	memcpy(hashbin + 32, &witness_nonce, sizeof(witness_nonce));
+	gen_hash(hashbin, hashbin + sizeof(witness_header), 32 + sizeof(witness_nonce));
+	memcpy(hashbin, witness_header, sizeof(witness_header));
+	__bin2hex(wb->witnessdata, hashbin, 32 + sizeof(witness_header));
+	wb->insert_witness = true;
+}
+
 /* This function assumes it will only receive a valid json gbt base template
  * since checking should have been done earlier, and creates the base template
  * for generating work templates. */
 static void *do_update(void *arg)
 {
 	struct update_req *ur = (struct update_req *)arg;
-	int prio = ur->prio, retries = 0;
+	int i, prio = ur->prio, retries = 0;
 	ckpool_t *ckp = ur->ckp;
 	sdata_t *sdata = ckp->sdata;
-	json_t *val, *txn_array;
+	json_t *val, *txn_array, *rules_array;
 	bool new_block = false;
 	bool ret = false;
 	workbase_t *wb;
 	time_t now_t;
 	char *buf;
+	const char* witnessdata_check, *rule;
 
 	pthread_detach(pthread_self());
 	rename_proc("updater");
@@ -1379,6 +1441,29 @@ retry:
 	json_strdup(&wb->flags, val, "flags");
 	txn_array = json_object_get(val, "transactions");
 	wb_merkle_bins(ckp, sdata, wb, txn_array);
+
+	wb->insert_witness = false;
+	memset(wb->witnessdata, 0, sizeof(wb->witnessdata));
+	rules_array = json_object_get(val, "rules");
+	if(rules_array) {
+		int rule_count = json_array_size(rules_array);
+		for(i = 0; i < rule_count; i++) {
+			rule = json_string_value(json_array_get(rules_array, i));
+			if(!rule)
+				continue;
+			if(*rule == '!')
+				rule++;
+			if(strcmp(rule, "segwit")) {
+				witnessdata_check = json_string_value(json_object_get(val, "default_witness_commitment"));
+				gbt_witness_data(wb, txn_array);
+				// Verify against the pre-calculated value if it exists. Skip the size/OP_RETURN bytes.
+				if (wb->insert_witness && witnessdata_check[0] && strcmp(witnessdata_check + 4, wb->witnessdata) != 0)
+					LOGERR("Witness from btcd: %s. Calculated Witness: %s", witnessdata_check + 4, wb->witnessdata);
+				break;
+			}
+		}
+	}
+
 	json_decref(val);
 	generate_coinbase(ckp, wb);
 
