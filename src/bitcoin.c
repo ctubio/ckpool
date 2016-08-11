@@ -17,6 +17,17 @@
 
 static const char *b58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
+static char* understood_rules[] = {};
+static bool check_required_rule(const char* rule)
+{
+	unsigned int i;
+	for(i = 0; i < sizeof(understood_rules) / sizeof(understood_rules[0]); i++) {
+		if(strcmp(understood_rules[i], rule) == 0)
+			return true;
+	}
+	return false;
+}
+
 /* Take a bitcoin address and do some sanity checks on it, then send it to
  * bitcoind to see if it's a valid address */
 bool validate_address(connsock_t *cs, const char *address)
@@ -86,16 +97,18 @@ static const char *gbt_req = "{\"method\": \"getblocktemplate\", \"params\": [{\
  * required to assemble a mining template, storing it in a gbtbase_t structure */
 bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 {
-	json_t *txn_array, *coinbase_aux, *res_val, *val;
+	json_t *txn_array, *rules_array, *coinbase_aux, *res_val, *val;
 	const char *previousblockhash;
 	char hash_swap[32], tmp[32];
 	uint64_t coinbasevalue;
 	const char *target;
 	const char *flags;
 	const char *bits;
+	const char *rule;
 	int version;
 	int curtime;
 	int height;
+	int i;
 	bool ret = false;
 
 	val = json_rpc_call(cs, gbt_req);
@@ -107,6 +120,18 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	if (!res_val) {
 		LOGWARNING("Failed to get result in json response to getblocktemplate");
 		goto out;
+	}
+
+	rules_array = json_object_get(res_val, "rules");
+	if(rules_array) {
+		int rule_count =  json_array_size(rules_array);
+		for(i = 0; i < rule_count; i++) {
+			rule = json_string_value(json_array_get(rules_array, i));
+			if(rule && *rule++ == '!' && !check_required_rule(rule)) {
+				LOGERR("Required rule not understood: %s", rule);
+				goto out;
+			}
+		}
 	}
 
 	previousblockhash = json_string_value(json_object_get(res_val, "previousblockhash"));
@@ -165,6 +190,9 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	json_object_set_new_nocheck(gbt->json, "flags", json_string_nocheck(gbt->flags));
 
 	json_object_set_new_nocheck(gbt->json, "transactions", json_deep_copy(txn_array));
+
+	json_object_set_new_nocheck(gbt->json, "rules", json_deep_copy(rules_array));
+
 	ret = true;
 
 out:
