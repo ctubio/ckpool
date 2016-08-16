@@ -55,7 +55,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.305"
+#define CKDB_VERSION DB_VERSION"-2.400"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -338,6 +338,8 @@ extern bool db_load_complete;
 extern bool prereload;
 // Different input data handling
 extern bool reloading;
+// Start marks processing during a larger reload
+extern bool reloaded_N_files;
 // Data load is complete
 extern bool startup_complete;
 // Tell everyone to die
@@ -1624,6 +1626,8 @@ extern K_TREE *users_root;
 extern K_TREE *userid_root;
 extern K_LIST *users_free;
 extern K_STORE *users_store;
+// Emulate a list for lock checking
+extern K_LIST *users_db_free;
 
 // USERATTS
 typedef struct useratts {
@@ -1890,6 +1894,8 @@ extern tv_t last_bc;
 // current network diff
 extern double current_ndiff;
 extern bool txn_tree_store;
+// avoid trying to run 2 ages at the same time
+extern bool workinfo_age_lock;
 
 // Offset in binary coinbase1 of the block number
 #define BLOCKNUM_OFFSET 42
@@ -2013,7 +2019,6 @@ typedef struct sharesummary {
 	tv_t lastshareacc;
 	double lastdiffacc;
 	char complete[TXT_FLAG+1];
-	MODIFYDATECONTROLPOINTERS;
 } SHARESUMMARY;
 
 /* After this many shares added, we need to update the DB record
@@ -2697,7 +2702,6 @@ typedef struct keysharesummary {
 	tv_t lastshareacc;
 	double lastdiffacc;
 	char complete[TXT_FLAG+1];
-	SIMPLEDATECONTROLPOINTERS;
 } KEYSHARESUMMARY;
 
 #define ALLOC_KEYSHARESUMMARY 1000
@@ -3142,10 +3146,9 @@ extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
 #define find_workinfo(_wid, _ctx) _find_workinfo(_wid, false, _ctx);
 extern K_ITEM *_find_workinfo(int64_t workinfoid, bool gotlock, K_TREE_CTX *ctx);
 extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
-extern bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by,
-			 char *code, char *inet, tv_t *cd, tv_t *ss_first,
-			 tv_t *ss_last, int64_t *ss_count, int64_t *s_count,
-			 int64_t *s_diff);
+extern bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
+			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
+			 int64_t *s_count, int64_t *s_diff);
 extern double coinbase_reward(int32_t height);
 extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
@@ -3166,8 +3169,7 @@ extern void zero_sharesummary(SHARESUMMARY *row);
 extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
 				  int64_t workinfoid, bool pool);
 extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
-extern void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
-			   char *code, char *inet, tv_t *cd);
+extern void auto_age_older(int64_t workinfoid, char *poolinstance, tv_t *cd);
 #define dbhash2btchash(_hash, _buf, _siz) \
 	_dbhash2btchash(_hash, _buf, _siz, WHERE_FFL_HERE)
 void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
@@ -3411,16 +3413,11 @@ extern bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmar
 						tv_t *cd, K_TREE *trf_root);
 extern bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm);
 extern char *ooo_status(char *buf, size_t siz);
-#define sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd) \
-	_sharesummary_update(_s_row, _e_row, _by, _code, _inet, _cd, \
-					WHERE_FFL_HERE)
-extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
-				 char *code, char *inet, tv_t *cd,
+#define sharesummary_update(_s_row, _e_row, _cd) \
+	_sharesummary_update(_s_row, _e_row, _cd, WHERE_FFL_HERE)
+extern bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
 				 WHERE_FFL_ARGS);
-#define sharesummary_age(_ss_item, _by, _code, _inet, _cd) \
-	_sharesummary_age(_ss_item, _by, _code, _inet, _cd, WHERE_FFL_HERE)
-extern bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
-				tv_t *cd, WHERE_FFL_ARGS);
+extern bool sharesummary_age(K_ITEM *ss_item);
 extern bool keysharesummary_age(K_ITEM *kss_item);
 extern bool sharesummary_fill(PGconn *conn);
 extern bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,

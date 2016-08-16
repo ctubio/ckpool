@@ -2865,18 +2865,20 @@ seconf:
 		}
 
 		ok = workinfo_age(workinfoid, transfer_data(i_poolinstance),
-				  by, code, inet, cd, &ss_first, &ss_last,
-				  &ss_count, &s_count, &s_diff);
+				  cd, &ss_first, &ss_last, &ss_count, &s_count,
+				  &s_diff);
 		if (!ok) {
 			LOGERR("%s(%s) %s.failed.DATA", __func__, cmd, id);
 			return strdup("failed.DATA");
 		} else {
-			/* Don't slow down the reload - do them later */
-			if (!reloading || key_update) {
+			/* Don't slow down the reload - do them later,
+			 *  unless it's a long reload since:
+			 *   Any pool restarts in the reload data will cause
+			 *    unaged workinfos and thus would stop marker() */
+			if (!reloading || key_update || reloaded_N_files) {
 				// Aging is a queued item thus the reply is ignored
 				auto_age_older(workinfoid,
-						transfer_data(i_poolinstance),
-						by, code, inet, cd);
+						transfer_data(i_poolinstance), cd);
 			}
 		}
 		LOGDEBUG("%s.ok.aged %"PRId64, id, workinfoid);
