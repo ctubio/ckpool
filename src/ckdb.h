@@ -11,8 +11,11 @@
 #ifndef CKDB_H
 #define CKDB_H
 
-// Remove this line if you have an old GCC version
+#ifdef __GNUC__
+#if __GNUC__ >= 6
 #pragma GCC diagnostic ignored "-Wtautological-compare"
+#endif
+#endif
 
 #include "config.h"
 
@@ -55,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.400"
+#define CKDB_VERSION DB_VERSION"-2.401"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -114,6 +117,13 @@ enum free_modes {
 #define FREE_MODE_FAST_STR "fast"
 
 extern enum free_modes free_mode;
+
+// Define the array size for thread data
+#define THREAD_LIMIT 99
+/* Flag to notify thread changes
+ * Set/checked under the function's main loop's first lock
+ * This is always a 'delta' value meaning add or subtract that many */
+extern int queue_threads_delta;
 
 #define BLANK " "
 extern char *EMPTY;
@@ -722,6 +732,7 @@ enum cmd_values {
 	CMD_LOCKS,
 	CMD_EVENTS,
 	CMD_HIGH,
+	CMD_THREADS,
 	CMD_END
 };
 

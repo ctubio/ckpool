@@ -8356,6 +8356,61 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+// Running thread adjustments
+static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
+			 __maybe_unused tv_t *now, __maybe_unused char *by,
+			 __maybe_unused char *code, __maybe_unused char *inet,
+			 __maybe_unused tv_t *cd, K_TREE *trf_root,
+			 __maybe_unused bool reload_data)
+{
+	K_ITEM *i_name, *i_delta;
+	char *name, *delta;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char *buf = NULL;
+	int delta_value = 0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_name = require_name(trf_root, "name", 1, NULL, reply, siz);
+	if (!i_name)
+		return strdup(reply);
+	name = transfer_data(i_name);
+	i_delta = require_name(trf_root, "delta", 2, NULL, reply, siz);
+	if (!i_delta)
+		return strdup(reply);
+	delta = transfer_data(i_delta);
+	if (*delta != '+' && *delta != '-') {
+		snprintf(reply, siz, "invalid delta '%s'", delta);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+	delta_value = atoi(delta+1);
+	if (delta_value < 1 || delta_value >= THREAD_LIMIT) {
+		snprintf(reply, siz, "invalid delta range '%s'", delta);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+	if (*delta == '-')
+		delta_value = -delta_value;
+
+	if (strcasecmp(name, "pr") == 0 ||
+	    strcasecmp(name, "process_reload") == 0) {
+		K_WLOCK(breakqueue_free);
+		// Just overwrite whatever's there
+		queue_threads_delta = delta_value;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else {
+		snprintf(reply, siz, "unknown name '%s'", name);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+
+	return buf;
+}
+
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -8468,5 +8523,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_LOCKS,	"locks",	false,	false,	cmd_locks,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_EVENTS,	"events",	false,	false,	cmd_events,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_HIGH,	"high",		false,	false,	cmd_high,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_THREADS,	"threads",	false,	false,	cmd_threads,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

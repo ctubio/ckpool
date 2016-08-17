@@ -117,14 +117,17 @@ static bool blistener_using_data;
 static bool breakdown_using_data;
 static bool replier_using_data;
 
-// Define the array size for thread data
-#define THREAD_LIMIT 99
+/* Flag to notify thread changes
+ * Set/checked under the function's main loop's first lock
+ * This is always a 'delta' value meaning add or subtract that many */
+int queue_threads_delta = 0;
 /* Use -Q to set it higher
- * Setting it higher can degrade performance if the server can't
- *  handle the extra locking or is swapping */
+ * Setting it higher can degrade performance if the CPUs can't
+ *  handle the extra locking or the threads are swapping */
 static int queue_threads = 1;
 // -B to override calculated value
 static int breakdown_threads = -1;
+// cpu count to breakdown thread ratio
 #define BREAKDOWN_RATIO 3
 static int reload_breakdown_count = 0;
 static int cmd_breakdown_count = 0;
@@ -5395,6 +5398,7 @@ static void *process_socket(void *arg)
 				case CMD_SHSTA:
 				case CMD_CHKPASS:
 				case CMD_GETATTS:
+				case CMD_THREADS:
 				case CMD_HOMEPAGE:
 					break;
 				default:
@@ -5586,6 +5590,7 @@ static void *process_socket(void *arg)
 			case CMD_LOCKS:
 			case CMD_EVENTS:
 			case CMD_HIGH:
+			case CMD_THREADS:
 				msgline->sockd = bq->sockd;
 				bq->sockd = -1;
 				K_WLOCK(workqueue_free);
@@ -6020,6 +6025,7 @@ static void process_reload_item(PGconn *conn, K_ITEM *bq_item)
 		case CMD_LOCKS:
 		case CMD_EVENTS:
 		case CMD_HIGH:
+		case CMD_THREADS:
 			LOGERR("%s() INVALID message line %"PRIu64
 				" ignored '%.42s...",
 				__func__, bq->count,
@@ -6077,37 +6083,37 @@ static void process_reload_item(PGconn *conn, K_ITEM *bq_item)
 
 static void *process_reload(__maybe_unused void *arg)
 {
-	pthread_t *procrel_pt;
+	static pthread_t procrel_pt[THREAD_LIMIT];
+	static int n[THREAD_LIMIT];
+	static bool running[THREAD_LIMIT];
+
 	PGconn *conn = NULL;
 	K_ITEM *bq_item = NULL;
 	char buf[128];
 	time_t now;
-	int i, *n, zeros;
 	ts_t when, when_add;
-	int ret;
+	int i, mythread, threads_delta = 0, done, tot, ret;
 
 	if (arg)
-		i = *(int *)(arg);
+		mythread = *(int *)(arg);
 	else {
 		pthread_detach(pthread_self());
 
-		n = malloc(queue_threads * sizeof(int));
-		procrel_pt = malloc(queue_threads * sizeof(*procrel_pt));
-		for (i = 1; i < queue_threads; i++) {
+		for (i = 0; i < THREAD_LIMIT; i++) {
 			n[i] = i;
-			create_pthread(&(procrel_pt[i]), process_reload, &(n[i]));
+			running[i] = false;
 		}
-		i = 0;
+
+		mythread = 0;
+		running[0] = true;
+
+		// Set to create the rest of the threads
+		queue_threads_delta = queue_threads - 1;
 
 		LOGNOTICE("%s() starting", __func__);
 	}
 
-	if (queue_threads < 10)
-		zeros = 1;
-	else
-		zeros = (int)log10(queue_threads) + 1;
-
-	snprintf(buf, sizeof(buf), "db_p%0*drload", zeros, i);
+	snprintf(buf, sizeof(buf), "db_p%02drload", mythread);
 	LOCK_INIT(buf);
 	rename_proc(buf);
 
@@ -6119,12 +6125,69 @@ static void *process_reload(__maybe_unused void *arg)
 
 	while (!everyone_die) {
 		K_WLOCK(breakqueue_free);
-		bq_item = k_unlink_head(reload_done_breakqueue_store);
-		if (bq_item) {
-			reload_processing++;
-			reload_processed++;
+		if (mythread == 0 && queue_threads_delta != 0) {
+			threads_delta = queue_threads_delta;
+			queue_threads_delta = 0;
+		} else {
+			bq_item = k_unlink_head(reload_done_breakqueue_store);
+			if (bq_item) {
+				reload_processing++;
+				reload_processed++;
+			}
 		}
 		K_WUNLOCK(breakqueue_free);
+
+		if (!running[mythread])
+			break;
+
+		// TODO: deal with thread creation/shutdown failure
+		if (threads_delta != 0) {
+			if (threads_delta > 0) {
+				// Add threads
+				tot = 1;
+				done = 0;
+				for (i = 1; i < THREAD_LIMIT; i++) {
+					if (!running[i]) {
+						if (threads_delta > 0) {
+							threads_delta--;
+							running[i] = true;
+							create_pthread(&(procrel_pt[i]),
+									process_reload,
+									&(n[i]));
+							done++;
+							tot++;
+						}
+					} else
+						tot++;
+				}
+				LOGWARNING("%s() created %d thread%s total now"
+					   " %d",
+					   __func__, done,
+					   (done == 1) ? EMPTY : "s", tot);
+			} else {
+				// Notify and wait for each to exit
+				tot = 1;
+				done = 0;
+				i = THREAD_LIMIT - 1;
+				for (i = THREAD_LIMIT - 1; i > 0; i--) {
+					if (running[i]) {
+						if (threads_delta < 0) {
+							threads_delta++;
+							running[i] = false;
+							join_pthread(procrel_pt[i]);
+							done++;
+						} else
+							tot++;
+					}
+				}
+				LOGWARNING("%s() stopped %d thread%s total now"
+					   " %d",
+					   __func__, done,
+					   (done == 1) ? EMPTY : "s", tot);
+			}
+			threads_delta = 0;
+			continue;
+		}
 
 		if (!bq_item) {
 			// Finished reloading?
@@ -6165,9 +6228,12 @@ static void *process_reload(__maybe_unused void *arg)
 
 	PQfinish(conn);
 
-	if (!arg) {
-		for (i = 1; i < queue_threads; i++)
-			join_pthread(procrel_pt[i]);
+	// Only when everyone_die is true
+	if (mythread == 0) {
+		for (i = 1; i < THREAD_LIMIT; i++) {
+			if (running[i])
+				join_pthread(procrel_pt[i]);
+		}
 
 		LOGNOTICE("%s() exiting, processed %"PRIu64,
 			  __func__, reload_processed);
