@@ -6160,10 +6160,16 @@ static void *process_reload(__maybe_unused void *arg)
 					} else
 						tot++;
 				}
-				LOGWARNING("%s() created %d thread%s total now"
-					   " %d",
-					   __func__, done,
-					   (done == 1) ? EMPTY : "s", tot);
+				LOGWARNING("%s() created %d thread%s total=%d"
+#if LOCK_CHECK
+					   " next_thread_id=%d"
+#endif
+					   , __func__, done,
+					   (done == 1) ? EMPTY : "s", tot
+#if LOCK_CHECK
+					   , next_thread_id
+#endif
+					   );
 			} else {
 				// Notify and wait for each to exit
 				tot = 1;
@@ -6180,10 +6186,16 @@ static void *process_reload(__maybe_unused void *arg)
 							tot++;
 					}
 				}
-				LOGWARNING("%s() stopped %d thread%s total now"
-					   " %d",
-					   __func__, done,
-					   (done == 1) ? EMPTY : "s", tot);
+				LOGWARNING("%s() stopped %d thread%s total=%d "
+#if LOCK_CHECK
+					   " next_thread_id=%d"
+#endif
+					   , __func__, done,
+					   (done == 1) ? EMPTY : "s", tot
+#if LOCK_CHECK
+					   , next_thread_id
+#endif
+					   );
 			}
 			threads_delta = 0;
 			continue;

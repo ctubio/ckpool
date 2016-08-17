@@ -13,6 +13,7 @@
 const char *tree_node_list_name = "TreeNodes";
 
 #if LOCK_CHECK
+bool disable_checks = false;
 bool check_locks = true;
 const char *thread_noname = "UNSET";
 int next_thread_id = 0;
