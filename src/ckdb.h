@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.403"
+#define CKDB_VERSION DB_VERSION"-2.404"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -120,11 +120,11 @@ extern enum free_modes free_mode;
 
 // Define the array size for thread data
 #define THREAD_LIMIT 99
-/* Flag to notify thread changes
+/* To notify thread changes
  * Set/checked under the function's main loop's first lock
  * This is always a 'delta' value meaning add or subtract that many */
 extern int queue_threads_delta;
-/* Flags to notify thread changes */
+// To notify thread changes
 extern int reload_breakdown_threads_delta;
 extern int cmd_breakdown_threads_delta;
 

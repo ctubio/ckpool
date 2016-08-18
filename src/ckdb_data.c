@@ -2288,9 +2288,11 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
 	ss_look.data = (void *)(&looksharesummary);
 	K_RLOCK(sharesummary_free);
 	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &ss_look, ss_ctx);
-	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
-	// complete could change, the id fields wont be changed/removed yet
-	STRNCPY(complete, sharesummary->complete);
+	if (ss_item) {
+		DATA_SHARESUMMARY(sharesummary, ss_item);
+		// complete could change, the id fields wont be changed/removed yet
+		STRNCPY(complete, sharesummary->complete);
+	}
 	K_RUNLOCK(sharesummary_free);
 	while (ss_item && sharesummary->workinfoid == workinfoid) {
 		ss_tot++;
@@ -2342,8 +2344,10 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
 
 		K_RLOCK(sharesummary_free);
 		ss_item = next_in_ktree(ss_ctx);
-		DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
-		STRNCPY(complete, sharesummary->complete);
+		if (ss_item) {
+			DATA_SHARESUMMARY(sharesummary, ss_item);
+			STRNCPY(complete, sharesummary->complete);
+		}
 		K_RUNLOCK(sharesummary_free);
 	}
 
@@ -2375,9 +2379,11 @@ skip_ss:
 	ks_look.data = (void *)(&lookkeysharesummary);
 	K_RLOCK(keysharesummary_free);
 	ks_item = find_after_in_ktree(keysharesummary_root, &ks_look, ks_ctx);
-	DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
-	// complete could change, the id fields wont be changed/removed yet
-	STRNCPY(complete, keysharesummary->complete);
+	if (ks_item) {
+		DATA_KEYSHARESUMMARY(keysharesummary, ks_item);
+		// complete could change, the id fields wont be changed/removed yet
+		STRNCPY(complete, keysharesummary->complete);
+	}
 	K_RUNLOCK(keysharesummary_free);
 	while (ks_item && keysharesummary->workinfoid == workinfoid) {
 		ks_tot++;
@@ -2416,8 +2422,10 @@ skip_ss:
 
 		K_RLOCK(keysharesummary_free);
 		ks_item = next_in_ktree(ks_ctx);
-		DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
-		STRNCPY(complete, keysharesummary->complete);
+		if (ks_item) {
+			DATA_KEYSHARESUMMARY(keysharesummary, ks_item);
+			STRNCPY(complete, keysharesummary->complete);
+		}
 		K_RUNLOCK(keysharesummary_free);
 	}
 

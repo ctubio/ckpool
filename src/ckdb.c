@@ -117,7 +117,7 @@ static bool blistener_using_data;
 static bool breakdown_using_data;
 static bool replier_using_data;
 
-/* Flag to notify thread changes
+/* To notify thread changes
  * Set/checked under the function's main loop's first lock
  * This is always a 'delta' value meaning add or subtract that many */
 int queue_threads_delta = 0;
@@ -131,7 +131,7 @@ static int reload_breakdown_threads = -1;
 static int cmd_breakdown_threads = -1;
 // cpu count to breakdown thread ratio
 #define BREAKDOWN_RATIO 3
-// Flags to notify thread changes
+// To notify thread changes
 int reload_breakdown_threads_delta = 0;
 int cmd_breakdown_threads_delta = 0;
 
