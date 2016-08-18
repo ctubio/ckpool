@@ -8402,6 +8402,22 @@ static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_WUNLOCK(breakqueue_free);
 		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
 		return strdup(reply);
+	} else if (strcasecmp(name, "rb") == 0 ||
+		   strcasecmp(name, "reload_breaker") == 0) {
+		K_WLOCK(breakqueue_free);
+		// Just overwrite whatever's there
+		reload_breakdown_threads_delta = delta_value;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "cb") == 0 ||
+		   strcasecmp(name, "cmd_breaker") == 0) {
+		K_WLOCK(breakqueue_free);
+		// Just overwrite whatever's there
+		cmd_breakdown_threads_delta = delta_value;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
 	} else {
 		snprintf(reply, siz, "unknown name '%s'", name);
 		LOGERR("%s() %s.%s", __func__, id, reply);

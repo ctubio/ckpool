@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.402"
+#define CKDB_VERSION DB_VERSION"-2.403"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -124,6 +124,9 @@ extern enum free_modes free_mode;
  * Set/checked under the function's main loop's first lock
  * This is always a 'delta' value meaning add or subtract that many */
 extern int queue_threads_delta;
+/* Flags to notify thread changes */
+extern int reload_breakdown_threads_delta;
+extern int cmd_breakdown_threads_delta;
 
 #define BLANK " "
 extern char *EMPTY;
