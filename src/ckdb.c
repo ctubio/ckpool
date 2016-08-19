@@ -3793,8 +3793,8 @@ static void *breaker(void *arg)
 		when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
 	}
 
-	snprintf(buf, sizeof(buf), "db_%c%02d%s",
-		 reload ? 'r' : 'c', mythread, __func__);
+	snprintf(buf, sizeof(buf), "db%s_%c%02d%s",
+		 dbcode, reload ? 'r' : 'c', mythread, __func__);
 	LOCK_INIT(buf);
 	rename_proc(buf);
 
@@ -4371,12 +4371,14 @@ static void summarise_blocks()
 static void *summariser(__maybe_unused void *arg)
 {
 	bool orphan_check = false;
+	char buf[128];
 	int i;
 
 	pthread_detach(pthread_self());
 
-	LOCK_INIT("db_summariser");
-	rename_proc("db_summariser");
+	snprintf(buf, sizeof(buf), "db%s_%s", dbcode, __func__);
+	LOCK_INIT(buf);
+	rename_proc(buf);
 
 	/* Don't do any summarisation until the reload queue completes coz:
 	 * 1) It locks/accesses a lot of data - workinfo/markersummary that
@@ -4961,12 +4963,14 @@ static void make_a_workmarker()
 
 static void *marker(__maybe_unused void *arg)
 {
+	char buf[128];
 	int i;
 
 	pthread_detach(pthread_self());
 
-	LOCK_INIT("db_marker");
-	rename_proc("db_marker");
+	snprintf(buf, sizeof(buf), "db%s_%s", dbcode, __func__);
+	LOCK_INIT(buf);
+	rename_proc(buf);
 
 	/* We want this to start during the CCL reload so that if we run a
 	 *  large reload and it fails at some point, the next reload will not
@@ -5038,7 +5042,7 @@ static void *logger(__maybe_unused void *arg)
 
 	pthread_detach(pthread_self());
 
-	snprintf(buf, sizeof(buf), "db%s_logger", dbcode);
+	snprintf(buf, sizeof(buf), "db%s_%s", dbcode, __func__);
 	LOCK_INIT(buf);
 	rename_proc(buf);
 
@@ -5156,7 +5160,7 @@ static void *replier(void *arg)
 			break;
 	}
 
-	snprintf(buf, sizeof(buf), "db_%c%s", typ, __func__);
+	snprintf(buf, sizeof(buf), "db%s_%c%s", dbcode, typ, __func__);
 	LOCK_INIT(buf);
 	rename_proc(buf);
 
@@ -5334,19 +5338,21 @@ static void *clistener(__maybe_unused void *arg)
 	PGconn *conn = NULL;
 	K_ITEM *wq_item;
 	tv_t now1, now2;
+	char buf[128];
 	time_t now;
 	ts_t when, when_add;
 	int ret;
 
 	pthread_detach(pthread_self());
 
-	when_add.tv_sec = CMD_QUEUE_SLEEP_MS / 1000;
-	when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
-
-	LOCK_INIT("db_clistener");
-	rename_proc("db_clistener");
+	snprintf(buf, sizeof(buf), "db%s_%s", dbcode, __func__);
+	LOCK_INIT(buf);
+	rename_proc(buf);
 
 	LOGNOTICE("%s() processing", __func__);
+
+	when_add.tv_sec = CMD_QUEUE_SLEEP_MS / 1000;
+	when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
 
 	clistener_using_data = true;
 
@@ -5401,19 +5407,21 @@ static void *blistener(__maybe_unused void *arg)
 	PGconn *conn = NULL;
 	K_ITEM *wq_item;
 	tv_t now1, now2;
+	char buf[128];
 	time_t now;
 	ts_t when, when_add;
 	int ret;
 
 	pthread_detach(pthread_self());
 
-	when_add.tv_sec = CMD_QUEUE_SLEEP_MS / 1000;
-	when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
-
-	LOCK_INIT("db_blistener");
-	rename_proc("db_blistener");
+	snprintf(buf, sizeof(buf), "db%s_%s", dbcode, __func__);
+	LOCK_INIT(buf);
+	rename_proc(buf);
 
 	LOGNOTICE("%s() processing", __func__);
+
+	when_add.tv_sec = CMD_QUEUE_SLEEP_MS / 1000;
+	when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
 
 	blistener_using_data = true;
 
@@ -5474,15 +5482,17 @@ static void *process_socket(void *arg)
 	char reply[1024+1];
 	char *ans = NULL, *rep = NULL, *tmp, *st;
 	size_t siz;
+	char buf[128];
 	ts_t when, when_add;
 
 	pthread_detach(pthread_self());
 
+	snprintf(buf, sizeof(buf), "db%s_procsock", dbcode);
+	LOCK_INIT(buf);
+	rename_proc(buf);
+
 	when_add.tv_sec = CMD_QUEUE_SLEEP_MS / 1000;
 	when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
-
-	LOCK_INIT("db_procsock");
-	rename_proc("db_procsock");
 
 	want_first = true;
 	while (!everyone_die) {
@@ -5942,12 +5952,14 @@ static void *socketer(void *arg)
 	BREAKQUEUE *bq = NULL;
 	int ret, sockd;
 	fd_set rfds;
+	char nbuf[128];
 	tv_t now, nowacc, now1, now2, tmo;
 
 	pthread_detach(pthread_self());
 
-	LOCK_INIT("db_socketer");
-	rename_proc("db_socketer");
+	snprintf(nbuf, sizeof(nbuf), "db%s_%s", dbcode, __func__);
+	LOCK_INIT(nbuf);
+	rename_proc(nbuf);
 
 	while (!everyone_die && !db_users_complete)
 		cksem_mswait(&socketer_sem, 420);
@@ -6259,7 +6271,7 @@ static void *process_reload(__maybe_unused void *arg)
 		LOGNOTICE("%s() starting", __func__);
 	}
 
-	snprintf(buf, sizeof(buf), "db_p%02drload", mythread);
+	snprintf(buf, sizeof(buf), "db%s_p%02drload", dbcode, mythread);
 	LOCK_INIT(buf);
 	rename_proc(buf);
 
@@ -6893,7 +6905,7 @@ static void *pqproc(void *arg)
 	} else {
 		mythread = *(int *)(arg);
 
-		snprintf(buf, sizeof(buf), "db_p%02dqproc", mythread);
+		snprintf(buf, sizeof(buf), "db%s_p%02dqproc", dbcode, mythread);
 		LOCK_INIT(buf);
 		rename_proc(buf);
 	}
@@ -7119,7 +7131,7 @@ static void *listener(void *arg)
 
 	pthread_detach(pthread_self());
 
-	snprintf(buf, sizeof(buf), "db_p00qproc");
+	snprintf(buf, sizeof(buf), "db%s_p00qproc", dbcode);
 	LOCK_INIT(buf);
 	rename_proc(buf);
 
@@ -7318,10 +7330,12 @@ static bool make_keysummaries()
 static void *keymarker(__maybe_unused void *arg)
 {
 	pthread_detach(pthread_self());
+	char buf[128];
 	bool ok = true;
 
-	LOCK_INIT("db_keymarker");
-	rename_proc("db_keymarker");
+	snprintf(buf, sizeof(buf), "db%s_%s", dbcode, __func__);
+	LOCK_INIT(buf);
+	rename_proc(buf);
 
 	if (!everyone_die) {
 		LOGWARNING("%s() Start key processing...", __func__);
