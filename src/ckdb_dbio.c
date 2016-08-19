@@ -649,7 +649,9 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	 *  and thus throw away any differences in the 2nd */
 	K_WLOCK(users_db_free);
 
+	K_RLOCK(users_free);
 	item = find_users(username);
+	K_RUNLOCK(users_free);
 	if (item) {
 		ok = true;
 		goto already;
