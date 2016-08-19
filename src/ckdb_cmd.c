@@ -8398,8 +8398,16 @@ static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
 	    strcasecmp(name, "process_reload") == 0) {
 		K_WLOCK(breakqueue_free);
 		// Just overwrite whatever's there
-		queue_threads_delta = delta_value;
+		reload_queue_threads_delta = delta_value;
 		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "pq") == 0 ||
+		   strcasecmp(name, "pqproc") == 0) {
+		K_WLOCK(workqueue_free);
+		// Just overwrite whatever's there
+		proc_queue_threads_delta = delta_value;
+		K_WUNLOCK(workqueue_free);
 		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
 		return strdup(reply);
 	} else if (strcasecmp(name, "rb") == 0 ||
