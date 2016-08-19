@@ -5940,8 +5940,9 @@ static void *socketer(void *arg)
 	char *end, *buf = NULL;
 	K_ITEM *bq_item = NULL;
 	BREAKQUEUE *bq = NULL;
-	int sockd;
-	tv_t now, nowacc, now1, now2;
+	int ret, sockd;
+	fd_set rfds;
+	tv_t now, nowacc, now1, now2, tmo;
 
 	pthread_detach(pthread_self());
 
@@ -5972,9 +5973,29 @@ static void *socketer(void *arg)
 		create_pthread(&proc_pt, process_socket, arg);
 	}
 
+	ret = 0;
 	setnow(&sock_stt);
 	while (!everyone_die) {
 		setnow(&now1);
+		while (!everyone_die) {
+			FD_ZERO(&rfds);
+			FD_SET(us->sockd, &rfds);
+			tmo.tv_sec = 1;
+			tmo.tv_usec = 0;
+			ret = select(us->sockd + 1, &rfds, NULL, NULL, &tmo);
+			if (ret > 0)
+				break;
+			if (ret < 0) {
+				int e = errno;
+				LOGERR("%s() Failed to select on socket (%d:%s)",
+				       __func__, e, strerror(e));
+				break;
+			}
+		}
+		// Timeout exit on no input (or error)
+		if (everyone_die || ret < 0)
+			break;
+
 		sockd = accept(us->sockd, NULL, NULL);
 		if (sockd < 0) {
 			int e = errno;
