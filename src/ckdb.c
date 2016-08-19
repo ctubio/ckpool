@@ -3824,6 +3824,8 @@ static void *breaker(void *arg)
 			break;
 
 		K_WLOCK(breakqueue_free);
+		bq_item = NULL;
+		was_null = false;
 		if (mythread == 0 && reload && reload_breakdown_threads_delta != 0) {
 			breaker_delta = reload_breakdown_threads_delta;
 			reload_breakdown_threads_delta = 0;
@@ -3831,8 +3833,6 @@ static void *breaker(void *arg)
 			breaker_delta = cmd_breakdown_threads_delta;
 			cmd_breakdown_threads_delta = 0;
 		} else {
-			bq_item = NULL;
-			was_null = false;
 			if (reload)
 				count = reload_done_breakqueue_store->count;
 			else
@@ -6345,7 +6345,7 @@ static void *process_reload(__maybe_unused void *arg)
 							tot++;
 					}
 				}
-				LOGWARNING("%s() stopped %d thread%s total=%d "
+				LOGWARNING("%s() stopped %d thread%s total=%d"
 #if LOCK_CHECK
 					   " next_thread_id=%d"
 #endif
@@ -7003,7 +7003,7 @@ static void *pqproc(void *arg)
 							tot++;
 					}
 				}
-				LOGWARNING("%s() stopped %d thread%s total=%d "
+				LOGWARNING("%s() stopped %d thread%s total=%d"
 #if LOCK_CHECK
 					   " next_thread_id=%d"
 #endif
