@@ -511,6 +511,8 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 			case TYPE_BTV:
 			case TYPE_T:
 			case TYPE_BT:
+			case TYPE_HMS:
+			case TYPE_MS:
 				siz = DATE_BUFSIZ;
 				break;
 			case TYPE_CTV:
@@ -597,6 +599,19 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 					   tm.tm_min,
 					   tm.tm_sec);
 			break;
+		case TYPE_HMS:
+			gmtime_r((time_t *)data, &tm);
+			snprintf(buf, siz, "%02d:%02d:%02d",
+					   tm.tm_hour,
+					   tm.tm_min,
+					   tm.tm_sec);
+			break;
+		case TYPE_MS:
+			gmtime_r((time_t *)data, &tm);
+			snprintf(buf, siz, "%02d:%02d",
+					   tm.tm_min,
+					   tm.tm_sec);
+			break;
 	}
 
 	return buf;
@@ -672,6 +687,18 @@ char *_btu64_to_buf(uint64_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
 	time_t t = *data;
 	return _data_to_buf(TYPE_BT, (void *)&t, buf, siz, WHERE_FFL_PASS);
+}
+
+// Convert to HH:MM:SS
+char *_hms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
+{
+	return _data_to_buf(TYPE_HMS, (void *)data, buf, siz, WHERE_FFL_PASS);
+}
+
+// Convert to MM:SS
+char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
+{
+	return _data_to_buf(TYPE_MS, (void *)data, buf, siz, WHERE_FFL_PASS);
 }
 
 // For mutiple variable function calls that need the data
