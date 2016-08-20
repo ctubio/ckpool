@@ -6730,7 +6730,7 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 	char *filename = NULL;
 	uint64_t count, total;
 	tv_t now, begin, file_begin, file_end;
-	double diff;
+	double diff, ratio;
 	FILE *fp = NULL;
 	int file_N_limit;
 	time_t tick_time, tmp_time;
@@ -6815,12 +6815,14 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 		diff = tvdiff(&file_end, &file_begin);
 		if (diff == 0)
 			diff = 1;
+		ratio = (double)ROLL_S / diff;
 
-		LOGWARNING("%s(): %sread %"PRIu64" line%s %.2f/s from %s",
+		LOGWARNING("%s(): %sread %"PRIu64" line%s %.2f/s (%.1fx)"
+			   " from %s",
 			   __func__,
 			   everyone_die ? "Terminate, aborting - " : "",
 			   count, count == 1 ? "" : "s", (count / diff),
-			   filename);
+			   ratio, filename);
 		total += count;
 		if (apipe) {
 			pclose(fp);
@@ -6905,14 +6907,15 @@ static bool reload_from(tv_t *start, const tv_t *finish)
 	diff = tvdiff(&now, &begin);
 	if (diff == 0)
 		diff = 1;
+	ratio = (double)(processing * ROLL_S) / diff;
 
 	snprintf(reload_buf, MAX_READ, "reload.%s.%"PRIu64, run, total);
 	LOGQUE(reload_buf, true);
 	LOGQUE(reload_buf, false);
-	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s %.2f/s",
+	LOGWARNING("%s(): read %d file%s, total %"PRIu64" line%s %.2f/s (%.1fx)",
 		   __func__,
 		   processing, processing == 1 ? "" : "s",
-		   total, total == 1 ? "" : "s", (total / diff));
+		   total, total == 1 ? "" : "s", (total / diff), ratio);
 
 	if (everyone_die)
 		return true;

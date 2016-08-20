@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.411"
+#define CKDB_VERSION DB_VERSION"-2.412"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -3063,9 +3063,9 @@ extern char *_t_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 // Convert seconds (only) time to (brief) M-DD/HH:MM:SS
 extern char *_bt_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 extern char *_btu64_to_buf(uint64_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
-// Convert tv to HH:MM:SS
+// Convert to HH:MM:SS
 extern char *_hms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
-// Convert tv to MM:SS
+// Convert to MM:SS
 extern char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
