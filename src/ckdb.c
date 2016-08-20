@@ -3232,6 +3232,7 @@ setitemdata:
 				found_msgs[i].last.tv_sec = 0;
 			ck_wlock(&seq_found_lock);
 			if (has_found) {
+				setnow(&found_now);
 				for (i = 0; i < SEQ_MAX; i++) {
 					if (found[i].last.tv_sec != 0 &&
 					    tvdiff(&found_now, &(found[i].last)) >= 2.0) {
