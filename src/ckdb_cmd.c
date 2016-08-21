@@ -7666,6 +7666,67 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+	} else if (strcasecmp(request, "shareinfo") == 0) {
+		/* return share information for the workinfo with wid>=value
+		 * if wid=0 then find the oldest workinfo that has shares */
+		K_ITEM *i_wid, s_look, *s_item;
+		SHARES lookshares, *shares;
+		int64_t selwid, wid, s_count = 0, s_diff = 0, s_sdiff = 0;
+		bool found;
+
+		i_wid = require_name(trf_root, "wid",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_wid)
+			return strdup(reply);
+		TXT_TO_BIGINT("wid", transfer_data(i_wid), selwid);
+
+		INIT_SHARES(&s_look);
+		lookshares.workinfoid = selwid;
+		lookshares.userid = -1;
+		lookshares.workername[0] = '\0';
+		DATE_ZERO(&(lookshares.createdate));
+		s_look.data = (void *)(&lookshares);
+		found = false;
+		K_RLOCK(shares_free);
+		s_item = find_after_in_ktree(shares_root, &s_look, ctx);
+		if (s_item) {
+			found = true;
+			DATA_SHARES(shares, s_item);
+			wid = shares->workinfoid;
+			while (s_item) {
+				DATA_SHARES(shares, s_item);
+				if (shares->workinfoid != wid)
+					break;
+				s_count++;
+				s_diff += shares->diff;
+				if (s_sdiff < shares->sdiff)
+					s_sdiff = shares->sdiff;
+				s_item = next_in_ktree(ctx);
+			}
+		}
+		K_RUNLOCK(shares_free);
+
+		if (found) {
+			snprintf(tmp, sizeof(tmp), "selwid=%"PRId64"%c",
+				 selwid, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "wid=%"PRId64"%c",
+				 wid, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "shares=%"PRId64"%c",
+				 s_count, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "diff=%"PRId64"%c",
+				 s_diff, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "maxsdiff=%"PRId64"%c",
+				 s_sdiff, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			rows++;
+		}
+
+		ok = true;
 	} else {
 		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);

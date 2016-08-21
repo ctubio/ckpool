@@ -5687,6 +5687,7 @@ static void *process_socket(void *arg)
 				case CMD_GETATTS:
 				case CMD_THREADS:
 				case CMD_HOMEPAGE:
+				case CMD_QUERY:
 					break;
 				default:
 					snprintf(reply, sizeof(reply),
