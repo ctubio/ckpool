@@ -3546,9 +3546,9 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 					 100.0 * pool.diffacc /
 					 workinfo->diff_target);
 			}
-			LOGWARNING("%s %s Diff %.1f%% (%.0f/%.1f) %s "
-				   "Pool %.1f%s%s",
-				   block ? "BLOCK!" : "Share",
+			LOGWARNING("%s (%"PRIu32") %s Diff %.1f%% (%.0f/%.1f) "
+				   "%s Pool %.1f%s%s",
+				   block ? "BLOCK!" : "Share", workinfo->height,
 				   (sta == NULL) ? "ok" : sta,
 				   100.0 * shares->sdiff / workinfo->diff_target,
 				   shares->sdiff, workinfo->diff_target,
