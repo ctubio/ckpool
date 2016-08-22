@@ -4787,6 +4787,39 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 dokey:
 
+	if (key_update) {
+		setnow(&add_stt);
+
+		// Discard the sharesummaries
+		looksharesummary.workinfoid = workmarkers->workinfoidend;
+		looksharesummary.userid = MAXID;
+		looksharesummary.workername = EMPTY;
+
+		INIT_SHARESUMMARY(&ss_look);
+		ss_look.data = (void *)(&looksharesummary);
+		/* Since shares come in from ckpool at a high rate,
+		 *  we don't want to lock sharesummary for long
+		 * Those incoming shares will not be touching the sharesummaries
+		 *  we are processing here */
+		K_RLOCK(sharesummary_free);
+		ss_item = find_before_in_ktree(sharesummary_workinfoid_root,
+						&ss_look, ss_ctx);
+		K_RUNLOCK(sharesummary_free);
+		while (ss_item) {
+			DATA_SHARESUMMARY(sharesummary, ss_item);
+			if (sharesummary->workinfoid < workmarkers->workinfoidstart)
+				break;
+			K_WLOCK(sharesummary_free);
+			ss_prev = prev_in_ktree(ss_ctx);
+			k_unlink_item(sharesummary_store, ss_item);
+			K_WUNLOCK(sharesummary_free);
+			k_add_head_nolock(old_sharesummary_store, ss_item);
+
+			ss_item = ss_prev;
+		}
+		setnow(&add_fin);
+	}
+
 	setnow(&kadd_stt);
 	INIT_KEYSUMMARY(&ks_look);
 
