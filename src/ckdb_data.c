@@ -2153,6 +2153,11 @@ K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 }
 
 #define DISCARD_ALL -1
+/* No longer required since we already discard the shares after being added
+ *  to the sharesummary */
+#if 1
+#define discard_shares(...)
+#else
 // userid = DISCARD_ALL will dump all shares for the given workinfoid
 static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
 			   int64_t *diff_tot, bool skipupdate,
@@ -2238,6 +2243,7 @@ static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
 	}
 
 }
+#endif
 
 // Duplicates during a reload are set to not show messages
 bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,

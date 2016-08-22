@@ -3714,8 +3714,8 @@ keep:
 		early_shares->oldcount, early_shares->redo);
 	FREENULL(st);
 	K_WLOCK(shares_free);
-	add_to_ktree(shares_root, es_item);
-	k_add_head(shares_store, es_item);
+	// Discard it, it's been processed
+	k_add_head(shares_free, es_item);
 	K_WUNLOCK(shares_free);
 	return;
 discard:
@@ -3752,6 +3752,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	USERS *users;
 	bool ok = false, dup = false;
 	char *st = NULL;
+	tv_t share_cd;
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
@@ -3876,9 +3877,10 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 
 	ok = shares_process(conn, shares, wi_item, trf_root);
 	if (ok) {
+		copy_tv(&share_cd, &(shares->createdate));
 		K_WLOCK(shares_free);
-		add_to_ktree(shares_root, s_item);
-		k_add_head(shares_store, s_item);
+		// Discard it, it's been processed
+		k_add_head(shares_free, s_item);
 		if (s2_item) {
 			// Discard duplicates
 			tmp_item = find_in_ktree(shares_db_root, s2_item, ctx);
@@ -3905,11 +3907,10 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 			FREENULL(st);
 		}
 
-		shares_process_early(conn, wi_item, &(shares->createdate),
-				     trf_root);
+		shares_process_early(conn, wi_item, &share_cd, trf_root);
 		// Call both since shareerrors may be rare
 		shareerrors_process_early(conn, shares->workinfoid,
-					  &(shares->createdate), trf_root);
+					  &share_cd, trf_root);
 
 		// The original share was ok
 		return true;
