@@ -807,6 +807,7 @@ K_TREE *userinfo_root;
 K_LIST *userinfo_free;
 K_STORE *userinfo_store;
 
+static char *listener_base = "listener";
 static char logname_db[512];
 static char logname_io[512];
 static char *dbcode;
@@ -8411,6 +8412,8 @@ static struct option long_options[] = {
 	{ "marker",		no_argument,		0,	'm' },
 	{ "markstart",		required_argument,	0,	'M' },
 	{ "name",		required_argument,	0,	'n' },
+	// base socket name to use instead of 'listener'
+	{ "listener",		required_argument,	0,	'N' },
 	{ "dbpass",		required_argument,	0,	'p' },
 	{ "btc-pass",		required_argument,	0,	'P' },
 	{ "reload-queue-limit",	required_argument,	0,	'q' },
@@ -8464,7 +8467,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:f:ghi:IkK:l:L:mM:n:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case '?':
 			case ':':
@@ -8610,6 +8613,9 @@ int main(int argc, char **argv)
 				break;
 			case 'n':
 				ckp.name = strdup(optarg);
+				break;
+			case 'N':
+				listener_base = strdup(optarg);
 				break;
 			case 'p':
 				db_pass = strdup(optarg);
@@ -8860,7 +8866,9 @@ int main(int argc, char **argv)
 	}
 
 	if (key_update) {
-		ckp.main.sockname = strdup("klistener");
+		char buf[64];
+		snprintf(buf, sizeof(buf), "k%s", listener_base);
+		ckp.main.sockname = strdup(buf);
 		write_namepid(&ckp.main);
 		create_process_unixsock(&ckp.main);
 		fcntl(ckp.main.us.sockd, F_SETFD, FD_CLOEXEC);
@@ -8872,7 +8880,7 @@ int main(int argc, char **argv)
 		confirm_summaries();
 		everyone_die = true;
 	} else {
-		ckp.main.sockname = strdup("listener");
+		ckp.main.sockname = strdup(listener_base);
 		write_namepid(&ckp.main);
 		create_process_unixsock(&ckp.main);
 		fcntl(ckp.main.us.sockd, F_SETFD, FD_CLOEXEC);
