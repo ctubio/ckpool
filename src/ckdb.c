@@ -808,6 +808,7 @@ K_LIST *userinfo_free;
 K_STORE *userinfo_store;
 
 static char *listener_base = "listener";
+static char *process_name = "main";
 static char logname_db[512];
 static char logname_io[512];
 static char *dbcode;
@@ -8414,6 +8415,8 @@ static struct option long_options[] = {
 	{ "name",		required_argument,	0,	'n' },
 	// base socket name to use instead of 'listener'
 	{ "listener",		required_argument,	0,	'N' },
+	// process name to use instead of "main"
+	{ "process",		required_argument,	0,	'o' },
 	{ "dbpass",		required_argument,	0,	'p' },
 	{ "btc-pass",		required_argument,	0,	'P' },
 	{ "reload-queue-limit",	required_argument,	0,	'q' },
@@ -8467,7 +8470,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case '?':
 			case ':':
@@ -8616,6 +8619,9 @@ int main(int argc, char **argv)
 				break;
 			case 'N':
 				listener_base = strdup(optarg);
+				break;
+			case 'o':
+				process_name = strdup(optarg);
 				break;
 			case 'p':
 				db_pass = strdup(optarg);
@@ -8818,7 +8824,7 @@ int main(int argc, char **argv)
 	srandom((unsigned int)(now.tv_usec * 4096 + now.tv_sec % 4096));
 
 	ckp.main.ckp = &ckp;
-	ckp.main.processname = strdup("main");
+	ckp.main.processname = strdup(process_name);
 
 	cklock_init(&breakdown_lock);
 	cklock_init(&replier_lock);
