@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.419"
+#define CKDB_VERSION DB_VERSION"-2.420"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1114,6 +1114,23 @@ enum cmd_values {
 		} \
 		(_row)->pointers = (_row)->pointers; \
 	} while (0)
+
+// IOQUEUE
+typedef struct ioqueue {
+	char *msg;
+	tv_t when;
+	int errn;
+	bool logfd;
+	bool logout;
+	bool logerr;
+	bool eol;
+	bool flush;
+} IOQUEUE;
+
+#define ALLOC_IOQUEUE 1024
+#define LIMIT_IOQUEUE 0
+#define INIT_IOQUEUE(_item) INIT_GENERIC(_item, ioqueue)
+#define DATA_IOQUEUE(_var, _item) DATA_GENERIC(_var, _item, ioqueue, true)
 
 // LOGQUEUE
 typedef struct logqueue {
@@ -2945,6 +2962,7 @@ enum reply_type {
 };
 
 extern void logmsg(int loglevel, const char *fmt, ...);
+extern void setnowts(ts_t *now);
 extern void setnow(tv_t *now);
 extern void tick();
 extern PGconn *dbconnect();
