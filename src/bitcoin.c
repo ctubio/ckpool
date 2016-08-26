@@ -16,13 +16,14 @@
 #include "bitcoin.h"
 
 static const char *b58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
 static char* understood_rules[] = {"segwit"};
+
 static bool check_required_rule(const char* rule)
 {
 	unsigned int i;
-	for(i = 0; i < sizeof(understood_rules) / sizeof(understood_rules[0]); i++) {
-		if(strcmp(understood_rules[i], rule) == 0)
+
+	for (i = 0; i < sizeof(understood_rules) / sizeof(understood_rules[0]); i++) {
+		if (safecmp(understood_rules[i], rule) == 0)
 			return true;
 	}
 	return false;
@@ -99,13 +100,13 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 {
 	json_t *txn_array, *rules_array, *coinbase_aux, *res_val, *val;
 	const char *previousblockhash;
+	const char *witnessdata_check;
 	char hash_swap[32], tmp[32];
 	uint64_t coinbasevalue;
 	const char *target;
 	const char *flags;
 	const char *bits;
 	const char *rule;
-	const char *witnessdata_check;
 	int version;
 	int curtime;
 	int height;
@@ -124,11 +125,12 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	}
 
 	rules_array = json_object_get(res_val, "rules");
-	if(rules_array) {
+	if (rules_array) {
 		int rule_count =  json_array_size(rules_array);
-		for(i = 0; i < rule_count; i++) {
+
+		for (i = 0; i < rule_count; i++) {
 			rule = json_string_value(json_array_get(rules_array, i));
-			if(rule && *rule++ == '!' && !check_required_rule(rule)) {
+			if (rule && *rule++ == '!' && !check_required_rule(rule)) {
 				LOGERR("Required rule not understood: %s", rule);
 				goto out;
 			}
