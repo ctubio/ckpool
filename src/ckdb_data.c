@@ -89,12 +89,6 @@ void free_sharesummary_data(K_ITEM *item)
 	DATA_SHARESUMMARY(sharesummary, item);
 	LIST_MEM_SUB(sharesummary_free, sharesummary->workername);
 	FREENULL(sharesummary->workername);
-	SET_CREATEBY(sharesummary_free, sharesummary->createby, EMPTY);
-	SET_CREATECODE(sharesummary_free, sharesummary->createcode, EMPTY);
-	SET_CREATEINET(sharesummary_free, sharesummary->createinet, EMPTY);
-	SET_MODIFYBY(sharesummary_free, sharesummary->modifyby, EMPTY);
-	SET_MODIFYCODE(sharesummary_free, sharesummary->modifycode, EMPTY);
-	SET_MODIFYINET(sharesummary_free, sharesummary->modifyinet, EMPTY);
 }
 
 void free_optioncontrol_data(K_ITEM *item)
@@ -128,9 +122,6 @@ void free_keysharesummary_data(K_ITEM *item)
 	DATA_KEYSHARESUMMARY(keysharesummary, item);
 	LIST_MEM_SUB(keysharesummary_free, keysharesummary->key);
 	FREENULL(keysharesummary->key);
-	SET_CREATEBY(keysharesummary_free, keysharesummary->createby, EMPTY);
-	SET_CREATECODE(keysharesummary_free, keysharesummary->createcode, EMPTY);
-	SET_CREATEINET(keysharesummary_free, keysharesummary->createinet, EMPTY);
 }
 
 void free_keysummary_data(K_ITEM *item)
@@ -520,6 +511,8 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 			case TYPE_BTV:
 			case TYPE_T:
 			case TYPE_BT:
+			case TYPE_HMS:
+			case TYPE_MS:
 				siz = DATE_BUFSIZ;
 				break;
 			case TYPE_CTV:
@@ -606,6 +599,19 @@ char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_
 					   tm.tm_min,
 					   tm.tm_sec);
 			break;
+		case TYPE_HMS:
+			gmtime_r((time_t *)data, &tm);
+			snprintf(buf, siz, "%02d:%02d:%02d",
+					   tm.tm_hour,
+					   tm.tm_min,
+					   tm.tm_sec);
+			break;
+		case TYPE_MS:
+			gmtime_r((time_t *)data, &tm);
+			snprintf(buf, siz, "%02d:%02d",
+					   tm.tm_min,
+					   tm.tm_sec);
+			break;
 	}
 
 	return buf;
@@ -681,6 +687,18 @@ char *_btu64_to_buf(uint64_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
 	time_t t = *data;
 	return _data_to_buf(TYPE_BT, (void *)&t, buf, siz, WHERE_FFL_PASS);
+}
+
+// Convert to HH:MM:SS
+char *_hms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
+{
+	return _data_to_buf(TYPE_HMS, (void *)data, buf, siz, WHERE_FFL_PASS);
+}
+
+// Convert to MM:SS
+char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
+{
+	return _data_to_buf(TYPE_MS, (void *)data, buf, siz, WHERE_FFL_PASS);
 }
 
 // For mutiple variable function calls that need the data
@@ -2135,6 +2153,11 @@ K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 }
 
 #define DISCARD_ALL -1
+/* No longer required since we already discard the shares after being added
+ *  to the sharesummary */
+#if 1
+#define discard_shares(...)
+#else
 // userid = DISCARD_ALL will dump all shares for the given workinfoid
 static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
 			   int64_t *diff_tot, bool skipupdate,
@@ -2144,6 +2167,8 @@ static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
 	SHARES lookshares, *shares;
 	K_TREE_CTX s_ctx[1];
 	char error[1024];
+	bool multiple = false;
+	int64_t curr_userid;
 
 	error[0] = '\0';
 	INIT_SHARES(&s_look);
@@ -2154,6 +2179,7 @@ static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
 	DATE_ZERO(&(lookshares.createdate));
 
 	s_look.data = (void *)(&lookshares);
+	curr_userid = userid;
 	K_WLOCK(shares_free);
 	s_item = find_after_in_ktree(shares_root, &s_look, s_ctx);
 	while (s_item) {
@@ -2167,37 +2193,62 @@ static void discard_shares(int64_t *shares_tot, int64_t *shares_dumped,
 			break;
 		}
 
+		// Avoid releasing the lock the first time in
+		if (curr_userid == DISCARD_ALL)
+			curr_userid = shares->userid;
+
+		/* The shares being removed here wont be touched by any other
+		 *  code, so we don't need to hold the shares_free lock the
+		 *  whole time, since that would slow down incoming share
+		 *  processing too much - this only affects DISCARD_ALL
+		 *  TODO: delete the shares when they are summarised in the
+		 *	  sharesummary */
+		if (shares->userid != curr_userid) {
+			K_WUNLOCK(shares_free);
+			curr_userid = shares->userid;
+			K_WLOCK(shares_free);
+		}
+
 		(*shares_tot)++;
 		if (shares->errn == SE_NONE)
 			(*diff_tot) += shares->diff;
+		if (reloading && skipupdate) {
+			(*shares_dumped)++;
+			if (error[0])
+				multiple = true;
+			else {
+				snprintf(error, sizeof(error),
+					 "%"PRId64"/%"PRId64"/%s/%s%.0f",
+					 shares->workinfoid,
+					 shares->userid,
+					 shares->workername,
+					 (shares->errn == SE_NONE) ? "" : "*",
+					 shares->diff);
+			}
+		}
 		tmp_item = next_in_ktree(s_ctx);
 		remove_from_ktree(shares_root, s_item);
 		k_unlink_item(shares_store, s_item);
-		if (reloading && skipupdate)
-			(*shares_dumped)++;
-		if (reloading && skipupdate && !error[0]) {
-			snprintf(error, sizeof(error),
-				 "reload found aged share: %"PRId64
-				 "/%"PRId64"/%s/%s%.0f",
-				 shares->workinfoid,
-				 shares->userid,
-				 shares->workername,
-				 (shares->errn == SE_NONE) ? "" : "*",
-				 shares->diff);
-		}
 		k_add_head(shares_free, s_item);
 		s_item = tmp_item;
 	}
 	K_WUNLOCK(shares_free);
 
-	if (error[0])
-		LOGERR("%s(): %s", __func__, error);
+	if (error[0]) {
+		LOGERR("%s(): reload found %s aged share%s%s: %s",
+			__func__, multiple ? "multiple" : "an",
+			multiple ? "s" : EMPTY,
+			multiple ? ", the first was" : EMPTY,
+			error);
+	}
+
 }
+#endif
 
 // Duplicates during a reload are set to not show messages
-bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
-		  char *inet, tv_t *cd, tv_t *ss_first, tv_t *ss_last,
-		  int64_t *ss_count, int64_t *s_count, int64_t *s_diff)
+bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
+		  tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
+		  int64_t *s_count, int64_t *s_diff)
 {
 	K_ITEM *wi_item, ss_look, *ss_item;
 	K_ITEM ks_look, *ks_item, *wm_item;
@@ -2208,6 +2259,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	int64_t diff_tot;
 	KEYSHARESUMMARY lookkeysharesummary, *keysharesummary;
 	SHARESUMMARY looksharesummary, *sharesummary;
+	char complete[TXT_FLAG+1];
 	WORKINFO *workinfo;
 	bool ok = false, ksok = false, skipupdate = false;
 
@@ -2269,8 +2321,12 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 	ss_look.data = (void *)(&looksharesummary);
 	K_RLOCK(sharesummary_free);
 	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &ss_look, ss_ctx);
+	if (ss_item) {
+		DATA_SHARESUMMARY(sharesummary, ss_item);
+		// complete could change, the id fields wont be changed/removed yet
+		STRNCPY(complete, sharesummary->complete);
+	}
 	K_RUNLOCK(sharesummary_free);
-	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	while (ss_item && sharesummary->workinfoid == workinfoid) {
 		ss_tot++;
 		skipupdate = false;
@@ -2278,7 +2334,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		 *  so finding an aged sharesummary here is an error
 		 * N.B. this can only happen with (very) old reload files */
 		if (reloading) {
-			if (sharesummary->complete[0] == SUMMARY_COMPLETE) {
+			if (complete[0] == SUMMARY_COMPLETE) {
 				ss_already++;
 				skipupdate = true;
 				if (confirm_sharesummary) {
@@ -2292,7 +2348,9 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 		}
 
 		if (!skipupdate) {
-			if (!sharesummary_age(ss_item, by, code, inet, cd)) {
+			K_WLOCK(sharesummary_free);
+			if (!sharesummary_age(ss_item)) {
+				K_WUNLOCK(sharesummary_free);
 				ss_failed++;
 				LOGERR("%s(): Failed to age sharesummary %"PRId64"/%s/%"PRId64,
 					__func__, sharesummary->userid,
@@ -2308,6 +2366,7 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 					copy_tv(ss_first, &(sharesummary->firstshare));
 				if (tv_newer(ss_last, &(sharesummary->lastshare)))
 					copy_tv(ss_last, &(sharesummary->lastshare));
+				K_WUNLOCK(sharesummary_free);
 			}
 		}
 
@@ -2318,8 +2377,11 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, char *by, char *code,
 
 		K_RLOCK(sharesummary_free);
 		ss_item = next_in_ktree(ss_ctx);
+		if (ss_item) {
+			DATA_SHARESUMMARY(sharesummary, ss_item);
+			STRNCPY(complete, sharesummary->complete);
+		}
 		K_RUNLOCK(sharesummary_free);
-		DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 	}
 
 	if (ss_already || ss_failed || shares_dumped) {
@@ -2350,8 +2412,12 @@ skip_ss:
 	ks_look.data = (void *)(&lookkeysharesummary);
 	K_RLOCK(keysharesummary_free);
 	ks_item = find_after_in_ktree(keysharesummary_root, &ks_look, ks_ctx);
+	if (ks_item) {
+		DATA_KEYSHARESUMMARY(keysharesummary, ks_item);
+		// complete could change, the id fields wont be changed/removed yet
+		STRNCPY(complete, keysharesummary->complete);
+	}
 	K_RUNLOCK(keysharesummary_free);
-	DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
 	while (ks_item && keysharesummary->workinfoid == workinfoid) {
 		ks_tot++;
 		skipupdate = false;
@@ -2359,7 +2425,7 @@ skip_ss:
 		 *  so finding an aged keysharesummary here is an error
 		 * N.B. this can only happen with (very) old reload files */
 		if (reloading && !key_update) {
-			if (keysharesummary->complete[0] == SUMMARY_COMPLETE) {
+			if (complete[0] == SUMMARY_COMPLETE) {
 				ks_already++;
 				skipupdate = true;
 				if (confirm_sharesummary) {
@@ -2373,20 +2439,27 @@ skip_ss:
 		}
 
 		if (!skipupdate) {
+			K_WLOCK(keysharesummary_free);
 			if (!keysharesummary_age(ks_item)) {
 				ks_failed++;
+				K_WUNLOCK(keysharesummary_free);
 				LOGERR("%s(): Failed to age keysharesummary %"PRId64"/%s/%s",
 					__func__, keysharesummary->workinfoid,
 					keysharesummary->keytype,
 					keysharesummary->key);
 				ksok = false;
+			} else {
+				K_WUNLOCK(keysharesummary_free);
 			}
 		}
 
 		K_RLOCK(keysharesummary_free);
 		ks_item = next_in_ktree(ks_ctx);
+		if (ks_item) {
+			DATA_KEYSHARESUMMARY(keysharesummary, ks_item);
+			STRNCPY(complete, keysharesummary->complete);
+		}
 		K_RUNLOCK(keysharesummary_free);
-		DATA_KEYSHARESUMMARY_NULL(keysharesummary, ks_item);
 	}
 
 	/* All shares should have been discarded during sharesummary
@@ -2527,19 +2600,17 @@ cmp_t cmp_shareerrors(K_ITEM *a, K_ITEM *b)
 
 void dsp_sharesummary(K_ITEM *item, FILE *stream)
 {
-	char createdate_buf[DATE_BUFSIZ];
 	SHARESUMMARY *s;
 
 	if (!item)
 		fprintf(stream, "%s() called with (null) item\n", __func__);
 	else {
 		DATA_SHARESUMMARY(s, item);
-		tv_to_buf(&(s->createdate), createdate_buf, sizeof(createdate_buf));
 		fprintf(stream, " uid=%"PRId64" wn='%s' wid=%"PRId64" "
-				"da=%f ds=%f ss=%f c='%s' cd=%s\n",
+				"da=%f ds=%f ss=%f c='%s'\n",
 				s->userid, s->workername, s->workinfoid,
 				s->diffacc, s->diffsta, s->sharesta,
-				s->complete, createdate_buf);
+				s->complete);
 	}
 }
 
@@ -2632,8 +2703,7 @@ K_ITEM *find_last_sharesummary(int64_t userid, char *workername)
 }
 
 // key_update must age keysharesummary directly
-static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
-				char *code, char *inet, tv_t *cd)
+static void key_auto_age_older(int64_t workinfoid, char *poolinstance, tv_t *cd)
 {
 	static int64_t last_attempted_id = -1;
 	static int64_t prev_found = 0;
@@ -2651,6 +2721,14 @@ static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 	int64_t age_id, do_id, to_id;
 	bool ok, found;
 
+	K_WLOCK(workinfo_free);
+	if (workinfo_age_lock) {
+		K_WUNLOCK(workinfo_free);
+		return;
+	} else
+		workinfo_age_lock = true;
+	K_WUNLOCK(workinfo_free);
+
 	LOGDEBUG("%s(): workinfoid=%"PRId64" prev=%"PRId64, __func__, workinfoid, prev_found);
 
 	age_id = prev_found;
@@ -2663,15 +2741,15 @@ static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 	INIT_KEYSHARESUMMARY(&look);
 	look.data = (void *)(&lookkeysharesummary);
 
+	DATE_ZERO(&kss_first_min);
+	DATE_ZERO(&kss_last_max);
+	kss_count_tot = s_count_tot = s_diff_tot = 0;
+	found = false;
+
 	K_RLOCK(keysharesummary_free);
 	kss_item = find_after_in_ktree(keysharesummary_root, &look, ctx);
 	DATA_KEYSHARESUMMARY_NULL(keysharesummary, kss_item);
 
-	DATE_ZERO(&kss_first_min);
-	DATE_ZERO(&kss_last_max);
-	kss_count_tot = s_count_tot = s_diff_tot = 0;
-
-	found = false;
 	while (kss_item && keysharesummary->workinfoid < workinfoid) {
 		if (keysharesummary->complete[0] == SUMMARY_NEW) {
 			age_id = keysharesummary->workinfoid;
@@ -2686,9 +2764,9 @@ static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 
 	LOGDEBUG("%s(): age_id=%"PRId64" found=%d", __func__, age_id, found);
 	// Don't repeat searching old items to avoid accessing their ram
-	if (!found)
+	if (!found) {
 		prev_found = workinfoid;
-	else {
+	} else {
 		/* Process all the consecutive keysharesummaries that's aren't aged
 		 * This way we find each oldest 'batch' of keysharesummaries that have
 		 *  been missed and can report the range of data that was aged,
@@ -2700,9 +2778,9 @@ static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 		do_id = age_id;
 		to_id = 0;
 		do {
-			ok = workinfo_age(do_id, poolinstance, by, code, inet,
-					  cd, &kss_first, &kss_last, &kss_count,
-					  &s_count, &s_diff);
+			ok = workinfo_age(do_id, poolinstance, cd, &kss_first,
+					  &kss_last, &kss_count, &s_count,
+					  &s_diff);
 
 			kss_count_tot += kss_count;
 			s_count_tot += s_count;
@@ -2774,12 +2852,14 @@ static void key_auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 				   idrange, keysharerange);
 		}
 	}
+	K_WLOCK(workinfo_free);
+	workinfo_age_lock = false;
+	K_WUNLOCK(workinfo_free);
 }
 
 /* TODO: markersummary checking?
  * However, there should be no issues since the sharesummaries are removed */
-void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
-		    char *code, char *inet, tv_t *cd)
+void auto_age_older(int64_t workinfoid, char *poolinstance, tv_t *cd)
 {
 	static int64_t last_attempted_id = -1;
 	static int64_t prev_found = 0;
@@ -2798,9 +2878,20 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 	bool ok, found;
 
 	if (key_update) {
-		key_auto_age_older(workinfoid, poolinstance, by, code, inet, cd);
+		key_auto_age_older(workinfoid, poolinstance, cd);
 		return;
 	}
+
+	/* Simply lock out more than one from running at the same time
+	 * This locks access to prev_found, repeat and last_attempted_id
+	 * If any are missed they'll be aged by the next age_workinfo in 30s */
+	K_WLOCK(workinfo_free);
+	if (workinfo_age_lock) {
+		K_WUNLOCK(workinfo_free);
+		return;
+	} else
+		workinfo_age_lock = true;
+	K_WUNLOCK(workinfo_free);
 
 	LOGDEBUG("%s(): workinfoid=%"PRId64" prev=%"PRId64, __func__, workinfoid, prev_found);
 
@@ -2814,15 +2905,15 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 	INIT_SHARESUMMARY(&look);
 	look.data = (void *)(&looksharesummary);
 
+	DATE_ZERO(&ss_first_min);
+	DATE_ZERO(&ss_last_max);
+	ss_count_tot = s_count_tot = s_diff_tot = 0;
+	found = false;
+
 	K_RLOCK(sharesummary_free);
 	ss_item = find_after_in_ktree(sharesummary_workinfoid_root, &look, ctx);
 	DATA_SHARESUMMARY_NULL(sharesummary, ss_item);
 
-	DATE_ZERO(&ss_first_min);
-	DATE_ZERO(&ss_last_max);
-	ss_count_tot = s_count_tot = s_diff_tot = 0;
-
-	found = false;
 	while (ss_item && sharesummary->workinfoid < workinfoid) {
 		if (sharesummary->complete[0] == SUMMARY_NEW) {
 			age_id = sharesummary->workinfoid;
@@ -2852,9 +2943,9 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 		do_id = age_id;
 		to_id = 0;
 		do {
-			ok = workinfo_age(do_id, poolinstance, by, code, inet,
-					  cd, &ss_first, &ss_last, &ss_count,
-					  &s_count, &s_diff);
+			ok = workinfo_age(do_id, poolinstance, cd, &ss_first,
+					  &ss_last, &ss_count, &s_count,
+					  &s_diff);
 
 			ss_count_tot += ss_count;
 			s_count_tot += s_count;
@@ -2926,6 +3017,9 @@ void auto_age_older(int64_t workinfoid, char *poolinstance, char *by,
 				   idrange, sharerange);
 		}
 	}
+	K_WLOCK(workinfo_free);
+	workinfo_age_lock = false;
+	K_WUNLOCK(workinfo_free);
 }
 
 void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS)

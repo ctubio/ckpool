@@ -2865,18 +2865,20 @@ seconf:
 		}
 
 		ok = workinfo_age(workinfoid, transfer_data(i_poolinstance),
-				  by, code, inet, cd, &ss_first, &ss_last,
-				  &ss_count, &s_count, &s_diff);
+				  cd, &ss_first, &ss_last, &ss_count, &s_count,
+				  &s_diff);
 		if (!ok) {
 			LOGERR("%s(%s) %s.failed.DATA", __func__, cmd, id);
 			return strdup("failed.DATA");
 		} else {
-			/* Don't slow down the reload - do them later */
-			if (!reloading || key_update) {
+			/* Don't slow down the reload - do them later,
+			 *  unless it's a long reload since:
+			 *   Any pool restarts in the reload data will cause
+			 *    unaged workinfos and thus would stop marker() */
+			if (!reloading || key_update || reloaded_N_files) {
 				// Aging is a queued item thus the reply is ignored
 				auto_age_older(workinfoid,
-						transfer_data(i_poolinstance),
-						by, code, inet, cd);
+						transfer_data(i_poolinstance), cd);
 			}
 		}
 		LOGDEBUG("%s.ok.aged %"PRId64, id, workinfoid);
@@ -7664,6 +7666,67 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+	} else if (strcasecmp(request, "shareinfo") == 0) {
+		/* return share information for the workinfo with wid>=value
+		 * if wid=0 then find the oldest workinfo that has shares */
+		K_ITEM *i_wid, s_look, *s_item;
+		SHARES lookshares, *shares;
+		int64_t selwid, wid, s_count = 0, s_diff = 0, s_sdiff = 0;
+		bool found;
+
+		i_wid = require_name(trf_root, "wid",
+					1, (char *)intpatt,
+					reply, siz);
+		if (!i_wid)
+			return strdup(reply);
+		TXT_TO_BIGINT("wid", transfer_data(i_wid), selwid);
+
+		INIT_SHARES(&s_look);
+		lookshares.workinfoid = selwid;
+		lookshares.userid = -1;
+		lookshares.workername[0] = '\0';
+		DATE_ZERO(&(lookshares.createdate));
+		s_look.data = (void *)(&lookshares);
+		found = false;
+		K_RLOCK(shares_free);
+		s_item = find_after_in_ktree(shares_root, &s_look, ctx);
+		if (s_item) {
+			found = true;
+			DATA_SHARES(shares, s_item);
+			wid = shares->workinfoid;
+			while (s_item) {
+				DATA_SHARES(shares, s_item);
+				if (shares->workinfoid != wid)
+					break;
+				s_count++;
+				s_diff += shares->diff;
+				if (s_sdiff < shares->sdiff)
+					s_sdiff = shares->sdiff;
+				s_item = next_in_ktree(ctx);
+			}
+		}
+		K_RUNLOCK(shares_free);
+
+		if (found) {
+			snprintf(tmp, sizeof(tmp), "selwid=%"PRId64"%c",
+				 selwid, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "wid=%"PRId64"%c",
+				 wid, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "shares=%"PRId64"%c",
+				 s_count, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "diff=%"PRId64"%c",
+				 s_diff, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "maxsdiff=%"PRId64"%c",
+				 s_sdiff, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			rows++;
+		}
+
+		ok = true;
 	} else {
 		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);
@@ -8354,6 +8417,85 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+// Running thread adjustments
+static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
+			 __maybe_unused tv_t *now, __maybe_unused char *by,
+			 __maybe_unused char *code, __maybe_unused char *inet,
+			 __maybe_unused tv_t *cd, K_TREE *trf_root,
+			 __maybe_unused bool reload_data)
+{
+	K_ITEM *i_name, *i_delta;
+	char *name, *delta;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char *buf = NULL;
+	int delta_value = 0;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_name = require_name(trf_root, "name", 1, NULL, reply, siz);
+	if (!i_name)
+		return strdup(reply);
+	name = transfer_data(i_name);
+	i_delta = require_name(trf_root, "delta", 2, NULL, reply, siz);
+	if (!i_delta)
+		return strdup(reply);
+	delta = transfer_data(i_delta);
+	if (*delta != '+' && *delta != '-') {
+		snprintf(reply, siz, "invalid delta '%s'", delta);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+	delta_value = atoi(delta+1);
+	if (delta_value < 1 || delta_value >= THREAD_LIMIT) {
+		snprintf(reply, siz, "invalid delta range '%s'", delta);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+	if (*delta == '-')
+		delta_value = -delta_value;
+
+	if (strcasecmp(name, "pr") == 0 ||
+	    strcasecmp(name, "process_reload") == 0) {
+		K_WLOCK(breakqueue_free);
+		// Just overwrite whatever's there
+		reload_queue_threads_delta = delta_value;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "pq") == 0 ||
+		   strcasecmp(name, "pqproc") == 0) {
+		K_WLOCK(workqueue_free);
+		// Just overwrite whatever's there
+		proc_queue_threads_delta = delta_value;
+		K_WUNLOCK(workqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "rb") == 0 ||
+		   strcasecmp(name, "reload_breaker") == 0) {
+		K_WLOCK(breakqueue_free);
+		// Just overwrite whatever's there
+		reload_breakdown_threads_delta = delta_value;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "cb") == 0 ||
+		   strcasecmp(name, "cmd_breaker") == 0) {
+		K_WLOCK(breakqueue_free);
+		// Just overwrite whatever's there
+		cmd_breakdown_threads_delta = delta_value;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else {
+		snprintf(reply, siz, "unknown name '%s'", name);
+		LOGERR("%s() %s.%s", __func__, id, reply);
+		return strdup(reply);
+	}
+
+	return buf;
+}
+
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -8466,5 +8608,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_LOCKS,	"locks",	false,	false,	cmd_locks,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_EVENTS,	"events",	false,	false,	cmd_events,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_HIGH,	"high",		false,	false,	cmd_high,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_THREADS,	"threads",	false,	false,	cmd_threads,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

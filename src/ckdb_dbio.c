@@ -214,12 +214,57 @@ char *pqerrmsg(PGconn *conn)
 #undef PQexec
 #undef PQexecParams
 
+/* Debug level to display write transactions - 0 removes the code
+ * Also enables checking the isread flag */
+#define CKPQ_SHOW_WRITE 0
+
+#define CKPQ_ISREAD1 "select "
+#define CKPQ_ISREAD1LEN (sizeof(CKPQ_ISREAD1)-1)
+#define CKPQ_ISREAD2 "declare "
+#define CKPQ_ISREAD2LEN (sizeof(CKPQ_ISREAD2)-1)
+#define CKPQ_ISREAD3 "fetch "
+#define CKPQ_ISREAD3LEN (sizeof(CKPQ_ISREAD3)-1)
+
 // Bug check to ensure no unexpected write txns occur
 PGresult *_CKPQexec(PGconn *conn, const char *qry, bool isread, WHERE_FFL_ARGS)
 {
 	// It would slow it down, but could check qry for insert/update/...
 	if (!isread && confirm_sharesummary)
 		quitfrom(1, file, func, line, "BUG: write txn during confirm");
+
+#if CKPQ_SHOW_WRITE
+	if (isread) {
+		if ((strncmp(qry, CKPQ_ISREAD1, CKPQ_ISREAD1LEN) != 0) &&
+		    (strncmp(qry, CKPQ_ISREAD2, CKPQ_ISREAD2LEN) != 0) &&
+		    (strncmp(qry, CKPQ_ISREAD3, CKPQ_ISREAD3LEN) != 0)) {
+			LOGERR("%s() ERR: query flagged as read, but isn't"
+				WHERE_FFL, __func__, WHERE_FFL_PASS);
+			isread = false;
+		}
+	} else {
+		if ((strncmp(qry, CKPQ_ISREAD1, CKPQ_ISREAD1LEN) == 0) ||
+		    (strncmp(qry, CKPQ_ISREAD2, CKPQ_ISREAD2LEN) == 0) ||
+		    (strncmp(qry, CKPQ_ISREAD3, CKPQ_ISREAD3LEN) == 0)) {
+			LOGERR("%s() ERR: query flagged as write, but isn't"
+				WHERE_FFL, __func__, WHERE_FFL_PASS);
+			isread = true;
+		}
+	}
+	if (!isread) {
+		char *buf = NULL, ffl[128];
+		size_t len, off;
+
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, __func__);
+		APPEND_REALLOC(buf, off, len, "() W: '");
+		APPEND_REALLOC(buf, off, len, qry);
+		APPEND_REALLOC(buf, off, len, "'");
+		snprintf(ffl, sizeof(ffl), WHERE_FFL, WHERE_FFL_PASS);
+		APPEND_REALLOC(buf, off, len, ffl);
+		LOGMSGBUF(CKPQ_SHOW_WRITE, buf);
+		FREENULL(buf);
+	}
+#endif
 
 	return PQexec(conn, qry);
 }
@@ -236,6 +281,47 @@ PGresult *_CKPQexecParams(PGconn *conn, const char *qry,
 	// It would slow it down, but could check qry for insert/update/...
 	if (!isread && confirm_sharesummary)
 		quitfrom(1, file, func, line, "BUG: write txn during confirm");
+
+#if CKPQ_SHOW_WRITE
+	if (isread) {
+		if ((strncmp(qry, CKPQ_ISREAD1, CKPQ_ISREAD1LEN) != 0) &&
+		    (strncmp(qry, CKPQ_ISREAD2, CKPQ_ISREAD2LEN) != 0) &&
+		    (strncmp(qry, CKPQ_ISREAD3, CKPQ_ISREAD3LEN) != 0)) {
+			LOGERR("%s() ERR: query flagged as read, but isn't"
+				WHERE_FFL, __func__, WHERE_FFL_PASS);
+			isread = false;
+		}
+	} else {
+		if ((strncmp(qry, CKPQ_ISREAD1, CKPQ_ISREAD1LEN) == 0) ||
+		    (strncmp(qry, CKPQ_ISREAD2, CKPQ_ISREAD2LEN) == 0) ||
+		    (strncmp(qry, CKPQ_ISREAD3, CKPQ_ISREAD3LEN) == 0)) {
+			LOGERR("%s() ERR: query flagged as write, but isn't"
+				WHERE_FFL, __func__, WHERE_FFL_PASS);
+			isread = true;
+		}
+	}
+	if (!isread) {
+		char *buf = NULL, num[16], ffl[128];
+		size_t len, off;
+		int i;
+
+		APPEND_REALLOC_INIT(buf, off, len);
+		APPEND_REALLOC(buf, off, len, __func__);
+		APPEND_REALLOC(buf, off, len, "() W: '");
+		APPEND_REALLOC(buf, off, len, qry);
+		APPEND_REALLOC(buf, off, len, "'");
+		for (i = 0; i < nParams; i++) {
+			snprintf(num, sizeof(num), " $%d='", i+1);
+			APPEND_REALLOC(buf, off, len, num);
+			APPEND_REALLOC(buf, off, len, paramValues[i]);
+			APPEND_REALLOC(buf, off, len, "'");
+		}
+		snprintf(ffl, sizeof(ffl), WHERE_FFL, WHERE_FFL_PASS);
+		APPEND_REALLOC(buf, off, len, ffl);
+		LOGMSGBUF(CKPQ_SHOW_WRITE, buf);
+		FREENULL(buf);
+	}
+#endif
 
 	return PQexecParams(conn, qry, nParams, paramTypes, paramValues, paramLengths,
 			    paramFormats, resultFormat);
@@ -558,6 +644,19 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 
 	LOGDEBUG("%s(): add", __func__);
 
+	/* 2 attempts to add the same user at the same time will only do it once
+	 * The 2nd attempt will get back the data provided by the 1st
+	 *  and thus throw away any differences in the 2nd */
+	K_WLOCK(users_db_free);
+
+	K_RLOCK(users_free);
+	item = find_users(username);
+	K_RUNLOCK(users_free);
+	if (item) {
+		ok = true;
+		goto already;
+	}
+
 	K_WLOCK(users_free);
 	item = k_unlink_head(users_free);
 	K_WUNLOCK(users_free);
@@ -664,6 +763,10 @@ unitem:
 		k_add_head(users_store, item);
 	}
 	K_WUNLOCK(users_free);
+
+already:
+
+	K_WUNLOCK(users_db_free);
 
 	if (ok)
 		return item;
@@ -1469,6 +1572,11 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 
 	LOGDEBUG("%s(): update", __func__);
 
+	/* Two attempts to update the same worker at the same time
+	 *  will determine the final state based on which gets the lock last,
+	 *  i.e. randomly, but without overwriting at the same time */
+	K_WLOCK(workers_db_free);
+
 	DATA_WORKERS(row, item);
 
 	if (check) {
@@ -1583,6 +1691,9 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 early:
+
+	K_WUNLOCK(workers_db_free);
+
 	return ok;
 }
 
@@ -3399,6 +3510,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 {
 	K_ITEM *w_item, *wm_item, *ss_item;
 	SHARESUMMARY *sharesummary;
+	char complete[TXT_FLAG+1];
 	WORKINFO *workinfo;
 	char *st = NULL;
 
@@ -3434,9 +3546,9 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 					 100.0 * pool.diffacc /
 					 workinfo->diff_target);
 			}
-			LOGWARNING("%s %s Diff %.1f%% (%.0f/%.1f) %s "
-				   "Pool %.1f%s%s",
-				   block ? "BLOCK!" : "Share",
+			LOGWARNING("%s (%"PRIu32") %s Diff %.1f%% (%.0f/%.1f) "
+				   "%s Pool %.1f%s%s",
+				   block ? "BLOCK!" : "Share", workinfo->height,
 				   (sta == NULL) ? "ok" : sta,
 				   100.0 * shares->sdiff / workinfo->diff_target,
 				   shares->sdiff, workinfo->diff_target,
@@ -3479,13 +3591,14 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 		K_RLOCK(sharesummary_free);
 		ss_item = find_sharesummary(shares->userid, shares->workername,
 					    shares->workinfoid);
-		K_RUNLOCK(sharesummary_free);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
 			if (sharesummary->complete[0] != SUMMARY_NEW) {
+				STRNCPY(complete, sharesummary->complete);
+				K_RUNLOCK(sharesummary_free);
 				LOGDEBUG("%s(): '%s' sharesummary exists "
 					 "%"PRId64" %"PRId64"/%s/%ld,%ld",
-					 __func__, sharesummary->complete,
+					 __func__, complete,
 					 shares->workinfoid, shares->userid,
 					 st = safe_text_nonull(shares->workername),
 					 shares->createdate.tv_sec,
@@ -3495,6 +3608,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 				return true;
 			}
 		}
+		K_RUNLOCK(sharesummary_free);
 	}
 
 	if (!key_update && !confirm_sharesummary) {
@@ -3504,8 +3618,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 		K_WUNLOCK(userinfo_free);
 	}
 
-	sharesummary_update(shares, NULL, shares->createby, shares->createcode,
-			    shares->createinet, &(shares->createdate));
+	sharesummary_update(shares, NULL, &(shares->createdate));
 
 	return true;
 }
@@ -3601,8 +3714,8 @@ keep:
 		early_shares->oldcount, early_shares->redo);
 	FREENULL(st);
 	K_WLOCK(shares_free);
-	add_to_ktree(shares_root, es_item);
-	k_add_head(shares_store, es_item);
+	// Discard it, it's been processed
+	k_add_head(shares_free, es_item);
 	K_WUNLOCK(shares_free);
 	return;
 discard:
@@ -3639,6 +3752,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	USERS *users;
 	bool ok = false, dup = false;
 	char *st = NULL;
+	tv_t share_cd;
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
@@ -3660,6 +3774,8 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
+	/* Can't change outside lock since we don't delete users
+	 *  or change their *userid */
 	if (!u_item) {
 		btv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		/* This should never happen unless there's a bug in ckpool
@@ -3672,7 +3788,6 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		goto tisbad;
 	}
 	DATA_USERS(users, u_item);
-
 	shares->userid = users->userid;
 
 	TXT_TO_BIGINT("workinfoid", workinfoid, shares->workinfoid);
@@ -3762,9 +3877,10 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 
 	ok = shares_process(conn, shares, wi_item, trf_root);
 	if (ok) {
+		copy_tv(&share_cd, &(shares->createdate));
 		K_WLOCK(shares_free);
-		add_to_ktree(shares_root, s_item);
-		k_add_head(shares_store, s_item);
+		// Discard it, it's been processed
+		k_add_head(shares_free, s_item);
 		if (s2_item) {
 			// Discard duplicates
 			tmp_item = find_in_ktree(shares_db_root, s2_item, ctx);
@@ -3791,11 +3907,10 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 			FREENULL(st);
 		}
 
-		shares_process_early(conn, wi_item, &(shares->createdate),
-				     trf_root);
+		shares_process_early(conn, wi_item, &share_cd, trf_root);
 		// Call both since shareerrors may be rare
 		shareerrors_process_early(conn, shares->workinfoid,
-					  &(shares->createdate), trf_root);
+					  &share_cd, trf_root);
 
 		// The original share was ok
 		return true;
@@ -4142,6 +4257,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 {
 	K_ITEM *w_item, *wm_item, *ss_item;
 	SHARESUMMARY *sharesummary;
+	char complete[TXT_FLAG+1];
 	char *st = NULL;
 
 	LOGDEBUG("%s() add", __func__);
@@ -4185,13 +4301,14 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 		ss_item = find_sharesummary(shareerrors->userid,
 					    shareerrors->workername,
 					    shareerrors->workinfoid);
-		K_RUNLOCK(sharesummary_free);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
 			if (sharesummary->complete[0] != SUMMARY_NEW) {
+				STRNCPY(complete, sharesummary->complete);
+				K_RUNLOCK(sharesummary_free);
 				LOGDEBUG("%s(): '%s' sharesummary exists "
 					 "%"PRId64" %"PRId64"/%s/%ld,%ld",
-					 __func__, sharesummary->complete,
+					 __func__, complete,
 					 shareerrors->workinfoid,
 					 shareerrors->userid,
 					 st = safe_text_nonull(shareerrors->workername),
@@ -4201,11 +4318,10 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 				return false;
 			}
 		}
+		K_RUNLOCK(sharesummary_free);
 	}
 
-	sharesummary_update(NULL, shareerrors, shareerrors->createby,
-			    shareerrors->createcode, shareerrors->createinet,
-			    &(shareerrors->createdate));
+	sharesummary_update(NULL, shareerrors, &(shareerrors->createdate));
 
 	return true;
 }
@@ -4670,6 +4786,39 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	setnow(&add_fin);
 
 dokey:
+
+	if (key_update) {
+		setnow(&add_stt);
+
+		// Discard the sharesummaries
+		looksharesummary.workinfoid = workmarkers->workinfoidend;
+		looksharesummary.userid = MAXID;
+		looksharesummary.workername = EMPTY;
+
+		INIT_SHARESUMMARY(&ss_look);
+		ss_look.data = (void *)(&looksharesummary);
+		/* Since shares come in from ckpool at a high rate,
+		 *  we don't want to lock sharesummary for long
+		 * Those incoming shares will not be touching the sharesummaries
+		 *  we are processing here */
+		K_RLOCK(sharesummary_free);
+		ss_item = find_before_in_ktree(sharesummary_workinfoid_root,
+						&ss_look, ss_ctx);
+		K_RUNLOCK(sharesummary_free);
+		while (ss_item) {
+			DATA_SHARESUMMARY(sharesummary, ss_item);
+			if (sharesummary->workinfoid < workmarkers->workinfoidstart)
+				break;
+			K_WLOCK(sharesummary_free);
+			ss_prev = prev_in_ktree(ss_ctx);
+			k_unlink_item(sharesummary_store, ss_item);
+			K_WUNLOCK(sharesummary_free);
+			k_add_head_nolock(old_sharesummary_store, ss_item);
+
+			ss_item = ss_prev;
+		}
+		setnow(&add_fin);
+	}
 
 	setnow(&kadd_stt);
 	INIT_KEYSUMMARY(&ks_look);
@@ -5182,13 +5331,12 @@ flail:
 	return ok;
 }
 
+// Requires K_WLOCK(sharesummary_free)
 static void set_sharesummary_stats(SHARESUMMARY *row, SHARES *s_row,
 				   SHAREERRORS *e_row, bool new,
 				   double *tdf, double *tdl)
 {
 	tv_t *createdate;
-
-	K_WLOCK(sharesummary_free);
 
 	if (s_row)
 		createdate = &(s_row->createdate);
@@ -5251,15 +5399,11 @@ static void set_sharesummary_stats(SHARESUMMARY *row, SHARES *s_row,
 		*tdf = tvdiff(createdate, &(row->firstshare));
 		*tdl = tvdiff(createdate, &(row->lastshare));
 	}
-
-	K_WUNLOCK(sharesummary_free);
 }
 
 static void set_keysharesummary_stats(KEYSHARESUMMARY *row, SHARES *s_row,
 				      bool new)
 {
-	K_WLOCK(keysharesummary_free);
-
 	if (new) {
 		zero_keysharesummary(row);
 		copy_tv(&(row->firstshare), &(s_row->createdate));
@@ -5307,8 +5451,6 @@ static void set_keysharesummary_stats(KEYSHARESUMMARY *row, SHARES *s_row,
 			row->sharerej++;
 			break;
 	}
-
-	K_WUNLOCK(keysharesummary_free);
 }
 
 /* Keep some simple stats on how often shares are out of order
@@ -5330,15 +5472,15 @@ char *ooo_status(char *buf, size_t siz)
 
 /* sharesummaries are no longer stored in the DB but fields are updated as b4
  * This creates/updates both the sharesummaries and the keysharesummaries */
-bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
-			  char *code, char *inet, tv_t *cd, WHERE_FFL_ARGS)
+bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
+			 WHERE_FFL_ARGS)
 {
 	WORKMARKERS *wm;
 	SHARESUMMARY *row, *p_row;
 	KEYSHARESUMMARY *ki_row = NULL, *ka_row = NULL;
 	K_ITEM *ss_item, *kiss_item = NULL, *kass_item = NULL, *wm_item, *p_item = NULL;
 	bool new = false, p_new = false, ki_new = false, ka_new = false;
-	int64_t userid, workinfoid;
+	int64_t userid, workinfoid, markerid;
 	char *workername, *address = NULL, *agent = NULL;
 	char *st = NULL, *db = NULL;
 	char ooo_buf[256];
@@ -5371,33 +5513,30 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 	K_RLOCK(workmarkers_free);
 	wm_item = find_workmarkers(workinfoid, false, MARKER_PROCESSED,
 				   NULL);
-	K_RUNLOCK(workmarkers_free);
 	if (wm_item) {
 		DATA_WORKMARKERS(wm, wm_item);
+		markerid = wm->markerid;
+		K_RUNLOCK(workmarkers_free);
 		LOGERR("%s(): attempt to update sharesummary "
 		       "with %s %"PRId64"/%"PRId64"/%s "CDDB" %s"
 		       " but processed workmarkers %"PRId64" exists",
 			__func__, s_row ? "shares" : "shareerrors",
 			workinfoid, userid, st = safe_text(workername),
-				db = ctv_to_buf(cd, NULL, 0),
-				wm->markerid);
+				db = ctv_to_buf(cd, NULL, 0), markerid);
 			FREENULL(st);
 			FREENULL(db);
 			return false;
 	}
+	K_RUNLOCK(workmarkers_free);
 
-	K_RLOCK(sharesummary_free);
+	K_WLOCK(sharesummary_free);
 	ss_item = find_sharesummary(userid, workername, workinfoid);
-	p_item = find_sharesummary_p(workinfoid);
-	K_RUNLOCK(sharesummary_free);
 
 	if (ss_item) {
 		DATA_SHARESUMMARY(row, ss_item);
 	} else {
 		new = true;
-		K_WLOCK(sharesummary_free);
 		ss_item = k_unlink_head(sharesummary_free);
-		K_WUNLOCK(sharesummary_free);
 		DATA_SHARESUMMARY(row, ss_item);
 		bzero(row, sizeof(*row));
 		row->userid = userid;
@@ -5409,20 +5548,23 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 	// N.B. this directly updates the non-key data
 	set_sharesummary_stats(row, s_row, e_row, new, &tdf, &tdl);
 
+	if (new) {
+		add_to_ktree(sharesummary_root, ss_item);
+		add_to_ktree(sharesummary_workinfoid_root, ss_item);
+		k_add_head(sharesummary_store, ss_item);
+	}
+	K_WUNLOCK(sharesummary_free);
+
 	// Ignore shareerrors for keysummaries
 	if (s_row) {
-		K_RLOCK(keysharesummary_free);
+		K_WLOCK(keysharesummary_free);
 		kiss_item = find_keysharesummary(workinfoid, KEYTYPE_IP, address);
-		kass_item = find_keysharesummary(workinfoid, KEYTYPE_AGENT, agent);
-		K_RUNLOCK(keysharesummary_free);
 
 		if (kiss_item) {
 			DATA_KEYSHARESUMMARY(ki_row, kiss_item);
 		} else {
 			ki_new = true;
-			K_WLOCK(keysharesummary_free);
 			kiss_item = k_unlink_head(keysharesummary_free);
-			K_WUNLOCK(keysharesummary_free);
 			DATA_KEYSHARESUMMARY(ki_row, kiss_item);
 			bzero(ki_row, sizeof(*ki_row));
 			ki_row->workinfoid = workinfoid;
@@ -5433,14 +5575,20 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 
 		// N.B. this directly updates the non-key data
 		set_keysharesummary_stats(ki_row, s_row, ki_new);
+		if (ki_new) {
+			add_to_ktree(keysharesummary_root, kiss_item);
+			k_add_head(keysharesummary_store, kiss_item);
+		}
+		K_WUNLOCK(keysharesummary_free);
+
+		K_WLOCK(keysharesummary_free);
+		kass_item = find_keysharesummary(workinfoid, KEYTYPE_AGENT, agent);
 
 		if (kass_item) {
 			DATA_KEYSHARESUMMARY(ka_row, kass_item);
 		} else {
 			ka_new = true;
-			K_WLOCK(keysharesummary_free);
 			kass_item = k_unlink_head(keysharesummary_free);
-			K_WUNLOCK(keysharesummary_free);
 			DATA_KEYSHARESUMMARY(ka_row, kass_item);
 			bzero(ka_row, sizeof(*ka_row));
 			ka_row->workinfoid = workinfoid;
@@ -5451,6 +5599,11 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 
 		// N.B. this directly updates the non-key data
 		set_keysharesummary_stats(ka_row, s_row, ka_new);
+		if (ka_new) {
+			add_to_ktree(keysharesummary_root, kass_item);
+			k_add_head(keysharesummary_store, kass_item);
+		}
+		K_WUNLOCK(keysharesummary_free);
 	}
 
 	if (!new) {
@@ -5506,13 +5659,14 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 		}
 	}
 
+	K_WLOCK(sharesummary_free);
+	p_item = find_sharesummary_p(workinfoid);
+
 	if (p_item) {
 		DATA_SHARESUMMARY(p_row, p_item);
 	} else {
 		p_new = true;
-		K_WLOCK(sharesummary_free);
 		p_item = k_unlink_head(sharesummary_free);
-		K_WUNLOCK(sharesummary_free);
 		DATA_SHARESUMMARY(p_row, p_item);
 		bzero(p_row, sizeof(*p_row));
 		POOL_SS(p_row);
@@ -5521,42 +5675,17 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, char *by,
 
 	set_sharesummary_stats(p_row, s_row, e_row, p_new, &tdf, &tdl);
 
-	MODIFYDATEPOINTERS(sharesummary_free, row, cd, by, code, inet);
-
-	// Store either new item
-	if (new || p_new) {
-		K_WLOCK(sharesummary_free);
-		if (new) {
-			add_to_ktree(sharesummary_root, ss_item);
-			add_to_ktree(sharesummary_workinfoid_root, ss_item);
-			k_add_head(sharesummary_store, ss_item);
-		}
-		if (p_new) {
-			add_to_ktree(sharesummary_pool_root, p_item);
-			k_add_head(sharesummary_pool_store, p_item);
-		}
-		K_WUNLOCK(sharesummary_free);
+	if (p_new) {
+		add_to_ktree(sharesummary_pool_root, p_item);
+		k_add_head(sharesummary_pool_store, p_item);
 	}
-
-	if (ki_new || ka_new) {
-		K_WLOCK(keysharesummary_free);
-		if (ki_new) {
-			add_to_ktree(keysharesummary_root, kiss_item);
-			k_add_head(keysharesummary_store, kiss_item);
-		}
-		if (ka_new) {
-			add_to_ktree(keysharesummary_root, kass_item);
-			k_add_head(keysharesummary_store, kass_item);
-		}
-		K_WUNLOCK(keysharesummary_free);
-	}
+	K_WUNLOCK(sharesummary_free);
 
 	return true;
 }
 
 // No key fields are modified
-bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
-			tv_t *cd, WHERE_FFL_ARGS)
+bool sharesummary_age(K_ITEM *ss_item)
 {
 	SHARESUMMARY *row;
 
@@ -5565,8 +5694,6 @@ bool _sharesummary_age(K_ITEM *ss_item, char *by, char *code, char *inet,
 	DATA_SHARESUMMARY(row, ss_item);
 	row->complete[0] = SUMMARY_COMPLETE;
 	row->complete[1] = '\0';
-
-	MODIFYDATEPOINTERS(sharesummary_free, row, cd, by, code, inet);
 
 	return true;
 }

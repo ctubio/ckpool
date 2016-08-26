@@ -75,10 +75,13 @@ extern const char *tree_node_list_name;
  *  default to false,
  *  or turn off check_locks during ckdb startup with a ckpmsg 'locks.ID.locks'
  * If you turn deadlock prediction on with ckpmsg 'locks.1.deadlocks=y'
- *  it will not re-enable it for any thread that has alread predicted
+ *  it will not re-enable it for any thread that has already predicted
  *  a deadlock */
 
 #if LOCK_CHECK
+// Disable all lock checks permanently if thread limits are exceeded
+extern bool disable_checks;
+
 // We disable lock checking if an error is encountered
 extern bool check_locks;
 /* Maximum number of threads preallocated
@@ -239,7 +242,9 @@ retry:
 #if LOCK_CHECK
 #define LOCK_MAYBE
 /* The simple lock_check_init check is in case someone incorrectly changes ckdb.c ...
- * It's not fool proof :P */
+ * It's not fool proof :P
+ * If LOCK_INIT() is called too many times, i.e. too many threads,
+ *  it will report and disable lock checking */
 #define LOCK_INIT(_name) do { \
 		if (!lock_check_init) { \
 			quithere(1, "In thread %s, lock_check_lock has not been " \
@@ -248,6 +253,12 @@ retry:
 		ck_wlock(&lock_check_lock); \
 		my_thread_id = next_thread_id++; \
 		ck_wunlock(&lock_check_lock); \
+		if (my_thread_id >= MAX_THREADS) { \
+			disable_checks = true; \
+			LOGERR("WARNING: all lock checking disabled due to " \
+				"initialising too many threads - limit %d", \
+				MAX_THREADS); \
+		} \
 		my_thread_name = strdup(_name); \
 	} while (0)
 #define FIRST_LOCK_INIT(_name) do { \
@@ -313,7 +324,7 @@ retry:
 		static const char *_fl = __FILE__; \
 		static const char *_f = __func__; \
 		static const int _l =  __LINE__; \
-		if (my_check_locks && check_locks) { \
+		if (!disable_checks && my_check_locks && check_locks) { \
 			if (_mode == LOCK_MODE_LOCK) { \
 				if (THRLCK(_list).first_held || \
 				    (THRLCK(_list).r_count != 0) || \
@@ -384,7 +395,7 @@ retry:
 				} \
 			} \
 		} \
-		if (check_deadlocks && my_check_deadlocks) { \
+		if (!disable_checks && check_deadlocks && my_check_deadlocks) { \
 			int _dp = (_list)->deadlock_priority; \
 			if (my_lock_level == 0) { \
 				if (_mode == LOCK_MODE_LOCK) { \
@@ -477,7 +488,7 @@ retry:
 					LOCK_MODE_UNLOCK, LOCK_TYPE_READ)
 
 #define _LIST_WRITE(_list, _chklock, _file, _func, _line) do { \
-		if (my_check_locks && check_locks && _chklock) { \
+		if (!disable_checks && my_check_locks && check_locks && _chklock) { \
 			if (!THRLCK(_list).first_held || \
 			    (THRLCK(_list).r_count != 0) || \
 			    (THRLCK(_list).w_count != 1)) { \
@@ -498,7 +509,7 @@ retry:
 		} \
 	} while (0)
 #define _LIST_WRITE2(_list, _chklock) do { \
-		if (my_check_locks && check_locks && _chklock) { \
+		if (!disable_checks && my_check_locks && check_locks && _chklock) { \
 			if (!THRLCK(_list).first_held || \
 			    (THRLCK(_list).r_count != 0) || \
 			    (THRLCK(_list).w_count != 1)) { \
@@ -519,7 +530,7 @@ retry:
 	} while (0)
 // read is ok under read or write
 #define _LIST_READ(_list, _chklock, _file, _func, _line) do { \
-		if (my_check_locks && check_locks && _chklock) { \
+		if (!disable_checks && my_check_locks && check_locks && _chklock) { \
 			if (!THRLCK(_list).first_held || \
 			    (THRLCK(_list).r_count + \
 			    THRLCK(_list).w_count) != 1) { \
@@ -540,7 +551,7 @@ retry:
 		} \
 	} while (0)
 #define _LIST_READ2(_list, _chklock) do { \
-		if (my_check_locks && check_locks && _chklock) { \
+		if (!disable_checks && my_check_locks && check_locks && _chklock) { \
 			if (!THRLCK(_list).first_held || \
 			    (THRLCK(_list).r_count + \
 			    THRLCK(_list).w_count) != 1) { \
