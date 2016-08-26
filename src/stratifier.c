@@ -1330,7 +1330,7 @@ static const unsigned char witness_nonce[32] = {0};
 static const unsigned char witness_header[] = {0xaa, 0x21, 0xa9, 0xed};
 static void gbt_witness_data(workbase_t *wb, json_t *txn_array)
 {
-	int i, binlen, binleft, txncount;
+	int i, binlen, txncount;
 	json_t *arr_val;
 	uchar *hashbin;
 	const char* hash;
@@ -1339,7 +1339,6 @@ static void gbt_witness_data(workbase_t *wb, json_t *txn_array)
 	binlen = txncount * 32 + 32;
 	hashbin = alloca(binlen + 32);
 	memset(hashbin, 0, 32);
-	binleft = binlen / 32;
 
 	for (i = 0; i < txncount; i++) {
 		char binswap[32];
