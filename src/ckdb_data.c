@@ -756,7 +756,7 @@ cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b)
 	return CMP_STR(ta->name, tb->name);
 }
 
-K_ITEM *find_transfer(K_TREE *trf_root, char *name)
+K_ITEM *_find_transfer(K_TREE *trf_root, char *name, WHERE_FFL_ARGS)
 {
 	TRANSFER transfer;
 	K_TREE_CTX ctx[1];
@@ -766,7 +766,7 @@ K_ITEM *find_transfer(K_TREE *trf_root, char *name)
 	INIT_TRANSFER(&look);
 	look.data = (void *)(&transfer);
 	// trf_root stores aren't shared
-	return find_in_ktree_nolock(trf_root, &look, ctx);
+	return _find_in_ktree(trf_root, &look, ctx, false, WHERE_FFL_PASS);
 }
 
 K_ITEM *_optional_name(K_TREE *trf_root, char *name, int len, char *patt,

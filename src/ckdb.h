@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.420"
+#define CKDB_VERSION DB_VERSION"-2.430"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -370,24 +370,6 @@ extern tv_t last_share_acc;
 extern tv_t last_share_inv;
 extern tv_t last_auth;
 extern cklock_t last_lock;
-
-// Running stats
-// replier()
-extern double reply_full_us;
-extern uint64_t reply_sent, reply_cant, reply_discarded, reply_fails;
-// socketer()
-extern tv_t sock_stt;
-extern double sock_us, sock_recv_us, sock_lock_wq_us, sock_lock_br_us;
-extern uint64_t sock_proc_early, sock_processed, sock_acc, sock_recv;
-// breaker() summarised
-extern tv_t break_reload_stt, break_cmd_stt, break_reload_fin;
-extern uint64_t break_reload_processed, break_cmd_processed;
-// clistener()
-extern double clis_us;
-extern uint64_t clis_processed;
-// blistener()
-extern double blis_us;
-extern uint64_t blis_processed;
 
 #define JSON_TRANSFER "json="
 #define JSON_TRANSFER_LEN (sizeof(JSON_TRANSFER)-1)
@@ -1184,6 +1166,8 @@ extern K_STORE *msgline_store;
 // BREAKQUEUE
 typedef struct breakqueue {
 	char *buf;
+	char *source;
+	int access;
 	tv_t accepted; // socket accepted or line read
 	tv_t now; // msg read or line read
 	int seqentryflags;
@@ -2964,6 +2948,7 @@ enum reply_type {
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnowts(ts_t *now);
 extern void setnow(tv_t *now);
+extern void status_report(tv_t *now);
 extern void tick();
 extern PGconn *dbconnect();
 extern void sequence_report(bool lock);
@@ -3089,7 +3074,9 @@ extern char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b);
-extern K_ITEM *find_transfer(K_TREE *trf_root, char *name);
+#define find_transfer(_trf_root, _name) \
+	_find_transfer(_trf_root, _name, WHERE_FFL_HERE)
+extern K_ITEM *_find_transfer(K_TREE *trf_root, char *name, WHERE_FFL_ARGS);
 #define optional_name(_root, _name, _len, _patt, _reply, _siz) \
 		_optional_name(_root, _name, _len, _patt, _reply, _siz, \
 				WHERE_FFL_HERE)
@@ -3555,12 +3542,13 @@ extern bool check_db_version(PGconn *conn);
 // *** ckdb_cmd.c
 // ***
 
-// TODO: limit access by having seperate sockets for each
 #define ACCESS_POOL	(1 << 0)
 #define ACCESS_SYSTEM	(1 << 1)
 #define ACCESS_WEB	(1 << 2)
 #define ACCESS_PROXY	(1 << 3)
 #define ACCESS_CKDB	(1 << 4)
+#define ACCESS_ALL (ACCESS_POOL | ACCESS_SYSTEM | ACCESS_WEB | ACCESS_PROXY | \
+		    ACCESS_CKDB)
 
 struct CMDS {
 	enum cmd_values cmd_val;
