@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.432"
+#define CKDB_VERSION DB_VERSION"-2.433"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2948,7 +2948,7 @@ enum reply_type {
 extern void logmsg(int loglevel, const char *fmt, ...);
 extern void setnowts(ts_t *now);
 extern void setnow(tv_t *now);
-extern void status_report(tv_t *now);
+extern void status_report(tv_t *now, bool showseq);
 extern void tick();
 extern PGconn *dbconnect();
 extern void sequence_report(bool lock);

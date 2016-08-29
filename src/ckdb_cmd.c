@@ -6831,7 +6831,7 @@ static char *cmd_shsta(__maybe_unused PGconn *conn, char *cmd, char *id,
 {
 	char buf[256];
 
-	status_report(now);
+	status_report(now, true);
 
 	snprintf(buf, sizeof(buf), "ok.%s", cmd);
 	LOGDEBUG("%s.%s", id, buf);

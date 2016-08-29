@@ -1235,7 +1235,7 @@ void setnow(tv_t *now)
 	now->tv_usec = spec.tv_nsec / 1000;
 }
 
-void status_report(tv_t *now)
+void status_report(tv_t *now, bool showseq)
 {
 	char ooo_buf[256];
 	int relq_count, _reload_processing, relqd_count;
@@ -1244,9 +1244,16 @@ void status_report(tv_t *now)
 	int64_t _earlysock_left, _pool0_discarded, _pool0_tot;
 	uint64_t count1, count2, count3, count4;
 	double tot1, tot2;
+	tv_t now0;
+
+	if (now == NULL) {
+		setnow(&now0);
+		now = &now0;
+	}
 
 	LOGWARNING("OoO %s", ooo_status(ooo_buf, sizeof(ooo_buf)));
-	sequence_report(true);
+	if (showseq)
+		sequence_report(true);
 
 	K_RLOCK(breakqueue_free);
 	relq_count = reload_breakqueue_store->count;
@@ -9320,6 +9327,8 @@ int main(int argc, char **argv)
 
 		update_keysummary();
 		everyone_die = true;
+
+		status_report(NULL, false);
 	} else if (confirm_sharesummary) {
 		// TODO: add a system lock to stop running 2 at once?
 		confirm_summaries();
@@ -9345,6 +9354,8 @@ int main(int argc, char **argv)
 
 		/* Terminate from here if the listener is sent a terminate message */
 		join_pthread(ckp.pth_listener);
+
+		status_report(NULL, false);
 	}
 
 	time_t start, trigger, curr;
