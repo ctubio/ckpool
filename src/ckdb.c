@@ -357,6 +357,8 @@ static bool ioqueue_die = false;
  *   the console is slow, then send it all by sending flush.2 */
 static bool ioqueue_flush = false;
 
+static int reload_access = ACCESS_POOL;
+
 /* These are included in cmd_homepage
  *  to help identify when ckpool locks up (or dies) */
 tv_t last_heartbeat;
@@ -7051,9 +7053,9 @@ static void reload_line(char *filename, char *buf, uint64_t count)
 		// release the lock since strdup could be slow, but rarely
 		DATA_BREAKQUEUE(bq, bq_item);
 		bq->buf = strdup(buf);
-		// reloads are all pool data
+		// reloads are normally all pool data but access can be changed
 		bq->source = (char *)ispool;
-		bq->access = ACCESS_POOL;
+		bq->access = reload_access;
 		copy_tv(&(bq->accepted), &now);
 		copy_tv(&(bq->now), &now);
 		bq->seqentryflags = SE_RELOAD;
@@ -8784,6 +8786,8 @@ static void check_restore_dir(char *name)
 static struct option long_options[] = {
 	// script to call when alerts happen
 	{ "alert",		required_argument,	0,	'a' },
+	// allow reload files to contain non-pool data
+	{ "allow-all",		no_argument,		0,	'A' },
 	// workinfoid to start shares_fill() default is 1 day
 	{ "shares-begin",	required_argument,	0,	'b' },
 	// override calculated value
@@ -8867,7 +8871,7 @@ int main(int argc, char **argv)
 	memset(&ckpcmd, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:b:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:Ab:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
 		switch(c) {
 			case '?':
 			case ':':
@@ -8880,6 +8884,9 @@ int main(int argc, char **argv)
 						" limit %d",
 						(int)len, MAX_ALERT_CMD);
 				ckdb_alert_cmd = strdup(optarg);
+				break;
+			case 'A':
+				reload_access = ACCESS_ALL;
 				break;
 			case 'b':
 				{
