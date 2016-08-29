@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.430"
+#define CKDB_VERSION DB_VERSION"-2.431"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1335,17 +1335,17 @@ extern K_STORE *heartbeatqueue_store;
 
 // TRANSFER
 #define NAME_SIZE 63
-#define VALUE_SIZE 1023
+#define VALUE_SIZE 63
 typedef struct transfer {
 	char name[NAME_SIZE+1];
 	char svalue[VALUE_SIZE+1];
 	char *mvalue;
 } TRANSFER;
 
-// Suggest malloc use MMAP - 1913 = largest under 2MB
-#define ALLOC_TRANSFER 1913
+// Suggest malloc use MMAP = largest under 2MB
+#define ALLOC_TRANSFER ((int)(2*1024*1024/sizeof(TRANSFER)))
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 32
+#define CULL_TRANSFER 16
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
