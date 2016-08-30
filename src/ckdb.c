@@ -4178,8 +4178,14 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 			K_WUNLOCK(transfer_free);
 			DATA_TRANSFER(transfer, t_item);
 			STRNCPY(transfer->name, data);
-			STRNCPY(transfer->svalue, eq);
-			transfer->mvalue = transfer->svalue;
+			siz = strlen(eq) + 1;
+			if (siz > sizeof(transfer->svalue)) {
+				transfer->mvalue = malloc(siz);
+				STRNCPYSIZ(transfer->mvalue, eq, siz);
+			} else {
+				STRNCPYSIZ(transfer->svalue, eq, siz);
+				transfer->mvalue = transfer->svalue;
+			}
 
 			// Discard duplicates
 			if (find_in_ktree_nolock(msgline->trf_root, t_item, ctx)) {
