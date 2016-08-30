@@ -6121,7 +6121,10 @@ static void *process_socket(__maybe_unused void *arg)
 			case CMD_AUTH:
 			case CMD_ADDRAUTH:
 			case CMD_HEARTBEAT:
-			case CMD_SHARELOG:
+			case CMD_WORKINFO:
+			case CMD_SHARES:
+			case CMD_SHAREERRORS:
+			case CMD_AGEWORKINFO:
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
 			case CMD_WORKERSTAT:
@@ -6399,7 +6402,10 @@ static void *process_socket(__maybe_unused void *arg)
 				FREENULL(ans);
 				replied = true;
 			// Always queue (ok.queued)
-			case CMD_SHARELOG:
+			case CMD_WORKINFO:
+			case CMD_SHARES:
+			case CMD_SHAREERRORS:
+			case CMD_AGEWORKINFO:
 			case CMD_POOLSTAT:
 			case CMD_USERSTAT:
 			case CMD_WORKERSTAT:
@@ -6799,7 +6805,10 @@ static void process_reload_item(PGconn *conn, K_ITEM *bq_item)
 		case CMD_ADDRAUTH:
 			if (confirm_sharesummary)
 				break;
-		case CMD_SHARELOG:
+		case CMD_WORKINFO:
+		case CMD_SHARES:
+		case CMD_SHAREERRORS:
+		case CMD_AGEWORKINFO:
 			// This will return the same cmdnum or DUP
 			cmdnum = process_seq(msgline);
 			if (cmdnum != CMD_DUPSEQ) {
