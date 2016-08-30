@@ -4557,7 +4557,11 @@ static void *breaker(void *arg)
 			pthread_cond_signal(&process_reload_waitcond);
 			mutex_unlock(&process_reload_waitlock);
 		} else {
-			k_add_tail(cmd_done_breakqueue_store, bq_item);
+			// Prioritise workinfo processing
+			if (bq->cmdnum == CMD_WORKINFO)
+				k_add_head(cmd_done_breakqueue_store, bq_item);
+			else
+				k_add_tail(cmd_done_breakqueue_store, bq_item);
 			mutex_lock(&process_socket_waitlock);
 			process_socket_signals++;
 			pthread_cond_signal(&process_socket_waitcond);
