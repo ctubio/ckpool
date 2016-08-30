@@ -2557,12 +2557,12 @@ static void dealloc_storage()
 	FREE_LIST(breakqueue);
 	FREE_LISTS(msgline);
 
+	sequence_report(false);
 	if (seqset_free) {
 		if (free_mode != FREE_MODE_ALL)
 			LOGWARNING("%s() seqset skipped", __func__);
 		else {
 			LOGWARNING("%s() seqset ...", __func__);
-			sequence_report(false);
 
 			FREE_STORE_DATA(seqset);
 			FREE_LIST_DATA(seqset);
@@ -9385,7 +9385,7 @@ int main(int argc, char **argv)
 		if (msg) {
 			trigger = curr;
 			snprintf(buf, sizeof(buf),
-				"%s %ds due to%s%s%s%s%s%s%s%s%s\n",
+				"%s %ds due to%s%s%s%s%s%s%s%s%s",
 				msg, (int)(curr - start),
 				socksetup_using_data ? " socksetup" : EMPTY,
 				summariser_using_data ? " summariser" : EMPTY,
