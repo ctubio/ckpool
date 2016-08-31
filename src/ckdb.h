@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.438"
+#define CKDB_VERSION DB_VERSION"-2.440"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1131,6 +1131,41 @@ typedef struct logqueue {
 extern K_LIST *logqueue_free;
 extern K_STORE *logqueue_store;
 
+// NAMERAM - RAM for INTRANSIENT names - 2M per allocation
+typedef struct nameram {
+	char rem[2*1024*1024-sizeof(void *)-sizeof(size_t)];
+	void *next;
+	size_t left;
+} NAMERAM;
+
+// Items never to be deleted and list never to be culled
+#define ALLOC_NAMERAM 1
+#define LIMIT_NAMERAM 0
+#define INIT_NAMERAM(_item) INIT_GENERIC(_item, nameram)
+#define DATA_NAMERAM(_var, _item) DATA_GENERIC(_var, _item, nameram, true)
+
+extern K_LIST *nameram_free;
+extern K_STORE *nameram_store;
+
+// INTRANSIENT - a list of common strings, to avoid wasting RAM
+typedef struct intransient {
+	char *str;
+} INTRANSIENT;
+
+/* Items never to be deleted and list never to be culled
+ * They are all created by the db load functions and breakdown */
+#define ALLOC_INTRANSIENT 1024
+#define LIMIT_INTRANSIENT 0
+#define INIT_INTRANSIENT(_item) INIT_GENERIC(_item, intransient)
+#define DATA_INTRANSIENT(_var, _item) DATA_GENERIC(_var, _item, intransient, true)
+#define DATA_INTRANSIENT_NULL(_var, _item) DATA_GENERIC(_var, _item, intransient, false)
+
+extern K_TREE *intransient_root;
+extern K_LIST *intransient_free;
+extern K_STORE *intransient_store;
+
+extern char *intransient_fields[];
+
 // MSGLINE
 typedef struct msgline {
 	int which_cmds;
@@ -1343,6 +1378,7 @@ typedef struct transfer {
 	char name[NAME_SIZE+1];
 	char svalue[VALUE_SIZE+1];
 	char *mvalue;
+	INTRANSIENT *intransient;
 } TRANSFER;
 
 // Suggest malloc use MMAP = largest under 2MB
@@ -3074,6 +3110,11 @@ extern char *_hms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 // Convert to MM:SS
 extern char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 
+extern cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b);
+#define get_intransient(_name) _get_intransient(_name, 0, WHERE_FFL_HERE)
+#define get_intransient_siz(_name, _siz) \
+	_get_intransient(_name, _siz, WHERE_FFL_HERE)
+extern INTRANSIENT *_get_intransient(char *name, size_t siz, WHERE_FFL_ARGS);
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b);

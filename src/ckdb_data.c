@@ -25,8 +25,13 @@ void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
 		t_item = STORE_HEAD_NOLOCK(msgline->trf_store);
 		while (t_item) {
 			DATA_TRANSFER(transfer, t_item);
-			if (transfer->mvalue != transfer->svalue)
-				FREENULL(transfer->mvalue);
+			if (transfer->mvalue != transfer->svalue) {
+				if (transfer->intransient) {
+					transfer->intransient = NULL;
+					transfer->mvalue = NULL;
+				} else
+					FREENULL(transfer->mvalue);
+			}
 			t_item = t_item->next;
 		}
 		if (t_lock)
@@ -699,6 +704,91 @@ char *_hms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
 	return _data_to_buf(TYPE_MS, (void *)data, buf, siz, WHERE_FFL_PASS);
+}
+
+// order by name asc
+cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b)
+{
+	INTRANSIENT *ia, *ib;
+	DATA_INTRANSIENT(ia, a);
+	DATA_INTRANSIENT(ib, b);
+	return CMP_STR(ia->str, ib->str);
+}
+
+INTRANSIENT *_get_intransient(char *name, size_t siz, WHERE_FFL_ARGS)
+{
+	INTRANSIENT intransient, *in = NULL;
+	K_ITEM look, *i_item, *n_item;
+	NAMERAM *nameram = NULL;
+	K_TREE_CTX ctx[1];
+	char *buf;
+	bool new;
+
+	if (siz == 0)
+		siz = strlen(name) + 1;
+
+	if (siz > sizeof(nameram->rem)) {
+		char *st = NULL;
+		LOGEMERG("%s() ERR '%10s...' discarded - siz %d>%d" WHERE_FFL,
+			 __func__, st = safe_text_nonull(name), (int)siz,
+			 (int)sizeof(nameram->rem), WHERE_FFL_PASS);
+		name = EMPTY;
+		siz = 1;
+	}
+
+	intransient.str = name;
+	INIT_INTRANSIENT(&look);
+	look.data = (void *)(&intransient);
+	K_RLOCK(intransient_free);
+	i_item = _find_in_ktree(intransient_root, &look, ctx, false,
+				WHERE_FFL_PASS);
+	K_RUNLOCK(intransient_free);
+
+	if (i_item) {
+		DATA_INTRANSIENT(in, i_item);
+		return in;
+	}
+
+	K_WLOCK(intransient_free);
+	// Search again, to be thread safe
+	i_item = _find_in_ktree(intransient_root, &look, ctx, false,
+				WHERE_FFL_PASS);
+	if (i_item) {
+		DATA_INTRANSIENT(in, i_item);
+	} else {
+		new = false;
+		buf = NULL;
+		K_WLOCK(nameram_free);
+		if (nameram_store->count == 0)
+			new = true;
+		else {
+			n_item = STORE_WHEAD(nameram_store);
+			DATA_NAMERAM(nameram, n_item);
+			if (nameram->left < siz)
+				new = true;
+		}
+		if (new) {
+			n_item = k_unlink_head(nameram_free);
+			DATA_NAMERAM(nameram, n_item);
+			nameram->next = nameram->rem;
+			nameram->left = sizeof(nameram->rem);
+			k_add_head(nameram_store, n_item);
+
+		}
+		buf = nameram->next;
+		nameram->next += siz;
+		nameram->left -= siz;
+		K_WUNLOCK(nameram_free);
+		strcpy(buf, name);
+		i_item = k_unlink_head(intransient_free);
+		DATA_INTRANSIENT(in, i_item);
+		in->str = buf;
+		k_add_tail(intransient_store, i_item);
+		add_to_ktree(intransient_root, i_item);
+	}
+	K_WUNLOCK(intransient_free);
+
+	return in;
 }
 
 // For mutiple variable function calls that need the data

@@ -208,24 +208,24 @@ const char *strpatt = "^[ -<>-~]*$";
 const char Transfer[] = "Transfer";
 
 // older version missing field defaults
-static TRANSFER auth_1 = { "poolinstance", "", auth_1.svalue };
+static TRANSFER auth_1 = { "poolinstance", "", auth_1.svalue, NULL };
 K_ITEM auth_poolinstance = { Transfer, NULL, NULL, (void *)(&auth_1) };
-static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue };
+static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue, NULL };
 K_ITEM auth_preauth = { Transfer, NULL, NULL, (void *)(&auth_2) };
-static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue };
+static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue, NULL };
 K_ITEM poolstats_elapsed = { Transfer, NULL, NULL, (void *)(&poolstats_1) };
-static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.svalue };
+static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.svalue, NULL };
 K_ITEM userstats_elapsed = { Transfer, NULL, NULL, (void *)(&userstats_1) };
-static TRANSFER userstats_2 = { "workername", "all", userstats_2.svalue };
+static TRANSFER userstats_2 = { "workername", "all", userstats_2.svalue, NULL };
 K_ITEM userstats_workername = { Transfer, NULL, NULL, (void *)(&userstats_2) };
-static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.svalue };
+static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.svalue, NULL };
 K_ITEM userstats_idle = { Transfer, NULL, NULL, (void *)(&userstats_3) };
-static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.svalue };
+static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.svalue, NULL };
 K_ITEM userstats_eos = { Transfer, NULL, NULL, (void *)(&userstats_4) };
 
-static TRANSFER shares_1 = { "secondaryuserid", TRUE_STR, shares_1.svalue };
+static TRANSFER shares_1 = { "secondaryuserid", TRUE_STR, shares_1.svalue, NULL };
 K_ITEM shares_secondaryuserid = { Transfer, NULL, NULL, (void *)(&shares_1) };
-static TRANSFER shareerrors_1 = { "secondaryuserid", TRUE_STR, shareerrors_1.svalue };
+static TRANSFER shareerrors_1 = { "secondaryuserid", TRUE_STR, shareerrors_1.svalue, NULL };
 K_ITEM shareerrors_secondaryuserid = { Transfer, NULL, NULL, (void *)(&shareerrors_1) };
 // Time limit that this problem occurred
 // 24-Aug-2014 05:20+00 (1st one shortly after this)
@@ -446,6 +446,34 @@ static pthread_cond_t f_ioqueue_waitcond;
 // LOGQUEUE
 K_LIST *logqueue_free;
 K_STORE *logqueue_store;
+
+// NAMERAM
+K_LIST *nameram_free;
+K_STORE *nameram_store;
+
+// INTRANSIENT
+K_TREE *intransient_root;
+K_LIST *intransient_free;
+K_STORE *intransient_store;
+
+char *intransient_fields[] = {
+	"workername",
+	"blockhash",
+	BYTRF,
+	CODETRF,
+	INETTRF,
+	"username",
+	"agent",
+	"useragent",
+	"address",
+	"prevhash",
+	"poolinstance",
+	"payaddress",
+	"originaltxn",
+	"committxn",
+	"commitblockhash",
+	NULL
+};
 
 // MSGLINE
 K_LIST *msgline_free;
@@ -1880,15 +1908,28 @@ static void alloc_storage()
 	logqueue_store = k_new_store(logqueue_free);
 
 	breakqueue_free = k_new_list("BreakQueue", sizeof(BREAKQUEUE),
-					ALLOC_BREAKQUEUE, LIMIT_BREAKQUEUE, true);
+				     ALLOC_BREAKQUEUE, LIMIT_BREAKQUEUE, true);
 	reload_breakqueue_store = k_new_store(breakqueue_free);
 	reload_done_breakqueue_store = k_new_store(breakqueue_free);
 	cmd_breakqueue_store = k_new_store(breakqueue_free);
 	cmd_done_breakqueue_store = k_new_store(breakqueue_free);
 
+	intransient_free = k_new_list("Intransient", sizeof(INTRANSIENT),
+					ALLOC_INTRANSIENT, LIMIT_INTRANSIENT,
+					true);
+	intransient_store = k_new_store(intransient_free);
+	intransient_root = new_ktree(NULL, cmp_intransient, intransient_free);
+
+	nameram_free = k_new_list("NameRAM", sizeof(NAMERAM), ALLOC_NAMERAM,
+				  LIMIT_NAMERAM, true);
+	nameram_store = k_new_store(nameram_free);
+
 #if LOCK_CHECK
 	DLPRIO(logqueue, 94);
 	DLPRIO(breakqueue, PRIO_TERMINAL);
+
+	DLPRIO(intransient, 2);
+	DLPRIO(nameram, 1);
 #endif
 
 	seqset_free = k_new_list("SeqSet", sizeof(SEQSET),
@@ -3910,8 +3951,9 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	K_ITEM *t_item = NULL, *cd_item = NULL, *seqall;
 	char *cmdptr, *idptr, *next, *eq, *end, *was;
 	char *data = NULL, *st = NULL, *st2 = NULL, *ip = NULL;
-	bool noid = false;
+	bool noid = false, intrans;
 	size_t siz;
+	int i;
 
 	K_WLOCK(msgline_free);
 	*ml_item = k_unlink_head_zero(msgline_free);
@@ -4033,6 +4075,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				FREENULL(st2);
 				goto nogood;
 			}
+			// LOGERR of buf could be truncated
 			*(end++) = '\0';
 			K_WLOCK(transfer_free);
 			t_item = k_unlink_head(transfer_free);
@@ -4131,12 +4174,29 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				}
 				siz = end - next;
 			}
-			if (siz >= sizeof(transfer->svalue)) {
-				transfer->mvalue = malloc(siz+1);
-				STRNCPYSIZ(transfer->mvalue, next, siz+1);
-			} else {
-				STRNCPYSIZ(transfer->svalue, next, siz+1);
-				transfer->mvalue = transfer->svalue;
+			intrans = false;
+			for (i = 0; intransient_fields[i]; i++) {
+				if (strcmp(transfer->name,
+					   intransient_fields[i]) == 0) {
+					intrans = true;
+					// This will affect 'was' if JSON_END is missing
+					*(next + siz) = '\0';
+					transfer->intransient = get_intransient_siz(next, siz+1);
+					transfer->mvalue = transfer->intransient->str;
+					break;
+				}
+			}
+			if (!intrans) {
+				transfer->intransient = NULL;
+				if (siz >= sizeof(transfer->svalue)) {
+					transfer->mvalue = malloc(siz+1);
+					STRNCPYSIZ(transfer->mvalue, next,
+						   siz+1);
+				} else {
+					STRNCPYSIZ(transfer->svalue, next,
+						   siz+1);
+					transfer->mvalue = transfer->svalue;
+				}
 			}
 			add_to_ktree_nolock(msgline->trf_root, t_item);
 			k_add_head_nolock(msgline->trf_store, t_item);
@@ -4179,12 +4239,25 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 			DATA_TRANSFER(transfer, t_item);
 			STRNCPY(transfer->name, data);
 			siz = strlen(eq) + 1;
-			if (siz > sizeof(transfer->svalue)) {
-				transfer->mvalue = malloc(siz);
-				STRNCPYSIZ(transfer->mvalue, eq, siz);
-			} else {
-				STRNCPYSIZ(transfer->svalue, eq, siz);
-				transfer->mvalue = transfer->svalue;
+			intrans = false;
+			for (i = 0; intransient_fields[i]; i++) {
+				if (strcmp(transfer->name,
+					   intransient_fields[i]) == 0) {
+					intrans = true;
+					transfer->intransient = get_intransient_siz(eq, siz);
+					transfer->mvalue = transfer->intransient->str;
+					break;
+				}
+			}
+			if (!intrans) {
+				transfer->intransient = NULL;
+				if (siz > sizeof(transfer->svalue)) {
+					transfer->mvalue = malloc(siz);
+					STRNCPYSIZ(transfer->mvalue, eq, siz);
+				} else {
+					STRNCPYSIZ(transfer->svalue, eq, siz);
+					transfer->mvalue = transfer->svalue;
+				}
 			}
 
 			// Discard duplicates
