@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.443"
+#define CKDB_VERSION DB_VERSION"-2.444"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1116,6 +1116,10 @@ typedef struct ioqueue {
 #define LIMIT_IOQUEUE 0
 #define INIT_IOQUEUE(_item) INIT_GENERIC(_item, ioqueue)
 #define DATA_IOQUEUE(_var, _item) DATA_GENERIC(_var, _item, ioqueue, true)
+
+extern K_LIST *ioqueue_free;
+extern K_STORE *ioqueue_store;
+extern K_STORE *console_ioqueue_store;
 
 // LOGQUEUE
 typedef struct logqueue {

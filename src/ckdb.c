@@ -436,9 +436,9 @@ int64_t mismatch_all_marks;
 int64_t mismatch_all_total;
 
 // IOQUEUE
-static K_LIST *ioqueue_free;
-static K_STORE *ioqueue_store;
-static K_STORE *console_ioqueue_store;
+K_LIST *ioqueue_free;
+K_STORE *ioqueue_store;
+K_STORE *console_ioqueue_store;
 // Trigger ioqueue_store processing
 static mutex_t f_ioqueue_waitlock;
 static pthread_cond_t f_ioqueue_waitcond;
@@ -1026,7 +1026,7 @@ static void *iomsgs(void *consol)
 		}
 
 		if (consol) {
-			if (!ioqueue_flush) {
+			if (!ioqueue_flush && !everyone_die) {
 				// max 50 per second
 				cksleep_ms(20);
 			}

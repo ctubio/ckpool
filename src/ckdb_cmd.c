@@ -7638,6 +7638,18 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+	} else if (strcasecmp(request, "ioqueue") == 0) {
+		K_RLOCK(ioqueue_free);
+		snprintf(tmp, sizeof(tmp), "console=%d%c",
+			 console_ioqueue_store->count, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "file=%d%c",
+			 ioqueue_store->count, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		K_RUNLOCK(ioqueue_free);
+		rows++;
+
+		ok = true;
 	} else {
 		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);
