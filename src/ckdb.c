@@ -6386,6 +6386,7 @@ static void *process_socket(__maybe_unused void *arg)
 			case CMD_EVENTS:
 			case CMD_HIGH:
 			case CMD_THREADS:
+			case CMD_QUERY:
 				msgline->sockd = bq->sockd;
 				bq->sockd = -1;
 				K_WLOCK(workqueue_free);
@@ -6427,7 +6428,6 @@ static void *process_socket(__maybe_unused void *arg)
 			case CMD_DSP:
 			case CMD_BLOCKSTATUS:
 			case CMD_MARKS:
-			case CMD_QUERY:
 				if (!startup_complete && !key_update) {
 					snprintf(reply, sizeof(reply),
 						 "%s.%ld.loading.%s",
