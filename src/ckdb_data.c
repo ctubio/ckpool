@@ -2126,6 +2126,145 @@ int64_t user_sys_setting(int64_t userid, char *setting_name,
 	return setting_default;
 }
 
+// order by workinfoid asc
+cmp_t cmp_esm(K_ITEM *a, K_ITEM *b)
+{
+	ESM *ea, *eb;
+	DATA_ESM(ea, a);
+	DATA_ESM(eb, b);
+	return CMP_BIGINT(ea->workinfoid, eb->workinfoid);
+}
+
+// must be locked before calling since data access must also be under lock
+K_ITEM *find_esm(int64_t workinfoid)
+{
+	K_TREE_CTX ctx[1];
+	K_ITEM look;
+	ESM lookesm;
+
+	lookesm.workinfoid = workinfoid;
+	INIT_ESM(&look);
+	look.data = (void *)(&lookesm);
+	return find_in_ktree(esm_root, &look, ctx);
+}
+
+bool esm_flag(int64_t workinfoid, bool error, bool procured)
+{
+	K_ITEM *esm_item = NULL;
+	ESM *esm = NULL;
+	bool failed;
+
+	K_WLOCK(esm_free);
+	esm_item = find_esm(workinfoid);
+	if (!esm_item) {
+		/* This isn't fatal since the message will be logged anyway
+		 * It just means the esm workinfoid summary was early and
+		 *  incorrect (which shouldn't happen) */
+		failed = true;
+	} else {
+		DATA_ESM(esm, esm_item);
+		if (!error && procured)
+			esm->procured++;
+		else if (!error && !procured)
+			esm->discarded++;
+		else if (error && procured)
+			esm->errprocured++;
+		else if (error && !procured)
+			esm->errdiscarded++;
+		failed = false;
+	}
+	K_WUNLOCK(esm_free);
+
+	return failed;
+}
+
+// called under workinfo lock
+static bool find_create_esm(int64_t workinfoid, bool error, tv_t *createdate)
+{
+	K_ITEM look, *esm_item;
+	K_TREE_CTX ctx[1];
+	ESM lookesm, *esm;
+	bool created;
+
+	lookesm.workinfoid = workinfoid;
+	INIT_ESM(&look);
+	look.data = (void *)(&lookesm);
+	K_WLOCK(esm_free);
+	esm_item = find_in_ktree(esm_root, &look, ctx);
+	if (!esm_item) {
+		created = true;
+		esm_item = k_unlink_head_zero(esm_free);
+		DATA_ESM(esm, esm_item);
+		esm->workinfoid = workinfoid;
+		copy_tv(&(esm->createdate), createdate);
+	} else {
+		created = false;
+		DATA_ESM(esm, esm_item);
+	}
+	if (error)
+		esm->errqueued++;
+	else
+		esm->queued++;
+	K_WUNLOCK(esm_free);
+
+	return created;
+}
+
+void esm_check(tv_t *now)
+{
+	K_ITEM *esm_item = NULL;
+	ESM *esm = NULL;
+	bool had = true;
+
+	while (had) {
+		K_WLOCK(esm_free);
+		if (esm_store->count == 0)
+			had = false;
+		else {
+			// items should be rare and few, so just loop thru them
+			esm_item = STORE_WHEAD(esm_store);
+			while (esm_item) {
+				DATA_ESM(esm, esm_item);
+				if (tvdiff(now, &(esm->createdate)) > ESM_LIMIT) {
+					k_unlink_item(esm_store, esm_item);
+					break;
+				}
+				esm_item = esm_item->next;
+			}
+		}
+		K_WUNLOCK(esm_free);
+		if (!esm_item)
+			had = false;
+		else {
+			if (esm->queued || esm->procured || esm->discarded) {
+				int diff = esm->queued - esm->procured -
+						esm->discarded;
+				LOGWARNING("%s() %s%d wid=%"PRId64" early "
+					   "shares=%d procured=%d discarded=%d",
+					   __func__, diff ? "DIFF " : EMPTY,
+					   diff, esm->workinfoid,
+					   esm->queued, esm->procured,
+					   esm->discarded);
+			}
+			if (esm->errqueued || esm->errprocured ||
+			    esm->errdiscarded) {
+				int diff = esm->errqueued - esm->errprocured -
+						esm->errdiscarded;
+				LOGWARNING("%s() %s%d wid=%"PRId64" early "
+					   "shareerrors=%d procured=%d "
+					   "discarded=%d",
+					   __func__, diff ? "DIFF " : EMPTY,
+					   diff, esm->workinfoid,
+					   esm->errqueued, esm->errprocured,
+					   esm->errdiscarded);
+			}
+			K_WLOCK(esm_free);
+			k_add_head(esm_free, esm_item);
+			K_WUNLOCK(esm_free);
+		}
+	}
+}
+
 // order by workinfoid asc,expirydate asc
 cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b)
 {
@@ -2241,6 +2380,28 @@ K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx)
 	}
 	K_RUNLOCK(workinfo_free);
 	return item;
+}
+
+// create the esm record inside the workinfo lock
+K_ITEM *find_workinfo_esm(int64_t workinfoid, bool error, bool *created, tv_t *createdate)
+{
+	WORKINFO workinfo;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *wi_item;
+
+	*created = false;
+	workinfo.workinfoid = workinfoid;
+	workinfo.expirydate.tv_sec = default_expiry.tv_sec;
+	workinfo.expirydate.tv_usec = default_expiry.tv_usec;
+
+	INIT_WORKINFO(&look);
+	look.data = (void *)(&workinfo);
+	K_RLOCK(workinfo_free);
+	wi_item = find_in_ktree(workinfo_root, &look, ctx);
+	if (!wi_item)
+		*created = find_create_esm(workinfoid, error, createdate);
+	K_RUNLOCK(workinfo_free);
+	return wi_item;
 }
 
 #define DISCARD_ALL -1

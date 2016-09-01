@@ -3636,7 +3636,7 @@ static void shares_process_early(PGconn *conn, K_ITEM *wi, tv_t *good_cd,
 	char *st = NULL;
 	char tmp[1024];
 	double delta;
-	bool ok;
+	bool ok, failed;
 
 	LOGDEBUG("%s() add", __func__);
 
@@ -3645,7 +3645,7 @@ static void shares_process_early(PGconn *conn, K_ITEM *wi, tv_t *good_cd,
 	if (shares_early_store->count == 0) {
 		K_WUNLOCK(shares_free);
 		// None
-		return;
+		goto out;
 	}
 	es_item = last_in_ktree(shares_early_root, ctx);
 	if (es_item) {
@@ -3696,42 +3696,49 @@ static void shares_process_early(PGconn *conn, K_ITEM *wi, tv_t *good_cd,
 			}
 		}
 	}
-	return;
+	goto out;
 redo:
 	K_WLOCK(shares_free);
 	add_to_ktree(shares_early_root, es_item);
 	k_add_tail(shares_early_store, es_item);
 	K_WUNLOCK(shares_free);
-	return;
+	goto out;
 keep:
+	failed = esm_flag(early_shares->workinfoid, false, true);
 	btv_to_buf(&(early_shares->createdate), cd_buf, sizeof(cd_buf));
-	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
-		" Early share procured",
-		__func__, early_shares->workinfoid,
-		st = safe_text_nonull(early_shares->workername),
-		early_shares->createdate.tv_sec,
-		early_shares->createdate.tv_usec, cd_buf,
-		early_shares->oldcount, early_shares->redo);
+	LOGNOTICE("%s() %s%"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
+		  " Early share procured",
+		  __func__, failed ? "***ESM " : EMPTY,
+		  early_shares->workinfoid,
+		  st = safe_text_nonull(early_shares->workername),
+		  early_shares->createdate.tv_sec,
+		  early_shares->createdate.tv_usec, cd_buf,
+		  early_shares->oldcount, early_shares->redo);
 	FREENULL(st);
 	K_WLOCK(shares_free);
 	// Discard it, it's been processed
 	k_add_head(shares_free, es_item);
 	K_WUNLOCK(shares_free);
-	return;
+	goto out;
 discard:
+	failed = esm_flag(early_shares->workinfoid, false, false);
 	btv_to_buf(&(early_shares->createdate), cd_buf, sizeof(cd_buf));
-	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
-		" Early share discarded!%s",
-		__func__, early_shares->workinfoid,
-		st = safe_text_nonull(early_shares->workername),
-		early_shares->createdate.tv_sec,
-		early_shares->createdate.tv_usec, cd_buf,
-		early_shares->oldcount, early_shares->redo, why);
+	LOGNOTICE("%s() %s%"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
+		  " Early share discarded!%s",
+		  __func__, failed ? "***ESM " : EMPTY,
+		  early_shares->workinfoid,
+		  st = safe_text_nonull(early_shares->workername),
+		  early_shares->createdate.tv_sec,
+		  early_shares->createdate.tv_usec, cd_buf,
+		  early_shares->oldcount, early_shares->redo, why);
 	FREENULL(st);
 	K_WLOCK(shares_free);
 	k_add_head(shares_free, es_item);
 	K_WUNLOCK(shares_free);
-	return;
+out:
+	// accessed outside lock, but esm_check() uses the lock
+	if (esm_store->count)
+		esm_check(good_cd);
 }
 
 static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
@@ -3750,7 +3757,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	SHARES *shares = NULL, *shares2 = NULL;
 	double sdiff_amt;
 	USERS *users;
-	bool ok = false, dup = false;
+	bool ok = false, dup = false, created;
 	char *st = NULL;
 	tv_t share_cd;
 
@@ -3827,10 +3834,12 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		memcpy(shares2, shares, sizeof(*shares2));
 	}
 
-	wi_item = find_workinfo(shares->workinfoid, NULL);
+	wi_item = find_workinfo_esm(shares->workinfoid, false, &created,
+				    &(shares->createdate));
 	if (!wi_item) {
+		int sta = (created ? LOG_ERR : LOG_NOTICE);
 		btv_to_buf(cd, cd_buf, sizeof(cd_buf));
-		LOGERR("%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
+		LOGMSG(sta, "%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
 			"Early share queued!",
 			__func__, shares->workinfoid,
 			st = safe_text_nonull(workername),
@@ -4338,7 +4347,7 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 	char *st = NULL;
 	char tmp[1024];
 	double delta;
-	bool ok;
+	bool ok, failed;
 
 	LOGDEBUG("%s() add", __func__);
 
@@ -4346,7 +4355,7 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 	if (shareerrors_early_store->count == 0) {
 		K_WUNLOCK(shareerrors_free);
 		// None
-		return;
+		goto out;
 	}
 	es_item = last_in_ktree(shareerrors_early_root, ctx);
 	if (es_item) {
@@ -4399,42 +4408,49 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 			}
 		}
 	}
-	return;
+	goto out;
 redo:
 	K_WLOCK(shareerrors_free);
 	add_to_ktree(shareerrors_early_root, es_item);
 	k_add_tail(shareerrors_early_store, es_item);
 	K_WUNLOCK(shareerrors_free);
-	return;
+	goto out;
 keep:
+	failed = esm_flag(early_shareerrors->workinfoid, true, true);
 	btv_to_buf(&(early_shareerrors->createdate), cd_buf, sizeof(cd_buf));
-	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
-		" Early share procured",
-		__func__, early_shareerrors->workinfoid,
-		st = safe_text_nonull(early_shareerrors->workername),
-		early_shareerrors->createdate.tv_sec,
-		early_shareerrors->createdate.tv_usec, cd_buf,
-		early_shareerrors->oldcount, early_shareerrors->redo);
+	LOGNOTICE("%s() %s%"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
+		  " Early shareerror procured",
+		  __func__, failed ? "***ESM " : EMPTY,
+		  early_shareerrors->workinfoid,
+		  st = safe_text_nonull(early_shareerrors->workername),
+		  early_shareerrors->createdate.tv_sec,
+		  early_shareerrors->createdate.tv_usec, cd_buf,
+		  early_shareerrors->oldcount, early_shareerrors->redo);
 	FREENULL(st);
 	K_WLOCK(shareerrors_free);
 	add_to_ktree(shareerrors_root, es_item);
 	k_add_head(shareerrors_store, es_item);
 	K_WUNLOCK(shareerrors_free);
-	return;
+	goto out;
 discard:
+	failed = esm_flag(early_shareerrors->workinfoid, true, false);
 	btv_to_buf(&(early_shareerrors->createdate), cd_buf, sizeof(cd_buf));
-	LOGERR("%s() %"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
-		" Early share discarded!%s",
-		__func__, early_shareerrors->workinfoid,
-		st = safe_text_nonull(early_shareerrors->workername),
-		early_shareerrors->createdate.tv_sec,
-		early_shareerrors->createdate.tv_usec, cd_buf,
-		early_shareerrors->oldcount, early_shareerrors->redo, why);
+	LOGNOTICE("%s() %s%"PRId64"/%s/%ld,%ld %s/%"PRId32"/%"PRId32
+		  " Early shareerror discarded!%s",
+		  __func__, failed ? "***ESM " : EMPTY,
+		  early_shareerrors->workinfoid,
+		  st = safe_text_nonull(early_shareerrors->workername),
+		  early_shareerrors->createdate.tv_sec,
+		  early_shareerrors->createdate.tv_usec, cd_buf,
+		  early_shareerrors->oldcount, early_shareerrors->redo, why);
 	FREENULL(st);
 	K_WLOCK(shareerrors_free);
 	k_add_head(shareerrors_free, es_item);
 	K_WUNLOCK(shareerrors_free);
-	return;
+out:
+	// accessed outside lock, but esm_check() uses the lock
+	if (esm_store->count)
+		esm_check(good_cd);
 }
 
 // Memory (and log file) only
@@ -4447,7 +4463,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	char cd_buf[DATE_BUFSIZ];
 	SHAREERRORS *shareerrors = NULL;
 	USERS *users;
-	bool ok = false;
+	bool ok = false, created;
 	char *st = NULL;
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
@@ -4501,10 +4517,12 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	HISTORYDATEINIT(shareerrors, cd, by, code, inet);
 	HISTORYDATETRANSFER(trf_root, shareerrors);
 
-	wi_item = find_workinfo(shareerrors->workinfoid, NULL);
+	wi_item = find_workinfo_esm(shareerrors->workinfoid, true, &created,
+				    &(shareerrors->createdate));
 	if (!wi_item) {
+		int sta = (created ? LOG_ERR : LOG_NOTICE);
 		btv_to_buf(cd, cd_buf, sizeof(cd_buf));
-		LOGERR("%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
+		LOGMSG(sta, "%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
 			"Early shareerror queued!",
 			__func__, shareerrors->workinfoid,
 			st = safe_text_nonull(workername),

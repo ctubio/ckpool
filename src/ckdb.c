@@ -640,6 +640,11 @@ K_TREE *optioncontrol_root;
 K_LIST *optioncontrol_free;
 K_STORE *optioncontrol_store;
 
+// ESM (Early Share/Shareerror Messages)
+K_TREE *esm_root;
+K_LIST *esm_free;
+K_STORE *esm_store;
+
 // WORKINFO workinfo.id.json={...}
 K_TREE *workinfo_root;
 // created during data load then destroyed since not needed later
@@ -2044,6 +2049,10 @@ static void alloc_storage()
 					ALLOC_IDCONTROL, LIMIT_IDCONTROL, true);
 	idcontrol_store = k_new_store(idcontrol_free);
 
+	esm_free = k_new_list("ESM", sizeof(ESM), ALLOC_ESM, LIMIT_ESM, true);
+	esm_store = k_new_store(esm_free);
+	esm_root = new_ktree(NULL, cmp_esm, esm_free);
+
 	workinfo_free = k_new_list("WorkInfo", sizeof(WORKINFO),
 					ALLOC_WORKINFO, LIMIT_WORKINFO, true);
 	workinfo_store = k_new_store(workinfo_free);
@@ -2256,6 +2265,7 @@ static void alloc_storage()
 	DLPRIO(userstats, 10);
 
 	// Don't currently nest any locks in these:
+	DLPRIO(esm, PRIO_TERMINAL);
 	DLPRIO(workers, PRIO_TERMINAL);
 	DLPRIO(idcontrol, PRIO_TERMINAL);
 	DLPRIO(paymentaddresses, PRIO_TERMINAL);
@@ -2555,6 +2565,12 @@ static void dealloc_storage()
 	}
 
 	LOGWARNING("%s() etc ...", __func__);
+
+	if (esm_store->count > 0) {
+		LOGWARNING("%s() ***ESM had %d records ...",
+			   __func__, esm_store->count);
+	}
+	FREE_ALL(esm);
 
 	FREE_LISTS(idcontrol);
 	FREE_ALL(accountbalance);

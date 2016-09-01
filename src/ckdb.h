@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.441"
+#define CKDB_VERSION DB_VERSION"-2.442"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1913,7 +1913,38 @@ typedef struct oc_trigger {
 	void (*func)(OPTIONCONTROL *, const char *);
 } OC_TRIGGER;
 
-// TODO: discarding workinfo,shares
+// ESM (Early Share/Shareerror Messages)
+typedef struct esm {
+	int64_t workinfoid;
+	int queued;
+	int procured;
+	int discarded;
+	int errqueued;
+	int errprocured;
+	int errdiscarded;
+	tv_t createdate;
+} ESM;
+
+/* This is to reduce the number of console Early messages
+ * The first queued message is displayed LOG_ERR
+ *  then the rest, for the given workinfoid, are LOG_NOTICE
+ * A final summary for the workinfoid will be displayed later with LOG_ERR,
+ *  if there were any */
+#define ALLOC_ESM 10
+#define LIMIT_ESM 0
+#define INIT_ESM(_item) INIT_GENERIC(_item, esm)
+#define DATA_ESM(_var, _item) DATA_GENERIC(_var, _item, esm, true)
+#define DATA_ESM_NULL(_var, _item) DATA_GENERIC(_var, _item, esm, false)
+
+extern K_TREE *esm_root;
+extern K_LIST *esm_free;
+extern K_STORE *esm_store;
+
+/* Age limit, in seconds, before displaying ESM summary messages and
+ *  deleting the associated ESM record */
+#define ESM_LIMIT 60.0
+
+// TODO: discarding workinfo
 // WORKINFO workinfo.id.json={...}
 typedef struct workinfo {
 	int64_t workinfoid;
@@ -3213,6 +3244,10 @@ extern K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t hei
 #define sys_setting(_name, _def, _now) user_sys_setting(0, _name, _def, _now)
 extern int64_t user_sys_setting(int64_t userid, char *setting_name,
 				int64_t setting_default, const tv_t *now);
+extern cmp_t cmp_esm(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_esm(int64_t workinfoid);
+extern bool esm_flag(int64_t workinfoid, bool error, bool procured);
+extern void esm_check(tv_t *now);
 extern cmp_t cmp_workinfo(K_ITEM *a, K_ITEM *b);
 #define coinbase1height(_wi) _coinbase1height(_wi, WHERE_FFL_HERE)
 extern int32_t _coinbase1height(WORKINFO *wi, WHERE_FFL_ARGS);
@@ -3220,6 +3255,8 @@ extern cmp_t cmp_workinfo_height(K_ITEM *a, K_ITEM *b);
 #define find_workinfo(_wid, _ctx) _find_workinfo(_wid, false, _ctx);
 extern K_ITEM *_find_workinfo(int64_t workinfoid, bool gotlock, K_TREE_CTX *ctx);
 extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
+extern K_ITEM *find_workinfo_esm(int64_t workinfoid, bool error, bool *created,
+				 tv_t *createdate);
 extern bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
 			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
 			 int64_t *s_count, int64_t *s_diff);
