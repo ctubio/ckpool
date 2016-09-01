@@ -447,6 +447,8 @@ static pthread_cond_t f_ioqueue_waitcond;
 K_LIST *logqueue_free;
 K_STORE *logqueue_store;
 
+static bool db_logger = true;
+
 // NAMERAM
 K_LIST *nameram_free;
 K_STORE *nameram_store;
@@ -5713,9 +5715,10 @@ static void *logger(__maybe_unused void *arg)
 		K_WUNLOCK(logqueue_free);
 		while (lq_item) {
 			DATA_LOGQUEUE(lq, lq_item);
-			if (lq->db)
-				LOGFILE(lq->msg, logname_db);
-			else
+			if (lq->db) {
+				if (db_logger)
+					LOGFILE(lq->msg, logname_db);
+			} else
 				LOGFILE(lq->msg, logname_io);
 			FREENULL(lq->msg);
 
@@ -8950,6 +8953,8 @@ static struct option long_options[] = {
 	{ "btc-user",		required_argument,	0,	'U' },
 	{ "version",		no_argument,		0,	'v' },
 	{ "workinfoid",		required_argument,	0,	'w' },
+	// Disable writing to the db-log file
+	{ "no-db-log",		no_argument,		0,	'x' },
 	{ "confirm",		no_argument,		0,	'y' },
 	{ "confirmrange",	required_argument,	0,	'Y' },
 	{ 0, 0, 0, 0 }
@@ -8990,7 +8995,7 @@ int main(int argc, char **argv)
 	memset(&ckpcmd, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:Ab:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:yY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:Ab:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:xyY:", long_options, &i)) != -1) {
 		switch(c) {
 			case '?':
 			case ':':
@@ -9255,6 +9260,9 @@ int main(int argc, char **argv)
 					}
 					dbload_workinfoid_start = start;
 				}
+				break;
+			case 'x':
+				db_logger = false;
 				break;
 			case 'y':
 				confirm_sharesummary = true;
