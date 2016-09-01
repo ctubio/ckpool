@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.446"
+#define CKDB_VERSION DB_VERSION"-2.447"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1156,8 +1156,7 @@ typedef struct intransient {
 	char *str;
 } INTRANSIENT;
 
-/* Items never to be deleted and list never to be culled
- * They are all created by breakdown */
+// Items never to be deleted and list never to be culled
 #define ALLOC_INTRANSIENT 1024
 #define LIMIT_INTRANSIENT 0
 #define INIT_INTRANSIENT(_item) INIT_GENERIC(_item, intransient)
@@ -1952,14 +1951,14 @@ extern K_STORE *esm_store;
 // WORKINFO workinfo.id.json={...}
 typedef struct workinfo {
 	int64_t workinfoid;
-	char poolinstance[TXT_BIG+1];
+	char *poolinstance;
 	char *transactiontree;
 	char *merklehash;
-	char prevhash[TXT_BIG+1];
-	char coinbase1[TXT_BIG+1];
-	char coinbase2[TXT_BIG+1];
-	char version[TXT_SML+1];
-	char bits[TXT_SML+1];
+	char *prevhash;
+	char *coinbase1;
+	char *coinbase2;
+	char *version;
+	char *bits;
 	char ntime[TXT_SML+1];
 	int64_t reward;
 	int32_t height; // non-DB field
@@ -3152,6 +3151,9 @@ extern cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b);
 	_get_intransient(_fld, _val , _siz, WHERE_FFL_HERE)
 extern INTRANSIENT *_get_intransient(char *fldnam, char *value, size_t siz,
 					WHERE_FFL_ARGS);
+#define intransient_str(_fld, _val) \
+	_intransient_str(_fld, _val, WHERE_FFL_HERE)
+extern char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS);
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b);
@@ -3167,6 +3169,11 @@ extern K_ITEM *_optional_name(K_TREE *trf_root, char *name, int len, char *patt,
 		_require_name(_root, _name, _len, _patt, _reply, \
 				_siz, WHERE_FFL_HERE)
 extern K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
+				char *reply, size_t siz, WHERE_FFL_ARGS);
+#define require_in(_root, _name, _len, _patt, _reply, _siz) \
+		_require_in(_root, _name, _len, _patt, _reply, \
+				_siz, WHERE_FFL_HERE)
+extern INTRANSIENT *_require_in(K_TREE *trf_root, char *name, int len, char *patt,
 				char *reply, size_t siz, WHERE_FFL_ARGS);
 extern cmp_t cmp_workerstatus(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_workerstatus(bool gotlock, int64_t userid, char *workername);
@@ -3504,10 +3511,11 @@ extern K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionval
 				 char *by, char *code, char *inet, tv_t *cd,
 				 K_TREE *trf_root, bool begun);
 extern bool optioncontrol_fill(PGconn *conn);
-extern int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
-				char *transactiontree, char *merklehash, char *prevhash,
-				char *coinbase1, char *coinbase2, char *version,
-				char *bits, char *ntime, char *reward, char *by,
+extern int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
+				INTRANSIENT *in_poolinstance, char *transactiontree,
+				char *merklehash, INTRANSIENT *in_prevhash,
+				char *coinbase1, char *coinbase2, INTRANSIENT *in_version,
+				INTRANSIENT *in_bits, char *ntime, char *reward, char *by,
 				char *code, char *inet, tv_t *cd, bool igndup,
 				K_TREE *trf_root);
 extern bool workinfo_fill(PGconn *conn);

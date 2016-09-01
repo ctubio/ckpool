@@ -3126,12 +3126,13 @@ bool optioncontrol_fill(PGconn *conn)
 	return ok;
 }
 
-int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
-			char *transactiontree, char *merklehash, char *prevhash,
-			char *coinbase1, char *coinbase2, char *version,
-			char *bits, char *ntime, char *reward, char *by,
-			char *code, char *inet, tv_t *cd, bool igndup,
-			K_TREE *trf_root)
+int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
+			INTRANSIENT *in_poolinstance, char *transactiontree,
+			char *merklehash, INTRANSIENT *in_prevhash,
+			char *coinbase1, char *coinbase2,
+			INTRANSIENT *in_version, INTRANSIENT *in_bits,
+			char *ntime, char *reward, char *by, char *code,
+			char *inet, tv_t *cd, bool igndup, K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -3157,14 +3158,14 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr, char *poolinstance,
 	bzero(row, sizeof(*row));
 
 	TXT_TO_BIGINT("workinfoid", workinfoidstr, row->workinfoid);
-	STRNCPY(row->poolinstance, poolinstance);
+	row->poolinstance = in_poolinstance->str;
 	DUP_POINTER(workinfo_free, row->transactiontree, transactiontree);
 	DUP_POINTER(workinfo_free, row->merklehash, merklehash);
-	STRNCPY(row->prevhash, prevhash);
-	STRNCPY(row->coinbase1, coinbase1);
-	STRNCPY(row->coinbase2, coinbase2);
-	STRNCPY(row->version, version);
-	STRNCPY(row->bits, bits);
+	row->prevhash = in_prevhash->str;
+	DUP_POINTER(workinfo_free, row->coinbase1, coinbase1);
+	DUP_POINTER(workinfo_free, row->coinbase2, coinbase2);
+	row->version = in_version->str;
+	row->bits = in_bits->str;
 	STRNCPY(row->ntime, ntime);
 	TXT_TO_BIGINT("reward", reward, row->reward);
 	pool.reward = row->reward;
@@ -3242,6 +3243,8 @@ unparam:
 		// Not currently needed in RAM
 		LIST_MEM_SUB(workinfo_free, row->transactiontree);
 		FREENULL(row->transactiontree);
+		LIST_MEM_SUB(workinfo_free, row->merklehash);
+		FREENULL(row->merklehash);
 
 		row->height = coinbase1height(row);
 		hex2bin(ndiffbin, row->bits, 4);
@@ -3389,7 +3392,7 @@ bool workinfo_fill(PGconn *conn)
 				POOLINSTANCE_DBLOAD_SET(workinfo, field);
 				continue;
 			}
-			TXT_TO_STR("poolinstance", field, row->poolinstance);
+			row->poolinstance = intransient_str("poolinstance", field);
 
 			PQ_GET_FLD(res, i, "workinfoid", field, ok);
 			if (!ok)
@@ -3397,37 +3400,34 @@ bool workinfo_fill(PGconn *conn)
 			TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
 
 			row->transactiontree = EMPTY;
-
-			PQ_GET_FLD(res, i, "merklehash", field, ok);
-			if (!ok)
-				break;
-			TXT_TO_BLOB("merklehash", field, row->merklehash);
-			LIST_MEM_ADD(workinfo_free, row->merklehash);
+			row->merklehash = EMPTY;
 
 			PQ_GET_FLD(res, i, "prevhash", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("prevhash", field, row->prevhash);
+			row->prevhash = intransient_str("prevhash", field);
 
 			PQ_GET_FLD(res, i, "coinbase1", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("coinbase1", field, row->coinbase1);
+			TXT_TO_BLOB("coinbase1", field, row->coinbase1);
+			LIST_MEM_ADD(workinfo_free, row->coinbase1);
 
 			PQ_GET_FLD(res, i, "coinbase2", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("coinbase2", field, row->coinbase2);
+			TXT_TO_BLOB("coinbase2", field, row->coinbase2);
+			LIST_MEM_ADD(workinfo_free, row->coinbase2);
 
 			PQ_GET_FLD(res, i, "version", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("version", field, row->version);
+			row->version = intransient_str("version", field);
 
 			PQ_GET_FLD(res, i, "bits", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("bits", field, row->bits);
+			row->bits = intransient_str("bits", field);
 
 			PQ_GET_FLD(res, i, "ntime", field, ok);
 			if (!ok)

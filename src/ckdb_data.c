@@ -67,6 +67,10 @@ void free_workinfo_data(K_ITEM *item)
 	FREENULL(workinfo->transactiontree);
 	LIST_MEM_SUB(workinfo_free, workinfo->merklehash);
 	FREENULL(workinfo->merklehash);
+	LIST_MEM_SUB(workinfo_free, workinfo->coinbase1);
+	FREENULL(workinfo->coinbase1);
+	LIST_MEM_SUB(workinfo_free, workinfo->coinbase2);
+	FREENULL(workinfo->coinbase2);
 }
 
 void free_payouts_data(K_ITEM *item)
@@ -792,6 +796,14 @@ INTRANSIENT *_get_intransient(char *fldnam, char *value, size_t siz, WHERE_FFL_A
 	return in;
 }
 
+char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS)
+{
+	INTRANSIENT *in;
+
+	in = _get_intransient(fldnam, value, 0, WHERE_FFL_PASS);
+	return in->str;
+}
+
 // For mutiple variable function calls that need the data
 char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS)
 {
@@ -968,6 +980,75 @@ K_ITEM *_require_name(K_TREE *trf_root, char *name, int len, char *patt,
 	}
 
 	return item;
+}
+
+INTRANSIENT *_require_in(K_TREE *trf_root, char *name, int len, char *patt,
+			 char *reply, size_t siz, WHERE_FFL_ARGS)
+{
+	INTRANSIENT *in;
+	TRANSFER *trf;
+	K_ITEM *item;
+	char *mvalue;
+	regex_t re;
+	size_t dlen;
+	int ret;
+
+	reply[0] = '\0';
+
+	item = find_transfer(trf_root, name);
+	if (!item) {
+		LOGERR("%s(): failed, field '%s' missing from %s():%d",
+			__func__, name, func, line);
+		snprintf(reply, siz, "failed.missing %s", name);
+		return NULL;
+	}
+
+	DATA_TRANSFER(trf, item);
+	if (!(in = trf->intransient)) {
+		LOGERR("%s(): failed, field '%s' is not intransient %s():%d",
+			__func__, name, func, line);
+		snprintf(reply, siz, "failed.transient %s", name);
+		return NULL;
+	}
+
+	mvalue = trf->mvalue;
+	if (mvalue)
+		dlen = strlen(mvalue);
+	else
+		dlen = 0;
+	if (!mvalue || (int)dlen < len) {
+		LOGERR("%s(): failed, field '%s' short (%s%d<%d) from %s():%d",
+			__func__, name, mvalue ? EMPTY : "null ",
+			(int)dlen, len, func, line);
+		snprintf(reply, siz, "failed.short %s", name);
+		return NULL;
+	}
+
+	if (patt) {
+		if (regcomp(&re, patt, REG_NOSUB) != 0) {
+			LOGERR("%s(): failed, field '%s' failed to"
+				" compile patt from %s():%d",
+				__func__, name, func, line);
+			snprintf(reply, siz, "failed.REG %s", name);
+			return NULL;
+		}
+
+		ret = regexec(&re, mvalue, (size_t)0, NULL, 0);
+		regfree(&re);
+
+		if (ret != 0) {
+			char *st = NULL;
+			LOGERR("%s(): failed, field '%s'='%.20s%s' invalid "
+				"from %s():%d",
+				__func__, name, st = safe_text_nonull(mvalue),
+				(dlen > 20) ? "..." : EMPTY, func, line);
+			FREENULL(st);
+			snprintf(reply, siz, "failed.invalid %s", name);
+			return NULL;
+		}
+	}
+
+	return in;
 }
 
 // order by userid asc,workername asc

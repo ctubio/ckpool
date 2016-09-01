@@ -469,6 +469,8 @@ char *intransient_fields[] = {
 	"useragent",
 	"address",
 	"prevhash",
+	"bits",
+	"version",
 	"poolinstance",
 	"payaddress",
 	"originaltxn",
@@ -2729,7 +2731,7 @@ static bool setup_data()
 	workinfo_current = last_in_ktree(workinfo_height_root, ctx);
 	if (workinfo_current) {
 		DATA_WORKINFO(wic, workinfo_current);
-		STRNCPY(wi.coinbase1, wic->coinbase1);
+		wi.coinbase1 = wic->coinbase1;
 		DATE_ZERO(&(wi.createdate));
 		INIT_WORKINFO(&look);
 		look.data = (void *)(&wi);
@@ -8953,7 +8955,7 @@ static struct option long_options[] = {
 	{ "btc-user",		required_argument,	0,	'U' },
 	{ "version",		no_argument,		0,	'v' },
 	{ "workinfoid",		required_argument,	0,	'w' },
-	// Disable writing to the db-log file
+	// Disable writing to the db-log file (for testing environments)
 	{ "no-db-log",		no_argument,		0,	'x' },
 	{ "confirm",		no_argument,		0,	'y' },
 	{ "confirmrange",	required_argument,	0,	'Y' },

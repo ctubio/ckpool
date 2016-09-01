@@ -2522,9 +2522,9 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
 	if (strcasecmp(cmd, STR_WORKINFO) == 0) {
-		K_ITEM *i_workinfoid, *i_poolinstance, *i_transactiontree, *i_merklehash;
-		K_ITEM *i_prevhash, *i_coinbase1, *i_coinbase2, *i_version, *i_bits;
-		K_ITEM *i_ntime, *i_reward;
+		K_ITEM *i_workinfoid, *i_transactiontree, *i_merklehash;
+		K_ITEM *i_coinbase1, *i_coinbase2, *i_ntime, *i_reward;
+		INTRANSIENT *in_poolinstance, *in_prevhash, *in_version, *in_bits;
 		bool igndup = false;
 		char *txn_tree;
 
@@ -2532,12 +2532,12 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		if (key_update)
 			goto wiconf;
 
-		i_poolinstance = require_name(trf_root, "poolinstance", 1, NULL, reply, siz);
-		if (!i_poolinstance)
+		in_poolinstance = require_in(trf_root, "poolinstance", 1, NULL, reply, siz);
+		if (!in_poolinstance)
 			return strdup(reply);
 
-		if (poolinstance && strcmp(poolinstance, transfer_data(i_poolinstance))){
-			POOLINSTANCE_DATA_SET(workinfo, transfer_data(i_poolinstance));
+		if (poolinstance && strcmp(poolinstance, in_poolinstance->str)){
+			POOLINSTANCE_DATA_SET(workinfo, in_poolinstance->str);
 			return strdup(FAILED_PI);
 		}
 
@@ -2570,8 +2570,8 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		if (!i_merklehash)
 			return strdup(reply);
 
-		i_prevhash = require_name(trf_root, "prevhash", 1, NULL, reply, siz);
-		if (!i_prevhash)
+		in_prevhash = require_in(trf_root, "prevhash", 1, NULL, reply, siz);
+		if (!in_prevhash)
 			return strdup(reply);
 
 		i_coinbase1 = require_name(trf_root, "coinbase1", 1, NULL, reply, siz);
@@ -2582,12 +2582,12 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 		if (!i_coinbase2)
 			return strdup(reply);
 
-		i_version = require_name(trf_root, "version", 1, NULL, reply, siz);
-		if (!i_version)
+		in_version = require_in(trf_root, "version", 1, NULL, reply, siz);
+		if (!in_version)
 			return strdup(reply);
 
-		i_bits = require_name(trf_root, "bits", 1, NULL, reply, siz);
-		if (!i_bits)
+		in_bits = require_in(trf_root, "bits", 1, NULL, reply, siz);
+		if (!in_bits)
 			return strdup(reply);
 
 		i_ntime = require_name(trf_root, "ntime", 1, NULL, reply, siz);
@@ -2599,14 +2599,14 @@ static char *cmd_sharelog(PGconn *conn, char *cmd, char *id,
 			return strdup(reply);
 
 		workinfoid = workinfo_add(conn, transfer_data(i_workinfoid),
-						transfer_data(i_poolinstance),
+						in_poolinstance,
 						txn_tree,
 						transfer_data(i_merklehash),
-						transfer_data(i_prevhash),
+						in_prevhash,
 						transfer_data(i_coinbase1),
 						transfer_data(i_coinbase2),
-						transfer_data(i_version),
-						transfer_data(i_bits),
+						in_version,
+						in_bits,
 						transfer_data(i_ntime),
 						transfer_data(i_reward),
 						by, code, inet, cd, igndup, trf_root);
