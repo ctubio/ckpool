@@ -7613,6 +7613,31 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 
 		ok = true;
+	} else if (strcasecmp(request, "nameram") == 0) {
+		NAMERAM *nameram = NULL;
+		K_ITEM *n_item;
+
+		K_RLOCK(nameram_free);
+		n_item = STORE_RHEAD(nameram_store);
+		while (n_item) {
+			DATA_NAMERAM(nameram, n_item);
+			snprintf(tmp, sizeof(tmp), "rem:%d=%d%c",
+				 rows, (int)sizeof(nameram->rem), FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "left:%d=%d%c",
+				 rows, (int)(nameram->left), FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			n_item = n_item->next;
+			rows++;
+		}
+		K_RUNLOCK(nameram_free);
+		snprintf(tmp, sizeof(tmp), "flds=%s%c", "rem,left", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "NameRAM", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
 	} else {
 		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);
