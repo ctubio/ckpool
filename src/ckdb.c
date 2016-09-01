@@ -5204,7 +5204,7 @@ static void make_a_shift_mark()
 			return;
 
 		setnow(&now);
-		ok = marks_process(NULL, true, workinfo->poolinstance,
+		ok = marks_process(NULL, true, workinfo->in_poolinstance,
 				   workinfo->workinfoid, description, EMPTY,
 				   MARKTYPE_OTHER_BEGIN_STR, MARK_USED_STR,
 				   (char *)by_default, (char *)__func__,
@@ -5383,7 +5383,7 @@ static void make_a_shift_mark()
 				return;
 			}
 			if (wi_bits[0] == '\0')
-				STRNCPY(wi_bits, workinfo->bits);
+				STRNCPY(wi_bits, workinfo->in_bits);
 			else {
 				/* Make sure you set the SHIFT_DIFF_BLOCK_STR
 				 *  optioncontrol if you changed ckdb to V1.323
@@ -5405,14 +5405,14 @@ static void make_a_shift_mark()
 				/* Did difficulty change?
 				 * Stop at the last workinfo, before the diff
 				 *  changed */
-				if (strcmp(wi_bits, workinfo->bits) != 0) {
+				if (strcmp(wi_bits, workinfo->in_bits) != 0) {
 					if (workinfo->height > (int32_t)shiftdiffblock) {
 						LOGDEBUG("%s() OK shift stops for a diff"
 							 " change '%s->%s' %"PRId64
 							 "->%"PRId64" height %"PRId32
 							 " limit %"PRId64,
 							 __func__, wi_bits,
-							 workinfo->bits, prev_wid,
+							 workinfo->in_bits, prev_wid,
 							 workinfo->workinfoid,
 							 workinfo->height,
 							 shiftdiffblock);
@@ -5589,7 +5589,7 @@ static void make_a_shift_mark()
 		}
 
 		setnow(&now);
-		ok = marks_process(NULL, true, workinfo->poolinstance,
+		ok = marks_process(NULL, true, workinfo->in_poolinstance,
 				   marks_wid, des, extra, shifttype, status,
 				   (char *)by_default, (char *)__func__,
 				   (char *)inet_default, &now, NULL);

@@ -3158,14 +3158,14 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 	bzero(row, sizeof(*row));
 
 	TXT_TO_BIGINT("workinfoid", workinfoidstr, row->workinfoid);
-	row->poolinstance = in_poolinstance->str;
+	row->in_poolinstance = in_poolinstance->str;
 	DUP_POINTER(workinfo_free, row->transactiontree, transactiontree);
 	DUP_POINTER(workinfo_free, row->merklehash, merklehash);
-	row->prevhash = in_prevhash->str;
+	row->in_prevhash = in_prevhash->str;
 	DUP_POINTER(workinfo_free, row->coinbase1, coinbase1);
 	DUP_POINTER(workinfo_free, row->coinbase2, coinbase2);
-	row->version = in_version->str;
-	row->bits = in_bits->str;
+	row->in_version = in_version->str;
+	row->in_bits = in_bits->str;
 	STRNCPY(row->ntime, ntime);
 	TXT_TO_BIGINT("reward", reward, row->reward);
 	pool.reward = row->reward;
@@ -3193,14 +3193,14 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 	if (!confirm_sharesummary) {
 		par = 0;
 		params[par++] = bigint_to_buf(row->workinfoid, NULL, 0);
-		params[par++] = str_to_buf(row->poolinstance, NULL, 0);
+		params[par++] = str_to_buf(row->in_poolinstance, NULL, 0);
 		params[par++] = str_to_buf(row->transactiontree, NULL, 0);
 		params[par++] = str_to_buf(row->merklehash, NULL, 0);
-		params[par++] = str_to_buf(row->prevhash, NULL, 0);
+		params[par++] = str_to_buf(row->in_prevhash, NULL, 0);
 		params[par++] = str_to_buf(row->coinbase1, NULL, 0);
 		params[par++] = str_to_buf(row->coinbase2, NULL, 0);
-		params[par++] = str_to_buf(row->version, NULL, 0);
-		params[par++] = str_to_buf(row->bits, NULL, 0);
+		params[par++] = str_to_buf(row->in_version, NULL, 0);
+		params[par++] = str_to_buf(row->in_bits, NULL, 0);
 		params[par++] = str_to_buf(row->ntime, NULL, 0);
 		params[par++] = bigint_to_buf(row->reward, NULL, 0);
 		HISTORYDATEPARAMS(params, par, row);
@@ -3247,7 +3247,7 @@ unparam:
 		FREENULL(row->merklehash);
 
 		row->height = coinbase1height(row);
-		hex2bin(ndiffbin, row->bits, 4);
+		hex2bin(ndiffbin, row->in_bits, 4);
 		row->diff_target = current_ndiff = diff_from_nbits(ndiffbin);
 
 		add_to_ktree(workinfo_root, item);
@@ -3392,7 +3392,7 @@ bool workinfo_fill(PGconn *conn)
 				POOLINSTANCE_DBLOAD_SET(workinfo, field);
 				continue;
 			}
-			row->poolinstance = intransient_str("poolinstance", field);
+			row->in_poolinstance = intransient_str("poolinstance", field);
 
 			PQ_GET_FLD(res, i, "workinfoid", field, ok);
 			if (!ok)
@@ -3405,7 +3405,7 @@ bool workinfo_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "prevhash", field, ok);
 			if (!ok)
 				break;
-			row->prevhash = intransient_str("prevhash", field);
+			row->in_prevhash = intransient_str("prevhash", field);
 
 			PQ_GET_FLD(res, i, "coinbase1", field, ok);
 			if (!ok)
@@ -3422,12 +3422,12 @@ bool workinfo_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "version", field, ok);
 			if (!ok)
 				break;
-			row->version = intransient_str("version", field);
+			row->in_version = intransient_str("version", field);
 
 			PQ_GET_FLD(res, i, "bits", field, ok);
 			if (!ok)
 				break;
-			row->bits = intransient_str("bits", field);
+			row->in_bits = intransient_str("bits", field);
 
 			PQ_GET_FLD(res, i, "ntime", field, ok);
 			if (!ok)
@@ -3445,7 +3445,7 @@ bool workinfo_fill(PGconn *conn)
 				break;
 
 			row->height = coinbase1height(row);
-			hex2bin(ndiffbin, row->bits, 4);
+			hex2bin(ndiffbin, row->in_bits, 4);
 			row->diff_target = diff_from_nbits(ndiffbin);
 
 			add_to_ktree(workinfo_root, item);

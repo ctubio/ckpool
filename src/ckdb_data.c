@@ -2612,14 +2612,14 @@ bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
 	}
 
 	DATA_WORKINFO(workinfo, wi_item);
-	if (strcmp(poolinstance, workinfo->poolinstance) != 0) {
+	if (strcmp(poolinstance, workinfo->in_poolinstance) != 0) {
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s() %"PRId64"/%s/%ld,%ld %.19s Poolinstance changed "
 //			"(from %s)! Age discarded!",
 			"(from %s)! Age not discarded",
 			__func__, workinfoid, poolinstance,
 			cd->tv_sec, cd->tv_usec, cd_buf,
-			workinfo->poolinstance);
+			workinfo->in_poolinstance);
 // TODO: ckdb only supports one, so until multiple support is written:
 //		goto bye;
 	}
@@ -6608,7 +6608,7 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
 			 fin->description, before ? "--" : "");
 
 		ok = workmarkers_process(conn, false, true, 0,
-					 wi_fin->poolinstance,
+					 wi_fin->in_poolinstance,
 					 wi_fin->workinfoid, wi_stt->workinfoid,
 					 description, MARKER_READY_STR,
 					 by, code, inet, cd, trf_root);
@@ -6617,7 +6617,7 @@ static bool gen_workmarkers(PGconn *conn, MARKS *stt, bool after, MARKS *fin,
 			return false;
 	}
 
-	ok = marks_process(conn, true, wi_fin->poolinstance, fin->workinfoid,
+	ok = marks_process(conn, true, wi_fin->in_poolinstance, fin->workinfoid,
 			   fin->description, fin->extra, fin->marktype,
 			   MARK_USED_STR, by, code, inet, cd, trf_root);
 

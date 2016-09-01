@@ -6232,7 +6232,7 @@ static char *cmd_marks(PGconn *conn, char *cmd, char *id,
 			return strdup(reply);
 		}
 		DATA_WORKINFO(workinfo, w_item);
-		ok = marks_process(conn, true, workinfo->poolinstance,
+		ok = marks_process(conn, true, workinfo->in_poolinstance,
 				   workinfoid, description, extra, marktype,
 				   status, by, code, inet, cd, trf_root);
 	} else if (strcasecmp(action, "expire") == 0) {
@@ -7145,7 +7145,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(tmp, sizeof(tmp),
 					 "prevhash:%d=%s%c",
-					 rows, workinfo->prevhash, FLDSEP);
+					 rows, workinfo->in_prevhash, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 				tv_to_buf(&(workinfo->expirydate), cd_buf,
 					  sizeof(cd_buf));
@@ -7354,7 +7354,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 			this_height = workinfo->height;
 			if (this_height == height) {
 				// We have our starting point
-				STRNCPY(bits, workinfo->bits);
+				STRNCPY(bits, workinfo->in_bits);
 				got = true;
 
 				bigint_to_buf(workinfo->workinfoid,
@@ -7371,7 +7371,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 				while (wi_item) {
 					if (CURRENT(&(workinfo->expirydate))) {
-						if (strcmp(bits, workinfo->bits) != 0)
+						if (strcmp(bits, workinfo->in_bits) != 0)
 							break;
 					}
 					wi_item = next_in_ktree(ctx);

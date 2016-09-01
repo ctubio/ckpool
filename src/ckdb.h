@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.447"
+#define CKDB_VERSION DB_VERSION"-2.448"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1951,14 +1951,14 @@ extern K_STORE *esm_store;
 // WORKINFO workinfo.id.json={...}
 typedef struct workinfo {
 	int64_t workinfoid;
-	char *poolinstance;
+	char *in_poolinstance;
 	char *transactiontree;
 	char *merklehash;
-	char *prevhash;
+	char *in_prevhash;
 	char *coinbase1;
 	char *coinbase2;
-	char *version;
-	char *bits;
+	char *in_version;
+	char *in_bits;
 	char ntime[TXT_SML+1];
 	int64_t reward;
 	int32_t height; // non-DB field
