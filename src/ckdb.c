@@ -4181,7 +4181,9 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 					intrans = true;
 					// This will affect 'was' if JSON_END is missing
 					*(next + siz) = '\0';
-					transfer->intransient = get_intransient_siz(next, siz+1);
+					transfer->intransient =
+						get_intransient_siz(transfer->name,
+								    next, siz+1);
 					transfer->mvalue = transfer->intransient->str;
 					break;
 				}
@@ -4244,7 +4246,9 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				if (strcmp(transfer->name,
 					   intransient_fields[i]) == 0) {
 					intrans = true;
-					transfer->intransient = get_intransient_siz(eq, siz);
+					transfer->intransient =
+						get_intransient_siz(transfer->name,
+								    eq, siz);
 					transfer->mvalue = transfer->intransient->str;
 					break;
 				}

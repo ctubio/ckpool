@@ -715,7 +715,7 @@ cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b)
 	return CMP_STR(ia->str, ib->str);
 }
 
-INTRANSIENT *_get_intransient(char *name, size_t siz, WHERE_FFL_ARGS)
+INTRANSIENT *_get_intransient(char *fldnam, char *value, size_t siz, WHERE_FFL_ARGS)
 {
 	INTRANSIENT intransient, *in = NULL;
 	K_ITEM look, *i_item, *n_item;
@@ -725,18 +725,19 @@ INTRANSIENT *_get_intransient(char *name, size_t siz, WHERE_FFL_ARGS)
 	bool new;
 
 	if (siz == 0)
-		siz = strlen(name) + 1;
+		siz = strlen(value) + 1;
 
 	if (siz > sizeof(nameram->rem)) {
 		char *st = NULL;
-		LOGEMERG("%s() ERR '%10s...' discarded - siz %d>%d" WHERE_FFL,
-			 __func__, st = safe_text_nonull(name), (int)siz,
-			 (int)sizeof(nameram->rem), WHERE_FFL_PASS);
-		name = EMPTY;
+		LOGEMERG("%s() ERR %s='%10s...' discarded - siz %d>%d"
+			 WHERE_FFL,
+			 __func__, fldnam, st = safe_text_nonull(value),
+			 (int)siz, (int)sizeof(nameram->rem), WHERE_FFL_PASS);
+		value = EMPTY;
 		siz = 1;
 	}
 
-	intransient.str = name;
+	intransient.str = value;
 	INIT_INTRANSIENT(&look);
 	look.data = (void *)(&intransient);
 	K_RLOCK(intransient_free);
@@ -779,7 +780,7 @@ INTRANSIENT *_get_intransient(char *name, size_t siz, WHERE_FFL_ARGS)
 		nameram->next += siz;
 		nameram->left -= siz;
 		K_WUNLOCK(nameram_free);
-		strcpy(buf, name);
+		strcpy(buf, value);
 		i_item = k_unlink_head(intransient_free);
 		DATA_INTRANSIENT(in, i_item);
 		in->str = buf;

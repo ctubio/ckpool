@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.440"
+#define CKDB_VERSION DB_VERSION"-2.441"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1153,7 +1153,7 @@ typedef struct intransient {
 } INTRANSIENT;
 
 /* Items never to be deleted and list never to be culled
- * They are all created by the db load functions and breakdown */
+ * They are all created by breakdown */
 #define ALLOC_INTRANSIENT 1024
 #define LIMIT_INTRANSIENT 0
 #define INIT_INTRANSIENT(_item) INIT_GENERIC(_item, intransient)
@@ -3111,10 +3111,12 @@ extern char *_hms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 extern char *_ms_to_buf(time_t *data, char *buf, size_t siz, WHERE_FFL_ARGS);
 
 extern cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b);
-#define get_intransient(_name) _get_intransient(_name, 0, WHERE_FFL_HERE)
-#define get_intransient_siz(_name, _siz) \
-	_get_intransient(_name, _siz, WHERE_FFL_HERE)
-extern INTRANSIENT *_get_intransient(char *name, size_t siz, WHERE_FFL_ARGS);
+#define get_intransient(_fld, _val) \
+	_get_intransient(_fld, _val, 0, WHERE_FFL_HERE)
+#define get_intransient_siz(_fld, _val, _siz) \
+	_get_intransient(_fld, _val , _siz, WHERE_FFL_HERE)
+extern INTRANSIENT *_get_intransient(char *fldnam, char *value, size_t siz,
+					WHERE_FFL_ARGS);
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b);
