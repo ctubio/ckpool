@@ -2278,6 +2278,8 @@ static bool find_create_esm(int64_t workinfoid, bool error, tv_t *createdate)
 		DATA_ESM(esm, esm_item);
 		esm->workinfoid = workinfoid;
 		copy_tv(&(esm->createdate), createdate);
+		add_to_ktree(esm_root, esm_item);
+		k_add_head(esm_store, esm_item);
 	} else {
 		created = false;
 		DATA_ESM(esm, esm_item);
@@ -2291,13 +2293,22 @@ static bool find_create_esm(int64_t workinfoid, bool error, tv_t *createdate)
 	return created;
 }
 
+/* Early shares are only procured one at a time, with each new share that
+ *  arrives, after the 'late' workinfo arrives
+ * Thus if less shares come in than the number of queued early shares,
+ *  within 60s of the first early share, the DIFF message will appear early
+ *  before the remaining procured messages
+ * This obvioulsy wouldn't happen on a normal running pool
+ * On a small test pool it shouldn't matter since there won't be many extra
+ *  messages */
 void esm_check(tv_t *now)
 {
-	K_ITEM *esm_item = NULL;
+	K_ITEM *esm_item;
 	ESM *esm = NULL;
 	bool had = true;
 
 	while (had) {
+		esm_item = NULL;
 		K_WLOCK(esm_free);
 		if (esm_store->count == 0)
 			had = false;
@@ -2307,6 +2318,7 @@ void esm_check(tv_t *now)
 			while (esm_item) {
 				DATA_ESM(esm, esm_item);
 				if (tvdiff(now, &(esm->createdate)) > ESM_LIMIT) {
+					remove_from_ktree(esm_root, esm_item);
 					k_unlink_item(esm_store, esm_item);
 					break;
 				}

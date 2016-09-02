@@ -7650,6 +7650,52 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		rows++;
 
 		ok = true;
+	} else if (strcasecmp(request, "esm") == 0) {
+		K_ITEM *esm_item;
+		ESM *esm = NULL;
+
+		K_RLOCK(esm_free);
+		esm_item = first_in_ktree(esm_root, ctx);
+		while (esm_item) {
+			DATA_ESM(esm, esm_item);
+			snprintf(tmp, sizeof(tmp), "workinfoid:%d=%"PRId64"%c",
+				 rows, esm->workinfoid, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "queued:%d=%d%c",
+				 rows, esm->queued, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "procured:%d=%d%c",
+				 rows, esm->procured, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "discarded:%d=%d%c",
+				 rows, esm->discarded, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "errqueued:%d=%d%c",
+				 rows, esm->errqueued, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "errprocured:%d=%d%c",
+				 rows, esm->errprocured, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			snprintf(tmp, sizeof(tmp), "errdiscarded:%d=%d%c",
+				 rows, esm->errdiscarded, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			tv_to_buf(&(esm->createdate), cd_buf, sizeof(cd_buf));
+			snprintf(tmp, sizeof(tmp), CDDB"_str:%d=%s%c",
+				 rows, cd_buf, FLDSEP);
+			APPEND_REALLOC(buf, off, len, tmp);
+			esm_item = next_in_ktree(ctx);
+			rows++;
+		}
+		K_RUNLOCK(esm_free);
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "workinfoid,queued,procured,discarded,errqueued,"
+			 "errprocured,errdiscarded,"CDDB"_str", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 "ESM", FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
 	} else {
 		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);

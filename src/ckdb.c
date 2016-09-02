@@ -2411,10 +2411,11 @@ void sequence_report(bool lock)
 
 static void dealloc_storage()
 {
+	K_ITEM *s_item, *esm_item;
 	SHAREERRORS *shareerrors;
-	K_ITEM *s_item;
 	char *st = NULL;
 	SHARES *shares;
+	ESM *esm;
 	int seq;
 
 	if (free_mode == FREE_MODE_NONE) {
@@ -2541,14 +2542,14 @@ static void dealloc_storage()
 			s_item = STORE_HEAD_NOLOCK(shares_early_store);
 			while (s_item) {
 				DATA_SHARES(shares, s_item);
-				LOGERR("%s(): %"PRId64"/%s/%s/%"PRId32"/%ld,%ld",
-					__func__,
-					shares->workinfoid,
-					st = safe_text_nonull(shares->workername),
-					shares->nonce,
-					shares->errn,
-					shares->createdate.tv_sec,
-					shares->createdate.tv_usec);
+				LOGNOTICE("%s(): %"PRId64"/%s/%s/%"PRId32
+					  "/%ld,%ld", __func__,
+					  shares->workinfoid,
+					  st = safe_text_nonull(shares->workername),
+					  shares->nonce,
+					  shares->errn,
+					  shares->createdate.tv_sec,
+					  shares->createdate.tv_usec);
 				FREENULL(st);
 				s_item = s_item->next;
 			}
@@ -2571,8 +2572,21 @@ static void dealloc_storage()
 	LOGWARNING("%s() etc ...", __func__);
 
 	if (esm_store->count > 0) {
-		LOGWARNING("%s() ***ESM had %d records ...",
-			   __func__, esm_store->count);
+		LOGWARNING("%s() *** ESM had %d record%s ***",
+			   __func__, esm_store->count,
+			   (esm_store->count) == 1 ? EMPTY : "s");
+		esm_item = STORE_HEAD_NOLOCK(esm_store);
+		while (esm_item) {
+			DATA_ESM(esm, esm_item);
+			LOGNOTICE("%s(): %"PRId64" %d/%d/%d err:%d/%d/%d"
+				  " %ld,%ld", __func__,
+				  esm->workinfoid, esm->queued, esm->procured,
+				  esm->discarded, esm->errqueued,
+				  esm->errprocured, esm->errdiscarded,
+				  esm->createdate.tv_sec,
+				  esm->createdate.tv_usec);
+			esm_item = esm_item->next;
+		}
 	}
 	FREE_ALL(esm);
 
