@@ -2296,8 +2296,8 @@ static bool find_create_esm(int64_t workinfoid, bool error, tv_t *createdate)
 /* Early shares are only procured one at a time, with each new share that
  *  arrives, after the 'late' workinfo arrives
  * Thus if less shares come in than the number of queued early shares,
- *  within 60s of the first early share, the DIFF message will appear early
- *  before the remaining procured messages
+ *  within ESM_LIMIT of the first early share, the DIFF message will appear
+ *  early before the remaining procured messages
  * This obvioulsy wouldn't happen on a normal running pool
  * On a small test pool it shouldn't matter since there won't be many extra
  *  messages */

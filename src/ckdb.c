@@ -901,6 +901,10 @@ static bool no_data_log = false;
  *	'restorefrom/'  */
 static char *logpath;
 
+static IOQUEUE byebye = {
+	"Exiting", { 0L, 0L }, 0, false, true, false, true, true
+};
+
 static void ioprocess(IOQUEUE *io)
 {
 	char stamp[128], tzinfo[16], tzch;
@@ -2283,6 +2287,76 @@ static void alloc_storage()
 #endif
 }
 
+static void share_reports()
+{
+	SHAREERRORS *shareerrors;
+	char *st = NULL;
+	K_ITEM *s_item;
+	SHARES *shares;
+
+	if (shareerrors_free && shareerrors_early_store->count > 0) {
+		LOGERR("%s() *** shareerrors_early count %d ***",
+			__func__, shareerrors_early_store->count);
+		s_item = STORE_HEAD_NOLOCK(shareerrors_early_store);
+		while (s_item) {
+			DATA_SHAREERRORS(shareerrors, s_item);
+			LOGNOTICE("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
+				  __func__,
+				  shareerrors->workinfoid,
+				  st = safe_text_nonull(shareerrors->workername),
+				  shareerrors->errn,
+				  shareerrors->error,
+				  shareerrors->createdate.tv_sec,
+				  shareerrors->createdate.tv_usec);
+			FREENULL(st);
+			s_item = s_item->next;
+		}
+	}
+
+	if (shares_free && shares_early_store->count > 0) {
+		LOGERR("%s() *** shares_early count %d ***",
+			__func__, shares_early_store->count);
+		s_item = STORE_HEAD_NOLOCK(shares_early_store);
+		while (s_item) {
+			DATA_SHARES(shares, s_item);
+			LOGNOTICE("%s(): %"PRId64"/%s/%s/%"PRId32
+				  "/%ld,%ld", __func__,
+				  shares->workinfoid,
+				  st = safe_text_nonull(shares->workername),
+				  shares->nonce,
+				  shares->errn,
+				  shares->createdate.tv_sec,
+				  shares->createdate.tv_usec);
+			FREENULL(st);
+			s_item = s_item->next;
+		}
+	}
+}
+
+static void esm_report()
+{
+	K_ITEM *esm_item;
+	ESM *esm;
+
+	if (esm_free && esm_store->count > 0) {
+		LOGWARNING("%s() *** ESM had %d record%s ***",
+			   __func__, esm_store->count,
+			   (esm_store->count == 1) ? EMPTY : "s");
+		esm_item = STORE_HEAD_NOLOCK(esm_store);
+		while (esm_item) {
+			DATA_ESM(esm, esm_item);
+			LOGNOTICE("%s(): %"PRId64" %d/%d/%d err:%d/%d/%d"
+				  " %ld,%ld", __func__,
+				  esm->workinfoid, esm->queued, esm->procured,
+				  esm->discarded, esm->errqueued,
+				  esm->errprocured, esm->errdiscarded,
+				  esm->createdate.tv_sec,
+				  esm->createdate.tv_usec);
+			esm_item = esm_item->next;
+		}
+	}
+}
+
 #define SEQSETMSG(_set, _seqset, _msgtxt, _endtxt) do { \
 	char _t_buf[DATE_BUFSIZ]; \
 	bool _warn = ((_seqset)->seqdata[SEQ_SHARES].missing > 0) || \
@@ -2411,14 +2485,13 @@ void sequence_report(bool lock)
 
 static void dealloc_storage()
 {
-	K_ITEM *s_item, *esm_item;
-	SHAREERRORS *shareerrors;
-	char *st = NULL;
-	SHARES *shares;
-	ESM *esm;
 	int seq;
 
 	if (free_mode == FREE_MODE_NONE) {
+		share_reports();
+		esm_report();
+		sequence_report(false);
+
 		LOGWARNING("%s() skipped", __func__);
 		return;
 	}
@@ -2511,24 +2584,7 @@ static void dealloc_storage()
 
 	if (shares_free) {
 		LOGWARNING("%s() shares ...", __func__);
-		if (shareerrors_early_store->count > 0) {
-			LOGERR("%s() *** shareerrors_early count %d ***",
-				__func__, shareerrors_early_store->count);
-			s_item = STORE_HEAD_NOLOCK(shareerrors_early_store);
-			while (s_item) {
-				DATA_SHAREERRORS(shareerrors, s_item);
-				LOGERR("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
-					__func__,
-					shareerrors->workinfoid,
-					st = safe_text_nonull(shareerrors->workername),
-					shareerrors->errn,
-					shareerrors->error,
-					shareerrors->createdate.tv_sec,
-					shareerrors->createdate.tv_usec);
-				FREENULL(st);
-				s_item = s_item->next;
-			}
-		}
+		share_reports();
 		FREE_TREE(shareerrors_early);
 		FREE_STORE(shareerrors_early);
 		FREE_ALL(shareerrors);
@@ -2536,24 +2592,6 @@ static void dealloc_storage()
 		FREE_TREE(shares_hi);
 		FREE_TREE(shares_db);
 		FREE_STORE(shares_hi);
-		if (shares_early_store->count > 0) {
-			LOGERR("%s() *** shares_early count %d ***",
-				__func__, shares_early_store->count);
-			s_item = STORE_HEAD_NOLOCK(shares_early_store);
-			while (s_item) {
-				DATA_SHARES(shares, s_item);
-				LOGNOTICE("%s(): %"PRId64"/%s/%s/%"PRId32
-					  "/%ld,%ld", __func__,
-					  shares->workinfoid,
-					  st = safe_text_nonull(shares->workername),
-					  shares->nonce,
-					  shares->errn,
-					  shares->createdate.tv_sec,
-					  shares->createdate.tv_usec);
-				FREENULL(st);
-				s_item = s_item->next;
-			}
-		}
 		FREE_TREE(shares_early);
 		FREE_STORE(shares_early);
 		FREE_ALL(shares);
@@ -2571,23 +2609,7 @@ static void dealloc_storage()
 
 	LOGWARNING("%s() etc ...", __func__);
 
-	if (esm_store->count > 0) {
-		LOGWARNING("%s() *** ESM had %d record%s ***",
-			   __func__, esm_store->count,
-			   (esm_store->count) == 1 ? EMPTY : "s");
-		esm_item = STORE_HEAD_NOLOCK(esm_store);
-		while (esm_item) {
-			DATA_ESM(esm, esm_item);
-			LOGNOTICE("%s(): %"PRId64" %d/%d/%d err:%d/%d/%d"
-				  " %ld,%ld", __func__,
-				  esm->workinfoid, esm->queued, esm->procured,
-				  esm->discarded, esm->errqueued,
-				  esm->errprocured, esm->errdiscarded,
-				  esm->createdate.tv_sec,
-				  esm->createdate.tv_usec);
-			esm_item = esm_item->next;
-		}
-	}
+	esm_report();
 	FREE_ALL(esm);
 
 	FREE_LISTS(idcontrol);
@@ -9540,6 +9562,9 @@ int main(int argc, char **argv)
 	FREE_LISTS(ioqueue);
 
 	clean_up(&ckp);
+
+	setnow(&(byebye.when));
+	ioprocess(&byebye);
 
 	return 0;
 }
