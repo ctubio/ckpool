@@ -8993,6 +8993,8 @@ static struct option long_options[] = {
 	{ "workinfoid",		required_argument,	0,	'w' },
 	// Disable writing to the db-log file (for testing environments)
 	{ "no-db-log",		no_argument,		0,	'x' },
+	// force disable the exclusive db load locks
+	{ "no-exclusive",	required_argument,	0,	'X' },
 	{ "confirm",		no_argument,		0,	'y' },
 	{ "confirmrange",	required_argument,	0,	'Y' },
 	{ 0, 0, 0, 0 }
@@ -9033,7 +9035,7 @@ int main(int argc, char **argv)
 	memset(&ckpcmd, 0, sizeof(ckp));
 	ckp.loglevel = LOG_NOTICE;
 
-	while ((c = getopt_long(argc, argv, "a:Ab:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:xyY:", long_options, &i)) != -1) {
+	while ((c = getopt_long(argc, argv, "a:Ab:B:c:d:D:f:ghi:IkK:l:L:mM:n:N:o:p:P:q:Q:r:R:s:S:t:Tu:U:vw:xXyY:", long_options, &i)) != -1) {
 		switch(c) {
 			case '?':
 			case ':':
@@ -9301,6 +9303,9 @@ int main(int argc, char **argv)
 				break;
 			case 'x':
 				db_logger = false;
+				break;
+			case 'X':
+				exclusive_db = false;
 				break;
 			case 'y':
 				confirm_sharesummary = true;
