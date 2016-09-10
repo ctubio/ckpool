@@ -9,17 +9,6 @@
 
 #include "ckdb.h"
 
-// Doesn't work with negative numbers ...
-void pcom(int n)
-{
-	if (n < 1000)
-		printf("%d", n);
-	else {
-		pcom(n/1000);
-		printf(",%03d", n % 1000);
-	}
-}
-
 char *pqerrmsg(PGconn *conn)
 {
 	char *ptr, *buf = strdup(PQerrorMessage(conn));
@@ -3275,6 +3264,7 @@ unparam:
 
 bool workinfo_fill(PGconn *conn)
 {
+	char tickbuf[256], pcombuf[64];
 	char ndiffbin[TXT_SML+1];
 	ExecStatusType rescode;
 	PGresult *res;
@@ -3290,8 +3280,8 @@ bool workinfo_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
-	printf(TICK_PREFIX"wi 0\r");
-	fflush(stdout);
+	STRNCPY(tickbuf, TICK_PREFIX"wi 0");
+	cr_msg(false, tickbuf);
 
 	APPEND_REALLOC_INIT(sel, off, len);
 	APPEND_REALLOC(sel, off, len,
@@ -3459,10 +3449,10 @@ bool workinfo_fill(PGconn *conn)
 			}
 
 			if (n == 0 || ((n+1) % 100000) == 0) {
-				printf(TICK_PREFIX"wi ");
-				pcom(n+1);
-				putchar('\r');
-				fflush(stdout);
+				pcom(n+1, pcombuf, sizeof(pcombuf));
+				snprintf(tickbuf, sizeof(tickbuf),
+					 TICK_PREFIX"wi %s", pcombuf);
+				cr_msg(false, tickbuf);
 			}
 			tick();
 			n++;
@@ -4007,6 +3997,7 @@ unparam:
 
 bool shares_fill(PGconn *conn)
 {
+	char tickbuf[256], pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_TREE_CTX ctx[1];
@@ -4055,8 +4046,8 @@ bool shares_fill(PGconn *conn)
 
 	LOGWARNING("%s(): loading from workinfoid>=%"PRId64, __func__, workinfoid);
 
-	printf(TICK_PREFIX"sh 0\r");
-	fflush(stdout);
+	STRNCPY(tickbuf, TICK_PREFIX"sh 0");
+	cr_msg(false, tickbuf);
 
 	sel = "declare sh cursor for select "
 		"workinfoid,userid,workername,clientid,enonce1,nonce2,nonce,"
@@ -4218,10 +4209,10 @@ bool shares_fill(PGconn *conn)
 			k_add_head(shares_hi_store, item);
 
 			if (n == 0 || ((n+1) % 100000) == 0) {
-				printf(TICK_PREFIX"sh ");
-				pcom(n+1);
-				putchar('\r');
-				fflush(stdout);
+				pcom(n+1, pcombuf, sizeof(pcombuf));
+				snprintf(tickbuf, sizeof(tickbuf),
+					 TICK_PREFIX"sh %s", pcombuf);
+				cr_msg(false, tickbuf);
 			}
 			tick();
 			n++;
@@ -8333,6 +8324,7 @@ unparam:
 
 bool markersummary_fill(PGconn *conn)
 {
+	char tickbuf[256], pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item = NULL, *p_item, *wm_item = NULL;
@@ -8434,8 +8426,8 @@ bool markersummary_fill(PGconn *conn)
 			   params[0], cd, amt, what);
 	}
 
-	printf(TICK_PREFIX"ms 0\r");
-	fflush(stdout);
+	STRNCPY(tickbuf, TICK_PREFIX"ms 0");
+	cr_msg(false, tickbuf);
 
 	res = PQexec(conn, "Begin", CKPQ_READ);
 	rescode = PQresultStatus(res);
@@ -8637,10 +8629,10 @@ bool markersummary_fill(PGconn *conn)
 			userinfo_update(NULL, NULL, row, false);
 
 			if (n == 0 || ((n+1) % 100000) == 0) {
-				printf(TICK_PREFIX"ms ");
-				pcom(n+1);
-				putchar('\r');
-				fflush(stdout);
+				pcom(n+1, pcombuf, sizeof(pcombuf));
+				snprintf(tickbuf, sizeof(tickbuf),
+					 TICK_PREFIX"ms %s", pcombuf);
+				cr_msg(false, tickbuf);
 			}
 			tick();
 			n++;

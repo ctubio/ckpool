@@ -192,6 +192,45 @@ void _free_seqset_data(K_ITEM *item)
 	}
 }
 
+static void pcom2(int n, char **buf, size_t *siz)
+{
+	size_t len;
+
+	if (*siz > 1) {
+		if (n < 1000) {
+			len = snprintf(*buf, *siz, "%d", n);
+		} else {
+			pcom2(n/1000, buf, siz);
+			len = snprintf(*buf, *siz, ",%03d", n % 1000);
+		}
+		if (len > 0) {
+			*siz -= len;
+			*buf += len;
+		}
+	}
+}
+
+void _pcom(int n, char *buf, size_t bufsiz, WHERE_FFL_ARGS)
+{
+	size_t siz = bufsiz;
+
+	// a random limit that should never occur
+	if (siz < 4) {
+		quithere(1, "%s() bufsiz (%d) too small" WHERE_FFL,
+			 __func__, (int)siz, WHERE_FFL_PASS);
+	}
+
+	if (n < 0) {
+		*(buf++) = '-';
+		siz--;
+		n = -n;
+	}
+
+	*buf = '\0';
+
+	pcom2(n, &buf, &siz);
+}
+
 /* Data copy functions (added here as needed)
    All pointers need to be initialised since DUP_POINTER will free them */
 

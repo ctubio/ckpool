@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.452"
+#define CKDB_VERSION DB_VERSION"-2.453"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -755,6 +755,20 @@ enum cmd_values {
 
 // CCLs are every ...
 #define ROLL_S 3600
+
+#define io_msg(stamp, msg, errn, logfd, logerr) \
+	_io_msg(stamp, msg, false, errn, logfd, false, logerr, true, true, \
+		WHERE_FFL_HERE)
+#define cr_msg(stamp, msg) \
+	_io_msg(stamp, msg, true, 0, false, true, false, false, true, WHERE_FFL_HERE)
+#define lf_msg(stamp, msg) \
+	_io_msg(stamp, msg, true, 0, false, true, false, true, true, WHERE_FFL_HERE)
+#define err_msg(stamp, msg, errn) \
+	_io_msg(stamp, msg, true, errn, false, false, true, true, true, WHERE_FFL_HERE)
+
+extern void _io_msg(bool stamp, char *msg, bool alloc, int errn, bool logfd,
+		    bool logout, bool logerr, bool eol, bool flush,
+		    WHERE_FFL_ARGS);
 
 #define LOGQUE(_msg, _db) log_queue_message(_msg, _db)
 #define LOGFILE(_msg, _prefix) rotating_log_nolock(_msg, _prefix)
@@ -3065,6 +3079,9 @@ extern void free_workmarkers_data(K_ITEM *item);
 extern void free_marks_data(K_ITEM *item);
 #define free_seqset_data(_item) _free_seqset_data(_item)
 extern void _free_seqset_data(K_ITEM *item);
+
+#define pcom(_n, _buf, _siz) _pcom(_n, _buf, _siz, WHERE_FFL_HERE);
+extern void _pcom(int n, char *buf, size_t bufsiz, WHERE_FFL_ARGS);
 
 // Data copy functions
 #define COPY_DATA(_new, _old) memcpy(_new, _old, sizeof(*(_new)))

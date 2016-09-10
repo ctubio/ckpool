@@ -1055,19 +1055,8 @@ static void *iomsgs(void *consol)
 	return NULL;
 }
 
-#define io_msg(stamp, msg, errn, logfd, logerr) \
-	_io_msg(stamp, msg, false, errn, logfd, false, logerr, true, true, \
-		WHERE_FFL_HERE)
-#define cr_msg(stamp, msg) \
-	_io_msg(stamp, msg, true, 0, false, true, false, false, true, WHERE_FFL_HERE)
-#define lf_msg(stamp, msg) \
-	_io_msg(stamp, msg, true, 0, false, true, false, true, true, WHERE_FFL_HERE)
-#define err_msg(stamp, msg, errn) \
-	_io_msg(stamp, msg, true, errn, false, false, true, true, true, WHERE_FFL_HERE)
-
-static void _io_msg(bool stamp, char *msg, bool alloc, int errn, bool logfd,
-		    bool logout, bool logerr, bool eol, bool flush,
-		    WHERE_FFL_ARGS)
+void _io_msg(bool stamp, char *msg, bool alloc, int errn, bool logfd,
+	     bool logout, bool logerr, bool eol, bool flush, WHERE_FFL_ARGS)
 {
 	K_ITEM *fio_item = NULL, *cio_item = NULL;
 	bool msgused = false;
