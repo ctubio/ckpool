@@ -2323,6 +2323,7 @@ unparam:
 
 bool payments_fill(PGconn *conn)
 {
+	char tickbuf[256], pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item = NULL;
@@ -2334,6 +2335,9 @@ bool payments_fill(PGconn *conn)
 	bool ok = false;
 
 	LOGDEBUG("%s(): select", __func__);
+
+	STRNCPY(tickbuf, TICK_PREFIX"pm 0");
+	cr_msg(false, tickbuf);
 
 	sel = "declare ps cursor for select "
 		"paymentid,payoutid,userid,subname,paydate,payaddress,"
@@ -2449,6 +2453,13 @@ bool payments_fill(PGconn *conn)
 
 			add_to_ktree(payments_root, item);
 			k_add_head(payments_store, item);
+
+			if (n == 0 || ((n+1) % 100000) == 0) {
+				pcom(n+1, pcombuf, sizeof(pcombuf));
+				snprintf(tickbuf, sizeof(tickbuf),
+					 TICK_PREFIX"pm %s", pcombuf);
+				cr_msg(false, tickbuf);
+			}
 			tick();
 			n++;
 		}
@@ -6635,6 +6646,7 @@ unparam:
 
 bool miningpayouts_fill(PGconn *conn)
 {
+	char tickbuf[256], pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item = NULL;
@@ -6646,6 +6658,9 @@ bool miningpayouts_fill(PGconn *conn)
 	bool ok = false;
 
 	LOGDEBUG("%s(): select", __func__);
+
+	STRNCPY(tickbuf, TICK_PREFIX"mp 0");
+	cr_msg(false, tickbuf);
 
 	sel = "declare mp cursor for select "
 		"payoutid,userid,diffacc,amount"
@@ -6735,6 +6750,13 @@ bool miningpayouts_fill(PGconn *conn)
 
 			add_to_ktree(miningpayouts_root, item);
 			k_add_head(miningpayouts_store, item);
+
+			if (n == 0 || ((n+1) % 100000) == 0) {
+				pcom(n+1, pcombuf, sizeof(pcombuf));
+				snprintf(tickbuf, sizeof(tickbuf),
+					 TICK_PREFIX"mp %s", pcombuf);
+				cr_msg(false, tickbuf);
+			}
 			tick();
 			n++;
 		}
