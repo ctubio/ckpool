@@ -208,7 +208,8 @@ const char *strpatt = "^[ -<>-~]*$";
 const char Transfer[] = "Transfer";
 
 // older version missing field defaults
-static TRANSFER auth_1 = { "poolinstance", "", auth_1.svalue, NULL };
+// see end of alloc_storage()
+static TRANSFER auth_1 = { "poolinstance", "", NULL, NULL };
 K_ITEM auth_poolinstance = { Transfer, NULL, NULL, (void *)(&auth_1) };
 static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue, NULL };
 K_ITEM auth_preauth = { Transfer, NULL, NULL, (void *)(&auth_2) };
@@ -216,8 +217,8 @@ static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue, NULL };
 K_ITEM poolstats_elapsed = { Transfer, NULL, NULL, (void *)(&poolstats_1) };
 static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.svalue, NULL };
 K_ITEM userstats_elapsed = { Transfer, NULL, NULL, (void *)(&userstats_1) };
-static TRANSFER userstats_2 = { "workername", "all", userstats_2.svalue, NULL };
-K_ITEM userstats_workername = { Transfer, NULL, NULL, (void *)(&userstats_2) };
+// see end of alloc_storage()
+INTRANSIENT *userstats_workername = NULL;
 static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.svalue, NULL };
 K_ITEM userstats_idle = { Transfer, NULL, NULL, (void *)(&userstats_3) };
 static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.svalue, NULL };
@@ -2274,6 +2275,11 @@ static void alloc_storage()
 	if (auto_check_deadlocks)
 		check_deadlocks = true;
 #endif
+
+	// set intransient
+	auth_1.intransient = get_intransient(auth_1.name, "");
+	auth_1.mvalue = auth_1.intransient->str;
+	userstats_workername = get_intransient("workername", "all");
 }
 
 static void share_reports()
@@ -2292,7 +2298,7 @@ static void share_reports()
 			LOGNOTICE("%s(): %"PRId64"/%s/%"PRId32"/%s/%ld,%ld",
 				  __func__,
 				  shareerrors->workinfoid,
-				  st = safe_text_nonull(shareerrors->workername),
+				  st = safe_text_nonull(shareerrors->in_workername),
 				  shareerrors->errn,
 				  shareerrors->error,
 				  shareerrors->createdate.tv_sec,
@@ -2311,7 +2317,7 @@ static void share_reports()
 			LOGNOTICE("%s(): %"PRId64"/%s/%s/%"PRId32
 				  "/%ld,%ld", __func__,
 				  shares->workinfoid,
-				  st = safe_text_nonull(shares->workername),
+				  st = safe_text_nonull(shares->in_workername),
 				  shares->nonce,
 				  shares->errn,
 				  shares->createdate.tv_sec,
@@ -4905,7 +4911,7 @@ static void summarise_blocks()
 	// Add up the sharesummaries, abort if any SUMMARY_NEW
 	looksharesummary.workinfoid = wi_finish;
 	looksharesummary.userid = MAXID;
-	looksharesummary.workername = EMPTY;
+	looksharesummary.in_workername = EMPTY;
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 
@@ -4978,7 +4984,7 @@ static void summarise_blocks()
 		if (WMPROCESSED(workmarkers->status)) {
 			lookmarkersummary.markerid = workmarkers->markerid;
 			lookmarkersummary.userid = MAXID;
-			lookmarkersummary.workername = EMPTY;
+			lookmarkersummary.in_workername = EMPTY;
 			INIT_MARKERSUMMARY(&ms_look);
 			ms_look.data = (void *)(&lookmarkersummary);
 			ms_item = find_before_in_ktree(markersummary_root, &ms_look,
@@ -5264,7 +5270,7 @@ static void make_a_shift_mark()
 		tv_to_buf(&(sharesummary->lastshare), cd_buf2, sizeof(cd_buf2));
 		LOGDEBUG("%s() last sharesummary %s/%s/%"PRId64"/%s/%s",
 			 __func__, sharesummary->complete,
-			 sharesummary->workername,
+			 sharesummary->in_workername,
 			 ss_age_wid, cd_buf, cd_buf2);
 	}
 	LOGDEBUG("%s() age sharesummary limit wid %"PRId64, __func__, ss_age_wid);
@@ -5488,7 +5494,7 @@ static void make_a_shift_mark()
 			 *  so doesn't need checking (and doesn't matter) */
 			looksharesummary.workinfoid = workinfo->workinfoid;
 			looksharesummary.userid = MAXID;
-			looksharesummary.workername = EMPTY;
+			looksharesummary.in_workername = EMPTY;
 			ss_look.data = (void *)(&looksharesummary);
 			K_RLOCK(sharesummary_free);
 			ss_item = find_before_in_ktree(sharesummary_workinfoid_root,
@@ -5507,7 +5513,7 @@ static void make_a_shift_mark()
 					LOGEMERG("%s() ERR unaged sharesummary "
 						 "%s/%s/%"PRId64"/%s/%s",
 						 __func__, sharesummary->complete,
-						 sharesummary->workername,
+						 sharesummary->in_workername,
 						 sharesummary->workinfoid,
 						 cd_buf, cd_buf2);
 					return;

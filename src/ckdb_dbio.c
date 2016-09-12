@@ -62,6 +62,32 @@ char *pqerrmsg(PGconn *conn)
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(EDDB, _fld, (_data)->expirydate); \
+		(_data)->buffers = (_data)->buffers; \
+	} while (0)
+
+#define HISTORYDATEIN(_res, _row, _data, _ok) do { \
+		char *_fld; \
+		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
+		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_createby = intransient_str(BYDB, _fld); \
+		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_createcode = intransient_str(CODEDB, _fld); \
+		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_createinet = intransient_str(INETDB, _fld); \
+		PQ_GET_FLD(_res, _row, EDDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_TVDB(EDDB, _fld, (_data)->expirydate); \
+		(_data)->intrans = (_data)->intrans; \
 	} while (0)
 
 #define HISTORYDATEPARAMS(_params, _his_pos, _row) do { \
@@ -69,6 +95,14 @@ char *pqerrmsg(PGconn *conn)
 		_params[_his_pos++] = str_to_buf(_row->createby, NULL, 0); \
 		_params[_his_pos++] = str_to_buf(_row->createcode, NULL, 0); \
 		_params[_his_pos++] = str_to_buf(_row->createinet, NULL, 0); \
+		_params[_his_pos++] = tv_to_buf(&(_row->expirydate), NULL, 0); \
+	} while (0)
+
+#define HISTORYDATEPARAMSIN(_params, _his_pos, _row) do { \
+		_params[_his_pos++] = tv_to_buf(&(_row->createdate), NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->in_createby, NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->in_createcode, NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->in_createinet, NULL, 0); \
 		_params[_his_pos++] = tv_to_buf(&(_row->expirydate), NULL, 0); \
 	} while (0)
 
@@ -107,6 +141,44 @@ char *pqerrmsg(PGconn *conn)
 		if (!_ok) \
 			break; \
 		SET_MODIFYINET(_list, (_data)->modifyinet, _fld); \
+		(_data)->pointers = (_data)->pointers; \
+	} while (0)
+
+#define MODIFYDATEIN(_res, _row, _data, _ok) do { \
+		char *_fld; \
+		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
+		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_createby = intransient_str(BYDB, _fld); \
+		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_createcode = intransient_str(CODEDB, _fld); \
+		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_createinet = intransient_str(INETDB, _fld); \
+		PQ_GET_FLD(_res, _row, MDDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		TXT_TO_TVDB(MDDB, _fld, (_data)->modifydate); \
+		PQ_GET_FLD(_res, _row, MBYDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_modifyby = intransient_str(MBYDB, _fld); \
+		PQ_GET_FLD(_res, _row, MCODEDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_modifycode = intransient_str(MCODEDB, _fld); \
+		PQ_GET_FLD(_res, _row, MINETDB, _fld, _ok); \
+		if (!_ok) \
+			break; \
+		(_data)->in_modifyinet = intransient_str(MINETDB, _fld); \
+		(_data)->intrans = (_data)->intrans; \
 	} while (0)
 
 #define MODIFYDATEPARAMS(_params, _mod_pos, _row) do { \
@@ -118,6 +190,17 @@ char *pqerrmsg(PGconn *conn)
 		_params[_mod_pos++] = str_to_buf(_row->modifyby, NULL, 0); \
 		_params[_mod_pos++] = str_to_buf(_row->modifycode, NULL, 0); \
 		_params[_mod_pos++] = str_to_buf(_row->modifyinet, NULL, 0); \
+	} while (0)
+
+#define MODIFYDATEPARAMSIN(_params, _mod_pos, _row) do { \
+		_params[_mod_pos++] = tv_to_buf(&(_row->createdate), NULL, 0); \
+		_params[_mod_pos++] = str_to_buf(_row->in_createby, NULL, 0); \
+		_params[_mod_pos++] = str_to_buf(_row->in_createcode, NULL, 0); \
+		_params[_mod_pos++] = str_to_buf(_row->in_createinet, NULL, 0); \
+		_params[_mod_pos++] = tv_to_buf(&(_row->modifydate), NULL, 0); \
+		_params[_mod_pos++] = str_to_buf(_row->in_modifyby, NULL, 0); \
+		_params[_mod_pos++] = str_to_buf(_row->in_modifycode, NULL, 0); \
+		_params[_mod_pos++] = str_to_buf(_row->in_modifyinet, NULL, 0); \
 	} while (0)
 
 #define MODIFYUPDATEPARAMS(_params, _mod_pos, _row) do { \
@@ -146,6 +229,7 @@ char *pqerrmsg(PGconn *conn)
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(INETDB, _fld, (_data)->createinet); \
+		(_data)->buffers = (_data)->buffers; \
 	} while (0)
 
 #define SIMPLEDATEPARAMS(_params, _his_pos, _row) do { \
@@ -153,6 +237,13 @@ char *pqerrmsg(PGconn *conn)
 		_params[_his_pos++] = str_to_buf(_row->createby, NULL, 0); \
 		_params[_his_pos++] = str_to_buf(_row->createcode, NULL, 0); \
 		_params[_his_pos++] = str_to_buf(_row->createinet, NULL, 0); \
+	} while (0)
+
+#define SIMPLEDATEPARAMSIN(_params, _his_pos, _row) do { \
+		_params[_his_pos++] = tv_to_buf(&(_row->createdate), NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->in_createby, NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->in_createcode, NULL, 0); \
+		_params[_his_pos++] = str_to_buf(_row->in_createinet, NULL, 0); \
 	} while (0)
 
 // For easy parameter constant strings
@@ -1389,6 +1480,7 @@ bool useratts_fill(PGconn *conn)
 	return ok;
 }
 
+// WARNING: workername must be intransient
 K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername, bool add_ws,
 			char *difficultydefault, char *idlenotificationenabled,
 			char *idlenotificationtime, char *by, char *code,
@@ -1438,7 +1530,7 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername, bool add_ws,
 		goto unitem;
 
 	row->userid = userid;
-	STRNCPY(row->workername, workername);
+	row->in_workername = workername;
 	if (difficultydefault && *difficultydefault) {
 		diffdef = atoi(difficultydefault);
 		// If out of the range, set it in the range
@@ -1485,7 +1577,7 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername, bool add_ws,
 	par = 0;
 	params[par++] = bigint_to_buf(row->workerid, NULL, 0);
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(row->workername, NULL, 0);
+	params[par++] = str_to_buf(row->in_workername, NULL, 0);
 	params[par++] = int_to_buf(row->difficultydefault, NULL, 0);
 	params[par++] = str_to_buf(row->idlenotificationenabled, NULL, 0);
 	params[par++] = int_to_buf(row->idlenotificationtime, NULL, 0);
@@ -1650,7 +1742,7 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	par = 0;
 	params[par++] = bigint_to_buf(row->workerid, NULL, 0);
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(row->workername, NULL, 0);
+	params[par++] = str_to_buf(row->in_workername, NULL, 0);
 	params[par++] = int_to_buf(row->difficultydefault, NULL, 0);
 	params[par++] = str_to_buf(row->idlenotificationenabled, NULL, 0);
 	params[par++] = int_to_buf(row->idlenotificationtime, NULL, 0);
@@ -1765,7 +1857,7 @@ bool workers_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "workername", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("workername", field, row->workername);
+			row->in_workername = intransient_str("workername", field);
 
 			PQ_GET_FLD(res, i, "difficultydefault", field, ok);
 			if (!ok)
@@ -1803,7 +1895,7 @@ bool workers_fill(PGconn *conn)
 
 			// Make sure a workerstatus exists for each worker
 			find_create_workerstatus(false, false, row->userid,
-						 row->workername, true,
+						 row->in_workername, true,
 						 __FILE__, __func__, __LINE__);
 			tick();
 			n++;
@@ -2274,8 +2366,8 @@ bool payments_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 	if (add) {
 		LOGDEBUG("%s(): adding new", __func__);
 
-		HISTORYDATEINIT(row, cd, by, code, inet);
-		HISTORYDATETRANSFER(trf_root, row);
+		HISTORYDATEINTRANS(row, cd, by, code, inet);
+		HISTORYDATETRANSFERIN(trf_root, row);
 
 		par = 0;
 		params[par++] = bigint_to_buf(row->paymentid, NULL, 0);
@@ -2289,7 +2381,7 @@ bool payments_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 		params[par++] = double_to_buf(row->diffacc, NULL, 0);
 		params[par++] = str_to_buf(row->committxn, NULL, 0);
 		params[par++] = str_to_buf(row->commitblockhash, NULL, 0);
-		HISTORYDATEPARAMS(params, par, row);
+		HISTORYDATEPARAMSIN(params, par, row);
 		PARCHK(par, params);
 
 		ins = "insert into payments "
@@ -2447,7 +2539,7 @@ bool payments_fill(PGconn *conn)
 				break;
 			TXT_TO_STR("commitblockhash", field, row->commitblockhash);
 
-			HISTORYDATEFLDS(res, i, row, ok);
+			HISTORYDATEIN(res, i, row, ok);
 			if (!ok)
 				break;
 
@@ -3170,8 +3262,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 	TXT_TO_BIGINT("reward", reward, row->reward);
 	pool.reward = row->reward;
 
-	HISTORYDATEINIT(row, cd, by, code, inet);
-	HISTORYDATETRANSFER(trf_root, row);
+	HISTORYDATEINTRANS(row, cd, by, code, inet);
+	HISTORYDATETRANSFERIN(trf_root, row);
 
 	K_WLOCK(workinfo_free);
 	if (find_in_ktree(workinfo_root, item, ctx)) {
@@ -3203,7 +3295,7 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 		params[par++] = str_to_buf(row->in_bits, NULL, 0);
 		params[par++] = str_to_buf(row->ntime, NULL, 0);
 		params[par++] = bigint_to_buf(row->reward, NULL, 0);
-		HISTORYDATEPARAMS(params, par, row);
+		HISTORYDATEPARAMSIN(params, par, row);
 		PARCHK(par, params);
 
 		ins = "insert into workinfo "
@@ -3441,7 +3533,7 @@ bool workinfo_fill(PGconn *conn)
 			TXT_TO_BIGINT("reward", field, row->reward);
 			pool.reward = row->reward;
 
-			HISTORYDATEFLDS(res, i, row, ok);
+			HISTORYDATEIN(res, i, row, ok);
 			if (!ok)
 				break;
 
@@ -3553,20 +3645,20 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 				   (sta == NULL) ? "ok" : sta,
 				   100.0 * shares->sdiff / workinfo->diff_target,
 				   shares->sdiff, workinfo->diff_target,
-				   st = safe_text_nonull(shares->workername),
+				   st = safe_text_nonull(shares->in_workername),
 				   pool.diffacc, est, pct);
 			FREENULL(st);
 		}
 	}
 
 	w_item = new_default_worker(conn, false, shares->userid,
-				    shares->workername, shares->createby,
+				    shares->in_workername, shares->createby,
 				    shares->createcode, shares->createinet,
 				    &(shares->createdate), trf_root);
 	if (!w_item) {
 		LOGDEBUG("%s(): new_default_worker failed %"PRId64"/%s/%ld,%ld",
 			 __func__, shares->userid,
-			 st = safe_text_nonull(shares->workername),
+			 st = safe_text_nonull(shares->in_workername),
 			 shares->createdate.tv_sec, shares->createdate.tv_usec);
 		FREENULL(st);
 		return false;
@@ -3582,7 +3674,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
 				 " %"PRId64"/%s/%ld,%ld",
 				 __func__, shares->workinfoid, shares->userid,
-				 st = safe_text_nonull(shares->workername),
+				 st = safe_text_nonull(shares->in_workername),
 				 shares->createdate.tv_sec,
 				 shares->createdate.tv_usec);
 			FREENULL(st);
@@ -3590,7 +3682,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 		}
 
 		K_RLOCK(sharesummary_free);
-		ss_item = find_sharesummary(shares->userid, shares->workername,
+		ss_item = find_sharesummary(shares->userid, shares->in_workername,
 					    shares->workinfoid);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -3601,7 +3693,7 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 					 "%"PRId64" %"PRId64"/%s/%ld,%ld",
 					 __func__, complete,
 					 shares->workinfoid, shares->userid,
-					 st = safe_text_nonull(shares->workername),
+					 st = safe_text_nonull(shares->in_workername),
 					 shares->createdate.tv_sec,
 					 shares->createdate.tv_usec);
 				FREENULL(st);
@@ -3711,7 +3803,7 @@ keep:
 		  " Early share procured",
 		  __func__, failed ? "***ESM " : EMPTY,
 		  early_shares->workinfoid,
-		  st = safe_text_nonull(early_shares->workername),
+		  st = safe_text_nonull(early_shares->in_workername),
 		  early_shares->createdate.tv_sec,
 		  early_shares->createdate.tv_usec, cd_buf,
 		  early_shares->oldcount, early_shares->redo);
@@ -3728,7 +3820,7 @@ discard:
 		  " Early share discarded!%s",
 		  __func__, failed ? "***ESM " : EMPTY,
 		  early_shares->workinfoid,
-		  st = safe_text_nonull(early_shares->workername),
+		  st = safe_text_nonull(early_shares->in_workername),
 		  early_shares->createdate.tv_sec,
 		  early_shares->createdate.tv_usec, cd_buf,
 		  early_shares->oldcount, early_shares->redo, why);
@@ -3746,11 +3838,12 @@ static void shareerrors_process_early(PGconn *conn, int64_t good_wid,
 				      tv_t *good_cd, K_TREE *trf_root);
 
 // DB Shares are stored by the summariser to ensure the reload is correct
-bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername,
-		char *clientid, char *errn, char *enonce1, char *nonce2,
-		char *nonce, char *diff, char *sdiff, char *secondaryuserid,
-		char *ntime, char *address, char *agent, char *by, char *code,
-		char *inet, tv_t *cd, K_TREE *trf_root)
+bool shares_add(PGconn *conn, char *workinfoid, char *username,
+		INTRANSIENT *in_workername, char *clientid, char *errn,
+		char *enonce1, char *nonce2, char *nonce, char *diff,
+		char *sdiff, char *secondaryuserid, char *ntime, char *address,
+		char *agent, char *by, char *code, char *inet, tv_t *cd,
+		K_TREE *trf_root)
 {
 	K_TREE_CTX ctx[1];
 	K_ITEM *s_item = NULL, *s2_item = NULL, *u_item, *wi_item, *tmp_item;
@@ -3764,7 +3857,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
-		 workinfoid, st = safe_text_nonull(workername), nonce,
+		 workinfoid, st = safe_text_nonull(in_workername->str), nonce,
 		 errn, cd->tv_sec, cd->tv_usec);
 	FREENULL(st);
 
@@ -3799,7 +3892,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 	shares->userid = users->userid;
 
 	TXT_TO_BIGINT("workinfoid", workinfoid, shares->workinfoid);
-	STRNCPY(shares->workername, workername);
+	shares->in_workername = in_workername->str;
 	TXT_TO_INT("clientid", clientid, shares->clientid);
 	TXT_TO_INT("errn", errn, shares->errn);
 	STRNCPY(shares->enonce1, enonce1);
@@ -3843,7 +3936,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 		LOGMSG(sta, "%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
 			"Early share queued!",
 			__func__, shares->workinfoid,
-			st = safe_text_nonull(workername),
+			st = safe_text_nonull(in_workername->str),
 			cd->tv_sec, cd->tv_usec, cd_buf);
 		FREENULL(st);
 		shares->redo = 0;
@@ -3874,7 +3967,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 			LOGWARNING("%s() duplicate DB share discarded: "
 				   "%"PRId64"/%s/%"PRId32"/%s/%.0f/%"PRId32"/%ld,%ld %s",
 				   __func__, shares->workinfoid,
-				   st = safe_text_nonull(workername),
+				   st = safe_text_nonull(in_workername->str),
 				   shares->clientid, shares->nonce,
 				   shares->sdiff, shares->errn,
 				   cd->tv_sec, cd->tv_usec, cd_buf);
@@ -3910,7 +4003,7 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username, char *workername
 			LOGWARNING("%s() duplicate DB share discarded: "
 				   "%"PRId64"/%s/%"PRId32"/%s/%.0f/%"PRId32"/%ld,%ld %s",
 				   __func__, shares->workinfoid,
-				   st = safe_text_nonull(workername),
+				   st = safe_text_nonull(in_workername->str),
 				   shares->clientid, shares->nonce,
 				   shares->sdiff, shares->errn,
 				   cd->tv_sec, cd->tv_usec, cd_buf);
@@ -3951,7 +4044,7 @@ bool shares_db(PGconn *conn, K_ITEM *s_item)
 	par = 0;
 	params[par++] = bigint_to_buf(row->workinfoid, NULL, 0);
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(row->workername, NULL, 0);
+	params[par++] = str_to_buf(row->in_workername, NULL, 0);
 	params[par++] = int_to_buf(row->clientid, NULL, 0);
 	params[par++] = str_to_buf(row->enonce1, NULL, 0);
 	params[par++] = str_to_buf(row->nonce2, NULL, 0);
@@ -4141,7 +4234,7 @@ bool shares_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "workername", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("workername", field, row->workername);
+			row->in_workername = intransient_str("workername", field);
 
 			PQ_GET_FLD(res, i, "clientid", field, ok);
 			if (!ok)
@@ -4274,7 +4367,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 	LOGDEBUG("%s() add", __func__);
 
 	w_item = new_default_worker(conn, false, shareerrors->userid,
-				    shareerrors->workername,
+				    shareerrors->in_workername,
 				    shareerrors->createby,
 				    shareerrors->createcode,
 				    shareerrors->createinet,
@@ -4282,7 +4375,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 	if (!w_item) {
 		LOGDEBUG("%s(): new_default_worker failed %"PRId64"/%s/%ld,%ld",
 			 __func__, shareerrors->userid,
-			 st = safe_text_nonull(shareerrors->workername),
+			 st = safe_text_nonull(shareerrors->in_workername),
 			 shareerrors->createdate.tv_sec,
 			 shareerrors->createdate.tv_usec);
 		FREENULL(st);
@@ -4301,7 +4394,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 				 " %"PRId64"/%s/%ld,%ld",
 				 __func__, shareerrors->workinfoid,
 				 shareerrors->userid,
-				 st = safe_text_nonull(shareerrors->workername),
+				 st = safe_text_nonull(shareerrors->in_workername),
 				 shareerrors->createdate.tv_sec,
 				 shareerrors->createdate.tv_usec);
 			FREENULL(st);
@@ -4310,7 +4403,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 
 		K_RLOCK(sharesummary_free);
 		ss_item = find_sharesummary(shareerrors->userid,
-					    shareerrors->workername,
+					    shareerrors->in_workername,
 					    shareerrors->workinfoid);
 		if (ss_item) {
 			DATA_SHARESUMMARY(sharesummary, ss_item);
@@ -4322,7 +4415,7 @@ static bool shareerrors_process(PGconn *conn, SHAREERRORS *shareerrors,
 					 __func__, complete,
 					 shareerrors->workinfoid,
 					 shareerrors->userid,
-					 st = safe_text_nonull(shareerrors->workername),
+					 st = safe_text_nonull(shareerrors->in_workername),
 					 shareerrors->createdate.tv_sec,
 					 shareerrors->createdate.tv_usec);
 				FREENULL(st);
@@ -4424,7 +4517,7 @@ keep:
 		  " Early shareerror procured",
 		  __func__, failed ? "***ESM " : EMPTY,
 		  early_shareerrors->workinfoid,
-		  st = safe_text_nonull(early_shareerrors->workername),
+		  st = safe_text_nonull(early_shareerrors->in_workername),
 		  early_shareerrors->createdate.tv_sec,
 		  early_shareerrors->createdate.tv_usec, cd_buf,
 		  early_shareerrors->oldcount, early_shareerrors->redo);
@@ -4441,7 +4534,7 @@ discard:
 		  " Early shareerror discarded!%s",
 		  __func__, failed ? "***ESM " : EMPTY,
 		  early_shareerrors->workinfoid,
-		  st = safe_text_nonull(early_shareerrors->workername),
+		  st = safe_text_nonull(early_shareerrors->in_workername),
 		  early_shareerrors->createdate.tv_sec,
 		  early_shareerrors->createdate.tv_usec, cd_buf,
 		  early_shareerrors->oldcount, early_shareerrors->redo, why);
@@ -4457,7 +4550,7 @@ out:
 
 // Memory (and log file) only
 bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
-			char *workername, char *clientid, char *errn,
+			INTRANSIENT *in_workername, char *clientid, char *errn,
 			char *error, char *secondaryuserid, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
@@ -4470,7 +4563,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 
 	LOGDEBUG("%s(): %s/%s/%s/%s/%ld,%ld",
 		 __func__,
-		 workinfoid, st = safe_text_nonull(workername), errn,
+		 workinfoid, st = safe_text_nonull(in_workername->str), errn,
 		 error, cd->tv_sec, cd->tv_usec);
 	FREENULL(st);
 
@@ -4497,7 +4590,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 	shareerrors->userid = users->userid;
 
 	TXT_TO_BIGINT("workinfoid", workinfoid, shareerrors->workinfoid);
-	STRNCPY(shareerrors->workername, workername);
+	shareerrors->in_workername = in_workername->str;
 	TXT_TO_INT("clientid", clientid, shareerrors->clientid);
 	TXT_TO_INT("errn", errn, shareerrors->errn);
 	STRNCPY(shareerrors->error, error);
@@ -4527,7 +4620,7 @@ bool shareerrors_add(PGconn *conn, char *workinfoid, char *username,
 		LOGMSG(sta, "%s() %"PRId64"/%s/%ld,%ld %s no workinfo! "
 			"Early shareerror queued!",
 			__func__, shareerrors->workinfoid,
-			st = safe_text_nonull(workername),
+			st = safe_text_nonull(in_workername->str),
 			cd->tv_sec, cd->tv_usec, cd_buf);
 		FREENULL(st);
 		shareerrors->redo = 0;
@@ -4686,7 +4779,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 	 *  and assume keysummaries are the same */
 	lookmarkersummary.markerid = workmarkers->markerid;
 	lookmarkersummary.userid = 0;
-	lookmarkersummary.workername = EMPTY;
+	lookmarkersummary.in_workername = EMPTY;
 
 	INIT_MARKERSUMMARY(&ms_look);
 	ms_look.data = (void *)(&lookmarkersummary);
@@ -4712,7 +4805,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 	looksharesummary.workinfoid = workmarkers->workinfoidend;
 	looksharesummary.userid = MAXID;
-	looksharesummary.workername = EMPTY;
+	looksharesummary.in_workername = EMPTY;
 
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
@@ -4734,10 +4827,10 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 		// Find/create the markersummary only once per worker change
 		if (!ms_item || markersummary->userid != sharesummary->userid ||
-		    strcmp(markersummary->workername, sharesummary->workername) != 0) {
+		    !INTREQ(markersummary->in_workername, sharesummary->in_workername)) {
 			lookmarkersummary.markerid = workmarkers->markerid;
 			lookmarkersummary.userid = sharesummary->userid;
-			lookmarkersummary.workername = sharesummary->workername;
+			lookmarkersummary.in_workername = sharesummary->in_workername;
 
 			ms_look.data = (void *)(&lookmarkersummary);
 			ms_item = find_in_ktree_nolock(ms_root, &ms_look, ms_ctx);
@@ -4750,15 +4843,13 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 				bzero(markersummary, sizeof(*markersummary));
 				markersummary->markerid = workmarkers->markerid;
 				markersummary->userid = sharesummary->userid;
-				DUP_POINTER(markersummary_free,
-					    markersummary->workername,
-					    sharesummary->workername);
+				markersummary->in_workername = sharesummary->in_workername;
 				add_to_ktree_nolock(ms_root, ms_item);
 
 				LOGDEBUG("%s() new ms %"PRId64"/%"PRId64"/%s",
 					 shortname, markersummary->markerid,
 					 markersummary->userid,
-					 st = safe_text(markersummary->workername));
+					 st = safe_text(markersummary->in_workername));
 				FREENULL(st);
 			} else {
 				DATA_MARKERSUMMARY(markersummary, ms_item);
@@ -4813,7 +4904,7 @@ dokey:
 		// Discard the sharesummaries
 		looksharesummary.workinfoid = workmarkers->workinfoidend;
 		looksharesummary.userid = MAXID;
-		looksharesummary.workername = EMPTY;
+		looksharesummary.in_workername = EMPTY;
 
 		INIT_SHARESUMMARY(&ss_look);
 		ss_look.data = (void *)(&looksharesummary);
@@ -5228,7 +5319,7 @@ bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm)
 
 	lookmarkersummary.markerid = wm->markerid;
 	lookmarkersummary.userid = 0;
-	lookmarkersummary.workername = EMPTY;
+	lookmarkersummary.in_workername = EMPTY;
 
 	ms_count = diffacc = shareacc = 0;
 	ms_item = NULL;
@@ -5515,7 +5606,7 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
 				    WHERE_FFL_PASS);
 		}
 		userid = s_row->userid;
-		workername = s_row->workername;
+		workername = s_row->in_workername;
 		workinfoid = s_row->workinfoid;
 		address = s_row->address;
 		agent = s_row->agent;
@@ -5526,7 +5617,7 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
 				    WHERE_FFL_PASS);
 		}
 		userid = e_row->userid;
-		workername = e_row->workername;
+		workername = e_row->in_workername;
 		workinfoid = e_row->workinfoid;
 	}
 
@@ -5560,8 +5651,7 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
 		DATA_SHARESUMMARY(row, ss_item);
 		bzero(row, sizeof(*row));
 		row->userid = userid;
-		DUP_POINTER(sharesummary_free, row->workername,
-			    workername);
+		row->in_workername = workername;
 		row->workinfoid = workinfoid;
 	}
 
@@ -5673,7 +5763,7 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
 			LOGDEBUG("%s(): updating sharesummary not '%c'"
 				 " %"PRId64"/%s/%"PRId64"/%s",
 				__func__, SUMMARY_NEW, row->userid,
-				st = safe_text_nonull(row->workername),
+				st = safe_text_nonull(row->in_workername),
 				row->workinfoid, row->complete);
 			FREENULL(st);
 		}
@@ -5883,7 +5973,7 @@ unparam:
 
 bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 		char *confirmed, char *info, char *workinfoid,
-		char *username, char *workername, char *clientid,
+		char *username, INTRANSIENT *in_workername, char *clientid,
 		char *enonce1, char *nonce2, char *nonce, char *reward,
 		char *by, char *code, char *inet, tv_t *cd,
 		bool igndup, char *id, K_TREE *trf_root)
@@ -5902,8 +5992,14 @@ bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 	bool ok = false, update_old = false;
 	int n, par = 0;
 	char *want = NULL, *st = NULL;
+	char *workername;
 
 	LOGDEBUG("%s(): add", __func__);
+
+	if (in_workername)
+		workername = in_workername->str;
+	else
+		workername = EMPTY;
 
 	K_WLOCK(blocks_free);
 	b_item = k_unlink_head(blocks_free);
@@ -5955,7 +6051,7 @@ bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 			STRNCPY(row->confirmed, confirmed);
 			STRNCPY(row->info, info);
 			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
-			STRNCPY(row->workername, workername);
+			row->in_workername = workername;
 			TXT_TO_INT("clientid", clientid, row->clientid);
 			STRNCPY(row->enonce1, enonce1);
 			STRNCPY(row->nonce2, nonce2);
@@ -5977,7 +6073,7 @@ bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 			params[par++] = str_to_buf(row->blockhash, NULL, 0);
 			params[par++] = bigint_to_buf(row->workinfoid, NULL, 0);
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
-			params[par++] = str_to_buf(row->workername, NULL, 0);
+			params[par++] = str_to_buf(row->in_workername, NULL, 0);
 			params[par++] = int_to_buf(row->clientid, NULL, 0);
 			params[par++] = str_to_buf(row->enonce1, NULL, 0);
 			params[par++] = str_to_buf(row->nonce2, NULL, 0);
@@ -6298,7 +6394,7 @@ flail:
 				snprintf(tmp, sizeof(tmp),
 					 " Reward: %f, Worker: %s, ShareEst: %.1f %s%sUTC:%s",
 					 BTC_TO_D(row->reward),
-					 st = safe_text_nonull(row->workername),
+					 st = safe_text_nonull(row->in_workername),
 					 pool.diffacc, est, pct, cd_buf);
 				FREENULL(st);
 				if (pool.workinfoid < row->workinfoid) {
@@ -6397,7 +6493,7 @@ bool blocks_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "workername", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_STR("workername", field, row->workername);
+		row->in_workername = intransient_str("workername", field);
 
 		PQ_GET_FLD(res, i, "clientid", field, ok);
 		if (!ok)
@@ -6605,15 +6701,15 @@ bool miningpayouts_add(PGconn *conn, bool add, K_ITEM *mp_item,
 	if (add) {
 		LOGDEBUG("%s(): adding new", __func__);
 
-		HISTORYDATEINIT(row, cd, by, code, inet);
-		HISTORYDATETRANSFER(trf_root, row);
+		HISTORYDATEINTRANS(row, cd, by, code, inet);
+		HISTORYDATETRANSFERIN(trf_root, row);
 
 		par = 0;
 		params[par++] = bigint_to_buf(row->payoutid, NULL, 0);
 		params[par++] = bigint_to_buf(row->userid, NULL, 0);
 		params[par++] = double_to_buf(row->diffacc, NULL, 0);
 		params[par++] = bigint_to_buf(row->amount, NULL, 0);
-		HISTORYDATEPARAMS(params, par, row);
+		HISTORYDATEPARAMSIN(params, par, row);
 		PARCHK(par, params);
 
 		ins = "insert into miningpayouts "
@@ -6744,7 +6840,7 @@ bool miningpayouts_fill(PGconn *conn)
 				break;
 			TXT_TO_BIGINT("amount", field, row->amount);
 
-			HISTORYDATEFLDS(res, i, row, ok);
+			HISTORYDATEIN(res, i, row, ok);
 			if (!ok)
 				break;
 
@@ -7688,7 +7784,7 @@ void ips_add(char *group, char *ip, char *eventname, bool is_event, char *des,
 
 // TODO: discard them from RAM
 bool auths_add(PGconn *conn, char *poolinstance, char *username,
-		char *workername, char *clientid, char *enonce1,
+		INTRANSIENT *in_workername, char *clientid, char *enonce1,
 		char *useragent, char *preauth, char *by, char *code,
 		char *inet, tv_t *cd, K_TREE *trf_root,
 		bool addressuser, USERS **users, WORKERS **workers,
@@ -7738,7 +7834,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 	STRNCPY(row->poolinstance, poolinstance);
 	row->userid = (*users)->userid;
 	// since update=false, a dup will be ok and do nothing when igndup=true
-	w_item = new_worker(conn, false, row->userid, workername,
+	w_item = new_worker(conn, false, row->userid, in_workername->str,
 			    DIFFICULTYDEFAULT_DEF_STR,
 			    IDLENOTIFICATIONENABLED_DEF,
 			    IDLENOTIFICATIONTIME_DEF_STR,
@@ -7747,7 +7843,7 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		goto unitem;
 
 	DATA_WORKERS(*workers, w_item);
-	STRNCPY(row->workername, workername);
+	row->in_workername = in_workername->str;
 	TXT_TO_INT("clientid", clientid, row->clientid);
 	STRNCPY(row->enonce1, enonce1);
 	STRNCPY(row->useragent, useragent);
@@ -7764,8 +7860,8 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 		// Shouldn't actually be possible unless twice in the logs
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s(): Duplicate auths ignored %s/%s/%s",
-			__func__, poolinstance, st = safe_text_nonull(workername),
-			cd_buf);
+			__func__, poolinstance,
+			st = safe_text_nonull(in_workername->str), cd_buf);
 		FREENULL(st);
 
 		/* Let them mine, that's what matters :)
@@ -8080,10 +8176,9 @@ clean:
 
 // To RAM
 bool userstats_add(char *poolinstance, char *elapsed, char *username,
-			char *workername, char *hashrate, char *hashrate5m,
-			char *hashrate1hr, char *hashrate24hr, bool idle,
-			bool eos, char *by, char *code, char *inet, tv_t *cd,
-			K_TREE *trf_root)
+		   INTRANSIENT *in_workername, char *hashrate, char *hashrate5m,
+		   char *hashrate1hr, char *hashrate24hr, bool idle, bool eos,
+		   char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	K_ITEM *us_item, *u_item, *us_match, *us_next;
 	USERSTATS *row, *match, *next;
@@ -8114,7 +8209,7 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	}
 	DATA_USERS(users, u_item);
 	row->userid = users->userid;
-	TXT_TO_STR("workername", workername, row->workername);
+	row->in_workername = in_workername->str;
 	TXT_TO_DOUBLE("hashrate", hashrate, row->hashrate);
 	TXT_TO_DOUBLE("hashrate5m", hashrate5m, row->hashrate5m);
 	TXT_TO_DOUBLE("hashrate1hr", hashrate1hr, row->hashrate1hr);
@@ -8187,10 +8282,10 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 
 // To RAM
 bool workerstats_add(char *poolinstance, char *elapsed, char *username,
-			char *workername, char *hashrate, char *hashrate5m,
-			char *hashrate1hr, char *hashrate24hr, bool idle,
-			char *instances, char *by, char *code, char *inet,
-			tv_t *cd, K_TREE *trf_root)
+			INTRANSIENT *in_workername, char *hashrate,
+			char *hashrate5m, char *hashrate1hr, char *hashrate24hr,
+			bool idle, char *instances, char *by, char *code,
+			char *inet, tv_t *cd, K_TREE *trf_root)
 {
 	K_ITEM *us_item, *u_item, *us_match;
 	USERSTATS *row, *match;
@@ -8216,14 +8311,14 @@ bool workerstats_add(char *poolinstance, char *elapsed, char *username,
 		LOGERR("%s(): unknown user '%s' (worker=%s)",
 			__func__,
 			usr = safe_text_nonull(username),
-			wrk = safe_text_nonull(workername));
+			wrk = safe_text_nonull(in_workername->str));
 		FREENULL(usr);
 		FREENULL(wrk);
 		return false;
 	}
 	DATA_USERS(users, u_item);
 	row->userid = users->userid;
-	TXT_TO_STR("workername", workername, row->workername);
+	row->in_workername = in_workername->str;
 	TXT_TO_DOUBLE("hashrate", hashrate, row->hashrate);
 	TXT_TO_DOUBLE("hashrate5m", hashrate5m, row->hashrate5m);
 	TXT_TO_DOUBLE("hashrate1hr", hashrate1hr, row->hashrate1hr);
@@ -8279,13 +8374,13 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 
 	DATA_MARKERSUMMARY(row, ms_item);
 
-	MODIFYDATEPOINTERS(markersummary_free, row, cd, by, code, inet);
-	MODIFYDATETRANSFER(markersummary_free, trf_root, row);
+	MODIFYDATEINTRANS(row, cd, by, code, inet);
+	MODIFYDATETRANSFERIN(trf_root, row);
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->markerid, NULL, 0);
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(row->workername, NULL, 0);
+	params[par++] = str_to_buf(row->in_workername, NULL, 0);
 	params[par++] = double_to_buf(row->diffacc, NULL, 0);
 	params[par++] = double_to_buf(row->diffsta, NULL, 0);
 	params[par++] = double_to_buf(row->diffdup, NULL, 0);
@@ -8303,7 +8398,7 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 	params[par++] = tv_to_buf(&(row->firstshareacc), NULL, 0);
 	params[par++] = tv_to_buf(&(row->lastshareacc), NULL, 0);
 	params[par++] = double_to_buf(row->lastdiffacc, NULL, 0);
-	MODIFYDATEPARAMS(params, par, row);
+	MODIFYDATEPARAMSIN(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into markersummary "
@@ -8315,7 +8410,7 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 
 	LOGDEBUG("%s() adding ms %"PRId64"/%"PRId64"/%s/%.0f",
 		 __func__, row->markerid, row->userid,
-		 st = safe_text_nonull(row->workername),
+		 st = safe_text_nonull(row->in_workername),
 		 row->diffacc);
 	FREENULL(st);
 
@@ -8525,8 +8620,7 @@ bool markersummary_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "workername", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_PTR("workername", field, row->workername);
-			LIST_MEM_ADD(markersummary_free, row->workername);
+			row->in_workername = intransient_str("workername", field);
 
 			PQ_GET_FLD(res, i, "diffacc", field, ok);
 			if (!ok)
@@ -8613,7 +8707,7 @@ bool markersummary_fill(PGconn *conn)
 				break;
 			TXT_TO_DOUBLE("lastdiffacc", field, row->lastdiffacc);
 
-			MODIFYDATEFLDPOINTERS(markersummary_free, res, i, row, ok);
+			MODIFYDATEIN(res, i, row, ok);
 			if (!ok)
 				break;
 
@@ -8713,7 +8807,7 @@ bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
 
 	DATA_KEYSUMMARY(row, ks_item);
 
-	SIMPLEDATEPOINTERS(markersummary_free, row, cd, by, code, inet);
+	SIMPLEDATEINTRANS(row, cd, by, code, inet);
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->markerid, NULL, 0);
@@ -8736,7 +8830,7 @@ bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
 	params[par++] = tv_to_buf(&(row->firstshareacc), NULL, 0);
 	params[par++] = tv_to_buf(&(row->lastshareacc), NULL, 0);
 	params[par++] = double_to_buf(row->lastdiffacc, NULL, 0);
-	SIMPLEDATEPARAMS(params, par, row);
+	SIMPLEDATEPARAMSIN(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into keysummary "

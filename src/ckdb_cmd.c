@@ -942,7 +942,7 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 				K_WUNLOCK(heartbeatqueue_free);
 
 				DATA_HEARTBEATQUEUE(heartbeatqueue, hq_item);
-				STRNCPY(heartbeatqueue->workername, workers->workername);
+				heartbeatqueue->in_workername = workers->in_workername;
 				heartbeatqueue->difficultydefault = workers->difficultydefault;
 				copy_tv(&(heartbeatqueue->createdate), now);
 
@@ -1108,9 +1108,10 @@ static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	// log to logfile
 
-	K_ITEM *i_poolinstance, *i_elapsed, *i_username, *i_workername;
+	K_ITEM *i_poolinstance, *i_elapsed, *i_username;
 	K_ITEM *i_hashrate, *i_hashrate5m, *i_hashrate1hr, *i_hashrate24hr;
 	K_ITEM *i_eos, *i_idle;
+	INTRANSIENT *in_workername;
 	bool ok = false, idle, eos;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -1132,9 +1133,9 @@ static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!i_username)
 		return strdup(reply);
 
-	i_workername = optional_name(trf_root, "workername", 1, NULL, reply, siz);
-	if (!i_workername)
-		i_workername = &userstats_workername;
+	in_workername = optional_in(trf_root, "workername", 1, NULL, reply, siz);
+	if (!in_workername)
+		in_workername = userstats_workername;
 
 	i_hashrate = require_name(trf_root, "hashrate", 1, NULL, reply, siz);
 	if (!i_hashrate)
@@ -1167,7 +1168,7 @@ static char *cmd_userstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	ok = userstats_add(transfer_data(i_poolinstance),
 			   transfer_data(i_elapsed),
 			   transfer_data(i_username),
-			   transfer_data(i_workername),
+			   in_workername,
 			   transfer_data(i_hashrate),
 			   transfer_data(i_hashrate5m),
 			   transfer_data(i_hashrate1hr),
@@ -1193,9 +1194,10 @@ static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	// log to logfile
 
-	K_ITEM *i_poolinstance, *i_elapsed, *i_username, *i_workername;
+	K_ITEM *i_poolinstance, *i_elapsed, *i_username;
 	K_ITEM *i_hashrate, *i_hashrate5m, *i_hashrate1hr, *i_hashrate24hr;
 	K_ITEM *i_idle, *i_instances;
+	INTRANSIENT *in_workername;
 	bool ok = false, idle;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
@@ -1217,8 +1219,8 @@ static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	if (!i_username)
 		return strdup(reply);
 
-	i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
-	if (!i_workername)
+	in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
+	if (!in_workername)
 		return strdup(reply);
 
 	i_hashrate = require_name(trf_root, "hashrate", 1, NULL, reply, siz);
@@ -1248,7 +1250,7 @@ static char *cmd_workerstats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	ok = workerstats_add(transfer_data(i_poolinstance),
 			     transfer_data(i_elapsed),
 			     transfer_data(i_username),
-			     transfer_data(i_workername),
+			     in_workername,
 			     transfer_data(i_hashrate),
 			     transfer_data(i_hashrate5m),
 			     transfer_data(i_hashrate1hr),
@@ -1350,7 +1352,7 @@ redo:
 			snprintf(tmp, sizeof(tmp), "reward:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
-			str_to_buf(blocks->workername, reply, sizeof(reply));
+			str_to_buf(blocks->in_workername, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
@@ -1589,7 +1591,7 @@ static char *cmd_blockstatus(PGconn *conn, char *cmd, char *id, tv_t *now,
 				ok = blocks_add(conn, height,
 						      blocks->blockhash,
 						      BLOCKS_ORPHAN_STR, info,
-						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      EMPTY, EMPTY, NULL, EMPTY,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      by, code, inet, now, false, id,
 						      trf_root);
@@ -1630,7 +1632,7 @@ static char *cmd_blockstatus(PGconn *conn, char *cmd, char *id, tv_t *now,
 				ok = blocks_add(conn, height,
 						      blocks->blockhash,
 						      BLOCKS_REJECT_STR, info,
-						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      EMPTY, EMPTY, NULL, EMPTY,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      by, code, inet, now, false, id,
 						      trf_root);
@@ -1659,7 +1661,7 @@ static char *cmd_blockstatus(PGconn *conn, char *cmd, char *id, tv_t *now,
 				ok = blocks_add(conn, height,
 						      blocks->blockhash,
 						      BLOCKS_CONFIRM_STR, info,
-						      EMPTY, EMPTY, EMPTY, EMPTY,
+						      EMPTY, EMPTY, NULL, EMPTY,
 						      EMPTY, EMPTY, EMPTY, EMPTY,
 						      by, code, inet, now, false, id,
 						      trf_root);
@@ -1877,7 +1879,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 
 	// Add up all user's worker stats to be divided into payout percentages
 	lookworkers.userid = users->userid;
-	lookworkers.workername[0] = '\0';
+	lookworkers.in_workername = EMPTY;
 	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
 	K_RLOCK(workers_free);
@@ -1888,7 +1890,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 		if (CURRENT(&(workers->expirydate))) {
 			K_RLOCK(workerstatus_free);
 			ws_item = find_workerstatus(true, users->userid,
-						    workers->workername);
+						    workers->in_workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
 				t_diffacc += workerstatus->block_diffacc;
@@ -1911,7 +1913,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 			 *  just cmp to last 'unused us_item' userid+worker
 			 *  then step it forward to be the next ready 'unused' */
 			K_RLOCK(userstats_free);
-			us_item = find_userstats(users->userid, workers->workername);
+			us_item = find_userstats(users->userid, workers->in_workername);
 			if (us_item) {
 				DATA_USERSTATS(userstats, us_item);
 				if (tvdiff(now, &(userstats->statsdate)) < USERSTATS_PER_S) {
@@ -2157,7 +2159,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	INIT_WORKERS(&w_look);
 
 	lookworkers.userid = users->userid;
-	lookworkers.workername[0] = '\0';
+	lookworkers.in_workername = EMPTY;
 	DATE_ZERO(&(lookworkers.expirydate));
 	w_look.data = (void *)(&lookworkers);
 	K_RLOCK(workers_free);
@@ -2169,7 +2171,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		if (CURRENT(&(workers->expirydate))) {
 			K_RLOCK(workerstatus_free);
 			ws_item = find_workerstatus(true, users->userid,
-						    workers->workername);
+						    workers->in_workername);
 			if (ws_item) {
 				DATA_WORKERSTATUS(workerstatus, ws_item);
 				// good or bad - either means active
@@ -2179,7 +2181,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 			K_RUNLOCK(workerstatus_free);
 
 			if (tvdiff(now, &last_share) < oldworkers) {
-				str_to_buf(workers->workername, reply, sizeof(reply));
+				str_to_buf(workers->in_workername, reply, sizeof(reply));
 				snprintf(tmp, sizeof(tmp), "workername:%d=%s%c", rows, reply, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 
@@ -2257,7 +2259,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 *  just cmp to last 'unused us_item' userid+worker
 					 *  then step it forward to be the next ready 'unused' */
 					K_RLOCK(userstats_free);
-					us_item = find_userstats(users->userid, workers->workername);
+					us_item = find_userstats(users->userid, workers->in_workername);
 					if (us_item) {
 						DATA_USERSTATS(userstats, us_item);
 						if (tvdiff(now, &(userstats->statsdate)) < USERSTATS_PER_S) {
@@ -2427,7 +2429,7 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 				userstats_u->userid = userstats->userid;
 				/* Remember the first workername for if we ever
 				 *  get the missing user LOGERR message below */
-				STRNCPY(userstats_u->workername, userstats->workername);
+				userstats_u->in_workername = userstats->in_workername;
 				userstats_u->hashrate5m = userstats->hashrate5m;
 				userstats_u->hashrate1hr = userstats->hashrate1hr;
 				userstats_u->instances = userstats->instances;
@@ -2460,7 +2462,7 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 			LOGERR("%s() userstats, but not users, "
 			       "ignored %"PRId64"/%s",
 			       __func__, userstats_u->userid,
-			       userstats_u->workername);
+			       userstats_u->in_workername);
 		} else {
 			DATA_USERS(users, u_item);
 			str_to_buf(users->username, reply, sizeof(reply));
@@ -2625,9 +2627,10 @@ wiconf:
 		snprintf(reply, siz, "ok.%"PRId64, workinfoid);
 		return strdup(reply);
 	} else if (strcasecmp(cmd, STR_SHARES) == 0) {
-		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
+		K_ITEM *i_workinfoid, *i_username, *i_clientid, *i_errn;
 		K_ITEM *i_enonce1, *i_nonce2, *i_nonce, *i_diff, *i_sdiff;
 		K_ITEM *i_secondaryuserid, *i_ntime, *i_address, *i_agent;
+		INTRANSIENT *in_workername;
 		char *address, *agent;
 		bool ok;
 
@@ -2675,8 +2678,8 @@ wiconf:
 		if (!i_username)
 			return strdup(reply);
 
-		i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
-		if (!i_workername)
+		in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
+		if (!in_workername)
 			return strdup(reply);
 
 		i_clientid = require_name(trf_root, "clientid", 1, NULL, reply, siz);
@@ -2726,7 +2729,7 @@ wiconf:
 
 		ok = shares_add(conn, transfer_data(i_workinfoid),
 				      transfer_data(i_username),
-				      transfer_data(i_workername),
+				      in_workername,
 				      transfer_data(i_clientid),
 				      transfer_data(i_errn),
 				      transfer_data(i_enonce1),
@@ -2758,8 +2761,9 @@ sconf:
 		snprintf(reply, siz, "ok.added %s", transfer_data(i_nonce));
 		return strdup(reply);
 	} else if (strcasecmp(cmd, STR_SHAREERRORS) == 0) {
-		K_ITEM *i_workinfoid, *i_username, *i_workername, *i_clientid, *i_errn;
+		K_ITEM *i_workinfoid, *i_username, *i_clientid, *i_errn;
 		K_ITEM *i_error, *i_secondaryuserid;
+		INTRANSIENT *in_workername;
 		bool ok;
 
 		// not summarised in keysummaries
@@ -2789,8 +2793,8 @@ sconf:
 				goto seconf;
 		}
 
-		i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
-		if (!i_workername)
+		in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
+		if (!in_workername)
 			return strdup(reply);
 
 		i_clientid = require_name(trf_root, "clientid", 1, NULL, reply, siz);
@@ -2812,7 +2816,7 @@ sconf:
 
 		ok = shareerrors_add(conn, transfer_data(i_workinfoid),
 					   transfer_data(i_username),
-					   transfer_data(i_workername),
+					   in_workername,
 					   transfer_data(i_clientid),
 					   transfer_data(i_errn),
 					   transfer_data(i_error),
@@ -2899,7 +2903,8 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, int32_t height, char *id,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	K_ITEM *i_blockhash, *i_confirmed, *i_workinfoid, *i_username;
-	K_ITEM *i_workername, *i_clientid, *i_enonce1, *i_nonce2, *i_nonce, *i_reward;
+	K_ITEM *i_clientid, *i_enonce1, *i_nonce2, *i_nonce, *i_reward;
+	INTRANSIENT *in_workername;
 	TRANSFER *transfer;
 	char *msg;
 	bool ok;
@@ -2926,8 +2931,8 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, int32_t height, char *id,
 			if (!i_username)
 				return strdup(reply);
 
-			i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
-			if (!i_workername)
+			in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
+			if (!in_workername)
 				return strdup(reply);
 
 			i_clientid = require_name(trf_root, "clientid", 1, NULL, reply, siz);
@@ -2957,7 +2962,7 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, int32_t height, char *id,
 					      EMPTY,
 					      transfer_data(i_workinfoid),
 					      transfer_data(i_username),
-					      transfer_data(i_workername),
+					      in_workername,
 					      transfer_data(i_clientid),
 					      transfer_data(i_enonce1),
 					      transfer_data(i_nonce2),
@@ -2972,7 +2977,7 @@ static char *cmd_blocks_do(PGconn *conn, char *cmd, int32_t height, char *id,
 					      transfer_data(i_blockhash),
 					      transfer_data(i_confirmed),
 					      EMPTY,
-					      EMPTY, EMPTY, EMPTY, EMPTY,
+					      EMPTY, EMPTY, NULL, EMPTY,
 					      EMPTY, EMPTY, EMPTY, EMPTY,
 					      by, code, inet, cd, igndup, id,
 					      trf_root);
@@ -3036,8 +3041,9 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
-	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
+	K_ITEM *i_poolinstance, *i_username, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *u_item, *oc_item, *w_item;
+	INTRANSIENT *in_workername;
 	USERS *users = NULL;
 	char *username;
 	WORKERS *workers = NULL;
@@ -3074,8 +3080,8 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 		return strdup(reply);
 	username = transfer_data(i_username);
 
-	i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
-	if (!i_workername)
+	in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
+	if (!in_workername)
 		return strdup(reply);
 
 	i_clientid = require_name(trf_root, "clientid", 1, NULL, reply, siz);
@@ -3116,7 +3122,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (ok) {
 		ok = auths_add(conn, transfer_data(i_poolinstance),
 				     username,
-				     transfer_data(i_workername),
+				     in_workername,
 				     transfer_data(i_clientid),
 				     transfer_data(i_enonce1),
 				     transfer_data(i_useragent),
@@ -3160,7 +3166,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				 "%s{\"workername\":\"%s\","
 				 "\"difficultydefault\":%"PRId32"}",
 				 first ? EMPTY : ",",
-				 workers->workername,
+				 workers->in_workername,
 				 workers->difficultydefault);
 			APPEND_REALLOC(buf, off, len, reply);
 			first = false;
@@ -3194,8 +3200,9 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
-	K_ITEM *i_poolinstance, *i_username, *i_workername, *i_clientid;
+	K_ITEM *i_poolinstance, *i_username, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *w_item;
+	INTRANSIENT *in_workername;
 	USERS *users = NULL;
 	WORKERS *workers = NULL;
 	size_t len, off;
@@ -3229,8 +3236,8 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	if (!i_username)
 		return strdup(reply);
 
-	i_workername = require_name(trf_root, "workername", 1, NULL, reply, siz);
-	if (!i_workername)
+	in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
+	if (!in_workername)
 		return strdup(reply);
 
 	i_clientid = require_name(trf_root, "clientid", 1, NULL, reply, siz);
@@ -3251,7 +3258,7 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 
 	ok = auths_add(conn, transfer_data(i_poolinstance),
 			     transfer_data(i_username),
-			     transfer_data(i_workername),
+			     in_workername,
 			     transfer_data(i_clientid),
 			     transfer_data(i_enonce1),
 			     transfer_data(i_useragent),
@@ -3294,7 +3301,7 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 				 "%s{\"workername\":\"%s\","
 				 "\"difficultydefault\":%"PRId32"}",
 				 first ? EMPTY : ",",
-				 workers->workername,
+				 workers->in_workername,
 				 workers->difficultydefault);
 			APPEND_REALLOC(buf, off, len, reply);
 			first = false;
@@ -3363,7 +3370,7 @@ static char *cmd_heartbeat(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 "\"difficultydefault\":%d,"
 			 "\""CDTRF"\":\"%ld,%ld\"}",
 			 first ? "" : ",",
-			 heartbeatqueue->workername,
+			 heartbeatqueue->in_workername,
 			 heartbeatqueue->difficultydefault,
 			 heartbeatqueue->createdate.tv_sec,
 			 heartbeatqueue->createdate.tv_usec);
@@ -3625,7 +3632,7 @@ static char *cmd_homepage(__maybe_unused PGconn *conn, char *cmd, char *id,
 		 * Use 'before' in case there is (unexpectedly) a userstats
 		 *  with an empty workername */
 		lookuserstats.userid = users->userid+1;
-		STRNCPY(lookuserstats.workername, EMPTY);
+		lookuserstats.in_workername = EMPTY;
 		INIT_USERSTATS(&look);
 		look.data = (void *)(&lookuserstats);
 		K_RLOCK(userstats_free);
@@ -4452,7 +4459,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	LOGDEBUG("%s(): block %"PRId32"/%"PRId64"/%s/%s/%"PRId64,
 		 __func__, blocks->height, blocks->workinfoid,
-		 blocks->workername, blocks->confirmed, blocks->reward);
+		 blocks->in_workername, blocks->confirmed, blocks->reward);
 	switch (blocks->confirmed[0]) {
 		case BLOCKS_NEW:
 			block_extra = "Can't be paid out yet";
@@ -4499,7 +4506,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	looksharesummary.workinfoid = block_workinfoid;
 	looksharesummary.userid = MAXID;
-	looksharesummary.workername = EMPTY;
+	looksharesummary.in_workername = EMPTY;
 	INIT_SHARESUMMARY(&ss_look);
 	ss_look.data = (void *)(&looksharesummary);
 	K_WLOCK(miningpayouts_free);
@@ -4591,7 +4598,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 				wm_count++;
 				lookmarkersummary.markerid = workmarkers->markerid;
 				lookmarkersummary.userid = MAXID;
-				lookmarkersummary.workername = EMPTY;
+				lookmarkersummary.in_workername = EMPTY;
 				INIT_MARKERSUMMARY(&ms_look);
 				ms_look.data = (void *)(&lookmarkersummary);
 				ms_item = find_before_in_ktree(markersummary_root,
@@ -4667,7 +4674,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "marks_status=%s%c", marks_status, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "workername=%s%c", blocks->workername, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "workername=%s%c", blocks->in_workername, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "nonce=%s%c", blocks->nonce, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
@@ -4890,7 +4897,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	LOGDEBUG("%s(): block %"PRId32"/%"PRId64"/%s/%s/%"PRId64,
 		 __func__, blocks->height, blocks->workinfoid,
-		 blocks->workername, blocks->confirmed, blocks->reward);
+		 blocks->in_workername, blocks->confirmed, blocks->reward);
 	switch (blocks->confirmed[0]) {
 		case BLOCKS_NEW:
 			block_extra = "Can't be paid out yet";
@@ -4962,7 +4969,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "marks_status=%s%c", marks_status, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
-	snprintf(tmp, sizeof(tmp), "workername=%s%c", blocks->workername, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "workername=%s%c", blocks->in_workername, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 	snprintf(tmp, sizeof(tmp), "nonce=%s%c", blocks->nonce, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
@@ -5677,14 +5684,14 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 			markersummary.markerid = wm->markerid;
 			markersummary.userid = users->userid;
-			markersummary.workername = EMPTY;
+			markersummary.in_workername = EMPTY;
 			K_RLOCK(markersummary_free);
 			ms_item = find_after_in_ktree(markersummary_root,
 							&ms_look, ms_ctx);
 			DATA_MARKERSUMMARY_NULL(ms, ms_item);
 			while (ms_item && ms->markerid == wm->markerid &&
 			       ms->userid == users->userid) {
-				work = worker_offset(ms->workername);
+				work = worker_offset(ms->in_workername);
 				for (want = 0; workm[want].worker; want++) {
 					if ((want == where_all) ||
 					    (workm[want].match && strncmp(work, workm[want].worker, workm[want].len) == 0) ||
@@ -7570,7 +7577,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		INIT_SHARES(&s_look);
 		lookshares.workinfoid = selwid;
 		lookshares.userid = -1;
-		lookshares.workername[0] = '\0';
+		lookshares.in_workername = EMPTY;
 		DATE_ZERO(&(lookshares.createdate));
 		s_look.data = (void *)(&lookshares);
 		found = false;
