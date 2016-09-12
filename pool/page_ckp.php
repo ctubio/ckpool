@@ -25,15 +25,17 @@ function dockp($data, $user)
  else
 	$ans = repDecode($rep);
 
+ addSort();
+ $r = "input type=radio name=srt onclick=\"sott('ckpsrt',this);\"";
  $pg .= 'TotalRAM: '.stnum($ans['totalram']).'<br>';
  $pg .= "<table cellpadding=0 cellspacing=0 border=0>\n";
  $pg .= '<thead><tr class=title>';
- $pg .= '<td class=dl>Name</td>';
+ $pg .= "<td class=dl><span class=nb>Name:<$r id=srtname data-sf=s0></span></td>";
  $pg .= '<td class=dr>Initial</td>';
  $pg .= '<td class=dr>Allocated</td>';
- $pg .= '<td class=dr>In&nbsp;Store</td>';
- $pg .= '<td class=dr>RAM</td>';
- $pg .= '<td class=dr>RAM2</td>';
+ $pg .= "<td class=dr><span class=nb><$r id=srtname data-sf=r3>:In&nbsp;Store</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtname data-sf=r4>:RAM</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtname data-sf=r5>:RAM2</span></td>";
  $pg .= '<td class=dr>Cull</td>';
  $pg .= "</tr></thead>\n";
  if ($ans['STATUS'] == 'ok')
@@ -48,12 +50,12 @@ function dockp($data, $user)
 			$row = 'odd';
 
 		$pg .= "<tr class=$row>";
-		$pg .= '<td class=dl>'.$ans['name:'.$i].'</td>';
+		$pg .= "<td class=dl data-srt='".$ans['name:'.$i]."'>".$ans['name:'.$i].'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['initial:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['allocated:'.$i]).'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['instore:'.$i]).'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['ram:'.$i]).'</td>';
-		$pg .= '<td class=dr>'.stnum($ans['ram2:'.$i]).'</td>';
+		$pg .= "<td class=dr data-srt='".$ans['instore:'.$i]."'>".stnum($ans['instore:'.$i]).'</td>';
+		$pg .= "<td class=dr data-srt='".$ans['ram:'.$i]."'>".stnum($ans['ram:'.$i]).'</td>';
+		$pg .= "<td class=dr data-srt='".$ans['ram2:'.$i]."'>".stnum($ans['ram2:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['cull:'.$i]).'</td>';
 		$pg .= "</tr>\n";
 	}
