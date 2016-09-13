@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.500"
+#define CKDB_VERSION DB_VERSION"-2.501"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1790,7 +1790,7 @@ extern K_LIST *seqtrans_free;
 // USERS
 typedef struct users {
 	int64_t userid;
-	char username[TXT_BIG+1];
+	char *in_username;
 	char usertrim[TXT_BIG+1]; // non-DB field
 	// Anything in 'status' fails mining authentication
 	char status[TXT_BIG+1];
@@ -1942,10 +1942,10 @@ extern K_LIST *workers_db_free;
 typedef struct paymentaddresses {
 	int64_t paymentaddressid;
 	int64_t userid;
-	char payaddress[TXT_BIG+1];
+	char *in_payaddress;
 	int32_t payratio;
 	char payname[TXT_SML+1];
-	HISTORYDATECONTROLFIELDS;
+	HISTORYDATECONTROLIN;
 	bool match; // non-DB field
 } PAYMENTADDRESSES;
 
@@ -1967,14 +1967,14 @@ typedef struct payments {
 	int64_t paymentid;
 	int64_t payoutid;
 	int64_t userid;
-	char subname[TXT_BIG+1];
+	char *in_subname;
 	tv_t paydate;
-	char payaddress[TXT_BIG+1];
-	char originaltxn[TXT_BIG+1];
+	char *in_payaddress;
+	char *in_originaltxn;
 	int64_t amount;
 	double diffacc;
-	char committxn[TXT_BIG+1];
-	char commitblockhash[TXT_BIG+1];
+	char *in_committxn;
+	char *in_commitblockhash;
 	HISTORYDATECONTROLIN;
 	K_ITEM *old_item; // non-DB field
 } PAYMENTS;
@@ -3152,7 +3152,7 @@ enum info_type {
 // USERINFO from various incoming data
 typedef struct userinfo {
 	int64_t userid;
-	char username[TXT_BIG+1];
+	char *in_username;
 	int blocks;
 	int orphans; // How many blocks are orphans
 	int rejects; // How many blocks are rejects
@@ -3643,14 +3643,16 @@ extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			 char *newhash, char *email, char *by, char *code,
 			 char *inet, tv_t *cd, K_TREE *trf_root, char *status,
 			 int *event);
-extern K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
-			char *passwordhash, int64_t userbits, char *by,
-			char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+extern K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username,
+			 char *emailaddress, char *passwordhash,
+			 int64_t userbits, char *by, char *code, char *inet,
+			 tv_t *cd, K_TREE *trf_root);
 extern bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item,
 			  char *by, char *code, char *inet, tv_t *cd,
 			  K_TREE *trf_root);
 extern bool users_fill(PGconn *conn);
-extern bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun);
+extern bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd,
+				bool begun);
 extern K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 				char *status, char *attstr, char *attstr2,
 				char *attnum, char *attnum2,  char *attdate,
@@ -3753,7 +3755,7 @@ extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 #define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
 extern int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
 #define ovents_add(_id, _trf_root) _ovents_add(_id, NULL, NULL, NULL, _trf_root)
-extern bool auths_add(PGconn *conn, char *poolinstance, char *username,
+extern bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
 			INTRANSIENT *in_workername, char *clientid,
 			char *enonce1, char *useragent, char *preauth, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root,

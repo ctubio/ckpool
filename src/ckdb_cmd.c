@@ -14,22 +14,22 @@
  * This should ONLY be used for web reporting cmds i.e. read only
  * Current PHP allows this for a hard coded user
  */
-static K_ITEM *adminuser(K_TREE *trf_root, char *reply, size_t siz)
+static INTRANSIENT *adminuser(K_TREE *trf_root, char *reply, size_t siz)
 {
-	K_ITEM *i_username, *i_admin;
+	INTRANSIENT *in_username, *in_admin;
 	char reply2[1024] = "";
 
-	i_username = require_name(trf_root, "username", MIN_USERNAME,
-				  (char *)userpatt, reply, siz);
-	if (!i_username)
+	in_username = require_in(trf_root, "username", MIN_USERNAME,
+				 (char *)userpatt, reply, siz);
+	if (!in_username)
 		return NULL;
 
-	i_admin = optional_name(trf_root, "admin", MIN_USERNAME,
+	in_admin = optional_in(trf_root, "admin", MIN_USERNAME,
 				(char *)userpatt, reply2, sizeof(reply2));
-	if (i_admin)
-		return i_admin;
+	if (in_admin)
+		return in_admin;
 
-	return i_username;
+	return in_username;
 }
 
 static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
@@ -38,14 +38,15 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 {
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
-	K_ITEM *i_username, *i_emailaddress, *i_passwordhash, *u_item = NULL;
+	K_ITEM *i_emailaddress, *i_passwordhash, *u_item = NULL;
+	INTRANSIENT *in_username;
 	int event = EVENT_OK;
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", MIN_USERNAME,
-				  (char *)userpatt, reply, siz);
-	if (!i_username)
+	in_username = require_in(trf_root, "username", MIN_USERNAME,
+				(char *)userpatt, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	/* If a username added from the web site looks like an address
@@ -56,7 +57,7 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 	 *  ... and the person who owns the payout address can't check that
 	 *  in advance, they'll just find out with their first payout not
 	 *  arriving at their payout address */
-	if (!like_address(transfer_data(i_username))) {
+	if (!like_address(in_username->str)) {
 		i_emailaddress = require_name(trf_root, "emailaddress", 7,
 					      (char *)mailpatt, reply, siz);
 		if (!i_emailaddress)
@@ -69,7 +70,7 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 
 		event = events_add(EVENTID_CREACC, trf_root);
 		if (event == EVENT_OK) {
-			u_item = users_add(conn, transfer_data(i_username),
+			u_item = users_add(conn, in_username,
 						 transfer_data(i_emailaddress),
 						 transfer_data(i_passwordhash), 0,
 						 by, code, inet, now, trf_root);
@@ -80,8 +81,8 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 		LOGERR("%s() %s.failed.DBE", __func__, id);
 		return reply_event(event, "failed.DBE");
 	}
-	LOGDEBUG("%s.ok.added %s", id, transfer_data(i_username));
-	snprintf(reply, siz, "ok.added %s", transfer_data(i_username));
+	LOGDEBUG("%s.ok.added %s", id, in_username->str);
+	snprintf(reply, siz, "ok.added %s", in_username->str);
 	return strdup(reply);
 }
 
@@ -292,7 +293,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 				LOGERR("%s() users databits invalid for "
 					"'%s/%"PRId64,
 					__func__,
-					st = safe_text_nonull(users->username),
+					st = safe_text_nonull(users->in_username),
 					users->databits);
 				FREENULL(st);
 				goto dame;
@@ -406,7 +407,7 @@ static char *cmd_2fa(__maybe_unused PGconn *conn, char *cmd, char *id,
 				LOGERR("%s() invalid key for '%s/%s "
 					"len(%d) != %d",
 					__func__,
-					st = safe_text_nonull(users->username),
+					st = safe_text_nonull(users->in_username),
 					USER_TOTPAUTH_NAME, (int)binlen,
 					TOTPAUTH_KEYSIZE);
 				FREENULL(st);
@@ -470,11 +471,12 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *i_passwordhash, *i_2fa, *i_rows, *i_address;
+	INTRANSIENT *in_username, *in_address;
+	K_ITEM *i_passwordhash, *i_2fa, *i_rows;
 	K_ITEM *i_ratio, *i_payname, *i_email, *u_item, *pa_item, *old_pa_item;
 	K_ITEM *ua_item = NULL;
 	USERATTS *useratts = NULL;
-	char *email, *address, *payname;
+	char *email, *payname;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
@@ -493,16 +495,16 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", MIN_USERNAME,
-				  (char *)userpatt, reply, siz);
-	if (!i_username) {
+	in_username = require_in(trf_root, "username", MIN_USERNAME,
+				 (char *)userpatt, reply, siz);
+	if (!in_username) {
 		// For web this message is detailed enough
 		reason = "System error";
 		goto struckout;
 	}
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 
 	if (!u_item) {
@@ -549,7 +551,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 				while (pa_item && CURRENT(&(row->expirydate)) &&
 				       row->userid == users->userid) {
 					snprintf(tmp, sizeof(tmp), "addr:%d=%s%c",
-						 rows, row->payaddress, FLDSEP);
+						 rows, row->in_payaddress, FLDSEP);
 					APPEND_REALLOC(answer, off, len, tmp);
 					snprintf(tmp, sizeof(tmp), "ratio:%d=%d%c",
 						 rows, row->payratio, FLDSEP);
@@ -649,22 +651,21 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 							continue;
 
 						snprintf(tmp, sizeof(tmp), "address:%d", i);
-						i_address = require_name(trf_root, tmp,
-									 ADDR_MIN_LEN,
-									 (char *)addrpatt,
-									 reply, siz);
-						if (!i_address) {
+						in_address = require_in(trf_root, tmp,
+									ADDR_MIN_LEN,
+									(char *)addrpatt,
+									reply, siz);
+						if (!in_address) {
 							K_WUNLOCK(paymentaddresses_free);
 							event = events_add(EVENTID_INCBTC,
 									   trf_root);
 							reason = "Invalid address";
 							goto struckout;
 						}
-						address = transfer_data(i_address);
 						pa_item = STORE_HEAD_NOLOCK(pa_store);
 						while (pa_item) {
 							DATA_PAYMENTADDRESSES(row, pa_item);
-							if (strcmp(row->payaddress, address) == 0) {
+							if (INTREQ(row->in_payaddress, in_address->str)) {
 								K_WUNLOCK(paymentaddresses_free);
 								reason = "Duplicate address";
 								goto struckout;
@@ -682,7 +683,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 						pa_item = k_unlink_head(paymentaddresses_free);
 						DATA_PAYMENTADDRESSES(row, pa_item);
 						bzero(row, sizeof(*row));
-						STRNCPY(row->payaddress, address);
+						row->in_payaddress = in_address->str;
 						row->payratio = ratio;
 						STRNCPY(row->payname, payname);
 						k_add_head(pa_store, pa_item);
@@ -704,7 +705,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 					DATA_PAYMENTADDRESSES(row, pa_item);
 					// Only EVER validate addresses once ... for now
 					K_RLOCK(paymentaddresses_free);
-					old_pa_item = find_any_payaddress(row->payaddress);
+					old_pa_item = find_any_payaddress(row->in_payaddress);
 					K_RUNLOCK(paymentaddresses_free);
 					if (old_pa_item) {
 						/* This test effectively means that
@@ -717,7 +718,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 							reason = "Unavailable BTC address";
 							goto struckout;
 						}
-					} else if (!btc_valid_address(row->payaddress)) {
+					} else if (!btc_valid_address(row->in_payaddress)) {
 						event = events_add(EVENTID_INVBTC,
 								   trf_root);
 						reason = "Invalid BTC address";
@@ -767,8 +768,8 @@ struckout:
 	if (reason) {
 		char *user, *st = NULL;
 		snprintf(reply, siz, "ERR.%s", reason);
-		if (i_username)
-			user = st = safe_text(transfer_data(i_username));
+		if (in_username)
+			user = st = safe_text(in_username->str);
 		else
 			user = EMPTY;
 		LOGERR("%s.%s.%s (%s)", cmd, id, reply, user);
@@ -852,7 +853,7 @@ static char *cmd_workerset(PGconn *conn, char *cmd, char *id, tv_t *now,
 					update = true;
 			}
 			if (update) {
-				ua_item = useratts_add(conn, users->username,
+				ua_item = useratts_add(conn, users->in_username,
 							USER_OLD_WORKERS, EMPTY,
 							EMPTY, EMPTY,
 							transfer_data(i_oldworkers),
@@ -1736,7 +1737,8 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused K_TREE *trf_root,
 			  __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *u_item, *p_item, *p2_item, *po_item;
+	K_ITEM *u_item, *p_item, *p2_item, *po_item;
+	INTRANSIENT *in_username;
 	K_TREE_CTX ctx[1];
 	K_STORE *pay_store;
 	PAYMENTS *payments, *last_payments = NULL;
@@ -1752,12 +1754,12 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = adminuser(trf_root, reply, siz);
-	if (!i_username)
+	in_username = adminuser(trf_root, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (!u_item)
 		return strdup("bad");
@@ -1774,13 +1776,17 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 	 *	 if it has multiple items (percent payout user) */
 	while (p_item && payments->userid == users->userid) {
 		if (CURRENT(&(payments->expirydate))) {
-			if (!last_payments || payments->payoutid != last_payments->payoutid) {
+			if (!last_payments ||
+			    payments->payoutid != last_payments->payoutid) {
 				p2_item = k_unlink_head(payments_free);
 				DATA_PAYMENTS_NULL(last_payments, p2_item);
-				memcpy(last_payments, payments, sizeof(*last_payments));
+				memcpy(last_payments, payments,
+					sizeof(*last_payments));
 				k_add_tail(pay_store, p2_item);
 			} else {
-				STRNCPY(last_payments->payaddress, "*Multiple");
+				/* This is OK since it's a local store and
+				 *  we don't use INTREQ() on it */
+				last_payments->in_payaddress = "*Multiple";
 				last_payments->amount += payments->amount;
 			}
 		}
@@ -1808,7 +1814,7 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 			snprintf(tmp, sizeof(tmp), "height:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
-			str_to_buf(payments->payaddress, reply, sizeof(reply));
+			str_to_buf(payments->in_payaddress, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
@@ -1824,6 +1830,9 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 		p_item = p_item->next;
 	}
+	K_WLOCK(payments_free);
+	k_list_transfer_to_head(pay_store, payments_free);
+	K_WUNLOCK(payments_free);
 
 	snprintf(tmp, sizeof(tmp), "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
@@ -1833,7 +1842,7 @@ static char *cmd_payments(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Payments", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	LOGDEBUG("%s.ok.%s", id, in_username->str);
 	return buf;
 }
 
@@ -1953,7 +1962,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 		ratio = (double)(pa->payratio) / (double)paytotal;
 
 		snprintf(tmp, sizeof(tmp), "payaddress:%d=%s%c",
-					   rows, pa->payaddress, FLDSEP);
+					   rows, pa->in_payaddress, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		snprintf(tmp, sizeof(tmp), "payratio:%d=%"PRId32"%c",
@@ -2065,7 +2074,7 @@ static char *cmd_percent(char *cmd, char *id, tv_t *now, USERS *users)
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Percents", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	LOGDEBUG("%s.ok.%s", id, users->username);
+	LOGDEBUG("%s.ok.%s", id, users->in_username);
 	return buf;
 }
 
@@ -2075,8 +2084,9 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *i_stats, *i_percent, w_look, *u_item, *w_item;
+	K_ITEM *i_stats, *i_percent, w_look, *u_item, *w_item;
 	K_ITEM *ua_item, *us_item, *ws_item;
+	INTRANSIENT *in_username;
 	K_TREE_CTX w_ctx[1];
 	WORKERS lookworkers, *workers;
 	WORKERSTATUS *workerstatus;
@@ -2102,12 +2112,12 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 		return reply_ovent(ovent, reply);
 	}
 
-	i_username = adminuser(trf_root, reply, siz);
-	if (!i_username)
+	in_username = adminuser(trf_root, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (!u_item)
 		return strdup("bad");
@@ -2391,7 +2401,7 @@ static char *cmd_workers(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Workers", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	LOGDEBUG("%s.ok.%s", id, in_username->str);
 	return buf;
 }
 
@@ -2465,7 +2475,7 @@ static char *cmd_allusers(__maybe_unused PGconn *conn, char *cmd, char *id,
 			       userstats_u->in_workername);
 		} else {
 			DATA_USERS(users, u_item);
-			str_to_buf(users->username, reply, sizeof(reply));
+			str_to_buf(users->in_username, reply, sizeof(reply));
 			snprintf(tmp, sizeof(tmp), "username:%d=%s%c", rows, reply, FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 
@@ -3041,11 +3051,10 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
-	K_ITEM *i_poolinstance, *i_username, *i_clientid;
+	K_ITEM *i_poolinstance, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *u_item, *oc_item, *w_item;
-	INTRANSIENT *in_workername;
+	INTRANSIENT *in_username, *in_workername;
 	USERS *users = NULL;
-	char *username;
 	WORKERS *workers = NULL;
 	OPTIONCONTROL *optioncontrol;
 	size_t len, off;
@@ -3075,10 +3084,9 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 		}
 	}
 
-	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
-	if (!i_username)
+	in_username = require_in(trf_root, "username", 1, NULL, reply, siz);
+	if (!in_username)
 		return strdup(reply);
-	username = transfer_data(i_username);
 
 	in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
 	if (!in_workername)
@@ -3103,14 +3111,14 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 	oc_item = find_optioncontrol(OPTIONCONTROL_AUTOADDUSER, cd, pool.height);
 	if (oc_item) {
 		K_RLOCK(users_free);
-		u_item = find_users(username);
+		u_item = find_users(in_username->str);
 		K_RUNLOCK(users_free);
 		if (!u_item) {
 			if (!reload_data)
 				event = events_add(EVENTID_AUTOACC, trf_root);
 			if (event == EVENT_OK) {
 				DATA_OPTIONCONTROL(optioncontrol, oc_item);
-				u_item = users_add(conn, username, EMPTY,
+				u_item = users_add(conn, in_username, EMPTY,
 						   optioncontrol->optionvalue,
 						   0, by, code, inet, cd,
 						   trf_root);
@@ -3121,8 +3129,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 
 	if (ok) {
 		ok = auths_add(conn, transfer_data(i_poolinstance),
-				     username,
-				     in_workername,
+				     in_username, in_workername,
 				     transfer_data(i_clientid),
 				     transfer_data(i_enonce1),
 				     transfer_data(i_useragent),
@@ -3200,9 +3207,9 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
-	K_ITEM *i_poolinstance, *i_username, *i_clientid;
+	K_ITEM *i_poolinstance, *i_clientid;
 	K_ITEM *i_enonce1, *i_useragent, *i_preauth, *w_item;
-	INTRANSIENT *in_workername;
+	INTRANSIENT *in_username, *in_workername;
 	USERS *users = NULL;
 	WORKERS *workers = NULL;
 	size_t len, off;
@@ -3232,8 +3239,8 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 		}
 	}
 
-	i_username = require_name(trf_root, "username", 1, NULL, reply, siz);
-	if (!i_username)
+	in_username = require_in(trf_root, "username", 1, NULL, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	in_workername = require_in(trf_root, "workername", 1, NULL, reply, siz);
@@ -3257,8 +3264,7 @@ static char *cmd_addrauth_do(PGconn *conn, char *cmd, char *id, char *by,
 		return strdup(reply);
 
 	ok = auths_add(conn, transfer_data(i_poolinstance),
-			     transfer_data(i_username),
-			     in_workername,
+			     in_username, in_workername,
 			     transfer_data(i_clientid),
 			     transfer_data(i_enonce1),
 			     transfer_data(i_useragent),
@@ -3700,7 +3706,8 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *i_attlist, *u_item, *ua_item;
+	K_ITEM *i_attlist, *u_item, *ua_item;
+	INTRANSIENT *in_username;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
@@ -3715,16 +3722,16 @@ static char *cmd_getatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", MIN_USERNAME,
-				  (char *)userpatt, reply, siz);
-	if (!i_username) {
+	in_username = require_in(trf_root, "username", MIN_USERNAME,
+				 (char *)userpatt, reply, siz);
+	if (!in_username) {
 		// Shouldn't happen except with a code problem no event required
 		reason = "Missing username";
 		goto nuts;
 	}
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 
 	if (!u_item) {
@@ -3880,7 +3887,8 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 	ExecStatusType rescode;
 	PGresult *res;
 	bool conned = false;
-	K_ITEM *i_username, *t_item, *u_item, *ua_item = NULL;
+	K_ITEM *t_item, *u_item, *ua_item = NULL;
+	INTRANSIENT *in_username;
 	K_TREE_CTX ctx[1];
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
@@ -3895,15 +3903,15 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", MIN_USERNAME,
-				  (char *)userpatt, reply, siz);
-	if (!i_username) {
+	in_username = require_in(trf_root, "username", MIN_USERNAME,
+				 (char *)userpatt, reply, siz);
+	if (!in_username) {
 		reason = "Missing user";
 		goto bats;
 	}
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 
 	if (!u_item) {
@@ -4047,7 +4055,8 @@ static char *cmd_expatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *i_attlist, *u_item, *ua_item;
+	K_ITEM *i_attlist, *u_item, *ua_item;
+	INTRANSIENT *in_username;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	USERATTS *useratts;
@@ -4058,15 +4067,15 @@ static char *cmd_expatts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = require_name(trf_root, "username", MIN_USERNAME,
-				  (char *)userpatt, reply, siz);
-	if (!i_username) {
+	in_username = require_in(trf_root, "username", MIN_USERNAME,
+				 (char *)userpatt, reply, siz);
+	if (!in_username) {
 		reason = "Missing username";
 		goto rats;
 	}
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 
 	if (!u_item) {
@@ -4733,8 +4742,8 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 				snprintf(tmp, sizeof(tmp),
 					 "user:%d=%s.%d%cpayaddress:%d=%s%c",
-					 rows, users->username, ++count, FLDSEP,
-					 rows, pa->payaddress, FLDSEP);
+					 rows, users->in_username, ++count,
+					 FLDSEP, rows, pa->in_payaddress, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(tmp, sizeof(tmp),
 					 "diffacc_user:%d=%.1f%c",
@@ -4750,7 +4759,7 @@ static char *cmd_pplns(__maybe_unused PGconn *conn, char *cmd, char *id,
 			K_RUNLOCK(paymentaddresses_free);
 			snprintf(tmp, sizeof(tmp),
 				 "user:%d=%s.0%cpayaddress:%d=%s%c",
-				 rows, users->username, FLDSEP,
+				 rows, users->in_username, FLDSEP,
 				 rows, "none", FLDSEP);
 			APPEND_REALLOC(buf, off, len, tmp);
 			snprintf(tmp, sizeof(tmp),
@@ -5020,11 +5029,13 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 						 "payaddress:%d=%s%c"
 						 "amount:%d=%"PRId64"%c"
 						 "diffacc:%d=%.1f%c",
-						 rows, payments->subname, FLDSEP,
-						 rows, ua_item ? HOLD_ADDRESS :
-						  payments->payaddress, FLDSEP,
-						 rows, payments->amount, FLDSEP,
-						 rows, payments->diffacc, FLDSEP);
+						 rows, payments->in_subname,
+						 FLDSEP, rows,
+						 ua_item ? HOLD_ADDRESS :
+						  payments->in_payaddress,
+						 FLDSEP, rows, payments->amount,
+						 FLDSEP, rows,
+						 payments->diffacc, FLDSEP);
 					APPEND_REALLOC(buf, off, len, tmp);
 					rows++;
 					out++;
@@ -5039,7 +5050,7 @@ static char *cmd_pplns2(__maybe_unused PGconn *conn, char *cmd, char *id,
 					 "payaddress:%d=%s%c"
 					 "amount:%d=%"PRId64"%c"
 					 "diffacc:%d=%.1f%c",
-					 rows, users->username, FLDSEP,
+					 rows, users->in_username, FLDSEP,
 					 rows, NONE_ADDRESS, FLDSEP,
 					 rows, miningpayouts->amount, FLDSEP,
 					 rows, miningpayouts->diffacc, FLDSEP);
@@ -5360,7 +5371,8 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused K_TREE *trf_root,
 			  __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *u_item, *mp_item, *po_item;
+	K_ITEM *u_item, *mp_item, *po_item;
+	INTRANSIENT *in_username;
 	K_TREE_CTX ctx[1];
 	MININGPAYOUTS *mp;
 	PAYOUTS *payouts;
@@ -5374,12 +5386,12 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = adminuser(trf_root, reply, siz);
-	if (!i_username)
+	in_username = adminuser(trf_root, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (!u_item)
 		return strdup("bad");
@@ -5471,7 +5483,7 @@ static char *cmd_mpayouts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "MiningPayouts", FLDSEP, "");
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	LOGDEBUG("%s.ok.%s", id, in_username->str);
 	return buf;
 }
 
@@ -5553,7 +5565,8 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			  __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username, *i_select;
+	INTRANSIENT *in_username;
+	K_ITEM *i_select;
 	K_ITEM *u_item, *p_item, *m_item, ms_look, *wm_item, *ms_item, *wi_item;
 	K_TREE_CTX wm_ctx[1], ms_ctx[1];
 	WORKMARKERS *wm;
@@ -5577,12 +5590,12 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = adminuser(trf_root, reply, siz);
-	if (!i_username)
+	in_username = adminuser(trf_root, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (!u_item)
 		return strdup("bad");
@@ -5645,7 +5658,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), " where_all=%d", where_all);
 	APPEND_REALLOC(buf, off, len, tmp);
 	LOGDEBUG("%s() user=%"PRId64"/%s' %s",
-		 __func__, users->userid, users->username, buf+1);
+		 __func__, users->userid, users->in_username, buf+1);
 	FREENULL(buf);
 
 	APPEND_REALLOC_INIT(buf, off, len);
@@ -5892,7 +5905,7 @@ static char *cmd_shifts(__maybe_unused PGconn *conn, char *cmd, char *id,
 		}
 	}
 
-	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	LOGDEBUG("%s.ok.%s", id, in_username->str);
 	return(buf);
 }
 
@@ -6092,7 +6105,7 @@ static char *cmd_userstatus(PGconn *conn, char *cmd, char *id, tv_t *now, char *
 	DATA_USERS(users, u_item);
 	snprintf(reply, siz, "ok.updated %"PRId64" %s status %s",
 			     users->userid,
-			     users->username,
+			     users->in_username,
 			     status[0] ? "disabled" : "enabled");
 	LOGWARNING("%s.%s", id, reply);
 	return strdup(reply);
@@ -6626,7 +6639,7 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 			  __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			  __maybe_unused bool reload_data)
 {
-	K_ITEM *i_username;
+	INTRANSIENT *in_username;
 	K_ITEM *u_item, *p_item, *m_item, *wm_item, *ms_item, *wi_item;
 	K_TREE_CTX wm_ctx[1];
 	WORKMARKERS *wm;
@@ -6647,12 +6660,12 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	i_username = adminuser(trf_root, reply, siz);
-	if (!i_username)
+	in_username = adminuser(trf_root, reply, siz);
+	if (!in_username)
 		return strdup(reply);
 
 	K_RLOCK(users_free);
-	u_item = find_users(transfer_data(i_username));
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (!u_item)
 		return strdup("bad");
@@ -6824,7 +6837,7 @@ static char *cmd_pshift(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp), ",%d_", 0);
 	APPEND_REALLOC(buf, off, len, tmp);
 
-	LOGDEBUG("%s.ok.%s", id, transfer_data(i_username));
+	LOGDEBUG("%s.ok.%s", id, in_username->str);
 	return(buf);
 }
 
@@ -6872,7 +6885,7 @@ static char *cmd_userinfo(__maybe_unused PGconn *conn, char *cmd, char *id,
 	while (ui_item) {
 		DATA_USERINFO(userinfo, ui_item);
 
-		str_to_buf(userinfo->username, reply, sizeof(reply));
+		str_to_buf(userinfo->in_username, reply, sizeof(reply));
 		snprintf(tmp, sizeof(tmp), "username:%d=%s%c",
 			 rows, reply, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);

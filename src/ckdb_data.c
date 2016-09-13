@@ -255,7 +255,7 @@ void username_trim(USERS *users)
 {
 	char *front, *trail;
 
-	front = users->username;
+	front = users->in_username;
 	while (*front && TRIM_IGNORE(*front))
 		front++;
 
@@ -1460,7 +1460,7 @@ cmp_t cmp_users(K_ITEM *a, K_ITEM *b)
 	USERS *ua, *ub;
 	DATA_USERS(ua, a);
 	DATA_USERS(ub, b);
-	cmp_t c = CMP_STR(ua->username, ub->username);
+	cmp_t c = CMP_STR(ua->in_username, ub->in_username);
 	if (c == 0)
 		c = CMP_TV(ub->expirydate, ua->expirydate);
 	return c;
@@ -1485,7 +1485,7 @@ K_ITEM *find_users(char *username)
 	K_TREE_CTX ctx[1];
 	K_ITEM look;
 
-	STRNCPY(users.username, username);
+	users.in_username = username;
 	users.expirydate.tv_sec = default_expiry.tv_sec;
 	users.expirydate.tv_usec = default_expiry.tv_usec;
 
@@ -1596,7 +1596,7 @@ bool check_hash(USERS *users, char *passwordhash)
 	char hex[SHA256SIZHEX+1];
 
 	if (*(users->salt)) {
-		password_hash(users->username, passwordhash, users->salt, hex, sizeof(hex));
+		password_hash(users->in_username, passwordhash, users->salt, hex, sizeof(hex));
 		return (strcasecmp(hex, users->passwordhash) == 0);
 	} else
 		return (strcasecmp(passwordhash, users->passwordhash) == 0);
@@ -1640,7 +1640,7 @@ char *_users_userdata_get_hex(USERS *users, char *name, int64_t bit,
 			LOGEMERG("%s() users userdata/databits mismatch for "
 				 "%s/%"PRId64 WHERE_FFL,
 				 __func__,
-				 st = safe_text_nonull(users->username),
+				 st = safe_text_nonull(users->in_username),
 				 users->databits, WHERE_FFL_PASS);
 			FREENULL(st);
 		} else {
@@ -1699,7 +1699,7 @@ void _users_userdata_del(USERS *users, char *name, int64_t bit, WHERE_FFL_ARGS)
 			LOGEMERG("%s() users userdata/databits mismatch for "
 				 "%s/%"PRId64 WHERE_FFL,
 				 __func__,
-				 st = safe_text_nonull(users->username),
+				 st = safe_text_nonull(users->in_username),
 				 users->databits, WHERE_FFL_PASS);
 			FREENULL(st);
 		} else {
@@ -1917,7 +1917,7 @@ void dsp_paymentaddresses(K_ITEM *item, FILE *stream)
 		fprintf(stream, " id=%"PRId64" userid=%"PRId64" addr='%s' "
 				"ratio=%"PRId32" exp=%s cd=%s\n",
 				pa->paymentaddressid, pa->userid,
-				pa->payaddress, pa->payratio,
+				pa->in_payaddress, pa->payratio,
 				expirydate_buf, createdate_buf);
 	}
 }
@@ -1932,7 +1932,7 @@ cmp_t cmp_paymentaddresses(K_ITEM *a, K_ITEM *b)
 	if (c == 0) {
 		c = CMP_BIGINT(pa->userid, pb->userid);
 		if (c == 0)
-			c = CMP_STR(pa->payaddress, pb->payaddress);
+			c = CMP_STR(pa->in_payaddress, pb->in_payaddress);
 	}
 	return c;
 }
@@ -1947,7 +1947,7 @@ cmp_t cmp_payaddr_create(K_ITEM *a, K_ITEM *b)
 	if (c == 0) {
 		c = CMP_TV(pa->createdate, pb->createdate);
 		if (c == 0)
-			c = CMP_STR(pa->payaddress, pb->payaddress);
+			c = CMP_STR(pa->in_payaddress, pb->in_payaddress);
 	}
 	return c;
 }
@@ -1963,7 +1963,7 @@ K_ITEM *find_paymentaddresses(int64_t userid, K_TREE_CTX *ctx)
 	paymentaddresses.expirydate.tv_sec = default_expiry.tv_sec;
 	paymentaddresses.expirydate.tv_usec = default_expiry.tv_usec;
 	paymentaddresses.userid = userid+1;
-	paymentaddresses.payaddress[0] = '\0';
+	paymentaddresses.in_payaddress = EMPTY;
 
 	INIT_PAYMENTADDRESSES(&look);
 	look.data = (void *)(&paymentaddresses);
@@ -1987,7 +1987,7 @@ K_ITEM *find_paymentaddresses_create(int64_t userid, K_TREE_CTX *ctx)
 
 	paymentaddresses.userid = userid;
 	DATE_ZERO(&(paymentaddresses.createdate));
-	paymentaddresses.payaddress[0] = '\0';
+	paymentaddresses.in_payaddress = EMPTY;
 
 	INIT_PAYMENTADDRESSES(&look);
 	look.data = (void *)(&paymentaddresses);
@@ -2010,14 +2010,14 @@ K_ITEM *find_one_payaddress(int64_t userid, char *payaddress, K_TREE_CTX *ctx)
 	paymentaddresses.expirydate.tv_sec = default_expiry.tv_sec;
 	paymentaddresses.expirydate.tv_usec = default_expiry.tv_usec;
 	paymentaddresses.userid = userid;
-	STRNCPY(paymentaddresses.payaddress, payaddress);
+	paymentaddresses.in_payaddress = payaddress;
 
 	INIT_PAYMENTADDRESSES(&look);
 	look.data = (void *)(&paymentaddresses);
 	return find_in_ktree(paymentaddresses_root, &look, ctx);
 }
 
-/* This will match any user that has the payaddress
+/* This will match any user that has the intransient payaddress
  * This avoids the bitcoind delay of rechecking an address
  *  that has EVER been seen before
  * However, also, cmd_userset() that uses it, effectively ensures
@@ -2026,7 +2026,7 @@ K_ITEM *find_one_payaddress(int64_t userid, char *payaddress, K_TREE_CTX *ctx)
  * N.B. this is faster than a bitcoind check, but still slow
  *  It needs a tree based on payaddress to speed it up
  * N.B.2 paymentadresses_root doesn't contain addrauth usernames */
-K_ITEM *find_any_payaddress(char *payaddress)
+K_ITEM *find_any_payaddress(char *in_payaddress)
 {
 	PAYMENTADDRESSES *pa;
 	K_TREE_CTX ctx[1];
@@ -2035,7 +2035,7 @@ K_ITEM *find_any_payaddress(char *payaddress)
 	item = first_in_ktree(paymentaddresses_root, ctx);
 	while (item) {
 		DATA_PAYMENTADDRESSES(pa, item);
-		if (strcmp(pa->payaddress, payaddress) == 0)
+		if (INTREQ(pa->in_payaddress, in_payaddress))
 			return item;
 		item = next_in_ktree(ctx);
 	}
@@ -2052,7 +2052,7 @@ cmp_t cmp_payments(K_ITEM *a, K_ITEM *b)
 	if (c == 0) {
 		c = CMP_BIGINT(pa->payoutid, pb->payoutid);
 		if (c == 0) {
-			c = CMP_STR(pa->subname, pb->subname);
+			c = CMP_STR(pa->in_subname, pb->in_subname);
 			if (c == 0)
 				c = CMP_TV(pb->expirydate, pa->expirydate);
 		}
@@ -2068,7 +2068,7 @@ K_ITEM *find_payments(int64_t payoutid, int64_t userid, char *subname)
 
 	payments.payoutid = payoutid;
 	payments.userid = userid;
-	STRNCPY(payments.subname, subname);
+	payments.in_subname = subname;
 	payments.expirydate.tv_sec = default_expiry.tv_sec;
 	payments.expirydate.tv_usec = default_expiry.tv_usec;
 
@@ -2107,7 +2107,7 @@ K_ITEM *find_first_paypayid(int64_t userid, int64_t payoutid, K_TREE_CTX *ctx)
 
 	payments.userid = userid;
 	payments.payoutid = payoutid;
-	payments.subname[0] = '\0';
+	payments.in_subname = EMPTY;
 
 	INIT_PAYMENTS(&look);
 	look.data = (void *)(&payments);
@@ -4484,7 +4484,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 	K_TREE *mu_root = NULL;
 	int usercount;
 	double ndiff, total_diff, diff_want, elapsed;
-	char rewardbuf[32];
+	char rewardbuf[32], subnamebuf[TXT_BIG+1];
 	double diff_times, diff_add;
 	char cd_buf[CDATE_BUFSIZ];
 	tv_t end_tv = { 0L, 0L };
@@ -4949,7 +4949,7 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 					pa_item2 = k_unlink_head(paymentaddresses_free);
 					DATA_PAYMENTADDRESSES(pa2, pa_item2);
 					pa2->userid = pa->userid;
-					STRNCPY(pa2->payaddress, pa->payaddress);
+					pa2->in_payaddress = pa->in_payaddress;
 					pa2->payratio = pa->payratio;
 					k_add_tail(addr_store, pa_item2);
 				}
@@ -4971,10 +4971,10 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 				bzero(payments, sizeof(*payments));
 				payments->payoutid = payouts->payoutid;
 				payments->userid = miningpayouts->userid;
-				snprintf(payments->subname,
-					 sizeof(payments->subname),
-					 "%s.%d", users->username, ++count);
-				STRNCPY(payments->payaddress, pa->payaddress);
+				snprintf(subnamebuf, sizeof(subnamebuf),
+					 "%s.%d", users->in_username, ++count);
+				payments->in_subname = intransient_str("subname", subnamebuf);
+				payments->in_payaddress = pa->in_payaddress;
 				d64 = floor((double)amount *
 					    (double)(pa->payratio) /
 					    (double)paytotal);
@@ -5005,10 +5005,10 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 				bzero(payments, sizeof(*payments));
 				payments->payoutid = payouts->payoutid;
 				payments->userid = miningpayouts->userid;
-				snprintf(payments->subname,
-					 sizeof(payments->subname),
-					 "%s.0", users->username);
-				STRNCPY(payments->payaddress, users->username);
+				snprintf(subnamebuf, sizeof(subnamebuf),
+					 "%s.0", users->in_username);
+				payments->in_subname = intransient_str("subname", subnamebuf);
+				payments->in_payaddress = users->in_username;
 				payments->amount = amount;
 				payments->diffacc = miningpayouts->diffacc;
 				used = amount;
@@ -7136,6 +7136,7 @@ K_ITEM *_find_create_userinfo(int64_t userid, WHERE_FFL_ARGS)
 	K_ITEM *ui_item, *u_item;
 	USERS *users = NULL;
 	USERINFO *row;
+	char usernamebuf[TXT_BIG+1];
 
 	ui_item = get_userinfo(userid);
 	if (!ui_item) {
@@ -7150,9 +7151,12 @@ K_ITEM *_find_create_userinfo(int64_t userid, WHERE_FFL_ARGS)
 		bzero(row, sizeof(*row));
 		row->userid = userid;
 		if (u_item)
-			STRNCPY(row->username, users->username);
-		else
-			bigint_to_buf(userid, row->username, sizeof(row->username));
+			row->in_username = users->in_username;
+		else {
+			bigint_to_buf(userid, usernamebuf, sizeof(usernamebuf));
+			row->in_username = intransient_str("username",
+							   usernamebuf);
+		}
 
 		add_to_ktree(userinfo_root, ui_item);
 		k_add_head(userinfo_store, ui_item);

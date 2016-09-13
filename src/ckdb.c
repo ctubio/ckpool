@@ -459,6 +459,9 @@ K_TREE *intransient_root;
 K_LIST *intransient_free;
 K_STORE *intransient_store;
 
+/* *** WARNING *** all incoming field names processed by breakdown(),
+ *  that are used as intransient anywhere, MUST be here
+ * TODO: this should be a hash table */
 char *intransient_fields[] = {
 	"workername",
 	"blockhash",
@@ -466,6 +469,7 @@ char *intransient_fields[] = {
 	CODETRF,
 	INETTRF,
 	"username",
+	"admin",
 	"agent",
 	"useragent",
 	"address",
@@ -474,6 +478,7 @@ char *intransient_fields[] = {
 	"version",
 	"poolinstance",
 	"payaddress",
+	"subname",
 	"originaltxn",
 	"committxn",
 	"commitblockhash",

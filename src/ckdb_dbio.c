@@ -599,7 +599,7 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	if (hash) {
 		// New salt each password change
 		make_salt(row);
-		password_hash(row->username, newhash, row->salt,
+		password_hash(row->in_username, newhash, row->salt,
 			      row->passwordhash, sizeof(row->passwordhash));
 	}
 	if (email)
@@ -705,7 +705,7 @@ unparam:
 	return ok;
 }
 
-K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
+K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username, char *emailaddress,
 			char *passwordhash, int64_t userbits, char *by,
 			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
 {
@@ -730,7 +730,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	K_WLOCK(users_db_free);
 
 	K_RLOCK(users_free);
-	item = find_users(username);
+	item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (item) {
 		ok = true;
@@ -744,7 +744,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	DATA_USERS(row, item);
 	bzero(row, sizeof(*row));
 
-	STRNCPY(row->username, username);
+	row->in_username = in_username->str;
 	username_trim(row);
 
 	dup = false;
@@ -771,7 +771,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 	row->status[0] = '\0';
 	STRNCPY(row->emailaddress, emailaddress);
 
-	snprintf(tohash, sizeof(tohash), "%s&#%s", username, emailaddress);
+	snprintf(tohash, sizeof(tohash), "%s&#%s", in_username->str, emailaddress);
 	HASH_BER(tohash, strlen(tohash), 1, hash, tmp);
 	__bin2hex(row->secondaryuserid, (void *)(&hash), sizeof(hash));
 
@@ -780,7 +780,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 		// Make it impossible to login for a BTC Address username
 		row->passwordhash[0] = '\0';
 	} else {
-		password_hash(row->username, passwordhash, row->salt,
+		password_hash(row->in_username, passwordhash, row->salt,
 			      row->passwordhash, sizeof(row->passwordhash));
 	}
 
@@ -796,7 +796,7 @@ K_ITEM *users_add(PGconn *conn, char *username, char *emailaddress,
 
 	par = 0;
 	params[par++] = bigint_to_buf(row->userid, NULL, 0);
-	params[par++] = str_to_buf(row->username, NULL, 0);
+	params[par++] = str_to_buf(row->in_username, NULL, 0);
 	params[par++] = str_to_buf(row->status, NULL, 0);
 	params[par++] = str_to_buf(row->emailaddress, NULL, 0);
 	params[par++] = tv_to_buf(&(row->joineddate), NULL, 0);
@@ -909,7 +909,7 @@ bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item, char *by,
 
 	par = 0;
 	params[par++] = bigint_to_buf(users->userid, NULL, 0);
-	params[par++] = str_to_buf(users->username, NULL, 0);
+	params[par++] = str_to_buf(users->in_username, NULL, 0);
 	params[par++] = str_to_buf(users->status, NULL, 0);
 	params[par++] = str_to_buf(users->emailaddress, NULL, 0);
 	params[par++] = tv_to_buf(&(users->joineddate), NULL, 0);
@@ -1026,7 +1026,7 @@ bool users_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "username", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_STR("username", field, row->username);
+		row->in_username = intransient_str("username", field);
 
 		PQ_GET_FLD(res, i, "status", field, ok);
 		if (!ok)
@@ -2004,7 +2004,7 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 		match = STORE_HEAD_NOLOCK(pa_store);
 		while (match) {
 			DATA_PAYMENTADDRESSES(pa, match);
-			if (strcmp(pa->payaddress, row->payaddress) == 0 &&
+			if (INTREQ(pa->in_payaddress, row->in_payaddress) &&
 			    pa->payratio == row->payratio &&
 			    strcmp(pa->payname, row->payname) == 0) {
 				pa->match = true; // Don't store it
@@ -2015,7 +2015,7 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 		}
 		if (!match) {
 			// No matching replacement, so expire 'row'
-			params[par++] = str_to_buf(row->payaddress, NULL, 0);
+			params[par++] = str_to_buf(row->in_payaddress, NULL, 0);
 			if (!first)
 				APPEND_REALLOC(upd, off, len, ",");
 			first = false;
@@ -2071,16 +2071,16 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 
 			row->userid = userid;
 
-			HISTORYDATEINIT(row, cd, by, code, inet);
-			HISTORYDATETRANSFER(trf_root, row);
+			HISTORYDATEINTRANS(row, cd, by, code, inet);
+			HISTORYDATETRANSFERIN(trf_root, row);
 
 			par = 0;
 			params[par++] = bigint_to_buf(row->paymentaddressid, NULL, 0);
 			params[par++] = bigint_to_buf(row->userid, NULL, 0);
-			params[par++] = str_to_buf(row->payaddress, NULL, 0);
+			params[par++] = str_to_buf(row->in_payaddress, NULL, 0);
 			params[par++] = int_to_buf(row->payratio, NULL, 0);
 			params[par++] = str_to_buf(row->payname, NULL, 0);
-			HISTORYDATEPARAMS(params, par, row);
+			HISTORYDATEPARAMSIN(params, par, row);
 			PARCHKVAL(par, 10, params); // As per PQPARAM10 above
 
 			res = PQexecParams(conn, ins, par, NULL, (const char **)params,
@@ -2129,7 +2129,7 @@ unparam:
 			match = STORE_HEAD_NOLOCK(pa_store);
 			while (match) {
 				DATA_PAYMENTADDRESSES(pa, match);
-				if (strcmp(pa->payaddress, row->payaddress) == 0 &&
+				if (INTREQ(pa->in_payaddress, row->in_payaddress) &&
 				    pa->payratio == row->payratio &&
 				    strcmp(pa->payname, row->payname) == 0) {
 					break;
@@ -2236,7 +2236,7 @@ bool paymentaddresses_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "payaddress", field, ok);
 		if (!ok)
 			break;
-		TXT_TO_STR("payaddress", field, row->payaddress);
+		row->in_payaddress = intransient_str("payaddress", field);
 
 		PQ_GET_FLD(res, i, "payratio", field, ok);
 		if (!ok)
@@ -2248,7 +2248,7 @@ bool paymentaddresses_fill(PGconn *conn)
 			break;
 		TXT_TO_STR("payname", field, row->payname);
 
-		HISTORYDATEFLDS(res, i, row, ok);
+		HISTORYDATEIN(res, i, row, ok);
 		if (!ok)
 			break;
 
@@ -2317,7 +2317,7 @@ bool payments_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 
 	DATA_PAYMENTS(row, p_item);
 	K_RLOCK(payments_free);
-	*old_p_item = find_payments(row->payoutid, row->userid, row->subname);
+	*old_p_item = find_payments(row->payoutid, row->userid, row->in_subname);
 	K_RUNLOCK(payments_free);
 
 	conned = CKPQConn(&conn);
@@ -2373,14 +2373,14 @@ bool payments_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 		params[par++] = bigint_to_buf(row->paymentid, NULL, 0);
 		params[par++] = bigint_to_buf(row->payoutid, NULL, 0);
 		params[par++] = bigint_to_buf(row->userid, NULL, 0);
-		params[par++] = str_to_buf(row->subname, NULL, 0);
+		params[par++] = str_to_buf(row->in_subname, NULL, 0);
 		params[par++] = tv_to_buf(&(row->paydate), NULL, 0);
-		params[par++] = str_to_buf(row->payaddress, NULL, 0);
-		params[par++] = str_to_buf(row->originaltxn, NULL, 0);
+		params[par++] = str_to_buf(row->in_payaddress, NULL, 0);
+		params[par++] = str_to_buf(row->in_originaltxn, NULL, 0);
 		params[par++] = bigint_to_buf(row->amount, NULL, 0);
 		params[par++] = double_to_buf(row->diffacc, NULL, 0);
-		params[par++] = str_to_buf(row->committxn, NULL, 0);
-		params[par++] = str_to_buf(row->commitblockhash, NULL, 0);
+		params[par++] = str_to_buf(row->in_committxn, NULL, 0);
+		params[par++] = str_to_buf(row->in_commitblockhash, NULL, 0);
 		HISTORYDATEPARAMSIN(params, par, row);
 		PARCHK(par, params);
 
@@ -2502,7 +2502,7 @@ bool payments_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "subname", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("subname", field, row->subname);
+			row->in_subname = intransient_str("subname", field);
 
 			PQ_GET_FLD(res, i, "paydate", field, ok);
 			if (!ok)
@@ -2512,12 +2512,12 @@ bool payments_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "payaddress", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("payaddress", field, row->payaddress);
+			row->in_payaddress = intransient_str("payaddress", field);
 
 			PQ_GET_FLD(res, i, "originaltxn", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("originaltxn", field, row->originaltxn);
+			row->in_originaltxn = intransient_str("originaltxn", field);
 
 			PQ_GET_FLD(res, i, "amount", field, ok);
 			if (!ok)
@@ -2532,12 +2532,12 @@ bool payments_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "committxn", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("committxn", field, row->committxn);
+			row->in_committxn = intransient_str("committxn", field);
 
 			PQ_GET_FLD(res, i, "commitblockhash", field, ok);
 			if (!ok)
 				break;
-			TXT_TO_STR("commitblockhash", field, row->commitblockhash);
+			row->in_commitblockhash = intransient_str("commitblockhash", field);
 
 			HISTORYDATEIN(res, i, row, ok);
 			if (!ok)
@@ -7783,7 +7783,7 @@ void ips_add(char *group, char *ip, char *eventname, bool is_event, char *des,
 }
 
 // TODO: discard them from RAM
-bool auths_add(PGconn *conn, char *poolinstance, char *username,
+bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
 		INTRANSIENT *in_workername, char *clientid, char *enonce1,
 		char *useragent, char *preauth, char *by, char *code,
 		char *inet, tv_t *cd, K_TREE *trf_root,
@@ -7807,17 +7807,17 @@ bool auths_add(PGconn *conn, char *poolinstance, char *username,
 	bzero(row, sizeof(*row));
 
 	K_RLOCK(users_free);
-	u_item = find_users(username);
+	u_item = find_users(in_username->str);
 	K_RUNLOCK(users_free);
 	if (!u_item) {
 		if (addressuser) {
-			u_item = users_add(conn, username, EMPTY, EMPTY,
+			u_item = users_add(conn, in_username, EMPTY, EMPTY,
 					   USER_ADDRESS, by, code, inet, cd,
 					   trf_root);
 		} else {
 			LOGDEBUG("%s(): unknown user '%s'",
 				 __func__,
-				 st = safe_text_nonull(username));
+				 st = safe_text_nonull(in_username->str));
 			FREENULL(st);
 			if (!reload_data)
 				*event = events_add(EVENTID_INVAUTH, trf_root);
