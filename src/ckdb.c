@@ -2267,11 +2267,12 @@ static void alloc_storage()
 	DLPRIO(poolstats, 11);
 	DLPRIO(userstats, 10);
 
+	DLPRIO(paymentaddresses, 5);
+
 	// Don't currently nest any locks in these:
 	DLPRIO(esm, PRIO_TERMINAL);
 	DLPRIO(workers, PRIO_TERMINAL);
 	DLPRIO(idcontrol, PRIO_TERMINAL);
-	DLPRIO(paymentaddresses, PRIO_TERMINAL);
 	DLPRIO(ips, PRIO_TERMINAL);
 	DLPRIO(replies, PRIO_TERMINAL);
 
