@@ -471,12 +471,12 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	INTRANSIENT *in_username, *in_address;
-	K_ITEM *i_passwordhash, *i_2fa, *i_rows;
+	INTRANSIENT *in_username;
+	K_ITEM *i_passwordhash, *i_2fa, *i_rows, *i_address;
 	K_ITEM *i_ratio, *i_payname, *i_email, *u_item, *pa_item, *old_pa_item;
 	K_ITEM *ua_item = NULL;
 	USERATTS *useratts = NULL;
-	char *email, *payname;
+	char *email, *address, *payname;
 	char reply[1024] = "";
 	size_t siz = sizeof(reply);
 	int event = EVENT_OK;
@@ -650,22 +650,24 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 						if (ratio == 0)
 							continue;
 
+						// This name won't be intransient
 						snprintf(tmp, sizeof(tmp), "address:%d", i);
-						in_address = require_in(trf_root, tmp,
-									ADDR_MIN_LEN,
-									(char *)addrpatt,
-									reply, siz);
-						if (!in_address) {
+						i_address = require_name(trf_root, tmp,
+									 ADDR_MIN_LEN,
+									 (char *)addrpatt,
+									 reply, siz);
+						if (!i_address) {
 							K_WUNLOCK(paymentaddresses_free);
 							event = events_add(EVENTID_INCBTC,
 									   trf_root);
 							reason = "Invalid address";
 							goto struckout;
 						}
+						address = transfer_data(i_address);
 						pa_item = STORE_HEAD_NOLOCK(pa_store);
 						while (pa_item) {
 							DATA_PAYMENTADDRESSES(row, pa_item);
-							if (INTREQ(row->in_payaddress, in_address->str)) {
+							if (strcmp(row->in_payaddress, address) == 0) {
 								K_WUNLOCK(paymentaddresses_free);
 								reason = "Duplicate address";
 								goto struckout;
@@ -683,7 +685,7 @@ static char *cmd_userset(PGconn *conn, char *cmd, char *id,
 						pa_item = k_unlink_head(paymentaddresses_free);
 						DATA_PAYMENTADDRESSES(row, pa_item);
 						bzero(row, sizeof(*row));
-						row->in_payaddress = in_address->str;
+						row->in_payaddress = intransient_str("payaddress", address);
 						row->payratio = ratio;
 						STRNCPY(row->payname, payname);
 						k_add_head(pa_store, pa_item);
