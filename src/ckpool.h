@@ -88,6 +88,8 @@ struct connsock {
 	ckpool_t *ckp;
 	/* Semaphore used to serialise request/responses */
 	sem_t sem;
+
+	bool alive;
 };
 
 typedef struct connsock connsock_t;
@@ -180,6 +182,10 @@ struct ckpool_instance {
 	proc_instance_t generator;
 	proc_instance_t stratifier;
 	proc_instance_t connector;
+
+	bool generator_ready;
+	bool stratifier_ready;
+	bool connector_ready;
 
 	/* Threads of main process */
 	pthread_t pth_listener;

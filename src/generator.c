@@ -217,7 +217,7 @@ static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 		LOGWARNING("Invalid btcaddress: %s !", ckp->btcaddress);
 		goto out;
 	}
-	si->alive = ret = true;
+	si->alive = cs->alive = ret = true;
 	LOGNOTICE("Server alive: %s:%s", cs->url, cs->port);
 out:
 	/* Close the file handle */
@@ -297,7 +297,6 @@ static void gen_loop(proc_instance_t *pi)
 	server_instance_t *si = NULL, *old_si;
 	unix_msg_t *umsg = NULL;
 	ckpool_t *ckp = pi->ckp;
-	bool started = false;
 	char *buf = NULL;
 	connsock_t *cs;
 	gbtbase_t *gbt;
@@ -309,8 +308,8 @@ reconnect:
 	si = live_server(ckp);
 	if (!si)
 		goto out;
-	if (unlikely(!started)) {
-		started = true;
+	if (unlikely(!ckp->generator_ready)) {
+		ckp->generator_ready = true;
 		LOGWARNING("%s generator ready", ckp->name);
 	}
 
@@ -339,7 +338,7 @@ retry:
 		if (!gen_gbtbase(cs, gbt)) {
 			LOGWARNING("Failed to get block template from %s:%s",
 				   cs->url, cs->port);
-			si->alive = false;
+			si->alive = cs->alive = false;
 			send_unix_msg(umsg->sockd, "Failed");
 			goto reconnect;
 		} else {
@@ -355,7 +354,7 @@ retry:
 		else if (!get_bestblockhash(cs, hash)) {
 			LOGINFO("No best block hash support from %s:%s",
 				cs->url, cs->port);
-			si->alive = false;
+			si->alive = cs->alive = false;
 			send_unix_msg(umsg->sockd, "failed");
 		} else {
 			send_unix_msg(umsg->sockd, hash);
@@ -366,13 +365,13 @@ retry:
 		if (si->notify)
 			send_unix_msg(umsg->sockd, "notify");
 		else if ((height = get_blockcount(cs)) == -1) {
-			si->alive = false;
+			si->alive = cs->alive = false;
 			send_unix_msg(umsg->sockd,  "failed");
 			goto reconnect;
 		} else {
 			LOGDEBUG("Height: %d", height);
 			if (!get_blockhash(cs, height, hash)) {
-				si->alive = false;
+				si->alive = cs->alive = false;
 				send_unix_msg(umsg->sockd, "failed");
 				goto reconnect;
 			} else {
@@ -2708,7 +2707,6 @@ static void proxy_loop(proc_instance_t *pi)
 	gdata_t *gdata = ckp->gdata;
 	unix_msg_t *umsg = NULL;
 	connsock_t *cs = NULL;
-	bool started = false;
 	char *buf = NULL;
 
 reconnect:
@@ -2737,8 +2735,8 @@ reconnect:
 			   proxi->id, proxi->url, ckp->passthrough ? " in passthrough mode" : "");
 	}
 
-	if (unlikely(!started)) {
-		started = true;
+	if (unlikely(!ckp->generator_ready)) {
+		ckp->generator_ready = true;
 		LOGWARNING("%s generator ready", ckp->name);
 	}
 retry:
@@ -2778,6 +2776,12 @@ retry:
 		memset(buf + 12 + 64, 0, 1);
 		sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
 		send_proc(ckp->stratifier, blockmsg);
+	} else if (cmdmatch(buf, "submittxn:")) {
+		if (unlikely(strlen(buf) < 11)) {
+			LOGWARNING("Got zero length submittxn");
+			goto retry;
+		}
+		submit_txn(cs, buf + 10);
 	} else if (cmdmatch(buf, "loglevel")) {
 		sscanf(buf, "loglevel=%d", &ckp->loglevel);
 	} else if (cmdmatch(buf, "ping")) {
