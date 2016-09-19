@@ -1328,6 +1328,7 @@ static void wb_merkle_bins(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, json_t
 static const unsigned char witness_nonce[32] = {0};
 static const int witness_nonce_size = sizeof(witness_nonce);
 static const unsigned char witness_header[] = {0xaa, 0x21, 0xa9, 0xed};
+static const int witness_header_size = sizeof(witness_header);
 
 static void gbt_witness_data(workbase_t *wb, json_t *txn_array)
 {
@@ -1370,9 +1371,9 @@ static void gbt_witness_data(workbase_t *wb, json_t *txn_array)
 	}
 
 	memcpy(hashbin + 32, &witness_nonce, witness_nonce_size);
-	gen_hash(hashbin, hashbin + witness_nonce_size, 32 + witness_nonce_size);
-	memcpy(hashbin, witness_header, witness_nonce_size);
-	__bin2hex(wb->witnessdata, hashbin, 32 + witness_nonce_size);
+	gen_hash(hashbin, hashbin + witness_header_size, 32 + witness_nonce_size);
+	memcpy(hashbin, witness_header, witness_header_size);
+	__bin2hex(wb->witnessdata, hashbin, 32 + witness_header_size);
 	wb->insert_witness = true;
 }
 
