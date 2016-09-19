@@ -2100,12 +2100,15 @@ static void *proxy_recv(void *arg)
 			/* Serialise messages from here once we have a cs by
 			 * holding the semaphore. */
 			cksem_wait(&cs->sem);
-			if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))
-				ret = -1;
-			else {
+			/* Process any messages before checking for errors in
+			 * case a message is sent and then the socket
+			 * immediately closed.
+			 */
+			if (event.events & EPOLLIN) {
 				timeout = 30;
 				ret = read_socket_line(cs, &timeout);
-			}
+			} else if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))
+				ret = -1;
 		}
 		if (ret < 1) {
 			LOGNOTICE("Proxy %d:%d %s failed to epoll/read_socket_line in proxy_recv",
