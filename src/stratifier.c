@@ -2678,7 +2678,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 
 	if (proxy->global) {
 		check_bestproxy(sdata);
-		if (proxy->parent == best_proxy(sdata)->parent)
+		if (proxy->parent != best_proxy(sdata)->parent)
 			reconnect_clients(sdata);
 	} else
 		check_userproxies(sdata, proxy->userid);
