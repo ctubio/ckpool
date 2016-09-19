@@ -2181,7 +2181,8 @@ static void *userproxy_recv(void *arg)
 		if (unlikely(!proxy->authorised))
 			continue;
 
-		if (event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
+		if ((event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) &&
+		    !(event.events & EPOLLIN)) {
 			LOGNOTICE("Proxy %d:%d %s hung up in epoll_wait", proxy->id,
 				  proxy->subid, proxy->url);
 			disable_subproxy(gdata, proxy->parent, proxy);
