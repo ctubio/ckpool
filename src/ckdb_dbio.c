@@ -1480,7 +1480,6 @@ bool useratts_fill(PGconn *conn)
 	return ok;
 }
 
-// WARNING: workername must be intransient
 K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername, bool add_ws,
 			char *difficultydefault, char *idlenotificationenabled,
 			char *idlenotificationtime, char *by, char *code,
@@ -1530,7 +1529,7 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername, bool add_ws,
 		goto unitem;
 
 	row->userid = userid;
-	row->in_workername = workername;
+	row->in_workername = intransient_str("workername", workername);
 	if (difficultydefault && *difficultydefault) {
 		diffdef = atoi(difficultydefault);
 		// If out of the range, set it in the range
@@ -5651,6 +5650,7 @@ bool _sharesummary_update(SHARES *s_row, SHAREERRORS *e_row, tv_t *cd,
 		DATA_SHARESUMMARY(row, ss_item);
 		bzero(row, sizeof(*row));
 		row->userid = userid;
+		// workername is intransient
 		row->in_workername = workername;
 		row->workinfoid = workinfoid;
 	}
@@ -6051,6 +6051,7 @@ bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 			STRNCPY(row->confirmed, confirmed);
 			STRNCPY(row->info, info);
 			TXT_TO_BIGINT("workinfoid", workinfoid, row->workinfoid);
+			// workername is intransient or EMPTY
 			row->in_workername = workername;
 			TXT_TO_INT("clientid", clientid, row->clientid);
 			STRNCPY(row->enonce1, enonce1);

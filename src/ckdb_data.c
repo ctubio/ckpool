@@ -1206,7 +1206,8 @@ K_ITEM *_find_create_workerstatus(bool gotlock, bool alertcreate,
 
 			bzero(row, sizeof(*row));
 			row->userid = userid;
-			row->in_workername = workername;
+			row->in_workername = intransient_str("workername",
+							     workername);
 
 			add_to_ktree(workerstatus_root, ws_item);
 			k_add_head(workerstatus_store, ws_item);
