@@ -13,9 +13,19 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "libckpool.h"
+#include "utlist.h"
+
+struct input_log {
+	struct input_log *next;
+	struct input_log *prev;
+	char *buf;
+};
+
+struct input_log *input_log;
 
 static int msg_loglevel = LOG_DEBUG;
 
@@ -84,6 +94,55 @@ static struct option long_options[] = {
 	{0, 0, 0, 0}
 };
 
+int get_line(char **buf)
+{
+	struct input_log *entry = NULL;
+	int c, len = 0, ctl1, ctl2;
+	*buf = NULL;
+
+	do {
+		c = getchar();
+		if (c == EOF || c == '\n')
+			break;
+		if (c == 27) {
+			ctl1 = getchar();
+			ctl2 = getchar();
+			if (ctl1 != '[')
+				continue;
+			if (ctl2 < 'A' || ctl2 > 'B')
+				continue;
+			if (!input_log)
+				continue;
+			printf("\33[2K\r");
+			free(*buf);
+			if (ctl2 == 'B')
+				entry = entry ? entry->prev : input_log->prev;
+			else
+				entry = entry ? entry->next : input_log;
+			*buf = strdup(entry->buf);
+			len = strlen(*buf);
+			printf("%s", *buf);
+		}
+		if (c == 127) {
+			if (!len)
+				continue;
+			printf("\b \b");
+			(*buf)[--len] = '\0';
+			continue;
+		}
+		if (c < 32 || c > 126)
+			continue;
+		len++;
+		realloc_strcat(buf, (char *)&c);
+		putchar(c);
+	} while (42);
+
+	if (*buf)
+		len = strlen(*buf);
+	printf("\n");
+	return len;
+}
+
 int main(int argc, char **argv)
 {
 	char *name = NULL, *socket_dir = NULL, *buf = NULL, *sockname = "listener";
@@ -92,6 +151,7 @@ int main(int argc, char **argv)
 	int tmo2 = RECV_UNIX_TIMEOUT2;
 	int c, count, i = 0, j;
 	char stamp[128];
+	struct termios ctrl;
 
 	while ((c = getopt_long(argc, argv, "chl:N:n:ps:t:T:", long_options, &i)) != -1) {
 		switch(c) {
@@ -164,29 +224,30 @@ int main(int argc, char **argv)
 	trail_slash(&socket_dir);
 	realloc_strcat(&socket_dir, sockname);
 
+	tcgetattr(STDIN_FILENO, &ctrl);
+	ctrl.c_lflag &= ~(ICANON | ECHO); // turn off canonical mode and echo
+	tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
+
 	count = 0;
 	while (42) {
+		struct input_log *log_entry;
 		int sockd, len;
-		size_t n;
 
 		dealloc(buf);
-		len = getline(&buf, &n, stdin);
-		if (len == -1) {
-			LOGNOTICE("Failed to get a valid line");
-			break;
-		}
-		mkstamp(stamp, sizeof(stamp));
-		len = strlen(buf);
+		len = get_line(&buf);
 		if (len < 2) {
 			LOGERR("%s No message", stamp);
 			continue;
 		}
-		buf[len - 1] = '\0'; // Strip /n
+		mkstamp(stamp, sizeof(stamp));
 		if (buf[0] == '#') {
 			LOGDEBUG("%s Got comment: %s", stamp, buf);
 			continue;
 		}
 		LOGDEBUG("%s Got message: %s", stamp, buf);
+		log_entry = ckalloc(sizeof(struct input_log));
+		log_entry->buf = buf;
+		CDL_PREPEND(input_log, log_entry);
 
 		sockd = open_unix_client(socket_dir);
 		if (sockd < 0) {
@@ -197,7 +258,7 @@ int main(int argc, char **argv)
 			LOGERR("Failed to send unix msg: %s", buf);
 			break;
 		}
-		dealloc(buf);
+		buf = NULL;
 		buf = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
 		close(sockd);
 		if (!buf) {
