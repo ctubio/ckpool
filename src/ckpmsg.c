@@ -10,6 +10,7 @@
 
 #include "config.h"
 
+#include <getopt.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -70,22 +71,52 @@ void mkstamp(char *stamp, size_t siz)
 			tzinfo);
 }
 
+static struct option long_options[] = {
+	{"counter",	no_argument,		0,	'c'},
+	{"help",	no_argument,		0,	'h'},
+	{"loglevel",	required_argument,	0,	'l'},
+	{"name",	required_argument,	0,	'n'},
+	{"sockname",	required_argument,	0,	'N'},
+	{"proxy",	no_argument,		0,	'p'},
+	{"sockdir",	required_argument,	0,	's'},
+	{"timeout1",	required_argument,	0,	't'},
+	{"timeout2",	required_argument,	0,	'T'},
+	{0, 0, 0, 0}
+};
+
 int main(int argc, char **argv)
 {
 	char *name = NULL, *socket_dir = NULL, *buf = NULL, *sockname = "listener";
+	bool proxy = false, counter = false;
 	int tmo1 = RECV_UNIX_TIMEOUT1;
 	int tmo2 = RECV_UNIX_TIMEOUT2;
-	bool proxy = false, counter = false;
+	int c, count, i = 0, j;
 	char stamp[128];
-	int c, count;
 
-	while ((c = getopt(argc, argv, "cl:N:n:ps:t:T:")) != -1) {
+	while ((c = getopt_long(argc, argv, "chl:N:n:ps:t:T:", long_options, &i)) != -1) {
 		switch(c) {
 			/* You'd normally disable most logmsg with -l 3 to
 			 * only see the counter */
 			case 'c':
 				counter = true;
 				break;
+			case 'h':
+				for (j = 0; long_options[j].val; j++) {
+					struct option *jopt = &long_options[j];
+
+					if (jopt->has_arg) {
+						char *upper = alloca(strlen(jopt->name) + 1);
+						int offset = 0;
+
+						do {
+							upper[offset] = toupper(jopt->name[offset]);
+						} while (upper[offset++] != '\0');
+						printf("-%c %s | --%s %s\n", jopt->val,
+						       upper, jopt->name, upper);
+					} else
+						printf("-%c | --%s\n", jopt->val, jopt->name);
+				}
+				exit(0);
 			case 'l':
 				msg_loglevel = atoi(optarg);
 				if (msg_loglevel < LOG_EMERG ||
