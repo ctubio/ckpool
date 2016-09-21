@@ -152,7 +152,7 @@ typedef struct k_list {
 	void **data_memory;	// allocated item data memory buffers
 	void (*dsp_func)(K_ITEM *, FILE *); // optional data display to a file
 	int cull_count;
-	int ram;		// ram allocated for data pointers - code must manage it
+	uint64_t ram;		// ram allocated for data pointers - code must manage it
 	int stores;		// how many stores it currently has
 #if LOCK_CHECK
 	// Since each thread has it's own k_lock no locking is required on this

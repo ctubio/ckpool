@@ -12,11 +12,18 @@
 
 // Data free functions (added here as needed)
 
+void free_transfer_data(TRANSFER *transfer)
+{
+	if (transfer->msiz)
+		FREENULL(transfer->mvalue);
+}
+
 void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
 {
 	K_ITEM *t_item = NULL;
 	TRANSFER *transfer;
 	MSGLINE *msgline;
+	uint64_t ram2 = 0;
 
 	DATA_MSGLINE(msgline, item);
 	if (msgline->trf_root)
@@ -25,17 +32,13 @@ void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
 		t_item = STORE_HEAD_NOLOCK(msgline->trf_store);
 		while (t_item) {
 			DATA_TRANSFER(transfer, t_item);
-			if (transfer->mvalue != transfer->svalue) {
-				if (transfer->intransient) {
-					transfer->intransient = NULL;
-					transfer->mvalue = NULL;
-				} else
-					FREENULL(transfer->mvalue);
-			}
+			ram2 += transfer->msiz;
+			free_transfer_data(transfer);
 			t_item = t_item->next;
 		}
 		if (t_lock)
 			K_WLOCK(transfer_free);
+		transfer_free->ram -= ram2;
 		k_list_transfer_to_head(msgline->trf_store, transfer_free);
 		if (t_cull) {
 			if (transfer_free->count == transfer_free->total &&
@@ -853,9 +856,8 @@ void dsp_transfer(K_ITEM *item, FILE *stream)
 		fprintf(stream, "%s() called with (null) item\n", __func__);
 	else {
 		DATA_TRANSFER(t, item);
-		fprintf(stream, " name='%s' mvalue='%s' malloc=%c\n",
-				t->name, t->mvalue,
-				(t->svalue == t->mvalue) ? 'N' : 'Y');
+		fprintf(stream, " name='%s' mvalue='%s' malloc=%"PRIu64"\n",
+				t->name, t->mvalue, t->msiz);
 	}
 }
 

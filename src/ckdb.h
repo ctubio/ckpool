@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.506"
+#define CKDB_VERSION DB_VERSION"-2.507"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1349,6 +1349,7 @@ typedef struct msgline {
 	char id[ID_SIZ+1];
 	char cmd[CMD_SIZ+1];
 	char *msg;
+	size_t msgsiz;
 	bool hasseq;
 	char *seqcmdnam;
 	uint64_t n_seqall;
@@ -1549,6 +1550,7 @@ typedef struct transfer {
 	char name[NAME_SIZE+1];
 	char svalue[VALUE_SIZE+1];
 	char *mvalue;
+	size_t msiz;
 	INTRANSIENT *intransient;
 } TRANSFER;
 
@@ -3215,6 +3217,7 @@ extern void sequence_report(bool lock);
 // Data free functions (first)
 #define FREE_ITEM(item) do { } while(0)
 // TODO: make a macro for all other to use above macro
+extern void free_transfer_data(TRANSFER *transfer);
 extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
 extern void free_users_data(K_ITEM *item);
 extern void free_workinfo_data(K_ITEM *item);
