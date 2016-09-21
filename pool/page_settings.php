@@ -149,7 +149,9 @@ function dosettings($data, $user)
 		else
 		{
 			$addr = getparam('baddr', false);
-			$addrarr = array(array('addr' => $addr));
+			if (nuem($addr))
+				$addr = '';
+			$addrarr = array(array('addr' => trim($addr)));
 			$pass = getparam('pass', false);
 			$twofa = getparam('2fa', false);
 			$ans = userSettings($user, null, $addrarr, $pass, $twofa);
