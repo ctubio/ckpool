@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.507"
+#define CKDB_VERSION DB_VERSION"-2.508"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1376,6 +1376,7 @@ extern K_STORE *msgline_store;
 // BREAKQUEUE
 typedef struct breakqueue {
 	char *buf;
+	size_t bufsiz;
 	char *source;
 	int access;
 	tv_t accepted; // socket accepted or line read

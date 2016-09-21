@@ -6669,6 +6669,7 @@ skippy:
 		if (dec_sockd)
 			sockd_count--;
 		cmd_processing--;
+		breakqueue_free->ram -= bq->bufsiz;
 		k_add_head(breakqueue_free, bq_item);
 		K_WUNLOCK(breakqueue_free);
 	}
@@ -6802,6 +6803,7 @@ static void *sockrun(void *arg)
 			K_WUNLOCK(breakqueue_free);
 			DATA_BREAKQUEUE(bq, bq_item);
 			bq->buf = buf;
+			bq->bufsiz = strlen(buf)+1;
 			bq->source = (char *)(this->gdata);
 			bq->access = *(int *)(this->cdata);
 			copy_tv(&(bq->accepted), &nowacc);
@@ -6812,6 +6814,7 @@ static void *sockrun(void *arg)
 			if (max_sockd_count < ++sockd_count)
 				max_sockd_count = sockd_count;
 			k_add_tail(cmd_breakqueue_store, bq_item);
+			breakqueue_free->ram += bq->bufsiz;
 			K_WUNLOCK(breakqueue_free);
 			setnow(&now2);
 			sock_lock_br_us[thissock] += us_tvdiff(&now2, &now1);
@@ -7025,6 +7028,7 @@ static void *process_reload(__maybe_unused void *arg)
 
 	PGconn *conn = NULL;
 	K_ITEM *bq_item = NULL;
+	BREAKQUEUE *bq;
 	char buf[128];
 	time_t now;
 	ts_t when, when_add;
@@ -7169,8 +7173,10 @@ static void *process_reload(__maybe_unused void *arg)
 
 		process_reload_item(conn, bq_item);
 
+		DATA_BREAKQUEUE(bq, bq_item);
 		K_WLOCK(breakqueue_free);
 		reload_processing--;
+		breakqueue_free->ram -= bq->bufsiz;
 		k_add_head(breakqueue_free, bq_item);
 		K_WUNLOCK(breakqueue_free);
 
@@ -7246,6 +7252,7 @@ static void reload_line(char *filename, char *buf, uint64_t count)
 		// release the lock since strdup could be slow, but rarely
 		DATA_BREAKQUEUE(bq, bq_item);
 		bq->buf = strdup(buf);
+		bq->bufsiz = strlen(buf)+1;
 		// reloads are normally all pool data but access can be changed
 		bq->source = (char *)ispool;
 		bq->access = reload_access;
@@ -7259,6 +7266,7 @@ static void reload_line(char *filename, char *buf, uint64_t count)
 		K_WLOCK(breakqueue_free);
 		k_add_tail(reload_breakqueue_store, bq_item);
 		qcount = reload_breakqueue_store->count;
+		breakqueue_free->ram += bq->bufsiz;
 		K_WUNLOCK(breakqueue_free);
 
 		mutex_lock(&bq_reload_waitlock);
