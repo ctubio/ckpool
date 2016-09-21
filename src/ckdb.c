@@ -209,8 +209,6 @@ const char Transfer[] = "Transfer";
 
 // older version missing field defaults
 // see end of alloc_storage()
-static TRANSFER auth_1 = { "poolinstance", "", NULL, NULL };
-K_ITEM auth_poolinstance = { Transfer, NULL, NULL, (void *)(&auth_1) };
 static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue, NULL };
 K_ITEM auth_preauth = { Transfer, NULL, NULL, (void *)(&auth_2) };
 static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue, NULL };
@@ -409,7 +407,7 @@ char *inet_default = "127.0.0.1";
 char *id_default = "42";
 
 // NULL or poolinstance must match
-const char *poolinstance = NULL;
+const char *sys_poolinstance = NULL;
 // lock for accessing all mismatch variables
 cklock_t poolinstance_lock;
 time_t last_mismatch_message;
@@ -2286,8 +2284,6 @@ static void alloc_storage()
 
 	// setup intransients
 	in_empty = get_intransient("empty", EMPTY);
-	auth_1.intransient = get_intransient(auth_1.name, "");
-	auth_1.mvalue = auth_1.intransient->str;
 	userstats_workername = get_intransient("workername", "all");
 }
 
@@ -4983,7 +4979,7 @@ static void summarise_blocks()
 				 "/%"PRId64"/%s/%s crosses block "
 				 "%"PRId32"/%"PRId64" boundary",
 				 __func__, workmarkers->markerid,
-				 workmarkers->poolinstance,
+				 workmarkers->in_poolinstance,
 				 workmarkers->workinfoidstart,
 				 workmarkers->workinfoidend,
 				 workmarkers->description,
@@ -8064,7 +8060,7 @@ static bool make_keysummaries()
 
 	LOGDEBUG("%s() processing workmarkers %"PRId64"/%s/End %"PRId64"/"
 		 "Stt %"PRId64"/%s/%s",
-		 __func__, workmarkers->markerid, workmarkers->poolinstance,
+		 __func__, workmarkers->markerid, workmarkers->in_poolinstance,
 		 workmarkers->workinfoidend, workmarkers->workinfoidstart,
 		 workmarkers->description, workmarkers->status);
 
@@ -9135,7 +9131,7 @@ int main(int argc, char **argv)
 			 *  to have poolinstance set to the given -i value
 			 *  since they will be blank */
 			case 'i':
-				poolinstance = (const char *)strdup(optarg);
+				sys_poolinstance = (const char *)strdup(optarg);
 				break;
 			case 'I':
 				ignore_seq = true;

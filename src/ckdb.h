@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.505"
+#define CKDB_VERSION DB_VERSION"-2.506"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -639,7 +639,7 @@ extern char *id_default;
 	} while (0)
 
 // NULL or poolinstance must match
-extern const char *poolinstance;
+extern const char *sys_poolinstance;
 // lock for accessing all mismatch variables
 extern cklock_t poolinstance_lock;
 extern time_t last_mismatch_message;
@@ -1565,7 +1565,6 @@ extern K_LIST *transfer_free;
 
 extern const char Transfer[];
 
-extern K_ITEM auth_poolinstance;
 extern K_ITEM auth_preauth;
 extern K_ITEM poolstats_elapsed;
 extern K_ITEM userstats_elapsed;
@@ -2681,7 +2680,7 @@ extern int o_limits_max_lifetime;
 // AUTHS authorise.id.json={...}
 typedef struct auths {
 	int64_t authid;
-	char poolinstance[TXT_BIG+1];
+	char *in_poolinstance;
 	int64_t userid;
 	char *in_workername;
 	int32_t clientid;
@@ -2706,7 +2705,7 @@ extern K_STORE *auths_store;
 #define STATS_PER (9.5*60.0)
 
 typedef struct poolstats {
-	char poolinstance[TXT_BIG+1];
+	char *in_poolinstance;
 	int64_t elapsed;
 	int32_t users;
 	int32_t workers;
@@ -2737,7 +2736,7 @@ extern K_STORE *poolstats_store;
  * Most of the #defines for USERSTATS are no longer needed
  *  but are left here for now for historical reference */
 typedef struct userstats {
-	char poolinstance[TXT_BIG+1];
+	char *in_poolinstance;
 	int64_t userid;
 	char *in_workername;
 	int64_t elapsed;
@@ -3015,7 +3014,7 @@ extern K_STORE *keysummary_store;
 // WORKMARKERS
 typedef struct workmarkers {
 	int64_t markerid;
-	char *poolinstance;
+	char *in_poolinstance;
 	int64_t workinfoidend;
 	int64_t workinfoidstart;
 	char *description;
@@ -3046,7 +3045,7 @@ extern K_STORE *workmarkers_store;
 
 // MARKS
 typedef struct marks {
-	char *poolinstance;
+	char *in_poolinstance;
 	int64_t workinfoid;
 	char *description;
 	char *extra;
@@ -3317,8 +3316,8 @@ extern cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b);
 	_get_intransient(_fld, _val, 0, WHERE_FFL_HERE)
 #define get_intransient_siz(_fld, _val, _siz) \
 	_get_intransient(_fld, _val , _siz, WHERE_FFL_HERE)
-extern INTRANSIENT *_get_intransient(char *fldnam, char *value, size_t siz,
-					WHERE_FFL_ARGS);
+extern INTRANSIENT *_get_intransient(const char *fldnam, char *value,
+					size_t siz, WHERE_FFL_ARGS);
 #define intransient_str(_fld, _val) \
 	_intransient_str(_fld, _val, WHERE_FFL_HERE)
 extern char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS);
@@ -3442,9 +3441,9 @@ extern K_ITEM *_find_workinfo(int64_t workinfoid, bool gotlock, K_TREE_CTX *ctx)
 extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
 extern K_ITEM *find_workinfo_esm(int64_t workinfoid, bool error, bool *created,
 				 tv_t *createdate);
-extern bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
-			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
-			 int64_t *s_count, int64_t *s_diff);
+extern bool workinfo_age(int64_t workinfoid, INTRANSIENT *in_poolinstance,
+			 tv_t *cd, tv_t *ss_first, tv_t *ss_last,
+			 int64_t *ss_count, int64_t *s_count, int64_t *s_diff);
 extern double coinbase_reward(int32_t height);
 extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
@@ -3465,7 +3464,8 @@ extern void zero_sharesummary(SHARESUMMARY *row);
 extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
 				  int64_t workinfoid, bool pool);
 extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
-extern void auto_age_older(int64_t workinfoid, char *poolinstance, tv_t *cd);
+extern void auto_age_older(int64_t workinfoid, INTRANSIENT *in_poolinstance,
+			   tv_t *cd);
 #define dbhash2btchash(_hash, _buf, _siz) \
 	_dbhash2btchash(_hash, _buf, _siz, WHERE_FFL_HERE)
 void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
@@ -3753,13 +3753,14 @@ extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 #define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
 extern int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
 #define ovents_add(_id, _trf_root) _ovents_add(_id, NULL, NULL, NULL, _trf_root)
-extern bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
-			INTRANSIENT *in_workername, char *clientid,
-			char *enonce1, char *useragent, char *preauth, char *by,
-			char *code, char *inet, tv_t *cd, K_TREE *trf_root,
-			bool addressuser, USERS **users, WORKERS **workers,
-			int *event, bool reload_data);
-extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
+extern bool auths_add(PGconn *conn, INTRANSIENT *in_poolinstance,
+			INTRANSIENT *in_username, INTRANSIENT *in_workername,
+			char *clientid, char *enonce1, char *useragent,
+			char *preauth, char *by, char *code, char *inet,
+			tv_t *cd, K_TREE *trf_root, bool addressuser,
+			USERS **users, WORKERS **workers, int *event,
+			bool reload_data);
+extern bool poolstats_add(PGconn *conn, bool store, INTRANSIENT *in_poolinstance,
 				char *elapsed, char *users, char *workers,
 				char *hashrate, char *hashrate5m,
 				char *hashrate1hr, char *hashrate24hr,
@@ -3767,12 +3768,12 @@ extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 				bool igndup, K_TREE *trf_root);
 extern bool poolstats_fill(PGconn *conn);
 extern bool userstats_add_db(PGconn *conn, USERSTATS *row);
-extern bool userstats_add(char *poolinstance, char *elapsed, char *username,
+extern bool userstats_add(INTRANSIENT *in_poolinstance, char *elapsed, char *username,
 			  INTRANSIENT *in_workername, char *hashrate,
 			  char *hashrate5m, char *hashrate1hr,
 			  char *hashrate24hr, bool idle, bool eos, char *by,
 			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
-extern bool workerstats_add(char *poolinstance, char *elapsed, char *username,
+extern bool workerstats_add(INTRANSIENT *in_poolinstance, char *elapsed, char *username,
 			    INTRANSIENT *in_workername, char *hashrate,
 			    char *hashrate5m, char *hashrate1hr,
 			    char *hashrate24hr, bool idle, char *instances,

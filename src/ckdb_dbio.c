@@ -3274,7 +3274,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 		if (!igndup) {
 			tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 			LOGERR("%s(): Duplicate workinfo ignored %s/%s/%s",
-				__func__, workinfoidstr, poolinstance, cd_buf);
+				__func__, workinfoidstr, in_poolinstance->str,
+				cd_buf);
 		}
 
 		return workinfoid;
@@ -3479,7 +3480,7 @@ bool workinfo_fill(PGconn *conn)
 			PQ_GET_FLD(res, i, "poolinstance", field, ok);
 			if (!ok)
 				break;
-			if (poolinstance && strcmp(field, poolinstance)) {
+			if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
 				k_add_head(workinfo_free, item);
 				POOLINSTANCE_DBLOAD_SET(workinfo, field);
 				continue;
@@ -4744,7 +4745,7 @@ bool sharesummaries_to_markersummaries(PGconn *conn, WORKMARKERS *workmarkers,
 
 	LOGWARNING("%s() Processing: workmarkers %"PRId64"/%s/"
 		   "End %"PRId64"/Stt %"PRId64"/%s/%s",
-		   shortname, workmarkers->markerid, workmarkers->poolinstance,
+		   shortname, workmarkers->markerid, workmarkers->in_poolinstance,
 		   workmarkers->workinfoidend, workmarkers->workinfoidstart,
 		   workmarkers->description, workmarkers->status);
 
@@ -5076,7 +5077,7 @@ dokey:
 	if (!key_update) {
 		ok = workmarkers_process(conn, true, true,
 					 workmarkers->markerid,
-					 workmarkers->poolinstance,
+					 workmarkers->in_poolinstance,
 					 workmarkers->workinfoidend,
 					 workmarkers->workinfoidstart,
 					 workmarkers->description,
@@ -5255,7 +5256,7 @@ flail:
 			   shareacc, diffacc,
 			   kshareacc >> 1, (kshareacc & 1) ? ".5" : "",
 			   kdiffacc >> 1, (kdiffacc & 1) ? ".5" : "",
-			   workmarkers->markerid, workmarkers->poolinstance,
+			   workmarkers->markerid, workmarkers->in_poolinstance,
 			   workmarkers->workinfoidend,
 			   workmarkers->workinfoidstart,
 			   workmarkers->description,
@@ -5310,7 +5311,7 @@ bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm)
 
 	LOGWARNING("%s() Deleting: markersummaries for workmarkers "
 		   "%"PRId64"/%s/End %"PRId64"/Stt %"PRId64"/%s/%s",
-		   shortname, wm->markerid, wm->poolinstance,
+		   shortname, wm->markerid, wm->in_poolinstance,
 		   wm->workinfoidend, wm->workinfoidstart, wm->description,
 		   wm->status);
 
@@ -5431,7 +5432,7 @@ flail:
 			   "%"PRId64" diff for workmarkers %"PRId64"/%s/"
 			   "End %"PRId64"/Stt %"PRId64"/%s/%s",
 			   shortname, ms_count, shareacc, diffacc,
-			   wm->markerid, wm->poolinstance, wm->workinfoidend,
+			   wm->markerid, wm->in_poolinstance, wm->workinfoidend,
 			   wm->workinfoidstart, wm->description, wm->status);
 	}
 
@@ -7784,10 +7785,10 @@ void ips_add(char *group, char *ip, char *eventname, bool is_event, char *des,
 }
 
 // TODO: discard them from RAM
-bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
-		INTRANSIENT *in_workername, char *clientid, char *enonce1,
-		char *useragent, char *preauth, char *by, char *code,
-		char *inet, tv_t *cd, K_TREE *trf_root,
+bool auths_add(PGconn *conn, INTRANSIENT *in_poolinstance,
+		INTRANSIENT *in_username, INTRANSIENT *in_workername,
+		char *clientid, char *enonce1, char *useragent, char *preauth,
+		char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root,
 		bool addressuser, USERS **users, WORKERS **workers,
 		int *event, bool reload_data)
 {
@@ -7832,7 +7833,7 @@ bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
 	if ((*users)->status[0])
 		goto unitem;
 
-	STRNCPY(row->poolinstance, poolinstance);
+	row->in_poolinstance = in_poolinstance->str;
 	row->userid = (*users)->userid;
 	// since update=false, a dup will be ok and do nothing when igndup=true
 	w_item = new_worker(conn, false, row->userid, in_workername->str,
@@ -7861,7 +7862,7 @@ bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
 		// Shouldn't actually be possible unless twice in the logs
 		tv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		LOGERR("%s(): Duplicate auths ignored %s/%s/%s",
-			__func__, poolinstance,
+			__func__, in_poolinstance->str,
 			st = safe_text_nonull(in_workername->str), cd_buf);
 		FREENULL(st);
 
@@ -7896,7 +7897,7 @@ unitem:
 	return ok;
 }
 
-bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
+bool poolstats_add(PGconn *conn, bool store, INTRANSIENT *in_poolinstance,
 			char *elapsed, char *users, char *workers,
 			char *hashrate, char *hashrate5m,
 			char *hashrate1hr, char *hashrate24hr,
@@ -7925,7 +7926,7 @@ bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 
 	row->stored = false;
 
-	STRNCPY(row->poolinstance, poolinstance);
+	row->in_poolinstance = in_poolinstance->str;
 	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
 	TXT_TO_INT("users", users, row->users);
 	TXT_TO_INT("workers", workers, row->workers);
@@ -7947,7 +7948,7 @@ bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 
 	if (store) {
 		par = 0;
-		params[par++] = str_to_buf(row->poolinstance, NULL, 0);
+		params[par++] = str_to_buf(row->in_poolinstance, NULL, 0);
 		params[par++] = bigint_to_buf(row->elapsed, NULL, 0);
 		params[par++] = int_to_buf(row->users, NULL, 0);
 		params[par++] = int_to_buf(row->workers, NULL, 0);
@@ -8105,12 +8106,12 @@ bool poolstats_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "poolinstance", field, ok);
 		if (!ok)
 			break;
-		if (poolinstance && strcmp(field, poolinstance)) {
+		if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
 			k_add_head(poolstats_free, item);
 			POOLINSTANCE_DBLOAD_SET(poolstats, field);
 			continue;
 		}
-		TXT_TO_STR("poolinstance", field, row->poolinstance);
+		row->in_poolinstance = intransient_str("poolinstance", field);
 
 		PQ_GET_FLD(res, i, "elapsed", field, ok);
 		if (!ok)
@@ -8176,7 +8177,7 @@ clean:
 }
 
 // To RAM
-bool userstats_add(char *poolinstance, char *elapsed, char *username,
+bool userstats_add(INTRANSIENT *in_poolinstance, char *elapsed, char *username,
 		   INTRANSIENT *in_workername, char *hashrate, char *hashrate5m,
 		   char *hashrate1hr, char *hashrate24hr, bool idle, bool eos,
 		   char *by, char *code, char *inet, tv_t *cd, K_TREE *trf_root)
@@ -8196,7 +8197,7 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 	DATA_USERSTATS(row, us_item);
 	bzero(row, sizeof(*row));
 
-	STRNCPY(row->poolinstance, poolinstance);
+	row->in_poolinstance = in_poolinstance->str;
 	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
 	K_RLOCK(users_free);
 	u_item = find_users(username);
@@ -8282,7 +8283,7 @@ bool userstats_add(char *poolinstance, char *elapsed, char *username,
 }
 
 // To RAM
-bool workerstats_add(char *poolinstance, char *elapsed, char *username,
+bool workerstats_add(INTRANSIENT *in_poolinstance, char *elapsed, char *username,
 			INTRANSIENT *in_workername, char *hashrate,
 			char *hashrate5m, char *hashrate1hr, char *hashrate24hr,
 			bool idle, char *instances, char *by, char *code,
@@ -8302,7 +8303,7 @@ bool workerstats_add(char *poolinstance, char *elapsed, char *username,
 	DATA_USERSTATS(row, us_item);
 	bzero(row, sizeof(*row));
 
-	STRNCPY(row->poolinstance, poolinstance);
+	row->in_poolinstance = in_poolinstance->str;
 	TXT_TO_BIGINT("elapsed", elapsed, row->elapsed);
 	K_RLOCK(users_free);
 	u_item = find_users(username);
@@ -9016,7 +9017,7 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			}
 		}
 
-		DUP_POINTER(workmarkers_free, row->poolinstance, poolinstance);
+		row->in_poolinstance = intransient_str("poolinstance", poolinstance);
 		row->workinfoidend = workinfoidend;
 		row->workinfoidstart = workinfoidstart;
 		DUP_POINTER(workmarkers_free, row->description, description);
@@ -9030,7 +9031,7 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 			HISTORYDATECONTROL ") values (" PQPARAM11 ")";
 		par = 0;
 		params[par++] = bigint_to_buf(row->markerid, NULL, 0);
-		params[par++] = str_to_buf(row->poolinstance, NULL, 0);
+		params[par++] = str_to_buf(row->in_poolinstance, NULL, 0);
 		params[par++] = bigint_to_buf(row->workinfoidend, NULL, 0);
 		params[par++] = bigint_to_buf(row->workinfoidstart, NULL, 0);
 		params[par++] = str_to_buf(row->description, NULL, 0);
@@ -9162,13 +9163,12 @@ bool workmarkers_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "poolinstance", field, ok);
 		if (!ok)
 			break;
-		if (poolinstance && strcmp(field, poolinstance)) {
+		if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
 			k_add_head(workmarkers_free, item);
 			POOLINSTANCE_DBLOAD_SET(workmarkers, field);
 			continue;
 		}
-		TXT_TO_PTR("poolinstance", field, row->poolinstance);
-		LIST_MEM_ADD(workmarkers_free, row->poolinstance);
+		row->in_poolinstance = intransient_str("poolinstance", field);
 
 		PQ_GET_FLD(res, i, "markerid", field, ok);
 		if (!ok)
@@ -9356,7 +9356,7 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 		K_WUNLOCK(marks_free);
 		DATA_MARKS(row, m_item);
 		bzero(row, sizeof(*row));
-		DUP_POINTER(marks_free, row->poolinstance, poolinstance);
+		row->in_poolinstance = intransient_str("poolinstance", poolinstance);
 		row->workinfoid = workinfoid;
 		DUP_POINTER(marks_free, row->description, description);
 		DUP_POINTER(marks_free, row->extra, extra);
@@ -9370,7 +9370,7 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 			"status"
 			HISTORYDATECONTROL ") values (" PQPARAM11 ")";
 		par = 0;
-		params[par++] = str_to_buf(row->poolinstance, NULL, 0);
+		params[par++] = str_to_buf(row->in_poolinstance, NULL, 0);
 		params[par++] = bigint_to_buf(workinfoid, NULL, 0);
 		params[par++] = str_to_buf(row->description, NULL, 0);
 		params[par++] = str_to_buf(row->extra, NULL, 0);
@@ -9495,13 +9495,12 @@ bool marks_fill(PGconn *conn)
 		PQ_GET_FLD(res, i, "poolinstance", field, ok);
 		if (!ok)
 			break;
-		if (poolinstance && strcmp(field, poolinstance)) {
+		if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
 			k_add_head(marks_free, item);
 			POOLINSTANCE_DBLOAD_SET(marks, field);
 			continue;
 		}
-		TXT_TO_PTR("poolinstance", field, row->poolinstance);
-		LIST_MEM_ADD(marks_free, row->poolinstance);
+		row->in_poolinstance = intransient_str("poolinstance", field);
 
 		PQ_GET_FLD(res, i, "workinfoid", field, ok);
 		if (!ok)
