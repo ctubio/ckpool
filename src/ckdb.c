@@ -485,6 +485,8 @@ char *intransient_fields[] = {
 	NULL
 };
 
+INTRANSIENT *in_empty;
+
 // MSGLINE
 K_LIST *msgline_free;
 K_STORE *msgline_store;
@@ -2282,7 +2284,8 @@ static void alloc_storage()
 		check_deadlocks = true;
 #endif
 
-	// set intransient
+	// setup intransients
+	in_empty = get_intransient("empty", EMPTY);
 	auth_1.intransient = get_intransient(auth_1.name, "");
 	auth_1.mvalue = auth_1.intransient->str;
 	userstats_workername = get_intransient("workername", "all");
@@ -3152,7 +3155,7 @@ static void msgs_seq(SEQFOUND *found_msgs)
  *  sequence code */
 static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 			uint64_t n_seqstt, uint64_t n_seqpid,
-			char *nam, tv_t *now, tv_t *cd, char *code,
+			char *nam, tv_t *now, tv_t *cd, INTRANSIENT *in_code,
 			int seqentryflags, char *msg)
 {
 	static SEQFOUND found[SEQ_MAX];
@@ -3178,7 +3181,7 @@ static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 
 	LOGDEBUG("%s() SQ %c:%d/%s/%"PRIu64"/%"PRIu64"/%"PRIu64"/%s '%.80s...",
 		 __func__, SECHR(seqentryflags), seq, nam, n_seqcmd, n_seqstt,
-		 n_seqpid, code, st = safe_text(msg));
+		 n_seqpid, in_code->str, st = safe_text(msg));
 	FREENULL(st);
 
 	firstseq = newseq = expseq = gothigh = okhi = gotstale =
@@ -3579,7 +3582,7 @@ setitemdata:
 		seqentry->flags = seqentryflags;
 		copy_tv(&(seqentry->time), now);
 		copy_tv(&(seqentry->cd), cd);
-		STRNCPY(seqentry->code, code);
+		seqentry->in_code = in_code->str;
 		seqdata->ok++;
 		seqset->ok++;
 	}
@@ -3643,7 +3646,7 @@ setitemdata:
 				(level == LOG_DEBUG) ? "*" : EMPTY,
 				SECHR(seqentryflags), SECHR(seqentry_copy.flags),
 				nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
-				t_buf2, code,
+				t_buf2, in_code->str,
 				seqset_copy.seqdata[seq].minseq,
 				seqset_copy.seqdata[seq].maxseq,
 				seqset_copy.seqdata[seq].missing,
@@ -3742,7 +3745,7 @@ setitemdata:
 		LOGWARNING("SEQ recovered %s %"PRIu64" set:%d/%"PRIu64
 			   "=%s/%"PRIu64" %s/%s",
 			   nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
-			   t_buf2, code);
+			   t_buf2, in_code->str);
 	}
 
 	if (gotstale || gotstalestart || gothigh) {
@@ -3755,7 +3758,7 @@ setitemdata:
 			   gothigh ? (okhi ? "OKHI" : "HIGH") : "stale",
 			   gotstalestart ? "STARTUP " : EMPTY,
 			   nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
-			   t_buf2, code,
+			   t_buf2, in_code->str,
 			   seqset_copy.seqdata[seq].minseq,
 			   seqset_copy.seqdata[seq].maxseq,
 			   seqset_copy.seqdata[seq].missing,
@@ -3827,7 +3830,7 @@ setitemdata:
 				   seqnam[seq], range_buf, set,
 				   n_seqstt, t_buf, n_seqpid,
 				   isrange ? "last: " : EMPTY,
-				   t_buf2, seqtrans->entry.code);
+				   t_buf2, seqtrans->entry.in_code);
 		}
 		K_WLOCK(seqtrans_free);
 		k_list_transfer_to_head(lost, seqtrans_free);
@@ -3874,13 +3877,13 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 		dupall = update_seq(SEQ_ALL, msgline->n_seqall,
 				    msgline->n_seqstt, msgline->n_seqpid,
 				    SEQALL, &(msgline->now), &(msgline->cd),
-				    msgline->code, msgline->seqentryflags,
+				    msgline->in_code, msgline->seqentryflags,
 				    msgline->msg);
 	}
 	dupcmd = update_seq(ckdb_cmds[msgline->which_cmds].seq,
 			    msgline->n_seqcmd, msgline->n_seqstt,
 			    msgline->n_seqpid, msgline->seqcmdnam,
-			    &(msgline->now), &(msgline->cd), msgline->code,
+			    &(msgline->now), &(msgline->cd), msgline->in_code,
 			    msgline->seqentryflags, msgline->msg);
 
 	if (ignore_seqall)
@@ -3914,9 +3917,11 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 
 static void setup_seq(K_ITEM *seqall, MSGLINE *msgline)
 {
-	K_ITEM *seqstt, *seqpid, *seqcmd, *i_code;
+	K_ITEM *seqstt, *seqpid, *seqcmd;
 	char *err = NULL, *st = NULL;
 	size_t len, off;
+	char reply[16] = "";
+	size_t siz = sizeof(reply);
 
 	msgline->n_seqall = atol(transfer_data(seqall));
 	if ((seqstt = find_transfer(msgline->trf_root, SEQSTT)))
@@ -3985,16 +3990,13 @@ static void setup_seq(K_ITEM *seqall, MSGLINE *msgline)
 
 	msgline->hasseq = true;
 
-	if ((i_code = find_transfer(msgline->trf_root, CODETRF))) {
-		msgline->code = transfer_data(i_code);
-		if (!(*(msgline->code)))
-			msgline->code = NULL;
-	}
-	if (!(msgline->code)) {
-		if ((i_code = find_transfer(msgline->trf_root, BYTRF)))
-			msgline->code = transfer_data(i_code);
-		else
-			msgline->code = EMPTY;
+	msgline->in_code = optional_in(msgline->trf_root, CODETRF, 1, NULL,
+					reply, siz);
+	if (!(msgline->in_code)) {
+		msgline->in_code = optional_in(msgline->trf_root, BYTRF,
+						0, NULL, reply, siz);
+		if (!msgline->in_code)
+			msgline->in_code = in_empty;
 	}
 }
 
@@ -4058,7 +4060,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	 *  you can ignore the access failed items by skipping items
 	 *  that start with a capital, since all (currently) are lower case
 	 *  however, command checks are case insensitive, so replaying
-	 *   the file will allow these commands, if they are present */
+	 *   the file will try these commands, if they are present */
 	if ((ckdb_cmds[msgline->which_cmds].access & access) == 0)
 		buf[0] = toupper(buf[0]);
 

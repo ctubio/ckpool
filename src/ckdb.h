@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.504"
+#define CKDB_VERSION DB_VERSION"-2.505"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1335,6 +1335,7 @@ extern K_LIST *intransient_free;
 extern K_STORE *intransient_store;
 
 extern char *intransient_fields[];
+extern INTRANSIENT *in_empty;
 
 // MSGLINE
 typedef struct msgline {
@@ -1355,7 +1356,7 @@ typedef struct msgline {
 	uint64_t n_seqstt;
 	uint64_t n_seqpid;
 	int seqentryflags;
-	char *code;
+	INTRANSIENT *in_code;
 	K_TREE *trf_root;
 	K_STORE *trf_store;
 	int sockd;
@@ -1680,9 +1681,6 @@ enum seq_num {
 	SEQ_MAX
 };
 
-// Ensure size is a (multiple of 8)-1
-#define SEQ_CODE 15
-
 #define SECHR(_sif) (((_sif) == SE_EARLYSOCK) ? 'E' : \
 			(((_sif) == SE_RELOAD) ? 'R' : \
 			(((_sif) == SE_SOCKET) ? 'S' : '?')))
@@ -1698,7 +1696,7 @@ typedef struct seqentry {
 	int flags;
 	tv_t cd; // sec:0=missing, usec:0=miss !0=trans
 	tv_t time;
-	char code[SEQ_CODE+1];
+	char *in_code;
 } SEQENTRY;
 
 typedef struct seqdata {
