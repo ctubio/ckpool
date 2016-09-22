@@ -146,7 +146,7 @@ fi
 echo "Command$s: `show "$ex0"`"
 read -p "ok? (y): " ok
 if [ "${ok:0:1}" = "y" ] ; then
- echo "$ex0" | tr "|" "\n" | ./ckpmsg -n ckdb -s /opt/ -N listenercmd
+ echo "$ex0" | tr "|" "\n" | php ckdb.php
  echo "Done"
 else
  echo "Aborted"
