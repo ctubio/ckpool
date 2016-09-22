@@ -21,7 +21,7 @@ function getsock2($fun, $tmo)
 #
 function msg($line, $tmo = false)
 {
- global $fld_sep, $val_sep, $alrts;
+ global $fld_sep, $val_sep;
 
  $fun = 'stdin';
  $ret = false;
@@ -33,21 +33,6 @@ function msg($line, $tmo = false)
 		$ret = readsockline($fun, $socket);
 
 	socket_close($socket);
- }
- $al = $fld_sep . 'alert' . $val_sep;
- if ($ret !== false and strpos($ret, $al) !== false)
- {
-	$all = explode($al, $ret);
-	$ret = $all[0];
-	$skip = true;
-	foreach ($all as $lrt)
-	{
-		if ($skip)
-			$skip = false;
-		else
-			// Discard duplicates
-			$alrts[preg_replace("/[\n\r]*$/",'',$lrt)] = 1;
-	}
  }
  return $ret;
 }
