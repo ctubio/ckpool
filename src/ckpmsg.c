@@ -11,6 +11,7 @@
 #include "config.h"
 
 #include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <termios.h>
@@ -94,11 +95,45 @@ static struct option long_options[] = {
 	{0, 0, 0, 0}
 };
 
+struct termios oldctrl;
+
+static void sighandler(const int sig)
+{
+	/* Return console to its previous state */
+	tcsetattr(STDIN_FILENO, TCSANOW, &oldctrl);
+
+	if (sig) {
+		signal (sig, SIG_DFL);
+		raise (sig);
+	}
+}
+
 int get_line(char **buf)
 {
 	struct input_log *entry = NULL;
 	int c, len = 0, ctl1, ctl2;
+	struct termios ctrl;
 	*buf = NULL;
+
+	/* If we're not reading from a terminal, parse lines at a time allowing
+	 * us to script usage of ckpmsg */
+	if (!isatty(fileno((FILE *)stdin))) do {
+		size_t n;
+
+		dealloc(*buf);
+		len = getline(buf, &n, stdin);
+		if (len == -1) {
+			dealloc(*buf);
+			goto out;
+		}
+		len = strlen(*buf);
+		(*buf)[--len] = '\0'; // Strip \n
+		goto out;
+	} while (42);
+
+	tcgetattr(STDIN_FILENO, &ctrl);
+	ctrl.c_lflag &= ~(ICANON | ECHO); // turn off canonical mode and echo
+	tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
 
 	do {
 		c = getchar();
@@ -140,6 +175,7 @@ int get_line(char **buf)
 	if (*buf)
 		len = strlen(*buf);
 	printf("\n");
+out:
 	return len;
 }
 
@@ -149,9 +185,11 @@ int main(int argc, char **argv)
 	bool proxy = false, counter = false;
 	int tmo1 = RECV_UNIX_TIMEOUT1;
 	int tmo2 = RECV_UNIX_TIMEOUT2;
+	struct sigaction handler;
 	int c, count, i = 0, j;
 	char stamp[128];
-	struct termios ctrl;
+
+	tcgetattr(STDIN_FILENO, &oldctrl);
 
 	while ((c = getopt_long(argc, argv, "chl:N:n:ps:t:T:", long_options, &i)) != -1) {
 		switch(c) {
@@ -224,22 +262,30 @@ int main(int argc, char **argv)
 	trail_slash(&socket_dir);
 	realloc_strcat(&socket_dir, sockname);
 
-	tcgetattr(STDIN_FILENO, &ctrl);
-	ctrl.c_lflag &= ~(ICANON | ECHO); // turn off canonical mode and echo
-	tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
+	signal(SIGPIPE, SIG_IGN);
+	handler.sa_handler = &sighandler;
+	handler.sa_flags = 0;
+	sigemptyset(&handler.sa_mask);
+	sigaction(SIGTERM, &handler, NULL);
+	sigaction(SIGINT, &handler, NULL);
+	sigaction(SIGQUIT, &handler, NULL);
+	sigaction(SIGKILL, &handler, NULL);
+	sigaction(SIGHUP, &handler, NULL);
 
 	count = 0;
 	while (42) {
 		struct input_log *log_entry;
 		int sockd, len;
+		char *buf2;
 
-		dealloc(buf);
 		len = get_line(&buf);
-		if (len < 2) {
+		if (len == -1)
+			break;
+		mkstamp(stamp, sizeof(stamp));
+		if (len < 1) {
 			LOGERR("%s No message", stamp);
 			continue;
 		}
-		mkstamp(stamp, sizeof(stamp));
 		if (buf[0] == '#') {
 			LOGDEBUG("%s Got comment: %s", stamp, buf);
 			continue;
@@ -258,15 +304,15 @@ int main(int argc, char **argv)
 			LOGERR("Failed to send unix msg: %s", buf);
 			break;
 		}
-		buf = NULL;
-		buf = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
+		buf2 = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
 		close(sockd);
-		if (!buf) {
+		if (!buf2) {
 			LOGERR("Received empty reply");
 			continue;
 		}
 		mkstamp(stamp, sizeof(stamp));
-		LOGMSGSIZ(65536, LOG_NOTICE, "%s Received response: %s", stamp, buf);
+		LOGMSGSIZ(65536, LOG_NOTICE, "%s Received response: %s", stamp, buf2);
+		dealloc(buf2);
 
 		if (counter) {
 			if ((++count % 100) == 0) {
@@ -276,7 +322,8 @@ int main(int argc, char **argv)
 		}
 	}
 
-	dealloc(buf);
 	dealloc(socket_dir);
+	sighandler(0);
+
 	return 0;
 }
