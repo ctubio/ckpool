@@ -11,6 +11,7 @@
 #include "config.h"
 
 #include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <termios.h>
@@ -94,6 +95,16 @@ static struct option long_options[] = {
 	{0, 0, 0, 0}
 };
 
+struct termios oldctrl;
+
+static void sighandler(const int __maybe_unused sig)
+{
+	/* Return console to its previous state */
+	tcsetattr(STDIN_FILENO, TCSANOW, &oldctrl);
+
+	exit(0);
+}
+
 int get_line(char **buf)
 {
 	struct input_log *entry = NULL;
@@ -108,14 +119,12 @@ int get_line(char **buf)
 
 		dealloc(*buf);
 		len = getline(buf, &n, stdin);
-		if (len < 2) {
-			if (len == -1)
-				dealloc(*buf);
-			LOGNOTICE("Failed to get a valid line");
-			return 0;
+		if (len == -1) {
+			dealloc(*buf);
+			goto out;
 		}
 		len = strlen(*buf);
-		(*buf)[len - 1] = '\0'; // Strip \n
+		(*buf)[--len] = '\0'; // Strip \n
 		goto out;
 	} while (42);
 
@@ -173,8 +182,11 @@ int main(int argc, char **argv)
 	bool proxy = false, counter = false;
 	int tmo1 = RECV_UNIX_TIMEOUT1;
 	int tmo2 = RECV_UNIX_TIMEOUT2;
+	struct sigaction handler;
 	int c, count, i = 0, j;
 	char stamp[128];
+
+	tcgetattr(STDIN_FILENO, &oldctrl);
 
 	while ((c = getopt_long(argc, argv, "chl:N:n:ps:t:T:", long_options, &i)) != -1) {
 		switch(c) {
@@ -247,6 +259,16 @@ int main(int argc, char **argv)
 	trail_slash(&socket_dir);
 	realloc_strcat(&socket_dir, sockname);
 
+	signal(SIGPIPE, SIG_IGN);
+	handler.sa_handler = &sighandler;
+	handler.sa_flags = 0;
+	sigemptyset(&handler.sa_mask);
+	sigaction(SIGTERM, &handler, NULL);
+	sigaction(SIGINT, &handler, NULL);
+	sigaction(SIGQUIT, &handler, NULL);
+	sigaction(SIGKILL, &handler, NULL);
+	sigaction(SIGHUP, &handler, NULL);
+
 	count = 0;
 	while (42) {
 		struct input_log *log_entry;
@@ -254,13 +276,13 @@ int main(int argc, char **argv)
 		char *buf2;
 
 		len = get_line(&buf);
-		if (!buf)
+		if (len == -1)
 			break;
+		mkstamp(stamp, sizeof(stamp));
 		if (len < 1) {
 			LOGERR("%s No message", stamp);
 			continue;
 		}
-		mkstamp(stamp, sizeof(stamp));
 		if (buf[0] == '#') {
 			LOGDEBUG("%s Got comment: %s", stamp, buf);
 			continue;
@@ -298,6 +320,7 @@ int main(int argc, char **argv)
 	}
 
 	dealloc(socket_dir);
+	sighandler(0);
 
 	return 0;
 }
