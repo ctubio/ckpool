@@ -98,7 +98,30 @@ int get_line(char **buf)
 {
 	struct input_log *entry = NULL;
 	int c, len = 0, ctl1, ctl2;
+	struct termios ctrl;
 	*buf = NULL;
+
+	/* If we're not reading from a terminal, parse lines at a time allowing
+	 * us to script usage of ckpmsg */
+	if (!isatty(fileno((FILE *)stdin))) do {
+		size_t n;
+
+		dealloc(*buf);
+		len = getline(buf, &n, stdin);
+		if (len < 2) {
+			if (len == -1)
+				dealloc(*buf);
+			LOGNOTICE("Failed to get a valid line");
+			return 0;
+		}
+		len = strlen(*buf);
+		(*buf)[len - 1] = '\0'; // Strip \n
+		goto out;
+	} while (42);
+
+	tcgetattr(STDIN_FILENO, &ctrl);
+	ctrl.c_lflag &= ~(ICANON | ECHO); // turn off canonical mode and echo
+	tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
 
 	do {
 		c = getchar();
@@ -140,6 +163,7 @@ int get_line(char **buf)
 	if (*buf)
 		len = strlen(*buf);
 	printf("\n");
+out:
 	return len;
 }
 
@@ -151,7 +175,6 @@ int main(int argc, char **argv)
 	int tmo2 = RECV_UNIX_TIMEOUT2;
 	int c, count, i = 0, j;
 	char stamp[128];
-	struct termios ctrl;
 
 	while ((c = getopt_long(argc, argv, "chl:N:n:ps:t:T:", long_options, &i)) != -1) {
 		switch(c) {
@@ -224,18 +247,16 @@ int main(int argc, char **argv)
 	trail_slash(&socket_dir);
 	realloc_strcat(&socket_dir, sockname);
 
-	tcgetattr(STDIN_FILENO, &ctrl);
-	ctrl.c_lflag &= ~(ICANON | ECHO); // turn off canonical mode and echo
-	tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
-
 	count = 0;
 	while (42) {
 		struct input_log *log_entry;
 		int sockd, len;
+		char *buf2;
 
-		dealloc(buf);
 		len = get_line(&buf);
-		if (len < 2) {
+		if (!buf)
+			break;
+		if (len < 1) {
 			LOGERR("%s No message", stamp);
 			continue;
 		}
@@ -258,15 +279,15 @@ int main(int argc, char **argv)
 			LOGERR("Failed to send unix msg: %s", buf);
 			break;
 		}
-		buf = NULL;
-		buf = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
+		buf2 = recv_unix_msg_tmo2(sockd, tmo1, tmo2);
 		close(sockd);
-		if (!buf) {
+		if (!buf2) {
 			LOGERR("Received empty reply");
 			continue;
 		}
 		mkstamp(stamp, sizeof(stamp));
-		LOGMSGSIZ(65536, LOG_NOTICE, "%s Received response: %s", stamp, buf);
+		LOGMSGSIZ(65536, LOG_NOTICE, "%s Received response: %s", stamp, buf2);
+		dealloc(buf2);
 
 		if (counter) {
 			if ((++count % 100) == 0) {
@@ -276,7 +297,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	dealloc(buf);
 	dealloc(socket_dir);
+
 	return 0;
 }
