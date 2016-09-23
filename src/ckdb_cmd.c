@@ -8463,6 +8463,22 @@ static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_WUNLOCK(breakqueue_free);
 		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
 		return strdup(reply);
+	} else if (strcasecmp(name, "cl") == 0 ||
+		   strcasecmp(name, "cmd_listener") == 0) {
+		K_WLOCK(workqueue_free);
+		// Just overwrite whatever's there
+		cmd_listener_threads_delta = delta_value;
+		K_WUNLOCK(workqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "bl") == 0 ||
+		   strcasecmp(name, "btc_listener") == 0) {
+		K_WLOCK(workqueue_free);
+		// Just overwrite whatever's there
+		btc_listener_threads_delta = delta_value;
+		K_WUNLOCK(workqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
 	} else {
 		snprintf(reply, siz, "unknown name '%s'", name);
 		LOGERR("%s() %s.%s", __func__, id, reply);
