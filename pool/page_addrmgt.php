@@ -162,7 +162,7 @@ function doaddrmgt($data, $user)
 				$nam = '';
 			$ratio = getparam('ratio:'.$i, false);
 			if (!nuem($addr) && !nuem($ratio))
-				$addrarr[] = array('addr' => $addr, 'payname' => $nam, 'ratio' => $ratio);
+				$addrarr[] = array('addr' => trim($addr), 'payname' => trim($nam), 'ratio' => $ratio);
 		}
 		$ans = userSettings($user, null, $addrarr, $pass, $twofa);
 		if ($ans['STATUS'] != 'ok')

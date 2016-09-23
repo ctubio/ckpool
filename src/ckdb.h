@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.503"
+#define CKDB_VERSION DB_VERSION"-2.508"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -639,7 +639,7 @@ extern char *id_default;
 	} while (0)
 
 // NULL or poolinstance must match
-extern const char *poolinstance;
+extern const char *sys_poolinstance;
 // lock for accessing all mismatch variables
 extern cklock_t poolinstance_lock;
 extern time_t last_mismatch_message;
@@ -1335,6 +1335,7 @@ extern K_LIST *intransient_free;
 extern K_STORE *intransient_store;
 
 extern char *intransient_fields[];
+extern INTRANSIENT *in_empty;
 
 // MSGLINE
 typedef struct msgline {
@@ -1348,6 +1349,7 @@ typedef struct msgline {
 	char id[ID_SIZ+1];
 	char cmd[CMD_SIZ+1];
 	char *msg;
+	size_t msgsiz;
 	bool hasseq;
 	char *seqcmdnam;
 	uint64_t n_seqall;
@@ -1355,7 +1357,7 @@ typedef struct msgline {
 	uint64_t n_seqstt;
 	uint64_t n_seqpid;
 	int seqentryflags;
-	char *code;
+	INTRANSIENT *in_code;
 	K_TREE *trf_root;
 	K_STORE *trf_store;
 	int sockd;
@@ -1374,6 +1376,7 @@ extern K_STORE *msgline_store;
 // BREAKQUEUE
 typedef struct breakqueue {
 	char *buf;
+	size_t bufsiz;
 	char *source;
 	int access;
 	tv_t accepted; // socket accepted or line read
@@ -1548,6 +1551,7 @@ typedef struct transfer {
 	char name[NAME_SIZE+1];
 	char svalue[VALUE_SIZE+1];
 	char *mvalue;
+	size_t msiz;
 	INTRANSIENT *intransient;
 } TRANSFER;
 
@@ -1564,7 +1568,6 @@ extern K_LIST *transfer_free;
 
 extern const char Transfer[];
 
-extern K_ITEM auth_poolinstance;
 extern K_ITEM auth_preauth;
 extern K_ITEM poolstats_elapsed;
 extern K_ITEM userstats_elapsed;
@@ -1680,9 +1683,6 @@ enum seq_num {
 	SEQ_MAX
 };
 
-// Ensure size is a (multiple of 8)-1
-#define SEQ_CODE 15
-
 #define SECHR(_sif) (((_sif) == SE_EARLYSOCK) ? 'E' : \
 			(((_sif) == SE_RELOAD) ? 'R' : \
 			(((_sif) == SE_SOCKET) ? 'S' : '?')))
@@ -1698,7 +1698,7 @@ typedef struct seqentry {
 	int flags;
 	tv_t cd; // sec:0=missing, usec:0=miss !0=trans
 	tv_t time;
-	char code[SEQ_CODE+1];
+	char *in_code;
 } SEQENTRY;
 
 typedef struct seqdata {
@@ -2683,7 +2683,7 @@ extern int o_limits_max_lifetime;
 // AUTHS authorise.id.json={...}
 typedef struct auths {
 	int64_t authid;
-	char poolinstance[TXT_BIG+1];
+	char *in_poolinstance;
 	int64_t userid;
 	char *in_workername;
 	int32_t clientid;
@@ -2708,7 +2708,7 @@ extern K_STORE *auths_store;
 #define STATS_PER (9.5*60.0)
 
 typedef struct poolstats {
-	char poolinstance[TXT_BIG+1];
+	char *in_poolinstance;
 	int64_t elapsed;
 	int32_t users;
 	int32_t workers;
@@ -2739,7 +2739,7 @@ extern K_STORE *poolstats_store;
  * Most of the #defines for USERSTATS are no longer needed
  *  but are left here for now for historical reference */
 typedef struct userstats {
-	char poolinstance[TXT_BIG+1];
+	char *in_poolinstance;
 	int64_t userid;
 	char *in_workername;
 	int64_t elapsed;
@@ -3017,7 +3017,7 @@ extern K_STORE *keysummary_store;
 // WORKMARKERS
 typedef struct workmarkers {
 	int64_t markerid;
-	char *poolinstance;
+	char *in_poolinstance;
 	int64_t workinfoidend;
 	int64_t workinfoidstart;
 	char *description;
@@ -3048,7 +3048,7 @@ extern K_STORE *workmarkers_store;
 
 // MARKS
 typedef struct marks {
-	char *poolinstance;
+	char *in_poolinstance;
 	int64_t workinfoid;
 	char *description;
 	char *extra;
@@ -3218,6 +3218,7 @@ extern void sequence_report(bool lock);
 // Data free functions (first)
 #define FREE_ITEM(item) do { } while(0)
 // TODO: make a macro for all other to use above macro
+extern void free_transfer_data(TRANSFER *transfer);
 extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
 extern void free_users_data(K_ITEM *item);
 extern void free_workinfo_data(K_ITEM *item);
@@ -3319,8 +3320,8 @@ extern cmp_t cmp_intransient(K_ITEM *a, K_ITEM *b);
 	_get_intransient(_fld, _val, 0, WHERE_FFL_HERE)
 #define get_intransient_siz(_fld, _val, _siz) \
 	_get_intransient(_fld, _val , _siz, WHERE_FFL_HERE)
-extern INTRANSIENT *_get_intransient(char *fldnam, char *value, size_t siz,
-					WHERE_FFL_ARGS);
+extern INTRANSIENT *_get_intransient(const char *fldnam, char *value,
+					size_t siz, WHERE_FFL_ARGS);
 #define intransient_str(_fld, _val) \
 	_intransient_str(_fld, _val, WHERE_FFL_HERE)
 extern char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS);
@@ -3444,9 +3445,9 @@ extern K_ITEM *_find_workinfo(int64_t workinfoid, bool gotlock, K_TREE_CTX *ctx)
 extern K_ITEM *next_workinfo(int64_t workinfoid, K_TREE_CTX *ctx);
 extern K_ITEM *find_workinfo_esm(int64_t workinfoid, bool error, bool *created,
 				 tv_t *createdate);
-extern bool workinfo_age(int64_t workinfoid, char *poolinstance, tv_t *cd,
-			 tv_t *ss_first, tv_t *ss_last, int64_t *ss_count,
-			 int64_t *s_count, int64_t *s_diff);
+extern bool workinfo_age(int64_t workinfoid, INTRANSIENT *in_poolinstance,
+			 tv_t *cd, tv_t *ss_first, tv_t *ss_last,
+			 int64_t *ss_count, int64_t *s_count, int64_t *s_diff);
 extern double coinbase_reward(int32_t height);
 extern double workinfo_pps(K_ITEM *w_item, int64_t workinfoid);
 extern cmp_t cmp_shares(K_ITEM *a, K_ITEM *b);
@@ -3467,7 +3468,8 @@ extern void zero_sharesummary(SHARESUMMARY *row);
 extern K_ITEM *_find_sharesummary(int64_t userid, char *workername,
 				  int64_t workinfoid, bool pool);
 extern K_ITEM *find_last_sharesummary(int64_t userid, char *workername);
-extern void auto_age_older(int64_t workinfoid, char *poolinstance, tv_t *cd);
+extern void auto_age_older(int64_t workinfoid, INTRANSIENT *in_poolinstance,
+			   tv_t *cd);
 #define dbhash2btchash(_hash, _buf, _siz) \
 	_dbhash2btchash(_hash, _buf, _siz, WHERE_FFL_HERE)
 void _dbhash2btchash(char *hash, char *buf, size_t siz, WHERE_FFL_ARGS);
@@ -3755,13 +3757,14 @@ extern int _events_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root)
 #define events_add(_id, _trf_root) _events_add(_id, NULL, NULL, NULL, _trf_root)
 extern int _ovents_add(int id, char *by, char *inet, tv_t *cd, K_TREE *trf_root);
 #define ovents_add(_id, _trf_root) _ovents_add(_id, NULL, NULL, NULL, _trf_root)
-extern bool auths_add(PGconn *conn, char *poolinstance, INTRANSIENT *in_username,
-			INTRANSIENT *in_workername, char *clientid,
-			char *enonce1, char *useragent, char *preauth, char *by,
-			char *code, char *inet, tv_t *cd, K_TREE *trf_root,
-			bool addressuser, USERS **users, WORKERS **workers,
-			int *event, bool reload_data);
-extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
+extern bool auths_add(PGconn *conn, INTRANSIENT *in_poolinstance,
+			INTRANSIENT *in_username, INTRANSIENT *in_workername,
+			char *clientid, char *enonce1, char *useragent,
+			char *preauth, char *by, char *code, char *inet,
+			tv_t *cd, K_TREE *trf_root, bool addressuser,
+			USERS **users, WORKERS **workers, int *event,
+			bool reload_data);
+extern bool poolstats_add(PGconn *conn, bool store, INTRANSIENT *in_poolinstance,
 				char *elapsed, char *users, char *workers,
 				char *hashrate, char *hashrate5m,
 				char *hashrate1hr, char *hashrate24hr,
@@ -3769,12 +3772,12 @@ extern bool poolstats_add(PGconn *conn, bool store, char *poolinstance,
 				bool igndup, K_TREE *trf_root);
 extern bool poolstats_fill(PGconn *conn);
 extern bool userstats_add_db(PGconn *conn, USERSTATS *row);
-extern bool userstats_add(char *poolinstance, char *elapsed, char *username,
+extern bool userstats_add(INTRANSIENT *in_poolinstance, char *elapsed, char *username,
 			  INTRANSIENT *in_workername, char *hashrate,
 			  char *hashrate5m, char *hashrate1hr,
 			  char *hashrate24hr, bool idle, bool eos, char *by,
 			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
-extern bool workerstats_add(char *poolinstance, char *elapsed, char *username,
+extern bool workerstats_add(INTRANSIENT *in_poolinstance, char *elapsed, char *username,
 			    INTRANSIENT *in_workername, char *hashrate,
 			    char *hashrate5m, char *hashrate1hr,
 			    char *hashrate24hr, bool idle, char *instances,

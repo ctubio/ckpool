@@ -209,24 +209,22 @@ const char Transfer[] = "Transfer";
 
 // older version missing field defaults
 // see end of alloc_storage()
-static TRANSFER auth_1 = { "poolinstance", "", NULL, NULL };
-K_ITEM auth_poolinstance = { Transfer, NULL, NULL, (void *)(&auth_1) };
-static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue, NULL };
+static TRANSFER auth_2 = { "preauth", FALSE_STR, auth_2.svalue, 0, NULL };
 K_ITEM auth_preauth = { Transfer, NULL, NULL, (void *)(&auth_2) };
-static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue, NULL };
+static TRANSFER poolstats_1 = { "elapsed", "0", poolstats_1.svalue, 0, NULL };
 K_ITEM poolstats_elapsed = { Transfer, NULL, NULL, (void *)(&poolstats_1) };
-static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.svalue, NULL };
+static TRANSFER userstats_1 = { "elapsed", "0", userstats_1.svalue, 0, NULL };
 K_ITEM userstats_elapsed = { Transfer, NULL, NULL, (void *)(&userstats_1) };
 // see end of alloc_storage()
 INTRANSIENT *userstats_workername = NULL;
-static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.svalue, NULL };
+static TRANSFER userstats_3 = { "idle", FALSE_STR, userstats_3.svalue, 0, NULL };
 K_ITEM userstats_idle = { Transfer, NULL, NULL, (void *)(&userstats_3) };
-static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.svalue, NULL };
+static TRANSFER userstats_4 = { "eos", TRUE_STR, userstats_4.svalue, 0, NULL };
 K_ITEM userstats_eos = { Transfer, NULL, NULL, (void *)(&userstats_4) };
 
-static TRANSFER shares_1 = { "secondaryuserid", TRUE_STR, shares_1.svalue, NULL };
+static TRANSFER shares_1 = { "secondaryuserid", TRUE_STR, shares_1.svalue, 0, NULL };
 K_ITEM shares_secondaryuserid = { Transfer, NULL, NULL, (void *)(&shares_1) };
-static TRANSFER shareerrors_1 = { "secondaryuserid", TRUE_STR, shareerrors_1.svalue, NULL };
+static TRANSFER shareerrors_1 = { "secondaryuserid", TRUE_STR, shareerrors_1.svalue, 0, NULL };
 K_ITEM shareerrors_secondaryuserid = { Transfer, NULL, NULL, (void *)(&shareerrors_1) };
 // Time limit that this problem occurred
 // 24-Aug-2014 05:20+00 (1st one shortly after this)
@@ -409,7 +407,7 @@ char *inet_default = "127.0.0.1";
 char *id_default = "42";
 
 // NULL or poolinstance must match
-const char *poolinstance = NULL;
+const char *sys_poolinstance = NULL;
 // lock for accessing all mismatch variables
 cklock_t poolinstance_lock;
 time_t last_mismatch_message;
@@ -484,6 +482,8 @@ char *intransient_fields[] = {
 	"commitblockhash",
 	NULL
 };
+
+INTRANSIENT *in_empty;
 
 // MSGLINE
 K_LIST *msgline_free;
@@ -2282,9 +2282,8 @@ static void alloc_storage()
 		check_deadlocks = true;
 #endif
 
-	// set intransient
-	auth_1.intransient = get_intransient(auth_1.name, "");
-	auth_1.mvalue = auth_1.intransient->str;
+	// setup intransients
+	in_empty = get_intransient("empty", EMPTY);
 	userstats_workername = get_intransient("workername", "all");
 }
 
@@ -3152,7 +3151,7 @@ static void msgs_seq(SEQFOUND *found_msgs)
  *  sequence code */
 static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 			uint64_t n_seqstt, uint64_t n_seqpid,
-			char *nam, tv_t *now, tv_t *cd, char *code,
+			char *nam, tv_t *now, tv_t *cd, INTRANSIENT *in_code,
 			int seqentryflags, char *msg)
 {
 	static SEQFOUND found[SEQ_MAX];
@@ -3178,7 +3177,7 @@ static bool update_seq(enum seq_num seq, uint64_t n_seqcmd,
 
 	LOGDEBUG("%s() SQ %c:%d/%s/%"PRIu64"/%"PRIu64"/%"PRIu64"/%s '%.80s...",
 		 __func__, SECHR(seqentryflags), seq, nam, n_seqcmd, n_seqstt,
-		 n_seqpid, code, st = safe_text(msg));
+		 n_seqpid, in_code->str, st = safe_text(msg));
 	FREENULL(st);
 
 	firstseq = newseq = expseq = gothigh = okhi = gotstale =
@@ -3579,7 +3578,7 @@ setitemdata:
 		seqentry->flags = seqentryflags;
 		copy_tv(&(seqentry->time), now);
 		copy_tv(&(seqentry->cd), cd);
-		STRNCPY(seqentry->code, code);
+		seqentry->in_code = in_code->str;
 		seqdata->ok++;
 		seqset->ok++;
 	}
@@ -3643,7 +3642,7 @@ setitemdata:
 				(level == LOG_DEBUG) ? "*" : EMPTY,
 				SECHR(seqentryflags), SECHR(seqentry_copy.flags),
 				nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
-				t_buf2, code,
+				t_buf2, in_code->str,
 				seqset_copy.seqdata[seq].minseq,
 				seqset_copy.seqdata[seq].maxseq,
 				seqset_copy.seqdata[seq].missing,
@@ -3742,7 +3741,7 @@ setitemdata:
 		LOGWARNING("SEQ recovered %s %"PRIu64" set:%d/%"PRIu64
 			   "=%s/%"PRIu64" %s/%s",
 			   nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
-			   t_buf2, code);
+			   t_buf2, in_code->str);
 	}
 
 	if (gotstale || gotstalestart || gothigh) {
@@ -3755,7 +3754,7 @@ setitemdata:
 			   gothigh ? (okhi ? "OKHI" : "HIGH") : "stale",
 			   gotstalestart ? "STARTUP " : EMPTY,
 			   nam, n_seqcmd, set, n_seqstt, t_buf, n_seqpid,
-			   t_buf2, code,
+			   t_buf2, in_code->str,
 			   seqset_copy.seqdata[seq].minseq,
 			   seqset_copy.seqdata[seq].maxseq,
 			   seqset_copy.seqdata[seq].missing,
@@ -3827,7 +3826,7 @@ setitemdata:
 				   seqnam[seq], range_buf, set,
 				   n_seqstt, t_buf, n_seqpid,
 				   isrange ? "last: " : EMPTY,
-				   t_buf2, seqtrans->entry.code);
+				   t_buf2, seqtrans->entry.in_code);
 		}
 		K_WLOCK(seqtrans_free);
 		k_list_transfer_to_head(lost, seqtrans_free);
@@ -3874,13 +3873,13 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 		dupall = update_seq(SEQ_ALL, msgline->n_seqall,
 				    msgline->n_seqstt, msgline->n_seqpid,
 				    SEQALL, &(msgline->now), &(msgline->cd),
-				    msgline->code, msgline->seqentryflags,
+				    msgline->in_code, msgline->seqentryflags,
 				    msgline->msg);
 	}
 	dupcmd = update_seq(ckdb_cmds[msgline->which_cmds].seq,
 			    msgline->n_seqcmd, msgline->n_seqstt,
 			    msgline->n_seqpid, msgline->seqcmdnam,
-			    &(msgline->now), &(msgline->cd), msgline->code,
+			    &(msgline->now), &(msgline->cd), msgline->in_code,
 			    msgline->seqentryflags, msgline->msg);
 
 	if (ignore_seqall)
@@ -3914,9 +3913,11 @@ static enum cmd_values process_seq(MSGLINE *msgline)
 
 static void setup_seq(K_ITEM *seqall, MSGLINE *msgline)
 {
-	K_ITEM *seqstt, *seqpid, *seqcmd, *i_code;
+	K_ITEM *seqstt, *seqpid, *seqcmd;
 	char *err = NULL, *st = NULL;
 	size_t len, off;
+	char reply[16] = "";
+	size_t siz = sizeof(reply);
 
 	msgline->n_seqall = atol(transfer_data(seqall));
 	if ((seqstt = find_transfer(msgline->trf_root, SEQSTT)))
@@ -3985,16 +3986,13 @@ static void setup_seq(K_ITEM *seqall, MSGLINE *msgline)
 
 	msgline->hasseq = true;
 
-	if ((i_code = find_transfer(msgline->trf_root, CODETRF))) {
-		msgline->code = transfer_data(i_code);
-		if (!(*(msgline->code)))
-			msgline->code = NULL;
-	}
-	if (!(msgline->code)) {
-		if ((i_code = find_transfer(msgline->trf_root, BYTRF)))
-			msgline->code = transfer_data(i_code);
-		else
-			msgline->code = EMPTY;
+	msgline->in_code = optional_in(msgline->trf_root, CODETRF, 1, NULL,
+					reply, siz);
+	if (!(msgline->in_code)) {
+		msgline->in_code = optional_in(msgline->trf_root, BYTRF,
+						0, NULL, reply, siz);
+		if (!msgline->in_code)
+			msgline->in_code = in_empty;
 	}
 }
 
@@ -4009,11 +4007,14 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	char *cmdptr, *idptr, *next, *eq, *end, *was;
 	char *data = NULL, *st = NULL, *st2 = NULL, *ip = NULL;
 	bool noid = false, intrans;
+	uint64_t ram2 = 0;
 	size_t siz;
 	int i;
 
+	siz = strlen(buf)+1;
 	K_WLOCK(msgline_free);
 	*ml_item = k_unlink_head_zero(msgline_free);
+	msgline_free->ram += siz;
 	K_WUNLOCK(msgline_free);
 	DATA_MSGLINE(msgline, *ml_item);
 	msgline->which_cmds = CMD_UNSET;
@@ -4023,6 +4024,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	DATE_ZERO(&(msgline->broken));
 	DATE_ZERO(&(msgline->processed));
 	msgline->msg = strdup(buf);
+	msgline->msgsiz = siz;
 	msgline->seqentryflags = seqentryflags;
 
 	cmdptr = strdup(buf);
@@ -4058,7 +4060,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 	 *  you can ignore the access failed items by skipping items
 	 *  that start with a capital, since all (currently) are lower case
 	 *  however, command checks are case insensitive, so replaying
-	 *   the file will allow these commands, if they are present */
+	 *   the file will try these commands, if they are present */
 	if ((ckdb_cmds[msgline->which_cmds].access & access) == 0)
 		buf[0] = toupper(buf[0]);
 
@@ -4135,7 +4137,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 			// LOGERR of buf could be truncated
 			*(end++) = '\0';
 			K_WLOCK(transfer_free);
-			t_item = k_unlink_head(transfer_free);
+			t_item = k_unlink_head_zero(transfer_free);
 			K_WUNLOCK(transfer_free);
 			DATA_TRANSFER(transfer, t_item);
 			STRNCPY(transfer->name, next);
@@ -4248,6 +4250,8 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 			if (!intrans) {
 				transfer->intransient = NULL;
 				if (siz >= sizeof(transfer->svalue)) {
+					transfer->msiz = siz+1;
+					ram2 += siz+1;
 					transfer->mvalue = malloc(siz+1);
 					STRNCPYSIZ(transfer->mvalue, next,
 						   siz+1);
@@ -4293,7 +4297,7 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				*(eq++) = '\0';
 
 			K_WLOCK(transfer_free);
-			t_item = k_unlink_head(transfer_free);
+			t_item = k_unlink_head_zero(transfer_free);
 			K_WUNLOCK(transfer_free);
 			DATA_TRANSFER(transfer, t_item);
 			STRNCPY(transfer->name, data);
@@ -4313,6 +4317,8 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 			if (!intrans) {
 				transfer->intransient = NULL;
 				if (siz > sizeof(transfer->svalue)) {
+					ram2 += siz;
+					transfer->msiz = siz;
 					transfer->mvalue = malloc(siz);
 					STRNCPYSIZ(transfer->mvalue, eq, siz);
 				} else {
@@ -4323,8 +4329,9 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 
 			// Discard duplicates
 			if (find_in_ktree_nolock(msgline->trf_root, t_item, ctx)) {
-				if (transfer->mvalue != transfer->svalue)
-					FREENULL(transfer->mvalue);
+				if (transfer->msiz)
+					ram2 -= transfer->msiz;
+				free_transfer_data(transfer);
 				K_WLOCK(transfer_free);
 				k_add_head(transfer_free, t_item);
 				K_WUNLOCK(transfer_free);
@@ -4334,7 +4341,15 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 				add_to_ktree_nolock(msgline->trf_root, t_item);
 				k_add_head_nolock(msgline->trf_store, t_item);
 			}
+			t_item = NULL;
 		}
+	}
+
+	if (ram2) {
+		K_WLOCK(transfer_free);
+		transfer_free->ram += ram2;
+		K_WUNLOCK(transfer_free);
+		ram2 = 0;
 	}
 
 	seqall = find_transfer(msgline->trf_root, SEQALL);
@@ -4396,9 +4411,17 @@ static enum cmd_values breakdown(K_ITEM **ml_item, char *buf, tv_t *now,
 
 	return ckdb_cmds[msgline->which_cmds].cmd_val;
 nogood:
-	if (t_item) {
+	if (t_item || ram2) {
 		K_WLOCK(transfer_free);
-		k_add_head(transfer_free, t_item);
+		if (t_item) {
+			DATA_TRANSFER(transfer, t_item);
+			if (transfer->msiz)
+				ram2 -= transfer->msiz;
+			free_transfer_data(transfer);
+			k_add_head(transfer_free, t_item);
+		}
+		if (ram2)
+			transfer_free->ram += ram2;
 		K_WUNLOCK(transfer_free);
 	}
 	free(cmdptr);
@@ -4981,7 +5004,7 @@ static void summarise_blocks()
 				 "/%"PRId64"/%s/%s crosses block "
 				 "%"PRId32"/%"PRId64" boundary",
 				 __func__, workmarkers->markerid,
-				 workmarkers->poolinstance,
+				 workmarkers->in_poolinstance,
 				 workmarkers->workinfoidstart,
 				 workmarkers->workinfoidend,
 				 workmarkers->description,
@@ -6014,6 +6037,7 @@ static void process_sockd(PGconn *conn, K_ITEM *wq_item, enum reply_type reply_t
 
 	free_msgline_data(ml_item, true, true);
 	K_WLOCK(msgline_free);
+	msgline_free->ram -= msgline->msgsiz;
 	k_add_head(msgline_free, ml_item);
 	K_WUNLOCK(msgline_free);
 
@@ -6587,8 +6611,11 @@ static void *process_socket(__maybe_unused void *arg)
 						WORKQUEUE *wq;
 						DATA_WORKQUEUE(wq, wq2_item);
 						K_ITEM *ml_item = wq->msgline_item;
+						MSGLINE *ml;
+						DATA_MSGLINE(ml, ml_item);
 						free_msgline_data(ml_item, true, false);
 						K_WLOCK(msgline_free);
+						msgline_free->ram -= ml->msgsiz;
 						k_add_head(msgline_free, ml_item);
 						K_WUNLOCK(msgline_free);
 						K_WLOCK(workqueue_free);
@@ -6627,8 +6654,11 @@ skippy:
 			dec_sockd = false;
 
 		if (bq->ml_item) {
+			MSGLINE *ml;
+			DATA_MSGLINE(ml, bq->ml_item);
 			free_msgline_data(bq->ml_item, true, true);
 			K_WLOCK(msgline_free);
+			msgline_free->ram -= ml->msgsiz;
 			k_add_head(msgline_free, bq->ml_item);
 			K_WUNLOCK(msgline_free);
 			bq->ml_item = NULL;
@@ -6639,6 +6669,7 @@ skippy:
 		if (dec_sockd)
 			sockd_count--;
 		cmd_processing--;
+		breakqueue_free->ram -= bq->bufsiz;
 		k_add_head(breakqueue_free, bq_item);
 		K_WUNLOCK(breakqueue_free);
 	}
@@ -6772,6 +6803,7 @@ static void *sockrun(void *arg)
 			K_WUNLOCK(breakqueue_free);
 			DATA_BREAKQUEUE(bq, bq_item);
 			bq->buf = buf;
+			bq->bufsiz = strlen(buf)+1;
 			bq->source = (char *)(this->gdata);
 			bq->access = *(int *)(this->cdata);
 			copy_tv(&(bq->accepted), &nowacc);
@@ -6782,6 +6814,7 @@ static void *sockrun(void *arg)
 			if (max_sockd_count < ++sockd_count)
 				max_sockd_count = sockd_count;
 			k_add_tail(cmd_breakqueue_store, bq_item);
+			breakqueue_free->ram += bq->bufsiz;
 			K_WUNLOCK(breakqueue_free);
 			setnow(&now2);
 			sock_lock_br_us[thissock] += us_tvdiff(&now2, &now1);
@@ -6976,8 +7009,10 @@ static void process_reload_item(PGconn *conn, K_ITEM *bq_item)
 	}
 
 	if (bq->ml_item) {
+		DATA_MSGLINE(msgline, bq->ml_item);
 		free_msgline_data(bq->ml_item, true, true);
 		K_WLOCK(msgline_free);
+		msgline_free->ram -= msgline->msgsiz;
 		k_add_head(msgline_free, bq->ml_item);
 		K_WUNLOCK(msgline_free);
 		bq->ml_item = NULL;
@@ -6993,6 +7028,7 @@ static void *process_reload(__maybe_unused void *arg)
 
 	PGconn *conn = NULL;
 	K_ITEM *bq_item = NULL;
+	BREAKQUEUE *bq;
 	char buf[128];
 	time_t now;
 	ts_t when, when_add;
@@ -7137,8 +7173,10 @@ static void *process_reload(__maybe_unused void *arg)
 
 		process_reload_item(conn, bq_item);
 
+		DATA_BREAKQUEUE(bq, bq_item);
 		K_WLOCK(breakqueue_free);
 		reload_processing--;
+		breakqueue_free->ram -= bq->bufsiz;
 		k_add_head(breakqueue_free, bq_item);
 		K_WUNLOCK(breakqueue_free);
 
@@ -7214,6 +7252,7 @@ static void reload_line(char *filename, char *buf, uint64_t count)
 		// release the lock since strdup could be slow, but rarely
 		DATA_BREAKQUEUE(bq, bq_item);
 		bq->buf = strdup(buf);
+		bq->bufsiz = strlen(buf)+1;
 		// reloads are normally all pool data but access can be changed
 		bq->source = (char *)ispool;
 		bq->access = reload_access;
@@ -7227,6 +7266,7 @@ static void reload_line(char *filename, char *buf, uint64_t count)
 		K_WLOCK(breakqueue_free);
 		k_add_tail(reload_breakqueue_store, bq_item);
 		qcount = reload_breakqueue_store->count;
+		breakqueue_free->ram += bq->bufsiz;
 		K_WUNLOCK(breakqueue_free);
 
 		mutex_lock(&bq_reload_waitlock);
@@ -7611,6 +7651,7 @@ static void process_queued(PGconn *conn, K_ITEM *wq_item)
 
 	free_msgline_data(ml_item, true, true);
 	K_WLOCK(msgline_free);
+	msgline_free->ram -= msgline->msgsiz;
 	k_add_head(msgline_free, ml_item);
 	K_WUNLOCK(msgline_free);
 
@@ -8062,7 +8103,7 @@ static bool make_keysummaries()
 
 	LOGDEBUG("%s() processing workmarkers %"PRId64"/%s/End %"PRId64"/"
 		 "Stt %"PRId64"/%s/%s",
-		 __func__, workmarkers->markerid, workmarkers->poolinstance,
+		 __func__, workmarkers->markerid, workmarkers->in_poolinstance,
 		 workmarkers->workinfoidend, workmarkers->workinfoidstart,
 		 workmarkers->description, workmarkers->status);
 
@@ -9133,7 +9174,7 @@ int main(int argc, char **argv)
 			 *  to have poolinstance set to the given -i value
 			 *  since they will be blank */
 			case 'i':
-				poolinstance = (const char *)strdup(optarg);
+				sys_poolinstance = (const char *)strdup(optarg);
 				break;
 			case 'I':
 				ignore_seq = true;
