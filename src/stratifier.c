@@ -2239,7 +2239,8 @@ static void set_proxy_prio(sdata_t *sdata, proxy_t *proxy, const int priority)
 	__set_proxy_prio(sdata, proxy, priority);
 	mutex_unlock(&sdata->proxy_lock);
 
-	check_userproxies(sdata, proxy, proxy->userid);
+	if (!proxy->global)
+		check_userproxies(sdata, proxy, proxy->userid);
 }
 
 /* Set proxy to the current proxy and calculate how much headroom it has */
@@ -2300,7 +2301,7 @@ static void generator_recruit(const ckpool_t *ckp, const int proxyid, const int 
 /* Find how much headroom we have and connect up to that many clients that are
  * not currently on this pool, recruiting more slots to switch more clients
  * later on lazily. Only reconnect clients bound to global proxies. */
-static void reconnect_clients(sdata_t *sdata)
+static void reconnect_global_clients(sdata_t *sdata)
 {
 	stratum_instance_t *client, *tmpclient;
 	int reconnects = 0;
@@ -2382,6 +2383,32 @@ static void check_bestproxy(sdata_t *sdata)
 		LOGNOTICE("Stratifier setting active proxy to %d", changed_id);
 }
 
+static proxy_t *best_proxy(sdata_t *sdata)
+{
+	proxy_t *proxy;
+
+	mutex_lock(&sdata->proxy_lock);
+	proxy = sdata->proxy;
+	mutex_unlock(&sdata->proxy_lock);
+
+	return proxy;
+}
+
+static void check_globalproxies(sdata_t *sdata, proxy_t *proxy)
+{
+	check_bestproxy(sdata);
+	if (proxy->parent == best_proxy(sdata)->parent)
+		reconnect_global_clients(sdata);
+}
+
+static void check_proxy(sdata_t *sdata, proxy_t *proxy)
+{
+	if (proxy->global)
+		check_globalproxies(sdata, proxy);
+	else
+		check_userproxies(sdata, proxy, proxy->userid);
+}
+
 static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bool replaced, const bool deleted)
 {
 	stratum_instance_t *client, *tmp;
@@ -2393,6 +2420,7 @@ static void dead_proxyid(sdata_t *sdata, const int id, const int subid, const bo
 	if (proxy) {
 		proxy->dead = true;
 		proxy->deleted = deleted;
+		set_proxy_prio(sdata, proxy, 0xFFFF);
 		if (!replaced && proxy->global)
 			check_bestproxy(sdata);
 	}
@@ -2526,6 +2554,8 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Only able to set nonce2len %d of requested %d on proxy %d:%d",
 			   proxy->enonce2varlen, ckp->nonce2length, id, subid);
 	json_decref(val);
+
+	check_proxy(sdata, proxy);
 }
 
 /* Find the highest priority alive proxy belonging to userid and recruit extra
@@ -2586,17 +2616,6 @@ static void check_userproxies(sdata_t *sdata, proxy_t *proxy, const int userid)
 	}
 	if (headroom < 0)
 		recruit_best_userproxy(sdata, userid, -headroom);
-}
-
-static proxy_t *best_proxy(sdata_t *sdata)
-{
-	proxy_t *proxy;
-
-	mutex_lock(&sdata->proxy_lock);
-	proxy = sdata->proxy;
-	mutex_unlock(&sdata->proxy_lock);
-
-	return proxy;
 }
 
 static void update_notify(ckpool_t *ckp, const char *cmd)
@@ -2688,12 +2707,7 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 			LOGNOTICE("Block hash on proxy %d changed to %s", id, dsdata->lastswaphash);
 	}
 
-	if (proxy->global) {
-		check_bestproxy(sdata);
-		if (proxy->parent != best_proxy(sdata)->parent)
-			reconnect_clients(sdata);
-	} else
-		check_userproxies(sdata, proxy, proxy->userid);
+	check_proxy(sdata, proxy);
 	clean |= new_block;
 	LOGINFO("Proxy %d:%d broadcast updated stratum notify with%s clean", id,
 		subid, clean ? "" : "out");
