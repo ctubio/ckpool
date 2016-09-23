@@ -97,12 +97,15 @@ static struct option long_options[] = {
 
 struct termios oldctrl;
 
-static void sighandler(const int __maybe_unused sig)
+static void sighandler(const int sig)
 {
 	/* Return console to its previous state */
 	tcsetattr(STDIN_FILENO, TCSANOW, &oldctrl);
 
-	exit(0);
+	if (sig) {
+		signal (sig, SIG_DFL);
+		raise (sig);
+	}
 }
 
 int get_line(char **buf)
