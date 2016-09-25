@@ -2135,8 +2135,11 @@ static proxy_t *__generate_proxy(sdata_t *sdata, const int id)
 	HASH_ADD(sh, proxy->subproxies, subid, sizeof(int), proxy);
 	proxy->subproxy_count++;
 	HASH_ADD_INT(sdata->proxies, id, proxy);
-	/* Set the new proxy priority to its id */
-	__set_proxy_prio(sdata, proxy, id);
+	/* Set the initial priority to impossibly high initially as the userid
+	 * has yet to be inherited and the priority should be set only after
+	 * all the proxy details are finalised. */
+	proxy->priority = 0x00FFFFFFFFFFFFFF;
+	HASH_SORT(sdata->proxies, prio_sort);
 	sdata->proxy_count++;
 	return proxy;
 }
@@ -2505,7 +2508,7 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		dead_proxyid(sdata, id, subid, true, false);
 		proxy = old;
 		proxy->dead = false;
-	} else
+	} else /* This is where all new proxies are created */
 		proxy = subproxy_by_id(sdata, id, subid);
 	proxy->global = global;
 	proxy->userid = userid;
@@ -2554,6 +2557,12 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
 		LOGWARNING("Only able to set nonce2len %d of requested %d on proxy %d:%d",
 			   proxy->enonce2varlen, ckp->nonce2length, id, subid);
 	json_decref(val);
+
+	/* Set the priority on a new proxy now that we have all the fields
+	 * filled in to push it to its correct priority position in the
+	 * hashlist. */
+	if (!old)
+		set_proxy_prio(sdata, proxy, id);
 
 	check_proxy(sdata, proxy);
 }
