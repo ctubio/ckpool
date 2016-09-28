@@ -72,8 +72,9 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 		if (event == EVENT_OK) {
 			u_item = users_add(conn, in_username,
 						 transfer_data(i_emailaddress),
-						 transfer_data(i_passwordhash), 0,
-						 by, code, inet, now, trf_root);
+						 transfer_data(i_passwordhash),
+						 NULL, 0, by, code, inet, now,
+						 trf_root);
 		}
 	}
 
@@ -3116,7 +3117,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				DATA_OPTIONCONTROL(optioncontrol, oc_item);
 				u_item = users_add(conn, in_username, EMPTY,
 						   optioncontrol->optionvalue,
-						   0, by, code, inet, cd,
+						   NULL, 0, by, code, inet, cd,
 						   trf_root);
 			} else
 				ok = false;

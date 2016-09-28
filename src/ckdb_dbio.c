@@ -706,8 +706,9 @@ unparam:
 }
 
 K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username, char *emailaddress,
-			char *passwordhash, int64_t userbits, char *by,
-			char *code, char *inet, tv_t *cd, K_TREE *trf_root)
+			char *passwordhash, char *secondaryuserid,
+			int64_t userbits, char *by, char *code, char *inet,
+			tv_t *cd, K_TREE *trf_root)
 {
 	ExecStatusType rescode;
 	bool conned = false;
@@ -771,9 +772,14 @@ K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username, char *emailaddress,
 	row->status[0] = '\0';
 	STRNCPY(row->emailaddress, emailaddress);
 
-	snprintf(tohash, sizeof(tohash), "%s&#%s", in_username->str, emailaddress);
-	HASH_BER(tohash, strlen(tohash), 1, hash, tmp);
-	__bin2hex(row->secondaryuserid, (void *)(&hash), sizeof(hash));
+	if (secondaryuserid == NULL) {
+		snprintf(tohash, sizeof(tohash), "%s&#%s",
+						 in_username->str,
+						 emailaddress);
+		HASH_BER(tohash, strlen(tohash), 1, hash, tmp);
+		__bin2hex(row->secondaryuserid, (void *)(&hash), sizeof(hash));
+	} else
+		STRNCPY(row->secondaryuserid, secondaryuserid);
 
 	make_salt(row);
 	if (passwordhash == EMPTY) {
@@ -967,6 +973,27 @@ unparam:
 	K_WUNLOCK(users_free);
 
 	return ok;
+}
+
+/* If a share contains an unknown username then it will most likely be from
+ *  reloading a data file when the users table is incomplete or corrupt
+ * Since the share is valid, it should be counted against the pool stats and
+ *  creating a user also means the payout rewards are calculated correctly
+ * This also gives 2 options to resolve it later:
+ *  1) Correct the database/redistribute the rewards to the correct user
+ *  2) Rollback the database and reload it with a corrected users table
+ *  Option 1) gives a simpler solution vs option 2) if 2) is too far in
+ *   the past to easily do a reload */
+K_ITEM *create_missing_user(PGconn *conn, char *username, char *secondaryuserid,
+			    char *by, char *code, char *inet, tv_t *cd,
+			    K_TREE *trf_root)
+{
+	INTRANSIENT *in_username;
+
+	in_username = get_intransient("username", username);
+
+	return users_add(conn, in_username, EMPTY, EMPTY, secondaryuserid,
+			 USER_MISSING, by, code, inet, cd, trf_root);
 }
 
 bool users_fill(PGconn *conn)
@@ -3656,10 +3683,11 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 				    shares->createcode, shares->createinet,
 				    &(shares->createdate), trf_root);
 	if (!w_item) {
-		LOGDEBUG("%s(): new_default_worker failed %"PRId64"/%s/%ld,%ld",
-			 __func__, shares->userid,
-			 st = safe_text_nonull(shares->in_workername),
-			 shares->createdate.tv_sec, shares->createdate.tv_usec);
+		LOGERR("%s(): ERR new_default_worker failed"
+			" %"PRId64"/%s/%ld,%ld",
+			__func__, shares->userid,
+			st = safe_text_nonull(shares->in_workername),
+			shares->createdate.tv_sec, shares->createdate.tv_usec);
 		FREENULL(st);
 		return false;
 	}
@@ -3671,12 +3699,12 @@ static bool shares_process(PGconn *conn, SHARES *shares, K_ITEM *wi_item,
 					   MARKER_PROCESSED, NULL);
 		K_RUNLOCK(workmarkers_free);
 		if (wm_item) {
-			LOGDEBUG("%s(): workmarker exists for wid %"PRId64
-				 " %"PRId64"/%s/%ld,%ld",
-				 __func__, shares->workinfoid, shares->userid,
-				 st = safe_text_nonull(shares->in_workername),
-				 shares->createdate.tv_sec,
-				 shares->createdate.tv_usec);
+			LOGERR("%s(): ERR workmarker exists for wid %"PRId64
+				" %"PRId64"/%s/%ld,%ld",
+				__func__, shares->workinfoid, shares->userid,
+				st = safe_text_nonull(shares->in_workername),
+				shares->createdate.tv_sec,
+				shares->createdate.tv_usec);
 			FREENULL(st);
 			return false;
 		}
@@ -3875,18 +3903,31 @@ bool shares_add(PGconn *conn, char *workinfoid, char *username,
 	K_RLOCK(users_free);
 	u_item = find_users(username);
 	K_RUNLOCK(users_free);
-	/* Can't change outside lock since we don't delete users
+	/* Won't change outside lock since we don't delete users
 	 *  or change their *userid */
 	if (!u_item) {
-		btv_to_buf(cd, cd_buf, sizeof(cd_buf));
 		/* This should never happen unless there's a bug in ckpool
 		    or the authentication information got to ckdb after
-		    the shares ... which shouldn't ever happen */
-		LOGERR("%s() %s/%ld,%ld %s no user! Share discarded!",
-			__func__, st = safe_text_nonull(username),
-			cd->tv_sec, cd->tv_usec, cd_buf);
-		FREENULL(st);
-		goto tisbad;
+		    the shares or the users table is missing data ...
+			which shouldn't ever happen
+		   However, since it's a valid share, store it */
+		u_item = create_missing_user(conn, username, secondaryuserid,
+					     by, code, inet, cd, trf_root);
+		btv_to_buf(cd, cd_buf, sizeof(cd_buf));
+		if (!u_item) {
+			LOGERR("%s() ERR %s/%ld,%ld %s no/failed user! Share"
+				" discarded!",
+				__func__, st = safe_text_nonull(username),
+				cd->tv_sec, cd->tv_usec, cd_buf);
+			FREENULL(st);
+			goto tisbad;
+		} else {
+			DATA_USERS(users, u_item);
+			LOGERR("%s() MISSING %s/%ld,%ld %s created",
+				__func__, st = safe_text_nonull(username),
+				cd->tv_sec, cd->tv_usec, cd_buf);
+			FREENULL(st);
+		}
 	}
 	DATA_USERS(users, u_item);
 	shares->userid = users->userid;
@@ -7818,8 +7859,8 @@ bool auths_add(PGconn *conn, INTRANSIENT *in_poolinstance,
 	if (!u_item) {
 		if (addressuser) {
 			u_item = users_add(conn, in_username, EMPTY, EMPTY,
-					   USER_ADDRESS, by, code, inet, cd,
-					   trf_root);
+					   NULL, USER_ADDRESS, by, code, inet,
+					   cd, trf_root);
 		} else {
 			LOGDEBUG("%s(): unknown user '%s'",
 				 __func__,

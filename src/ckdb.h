@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.510"
+#define CKDB_VERSION DB_VERSION"-2.511"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1843,6 +1843,9 @@ typedef struct users {
 // userbits attributes
 // Address account, not a username account
 #define USER_ADDRESS 0x1
+
+// Username created due to a share that had an unknown username
+#define USER_MISSING 0x2
 
 // 16 x base 32 (5 bits) = 10 bytes (8 bits)
 #define TOTPAUTH_KEYSIZE 10
@@ -3652,11 +3655,14 @@ extern bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 			 int *event);
 extern K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username,
 			 char *emailaddress, char *passwordhash,
-			 int64_t userbits, char *by, char *code, char *inet,
-			 tv_t *cd, K_TREE *trf_root);
+			 char *secondaryuserid, int64_t userbits, char *by,
+			 char *code, char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item,
 			  char *by, char *code, char *inet, tv_t *cd,
 			  K_TREE *trf_root);
+extern K_ITEM *create_missing_user(PGconn *conn, char *username,
+				   char *secondaryuserid, char *by, char *code,
+				   char *inet, tv_t *cd, K_TREE *trf_root);
 extern bool users_fill(PGconn *conn);
 extern bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd,
 				bool begun);
