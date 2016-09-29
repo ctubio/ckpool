@@ -5986,7 +5986,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024], *buf;
 	const char *name;
 	size_t len, off;
-	uint64_t ram, ram2, tot = 0;
+	int64_t ram, ram2, tot = 0;
 	K_LIST *klist;
 	K_LISTS *klists;
 	int rows = 0;
@@ -6031,8 +6031,8 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 		snprintf(tmp, sizeof(tmp),
 			 "name:%d=%s%s%s%cinitial:%d=%d%callocated:%d=%d%c"
-			 "instore:%d=%d%cram:%d=%"PRIu64"%c"
-			 "ram2:%d=%"PRIu64"%ccull:%d=%d%ccull_limit:%d=%d%c",
+			 "instore:%d=%d%cram:%d=%"PRId64"%c"
+			 "ram2:%d=%"PRId64"%ccull:%d=%d%ccull_limit:%d=%d%c",
 			 rows, name, istree ? " (tree)" : "",
 			 klist->is_lock_only ? " (lock)" : "", FLDSEP,
 			 rows, klist->allocate, FLDSEP,
@@ -6051,7 +6051,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	ck_wunlock(&lock_check_lock);
 
-	snprintf(tmp, sizeof(tmp), "totalram=%"PRIu64"%c", tot, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "totalram=%"PRId64"%c", tot, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp),
