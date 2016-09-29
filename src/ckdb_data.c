@@ -5012,6 +5012,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 						    (double)(pa->payratio) /
 						    (double)paytotal;
 				used += d64;
+				payments->in_originaltxn =
+					payments->in_committxn =
+					payments->in_commitblockhash = EMPTY;
 				k_add_tail_nolock(pay_store, pay_item);
 				ok = payments_add(conn, true, pay_item,
 						  &(payments->old_item),
@@ -5041,6 +5044,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 				payments->amount = amount;
 				payments->diffacc = miningpayouts->diffacc;
 				used = amount;
+				payments->in_originaltxn =
+					payments->in_committxn =
+					payments->in_commitblockhash = EMPTY;
 				k_add_tail_nolock(pay_store, pay_item);
 				ok = payments_add(conn, true, pay_item,
 						  &(payments->old_item),
