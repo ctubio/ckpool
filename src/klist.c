@@ -213,7 +213,8 @@ K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
 
 K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 		    bool do_tail, bool lock_only, bool without_lock,
-		    bool local_list, const char *name2, KLIST_FFL_ARGS)
+		    bool local_list, const char *name2, int cull_limit,
+		    KLIST_FFL_ARGS)
 {
 	K_LIST *list;
 
@@ -222,6 +223,11 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 
 	if (limit < 0)
 		quithere(1, "Invalid new list %s with limit %d must be >= 0", name, limit);
+
+	/* after culling, the first block of items are again allocated,
+	 * so there's no point culling a single block of items */
+	if (cull_limit > 0 && cull_limit <= allocate)
+		quithere(1, "Invalid new list %s with cull_limit %d must be > allocate (%d)", name, cull_limit, allocate);
 
 	list = calloc(1, sizeof(*list));
 	if (!list)
@@ -248,6 +254,7 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 	list->allocate = allocate;
 	list->limit = limit;
 	list->do_tail = do_tail;
+	list->cull_limit = cull_limit;
 
 	if (!(list->is_lock_only))
 		k_alloc_items(list, KLIST_FFL_PASS);
@@ -360,6 +367,58 @@ K_ITEM *_k_unlink_tail(K_LIST *list, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS)
 	return item;
 }
 
+#define CHKCULL(_list) \
+	do { \
+		if (!((_list)->is_store) && !((_list)->is_lock_only) && \
+		    (_list)->cull_limit > 0 && \
+		    (_list)->count == (_list)->total && \
+		    (_list)->total >= (_list)->cull_limit) { \
+			k_cull_list(_list, file, func, line); \
+		} \
+	} while(0);
+
+static void k_cull_list(K_LIST *list, KLIST_FFL_ARGS)
+{
+	int i;
+
+	CHKLIST(list);
+	_LIST_WRITE(list, true, file, func, line);
+
+	if (list->is_store) {
+		quithere(1, "List %s can't %s() a store" KLIST_FFL,
+				list->name, __func__, KLIST_FFL_PASS);
+	}
+
+	if (list->is_lock_only) {
+		quithere(1, "List %s can't %s() a lock_only" KLIST_FFL,
+				list->name, __func__, KLIST_FFL_PASS);
+	}
+
+	if (list->count != list->total) {
+		quithere(1, "List %s can't %s() a list in use" KLIST_FFL,
+				list->name, __func__, KLIST_FFL_PASS);
+	}
+
+	for (i = 0; i < list->item_mem_count; i++)
+		free(list->item_memory[i]);
+	free(list->item_memory);
+	list->item_memory = NULL;
+	list->item_mem_count = 0;
+
+	for (i = 0; i < list->data_mem_count; i++)
+		free(list->data_memory[i]);
+	free(list->data_memory);
+	list->data_memory = NULL;
+	list->data_mem_count = 0;
+
+	list->total = list->count = list->count_up = 0;
+	list->head = list->tail = NULL;
+
+	list->cull_count++;
+
+	k_alloc_items(list, KLIST_FFL_PASS);
+}
+
 void _k_add_head(K_LIST *list, K_ITEM *item, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS)
 {
 	CHKLS(list);
@@ -390,6 +449,8 @@ void _k_add_head(K_LIST *list, K_ITEM *item, LOCK_MAYBE bool chklock, KLIST_FFL_
 
 	list->count++;
 	list->count_up++;
+
+	CHKCULL(list);
 }
 
 /* slows it down (of course) - only for debugging
@@ -437,6 +498,8 @@ void _k_add_tail(K_LIST *list, K_ITEM *item, LOCK_MAYBE bool chklock, KLIST_FFL_
 
 	list->count++;
 	list->count_up++;
+
+	CHKCULL(list);
 }
 
 // Insert item into the list next after 'after'
@@ -475,6 +538,8 @@ void _k_insert_after(K_LIST *list, K_ITEM *item, K_ITEM *after, LOCK_MAYBE bool 
 
 	list->count++;
 	list->count_up++;
+
+	// no point checking cull since this wouldn't be an _free list
 }
 
 void _k_unlink_item(K_LIST *list, K_ITEM *item, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS)
@@ -541,6 +606,8 @@ void _k_list_transfer_to_head(K_LIST *from, K_LIST *to, LOCK_MAYBE bool chklock,
 	from->count = 0;
 	to->count_up += from->count_up;
 	from->count_up = 0;
+
+	CHKCULL(to);
 }
 
 void _k_list_transfer_to_tail(K_LIST *from, K_LIST *to, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS)
@@ -577,6 +644,8 @@ void _k_list_transfer_to_tail(K_LIST *from, K_LIST *to, LOCK_MAYBE bool chklock,
 	from->count = 0;
 	to->count_up += from->count_up;
 	from->count_up = 0;
+
+	CHKCULL(to);
 }
 
 K_LIST *_k_free_list(K_LIST *list, KLIST_FFL_ARGS)
@@ -654,42 +723,4 @@ K_STORE *_k_free_store(K_STORE *store, KLIST_FFL_ARGS)
 	free(store);
 
 	return NULL;
-}
-
-// Must be locked and none in use and/or unlinked
-void _k_cull_list(K_LIST *list, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS)
-{
-	int i;
-
-	CHKLIST(list);
-	_LIST_WRITE(list, chklock, file, func, line);
-
-	if (list->is_store) {
-		quithere(1, "List %s can't %s() a store" KLIST_FFL,
-				list->name, __func__, KLIST_FFL_PASS);
-	}
-
-	if (list->count != list->total) {
-		quithere(1, "List %s can't %s() a list in use" KLIST_FFL,
-				list->name, __func__, KLIST_FFL_PASS);
-	}
-
-	for (i = 0; i < list->item_mem_count; i++)
-		free(list->item_memory[i]);
-	free(list->item_memory);
-	list->item_memory = NULL;
-	list->item_mem_count = 0;
-
-	for (i = 0; i < list->data_mem_count; i++)
-		free(list->data_memory[i]);
-	free(list->data_memory);
-	list->data_memory = NULL;
-	list->data_mem_count = 0;
-
-	list->total = list->count = list->count_up = 0;
-	list->head = list->tail = NULL;
-
-	list->cull_count++;
-
-	k_alloc_items(list, KLIST_FFL_PASS);
 }

@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.513"
+#define CKDB_VERSION DB_VERSION"-2.514"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1370,7 +1370,7 @@ typedef struct msgline {
 
 #define ALLOC_MSGLINE 8192
 #define LIMIT_MSGLINE 0
-#define CULL_MSGLINE 8
+#define CULL_MSGLINE (8 * ALLOC_MSGLINE)
 #define INIT_MSGLINE(_item) INIT_GENERIC(_item, msgline)
 #define DATA_MSGLINE(_var, _item) DATA_GENERIC(_var, _item, msgline, true)
 #define DATA_MSGLINE_NULL(_var, _item) DATA_GENERIC(_var, _item, msgline, false)
@@ -1396,7 +1396,7 @@ typedef struct breakqueue {
 
 #define ALLOC_BREAKQUEUE 16384
 #define LIMIT_BREAKQUEUE 0
-#define CULL_BREAKQUEUE 4
+#define CULL_BREAKQUEUE (4 * ALLOC_BREAKQUEUE)
 #define INIT_BREAKQUEUE(_item) INIT_GENERIC(_item, breakqueue)
 #define DATA_BREAKQUEUE(_var, _item) DATA_GENERIC(_var, _item, breakqueue, true)
 
@@ -1463,7 +1463,7 @@ typedef struct workqueue {
 
 #define ALLOC_WORKQUEUE 1024
 #define LIMIT_WORKQUEUE 0
-#define CULL_WORKQUEUE 32
+#define CULL_WORKQUEUE (32 * ALLOC_WORKQUEUE)
 #define INIT_WORKQUEUE(_item) INIT_GENERIC(_item, workqueue)
 #define DATA_WORKQUEUE(_var, _item) DATA_GENERIC(_var, _item, workqueue, true)
 
@@ -1563,7 +1563,9 @@ typedef struct transfer {
 // Suggest malloc use MMAP = largest under 2MB
 #define ALLOC_TRANSFER ((int)(2*1024*1024/sizeof(TRANSFER)))
 #define LIMIT_TRANSFER 0
-#define CULL_TRANSFER 16
+/* ALLOC_TRANSFER is ~14k, but it should only ever get this big during a reload
+ * so set it a bit above that */
+#define CULL_TRANSFER 32768
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
@@ -1787,7 +1789,7 @@ extern K_LIST *seqtrans_free;
 
 #define ALLOC_SEQTRANS 1024
 #define LIMIT_SEQTRANS 0
-#define CULL_SEQTRANS 64
+#define CULL_SEQTRANS (16 * ALLOC_SEQTRANS)
 #define INIT_SEQTRANS(_item) INIT_GENERIC(_item, seqtrans)
 #define DATA_SEQTRANS(_var, _item) DATA_GENERIC(_var, _item, seqtrans, true)
 #define DATA_SEQTRANS_NULL(_var, _item) DATA_GENERIC(_var, _item, seqtrans, false)
@@ -3227,7 +3229,7 @@ extern void sequence_report(bool lock);
 #define FREE_ITEM(item) do { } while(0)
 // TODO: make a macro for all other to use above macro
 extern void free_transfer_data(TRANSFER *transfer);
-extern void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull);
+extern void free_msgline_data(K_ITEM *item, bool t_lock);
 extern void free_users_data(K_ITEM *item);
 extern void free_workinfo_data(K_ITEM *item);
 #define free_sharesummary_data(_i) FREE_ITEM(_i)

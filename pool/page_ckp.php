@@ -16,7 +16,7 @@ function stnum($num)
 #
 function dockp($data, $user)
 {
- $pg = '<h1>CKPool</h1>';
+ $pg = '<h1>CKDB</h1>';
 
  $msg = msgEncode('stats', 'stats', array(), $user);
  $rep = sendsockreply('stats', $msg);
@@ -33,10 +33,11 @@ function dockp($data, $user)
  $pg .= "<td class=dl><span class=nb>Name:<$r id=srtname data-sf=s0></span></td>";
  $pg .= '<td class=dr>Initial</td>';
  $pg .= '<td class=dr>Allocated</td>';
- $pg .= "<td class=dr><span class=nb><$r id=srtname data-sf=r3>:In&nbsp;Store</span></td>";
- $pg .= "<td class=dr><span class=nb><$r id=srtname data-sf=r4>:RAM</span></td>";
- $pg .= "<td class=dr><span class=nb><$r id=srtname data-sf=r5>:RAM2</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtstore data-sf=r3>:In&nbsp;Store</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtram data-sf=r4>:RAM</span></td>";
+ $pg .= "<td class=dr><span class=nb><$r id=srtram2 data-sf=r5>:RAM2</span></td>";
  $pg .= '<td class=dr>Cull</td>';
+ $pg .= '<td class=dr>Limit</td>';
  $pg .= "</tr></thead>\n";
  if ($ans['STATUS'] == 'ok')
  {
@@ -57,11 +58,14 @@ function dockp($data, $user)
 		$pg .= "<td class=dr data-srt='".$ans['ram:'.$i]."'>".stnum($ans['ram:'.$i]).'</td>';
 		$pg .= "<td class=dr data-srt='".$ans['ram2:'.$i]."'>".stnum($ans['ram2:'.$i]).'</td>';
 		$pg .= '<td class=dr>'.stnum($ans['cull:'.$i]).'</td>';
+		$pg .= '<td class=dr>'.stnum($ans['cull_limit:'.$i]).'</td>';
 		$pg .= "</tr>\n";
 	}
 	$pg .= '</tbody>';
  }
  $pg .= "</table>\n";
+ $pg .= "<script type='text/javascript'>\n";
+ $pg .= "sotc('ckpsrt','srtram');</script>\n";
 
  return $pg;
 }

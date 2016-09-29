@@ -18,7 +18,7 @@ void free_transfer_data(TRANSFER *transfer)
 		FREENULL(transfer->mvalue);
 }
 
-void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
+void free_msgline_data(K_ITEM *item, bool t_lock)
 {
 	K_ITEM *t_item = NULL;
 	TRANSFER *transfer;
@@ -40,11 +40,6 @@ void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
 			K_WLOCK(transfer_free);
 		transfer_free->ram -= ram2;
 		k_list_transfer_to_head(msgline->trf_store, transfer_free);
-		if (t_cull) {
-			if (transfer_free->count == transfer_free->total &&
-			    transfer_free->total >= ALLOC_TRANSFER * CULL_TRANSFER)
-				k_cull_list(transfer_free);
-		}
 		if (t_lock)
 			K_WUNLOCK(transfer_free);
 		msgline->trf_store = k_free_store(msgline->trf_store);

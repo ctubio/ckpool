@@ -1962,8 +1962,9 @@ static void alloc_storage()
 					ALLOC_LOGQUEUE, LIMIT_LOGQUEUE, true);
 	logqueue_store = k_new_store(logqueue_free);
 
-	breakqueue_free = k_new_list("BreakQueue", sizeof(BREAKQUEUE),
-				     ALLOC_BREAKQUEUE, LIMIT_BREAKQUEUE, true);
+	breakqueue_free = k_new_list_cull("BreakQueue", sizeof(BREAKQUEUE),
+					  ALLOC_BREAKQUEUE, LIMIT_BREAKQUEUE,
+					  true, CULL_BREAKQUEUE);
 	reload_breakqueue_store = k_new_store(breakqueue_free);
 	reload_done_breakqueue_store = k_new_store(breakqueue_free);
 	cmd_breakqueue_store = k_new_store(breakqueue_free);
@@ -2017,16 +2018,19 @@ static void alloc_storage()
 		}
 	}
 
-	seqtrans_free = k_new_list("SeqTrans", sizeof(SEQTRANS),
-				   ALLOC_SEQTRANS, LIMIT_SEQTRANS, true);
+	seqtrans_free = k_new_list_cull("SeqTrans", sizeof(SEQTRANS),
+					ALLOC_SEQTRANS, LIMIT_SEQTRANS, true,
+					CULL_SEQTRANS);
 
-	msgline_free = k_new_list("MsgLine", sizeof(MSGLINE),
-					ALLOC_MSGLINE, LIMIT_MSGLINE, true);
+	msgline_free = k_new_list_cull("MsgLine", sizeof(MSGLINE),
+					ALLOC_MSGLINE, LIMIT_MSGLINE, true,
+					CULL_MSGLINE);
 	msgline_store = k_new_store(msgline_free);
 	msgline_free->dsp_func = dsp_msgline;
 
-	workqueue_free = k_new_list("WorkQueue", sizeof(WORKQUEUE),
-					ALLOC_WORKQUEUE, LIMIT_WORKQUEUE, true);
+	workqueue_free = k_new_list_cull("WorkQueue", sizeof(WORKQUEUE),
+					 ALLOC_WORKQUEUE, LIMIT_WORKQUEUE,
+					 true, CULL_WORKQUEUE);
 	pool0_workqueue_store = k_new_store(workqueue_free);
 	pool_workqueue_store = k_new_store(workqueue_free);
 	cmd_workqueue_store = k_new_store(workqueue_free);
@@ -2045,8 +2049,9 @@ static void alloc_storage()
 					 LIMIT_HEARTBEATQUEUE, true);
 	heartbeatqueue_store = k_new_store(heartbeatqueue_free);
 
-	transfer_free = k_new_list(Transfer, sizeof(TRANSFER),
-					ALLOC_TRANSFER, LIMIT_TRANSFER, true);
+	transfer_free = k_new_list_cull(Transfer, sizeof(TRANSFER),
+					ALLOC_TRANSFER, LIMIT_TRANSFER, true,
+					CULL_TRANSFER);
 	transfer_free->dsp_func = dsp_transfer;
 
 	users_free = k_new_list("Users", sizeof(USERS),
@@ -3097,9 +3102,6 @@ static void trans_seq(tv_t *now)
 		if (store->count) {
 			K_WLOCK(seqtrans_free);
 			k_list_transfer_to_head(store, seqtrans_free);
-			if (seqtrans_free->count == seqtrans_free->total &&
-			    seqtrans_free->total >= ALLOC_SEQTRANS * CULL_SEQTRANS)
-				k_cull_list(seqtrans_free);
 			K_WUNLOCK(seqtrans_free);
 		}
 	}
@@ -3878,9 +3880,6 @@ setitemdata:
 		}
 		K_WLOCK(seqtrans_free);
 		k_list_transfer_to_head(lost, seqtrans_free);
-		if (seqtrans_free->count == seqtrans_free->total &&
-		    seqtrans_free->total >= ALLOC_SEQTRANS * CULL_SEQTRANS)
-			k_cull_list(seqtrans_free);
 		K_WUNLOCK(seqtrans_free);
 	}
 
@@ -4772,10 +4771,6 @@ static void *breaker(void *arg)
 			pthread_cond_signal(&process_socket_waitcond);
 			mutex_unlock(&process_socket_waitlock);
 		}
-
-		if (breakqueue_free->count == breakqueue_free->total &&
-		    breakqueue_free->total >= ALLOC_BREAKQUEUE * CULL_BREAKQUEUE)
-			k_cull_list(breakqueue_free);
 		K_WUNLOCK(breakqueue_free);
 	}
 
@@ -6083,7 +6078,7 @@ static void process_sockd(PGconn *conn, K_ITEM *wq_item, enum reply_type reply_t
 	K_WUNLOCK(breakqueue_free);
 	FREENULL(ans);
 
-	free_msgline_data(ml_item, true, true);
+	free_msgline_data(ml_item, true);
 	K_WLOCK(msgline_free);
 	msgline_free->ram -= msgline->msgsiz;
 	k_add_head(msgline_free, ml_item);
@@ -6091,9 +6086,6 @@ static void process_sockd(PGconn *conn, K_ITEM *wq_item, enum reply_type reply_t
 
 	K_WLOCK(workqueue_free);
 	k_add_head(workqueue_free, wq_item);
-	if (workqueue_free->count == workqueue_free->total &&
-	    workqueue_free->total >= ALLOC_WORKQUEUE * CULL_WORKQUEUE)
-		k_cull_list(workqueue_free);
 	K_WUNLOCK(workqueue_free);
 
 	tick();
@@ -6755,7 +6747,7 @@ static void *process_socket(__maybe_unused void *arg)
 						K_ITEM *ml_item = wq->msgline_item;
 						MSGLINE *ml;
 						DATA_MSGLINE(ml, ml_item);
-						free_msgline_data(ml_item, true, false);
+						free_msgline_data(ml_item, true);
 						K_WLOCK(msgline_free);
 						msgline_free->ram -= ml->msgsiz;
 						k_add_head(msgline_free, ml_item);
@@ -6798,7 +6790,7 @@ skippy:
 		if (bq->ml_item) {
 			MSGLINE *ml;
 			DATA_MSGLINE(ml, bq->ml_item);
-			free_msgline_data(bq->ml_item, true, true);
+			free_msgline_data(bq->ml_item, true);
 			K_WLOCK(msgline_free);
 			msgline_free->ram -= ml->msgsiz;
 			k_add_head(msgline_free, bq->ml_item);
@@ -7158,7 +7150,7 @@ static void process_reload_item(PGconn *conn, K_ITEM *bq_item)
 
 	if (bq->ml_item) {
 		DATA_MSGLINE(msgline, bq->ml_item);
-		free_msgline_data(bq->ml_item, true, true);
+		free_msgline_data(bq->ml_item, true);
 		K_WLOCK(msgline_free);
 		msgline_free->ram -= msgline->msgsiz;
 		k_add_head(msgline_free, bq->ml_item);
@@ -7797,7 +7789,7 @@ static void process_queued(PGconn *conn, K_ITEM *wq_item)
 			break;
 	}
 
-	free_msgline_data(ml_item, true, true);
+	free_msgline_data(ml_item, true);
 	K_WLOCK(msgline_free);
 	msgline_free->ram -= msgline->msgsiz;
 	k_add_head(msgline_free, ml_item);
@@ -7805,9 +7797,6 @@ static void process_queued(PGconn *conn, K_ITEM *wq_item)
 
 	K_WLOCK(workqueue_free);
 	k_add_head(workqueue_free, wq_item);
-	if (workqueue_free->count == workqueue_free->total &&
-	    workqueue_free->total >= ALLOC_WORKQUEUE * CULL_WORKQUEUE)
-		k_cull_list(workqueue_free);
 	K_WUNLOCK(workqueue_free);
 }
 
@@ -7816,9 +7805,6 @@ static void free_lost(SEQDATA *seqdata)
 	if (seqdata->reload_lost) {
 		K_WLOCK(seqtrans_free);
 		k_list_transfer_to_head(seqdata->reload_lost, seqtrans_free);
-		if (seqtrans_free->count == seqtrans_free->total &&
-		    seqtrans_free->total >= ALLOC_SEQTRANS * CULL_SEQTRANS)
-			k_cull_list(seqtrans_free);
 		K_WUNLOCK(seqtrans_free);
 		seqdata->reload_lost = NULL;
 	}

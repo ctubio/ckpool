@@ -6032,7 +6032,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 		snprintf(tmp, sizeof(tmp),
 			 "name:%d=%s%s%s%cinitial:%d=%d%callocated:%d=%d%c"
 			 "instore:%d=%d%cram:%d=%"PRIu64"%c"
-			 "ram2:%d=%"PRIu64"%ccull:%d=%d%c",
+			 "ram2:%d=%"PRIu64"%ccull:%d=%d%ccull_limit:%d=%d%c",
 			 rows, name, istree ? " (tree)" : "",
 			 klist->is_lock_only ? " (lock)" : "", FLDSEP,
 			 rows, klist->allocate, FLDSEP,
@@ -6040,7 +6040,8 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 rows, klist->total - klist->count, FLDSEP,
 			 rows, ram, FLDSEP,
 			 rows, ram2, FLDSEP,
-			 rows, klist->cull_count, FLDSEP);
+			 rows, klist->cull_count, FLDSEP,
+			 rows, klist->cull_limit, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		tot += ram + ram2;
@@ -6056,7 +6057,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "name,initial,allocated,instore,ram,cull", FLDSEP);
+		 "name,initial,allocated,instore,ram,cull,cull_limit", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Stats", FLDSEP, "");
