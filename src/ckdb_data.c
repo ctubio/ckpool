@@ -816,6 +816,37 @@ char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS)
 	return in->str;
 }
 
+void dsp_msgline(K_ITEM *item, FILE *stream)
+{
+	K_ITEM *t_item;
+	MSGLINE *m;
+	int c;
+
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		DATA_MSGLINE(m, item);
+		if (m->trf_store)
+			c = m->trf_store->count;
+		else
+			c = 0;
+
+		fprintf(stream, " which=%d id='%s' cmd='%s' msg='%.42s' "
+				"trf_store=%c count=%d\n",
+				m->which_cmds, m->id, m->cmd, m->msg,
+				m->trf_store ? 'Y' : 'N', c);
+
+		if (m->trf_store) {
+			t_item = m->trf_store->head;
+			while (t_item) {
+				fputc(' ', stream);
+				dsp_transfer(t_item, stream);
+				t_item = t_item->next;
+			}
+		}
+	}
+}
+
 // For mutiple variable function calls that need the data
 char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS)
 {

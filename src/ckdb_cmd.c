@@ -5966,6 +5966,9 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 
 		if (strcasecmp(name, "markersummary") == 0)
 			dsp_kstore(markersummary_store, fil, NULL);
+
+		if (strcasecmp(name, "msgline") == 0)
+			dsp_kstore(msgline_store, fil, NULL);
 	}
 
 	LOGDEBUG("%s.ok.dsp.file='%s'", id, fil);

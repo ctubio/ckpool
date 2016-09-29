@@ -2023,6 +2023,7 @@ static void alloc_storage()
 	msgline_free = k_new_list("MsgLine", sizeof(MSGLINE),
 					ALLOC_MSGLINE, LIMIT_MSGLINE, true);
 	msgline_store = k_new_store(msgline_free);
+	msgline_free->dsp_func = dsp_msgline;
 
 	workqueue_free = k_new_list("WorkQueue", sizeof(WORKQUEUE),
 					ALLOC_WORKQUEUE, LIMIT_WORKQUEUE, true);

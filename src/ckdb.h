@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.512"
+#define CKDB_VERSION DB_VERSION"-2.513"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -3333,6 +3333,7 @@ extern INTRANSIENT *_get_intransient(const char *fldnam, char *value,
 #define intransient_str(_fld, _val) \
 	_intransient_str(_fld, _val, WHERE_FFL_HERE)
 extern char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS);
+extern void dsp_msgline(K_ITEM *item, FILE *stream);
 extern char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS);
 extern void dsp_transfer(K_ITEM *item, FILE *stream);
 extern cmp_t cmp_transfer(K_ITEM *a, K_ITEM *b);
