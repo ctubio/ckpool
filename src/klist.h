@@ -663,6 +663,8 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 #define STORE_HEAD_NOLOCK(_s) LIST_HEAD_NOLOCK(_s)
 #define STORE_TAIL_NOLOCK(_s) LIST_TAIL_NOLOCK(_s)
 
+extern void _dsp_kstore(K_STORE *store, char *filename, char *msg, KLIST_FFL_ARGS);
+#define dsp_kstore(_store, _file, _msg) _dsp_kstore(_store, _file, _msg, KLIST_FFL_HERE)
 extern K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS);
 #define k_new_store(_list) _k_new_store(_list, KLIST_FFL_HERE)
 extern K_LIST *_k_new_list(const char *name, size_t siz, int allocate,

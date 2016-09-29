@@ -60,6 +60,63 @@ K_LISTS *all_klists;
 
 #define CHKITEM(__item, __list) _CHKITEM(__item, __list, "item")
 
+void _dsp_kstore(K_STORE *store, char *filename, char *msg, KLIST_FFL_ARGS)
+{
+	K_ITEM *item;
+	FILE *stream;
+	struct tm tm;
+	time_t now_t;
+	char stamp[128];
+
+	if (!(store->master->dsp_func)) {
+		quithere(1, "List %s has no dsp_func" KLIST_FFL,
+				store->master->name, KLIST_FFL_PASS);
+	}
+
+	now_t = time(NULL);
+	localtime_r(&now_t, &tm);
+	snprintf(stamp, sizeof(stamp),
+			"[%d-%02d-%02d %02d:%02d:%02d]",
+			tm.tm_year + 1900,
+			tm.tm_mon + 1,
+			tm.tm_mday,
+			tm.tm_hour,
+			tm.tm_min,
+			tm.tm_sec);
+
+	stream = fopen(filename, "ae");
+	if (!stream)
+	{
+		fprintf(stderr, "%s %s() failed to open '%s' (%d) %s",
+				stamp, __func__, filename, errno, strerror(errno));
+		return;
+	}
+
+	if (msg)
+		fprintf(stream, "%s %s\n", stamp, msg);
+	else
+		fprintf(stream, "%s Dump of store '%s':\n", stamp, store->master->name);
+
+	if (store->count > 0)
+	{
+		K_RLOCK(store->master);
+
+		item = store->head;
+		while (item)
+		{
+			store->master->dsp_func(item, stream);
+			item = item->next;
+		}
+		K_RUNLOCK(store->master);
+
+		fprintf(stream, "End\n\n");
+	}
+	else
+		fprintf(stream, "Empty kstore\n\n");
+
+	fclose(stream);
+}
+
 static void k_alloc_items(K_LIST *list, KLIST_FFL_ARGS)
 {
 	K_ITEM *item;

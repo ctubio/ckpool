@@ -856,8 +856,10 @@ void dsp_transfer(K_ITEM *item, FILE *stream)
 		fprintf(stream, "%s() called with (null) item\n", __func__);
 	else {
 		DATA_TRANSFER(t, item);
-		fprintf(stream, " name='%s' mvalue='%s' malloc=%"PRIu64"\n",
-				t->name, t->mvalue, t->msiz);
+		fprintf(stream, " name='%s' mvalue='%s' malloc=%"PRIu64
+				" intransient=%c\n",
+				t->name, t->mvalue, t->msiz,
+				t->intransient ? 'Y' : 'N');
 	}
 }
 

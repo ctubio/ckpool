@@ -5904,45 +5904,73 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 		     __maybe_unused K_TREE *trf_root,
 		     __maybe_unused bool reload_data)
 {
-	__maybe_unused K_ITEM *i_file;
-	__maybe_unused char reply[1024] = "";
-	__maybe_unused size_t siz = sizeof(reply);
-
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	// WARNING: This is a gaping security hole - only use in development
+#if 1
 	LOGDEBUG("%s.disabled.dsp", id);
 	return strdup("disabled.dsp");
-/*
+#else
+	// WARNING: This is a gaping security hole - only use in development
+	K_ITEM *i_file, *i_name, *i_type;
+	char reply[1024] = "", *fil, *name, *typ;
+	size_t siz = sizeof(reply);
+
 	i_file = require_name(trf_root, "file", 1, NULL, reply, siz);
 	if (!i_file)
 		return strdup(reply);
 
-	dsp_ktree(blocks_free, blocks_root, transfer_data(i_file), NULL);
+	i_name = require_name(trf_root, "name", 1, NULL, reply, siz);
+	if (!i_name)
+		return strdup(reply);
 
-	dsp_ktree(transfer_free, trf_root, transfer_data(i_file), NULL);
+	i_type = optional_name(trf_root, "type", 1, NULL, reply, siz);
+	if (*reply)
+		return strdup(reply);
 
-	dsp_ktree(paymentaddresses_free, paymentaddresses_root,
-		  transfer_data(i_file), NULL);
+	fil = transfer_data(i_file);
+	name = transfer_data(i_name);
+	if (i_type)
+		typ = transfer_data(i_type);
+	else
+		typ = "tree";
 
-	dsp_ktree(paymentaddresses_create_free, paymentaddresses_root,
-		  transfer_data(i_file), NULL);
+	if (strcasecmp(typ, "tree") == 0) {
+		if (strcasecmp(name, "blocks") == 0)
+			dsp_ktree(blocks_root, fil, NULL);
 
-	dsp_ktree(sharesummary_free, sharesummary_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "transfer") == 0)
+			dsp_ktree(trf_root, fil, NULL);
 
-	dsp_ktree(userstats_free, userstats_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "paymentaddresses") == 0)
+			dsp_ktree(paymentaddresses_root, fil, NULL);
 
-	dsp_ktree(markersummary_free, markersummary_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "paymentaddresses_create") == 0)
+			dsp_ktree(paymentaddresses_root, fil, NULL);
 
-	dsp_ktree(workmarkers_free, workmarkers_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "sharesummary") == 0)
+			dsp_ktree(sharesummary_root, fil, NULL);
 
-	LOGDEBUG("%s.ok.dsp.file='%s'", id, transfer_data(i_file));
+		if (strcasecmp(name, "userstats") == 0)
+			dsp_ktree(userstats_root, fil, NULL);
+
+		if (strcasecmp(name, "markersummary") == 0)
+			dsp_ktree(markersummary_root, fil, NULL);
+
+		if (strcasecmp(name, "workmarkers") == 0)
+			dsp_ktree(workmarkers_root, fil, NULL);
+	}
+
+	if (strcasecmp(typ, "store") == 0) {
+		if (strcasecmp(name, "blocks") == 0)
+			dsp_kstore(blocks_store, fil, NULL);
+
+		if (strcasecmp(name, "markersummary") == 0)
+			dsp_kstore(markersummary_store, fil, NULL);
+	}
+
+	LOGDEBUG("%s.ok.dsp.file='%s'", id, fil);
 	return strdup("ok.dsp");
-*/
+#endif
 }
 
 static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
