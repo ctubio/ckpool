@@ -505,8 +505,26 @@ void _txt_to_double(char *nam, char *fld, double *data, size_t siz, WHERE_FFL_AR
 
 char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
+	static bool had_null = false;
 	struct tm tm;
 	double d;
+
+	// Return an empty string but only log a console message the first time
+	if (!data) {
+		// locking doesn't matter - if we get extra messages
+		if (!had_null) {
+			had_null = true;
+			LOGEMERG("%s() BUG - called with null data - check"
+				 " log file" WHERE_FFL,
+				 __func__, WHERE_FFL_PASS);
+		}
+		LOGNOTICE("%s() BUG - called with null data typ=%d" WHERE_FFL,
+			  __func__, (int)typ, WHERE_FFL_PASS);
+		if (!buf)
+			buf = malloc(1);
+		*buf = '\0';
+		return buf;
+	}
 
 	if (!buf) {
 		switch (typ) {
