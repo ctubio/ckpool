@@ -4115,11 +4115,13 @@ bool shares_db(PGconn *conn, K_ITEM *s_item)
 	res = PQexecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = PQresultStatus(res);
 	if (!PGOK(rescode)) {
-		// If the share is already in the db ignore the error
 		char *code = PQresultErrorField(res, PG_DIAG_SQLSTATE);
 		if (!code || strcmp(code, SQL_UNIQUE_VIOLATION)) {
 			PGLOGERR("Insert", rescode, conn);
 			goto unparam;
+		} else {
+			// If the share is already in the db use NOTICE
+			PGLOGNOTICE("Insert", rescode, conn);
 		}
 	}
 
