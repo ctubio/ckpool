@@ -3872,8 +3872,6 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	ExecStatusType rescode;
-	PGresult *res;
 	bool conned = false;
 	K_ITEM *t_item, *u_item, *ua_item = NULL;
 	INTRANSIENT *in_username;
@@ -3921,21 +3919,13 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 				*(dot++) = '\0';
 				// If we already had a different one, save it to the DB
 				if (ua_item && strcmp(useratts->attname, attname) != 0) {
-					if (conn == NULL) {
-						conn = dbconnect();
-						conned = true;
-					}
+					conned = CKPQConn(&conn);
 					if (!begun) {
-						// Beginning of a write txn
-						res = PQexec(conn, "Begin", CKPQ_WRITE);
-						rescode = PQresultStatus(res);
-						PQclear(res);
-						if (!PGOK(rescode)) {
-							PGLOGERR("Begin", rescode, conn);
+						begun = CKPQBegin(conn);
+						if (!begun) {
 							reason = "DBERR";
 							goto bats;
 						}
-						begun = true;
 					}
 					if (useratts_item_add(conn, ua_item, now, begun)) {
 						ua_item = NULL;
@@ -3983,21 +3973,13 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 			t_item = next_in_ktree(ctx);
 		}
 		if (ua_item) {
-			if (conn == NULL) {
-				conn = dbconnect();
-				conned = true;
-			}
+			conned = CKPQConn(&conn);
 			if (!begun) {
-				// Beginning of a write txn
-				res = PQexec(conn, "Begin", CKPQ_WRITE);
-				rescode = PQresultStatus(res);
-				PQclear(res);
-				if (!PGOK(rescode)) {
-					PGLOGERR("Begin", rescode, conn);
+				begun = CKPQBegin(conn);
+				if (!begun) {
 					reason = "DBERR";
 					goto bats;
 				}
-				begun = true;
 			}
 			if (!useratts_item_add(conn, ua_item, now, begun)) {
 				reason = "DBERR";
@@ -4007,15 +3989,11 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 		}
 	}
 rollback:
-	if (!reason)
-		res = PQexec(conn, "Commit", CKPQ_WRITE);
-	else
-		res = PQexec(conn, "Rollback", CKPQ_WRITE);
 
-	PQclear(res);
+	CKPQEnd(conn, (reason == NULL));
+
 bats:
-	if (conned)
-		PQfinish(conn);
+	conned = CKPQDisco(&conn, conned);
 	if (reason) {
 		if (ua_item) {
 			K_WLOCK(useratts_free);
@@ -4207,8 +4185,6 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	ExecStatusType rescode;
-	PGresult *res;
 	bool conned = false;
 	K_ITEM *t_item, *oc_item = NULL, *ok = NULL;
 	K_TREE_CTX ctx[1];
@@ -4242,21 +4218,13 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 					reason = "Missing value";
 					goto rollback;
 				}
-				if (conn == NULL) {
-					conn = dbconnect();
-					conned = true;
-				}
+				conned = CKPQConn(&conn);
 				if (!begun) {
-					// Beginning of a write txn
-					res = PQexec(conn, "Begin", CKPQ_WRITE);
-					rescode = PQresultStatus(res);
-					PQclear(res);
-					if (!PGOK(rescode)) {
-						PGLOGERR("Begin", rescode, conn);
+					begun = CKPQBegin(conn);
+					if (!begun) {
 						reason = "DBERR";
 						goto rollback;
 					}
-					begun = true;
 				}
 				ok = optioncontrol_item_add(conn, oc_item, now, begun);
 				oc_item = NULL;
@@ -4299,21 +4267,13 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 			reason = "Missing value";
 			goto rollback;
 		}
-		if (conn == NULL) {
-			conn = dbconnect();
-			conned = true;
-		}
+		conned = CKPQConn(&conn);
 		if (!begun) {
-			// Beginning of a write txn
-			res = PQexec(conn, "Begin", CKPQ_WRITE);
-			rescode = PQresultStatus(res);
-			PQclear(res);
-			if (!PGOK(rescode)) {
-				PGLOGERR("Begin", rescode, conn);
+			begun = CKPQBegin(conn);
+			if (!begun) {
 				reason = "DBERR";
 				goto rollback;
 			}
-			begun = true;
 		}
 		ok = optioncontrol_item_add(conn, oc_item, now, begun);
 		oc_item = NULL;
@@ -4325,17 +4285,10 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 		}
 	}
 rollback:
-	if (begun) {
-		if (reason)
-			res = PQexec(conn, "Rollback", CKPQ_WRITE);
-		else
-			res = PQexec(conn, "Commit", CKPQ_WRITE);
+	if (begun)
+		CKPQEnd(conn, (reason == NULL));
 
-		PQclear(res);
-	}
-
-	if (conned)
-		PQfinish(conn);
+	conned = CKPQDisco(&conn, conned);
 	if (reason) {
 		snprintf(reply, siz, "ERR.%s", reason);
 		LOGERR("%s.%s.%s", cmd, id, reply);
@@ -8386,10 +8339,7 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 	if (strcasecmp(action, "store") == 0) {
 		/* Store the shares_hi_root list in the db now,
 		 * rather than wait for a shift process to do it */
-		if (!conn) {
-			conn = dbconnect();
-			conned = true;
-		}
+		conned = CKPQConn(&conn);
 		count = 0;
 		do {
 			did = false;
@@ -8404,8 +8354,7 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 				count++;
 			}
 		} while (did);
-		if (conned)
-			PQfinish(conn);
+		conned = CKPQDisco(&conn, conned);
 		if (count) {
 			LOGWARNING("%s() Stored: %d high shares",
 				   __func__, count);

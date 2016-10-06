@@ -6397,7 +6397,7 @@ K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 			  tv_t *cd, K_TREE *trf_root)
 {
-	PGconn *conn;
+	PGconn *conn = NULL;
 	K_TREE_CTX ctx[1];
 	WORKMARKERS *workmarkers;
 	K_ITEM *wm_item, *wm_last = NULL, *s_item = NULL;
@@ -6427,7 +6427,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 		return false;
 	}
 
-	conn = dbconnect();
+	CKPQConn(&conn);
 
 	/* Store all shares in the DB before processing the workmarker
 	 * This way we know that the high shares in the DB will match the start
@@ -6486,7 +6486,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 		   tvdiff(&proc_lock_fin, &proc_lock_got));
 
 flailed:
-	PQfinish(conn);
+	CKPQDisco(&conn, true);
 
 	if (count > 0) {
 		LOGWARNING("%s() Stored: %d high shares %.3fs",

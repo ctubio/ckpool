@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.518"
+#define CKDB_VERSION DB_VERSION"-2.600"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -3614,12 +3614,12 @@ extern void userinfo_block(BLOCKS *blocks, enum info_type isnew, int delta);
 #define CKPQ_READ true
 #define CKPQ_WRITE false
 
-#define CKPQexec(_conn, _qry, _isread) _CKPQexec(_conn, _qry, _isread, WHERE_FFL_HERE)
-extern PGresult *_CKPQexec(PGconn *conn, const char *qry, bool isread, WHERE_FFL_ARGS);
-#define CKPQexecParams(_conn, _qry, _p1, _p2, _p3, _p4, _p5, _p6, _isread) \
-			_CKPQexecParams(_conn, _qry, _p1, _p2, _p3, _p4, _p5, _p6, \
+#define CKPQExec(_conn, _qry, _isread) _CKPQExec(_conn, _qry, _isread, WHERE_FFL_HERE)
+extern PGresult *_CKPQExec(PGconn *conn, const char *qry, bool isread, WHERE_FFL_ARGS);
+#define CKPQExecParams(_conn, _qry, _p1, _p2, _p3, _p4, _p5, _p6, _isread) \
+			_CKPQExecParams(_conn, _qry, _p1, _p2, _p3, _p4, _p5, _p6, \
 			_isread, WHERE_FFL_HERE)
-extern PGresult *_CKPQexecParams(PGconn *conn, const char *qry,
+extern PGresult *_CKPQExecParams(PGconn *conn, const char *qry,
 				 int nParams,
 				 const Oid *paramTypes,
 				 const char *const * paramValues,
@@ -3627,10 +3627,10 @@ extern PGresult *_CKPQexecParams(PGconn *conn, const char *qry,
 				 const int *paramFormats,
 				 int resultFormat,
 				 bool isread, WHERE_FFL_ARGS);
-
-// Force use CKPQ... for PQ functions in use
-#define PQexec CKPQexec
-#define PQexecParams CKPQexecParams
+extern ExecStatusType _CKPQResultStatus(PGresult *res, WHERE_FFL_ARGS);
+#define CKPQResultStatus(_res) _CKPQResultStatus(_res, WHERE_FFL_HERE)
+extern void _CKPQClear(PGresult *res, WHERE_FFL_ARGS);
+#define CKPQClear(_res) _CKPQClear(_res, WHERE_FFL_HERE)
 
 #define PGLOG(__LOG, __str, __rescode, __conn) do { \
 		char *__buf = pqerrmsg(__conn); \
@@ -3644,12 +3644,16 @@ extern PGresult *_CKPQexecParams(PGconn *conn, const char *qry,
 #define PGLOGNOTICE(_str, _rescode, _conn) PGLOG(LOGNOTICE, _str, _rescode, _conn)
 
 extern char *pqerrmsg(PGconn *conn);
-extern bool CKPQConn(PGconn **conn);
-extern void CKPQDisco(PGconn **conn, bool conned);
+extern bool _CKPQConn(PGconn **conn, WHERE_FFL_ARGS);
+#define CKPQConn(_conn) _CKPQConn(_conn, WHERE_FFL_HERE)
+extern bool _CKPQDisco(PGconn **conn, bool conned, WHERE_FFL_ARGS);
+#define CKPQDisco(_conn, _conned) _CKPQDisco(_conn, _conned, WHERE_FFL_HERE)
+#define CKPQFinish(_conn) CKPQDisco(_conn, true)
 extern bool _CKPQBegin(PGconn *conn, WHERE_FFL_ARGS);
 #define CKPQBegin(_conn) _CKPQBegin(conn, WHERE_FFL_HERE)
 extern void _CKPQEnd(PGconn *conn, bool commit, WHERE_FFL_ARGS);
 #define CKPQEnd(_conn, _commit) _CKPQEnd(_conn, _commit, WHERE_FFL_HERE)
+#define CKPQCommit(_conn) _CKPQEnd(_conn, true, WHERE_FFL_HERE)
 
 extern int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 			tv_t *cd, char *by, char *code, char *inet);

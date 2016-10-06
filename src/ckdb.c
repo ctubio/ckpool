@@ -1716,8 +1716,10 @@ PGconn *dbconnect()
  */
 static bool getdata1()
 {
-	PGconn *conn = dbconnect();
+	PGconn *conn = NULL;
 	bool ok = true;
+
+	CKPQConn(&conn);
 
 	if (!(ok = check_db_version(conn)))
 		goto matane;
@@ -1731,7 +1733,7 @@ static bool getdata1()
 
 matane:
 
-	PQfinish(conn);
+	CKPQFinish(&conn);
 	return ok;
 }
 
@@ -1740,18 +1742,24 @@ matane:
  */
 static bool getdata2()
 {
-	PGconn *conn = dbconnect();
-	bool ok = blocks_fill(conn);
+	PGconn *conn = NULL;
+	bool ok;
 
-	PQfinish(conn);
+	CKPQConn(&conn);
+
+	ok = blocks_fill(conn);
+
+	CKPQFinish(&conn);
 
 	return ok;
 }
 
 static bool getdata3()
 {
-	PGconn *conn = dbconnect();
+	PGconn *conn = NULL;
 	bool ok = true;
+
+	CKPQConn(&conn);
 
 	if (!key_update && !confirm_sharesummary) {
 		if (!(ok = paymentaddresses_fill(conn)) || everyone_die)
@@ -1762,12 +1770,12 @@ static bool getdata3()
 		if (!(ok = miningpayouts_fill(conn)) || everyone_die)
 			goto sukamudai;
 	}
-	PQfinish(conn);
-	conn = dbconnect();
+	CKPQFinish(&conn);
+	CKPQConn(&conn);
 	if (!(ok = workinfo_fill(conn)) || everyone_die)
 		goto sukamudai;
-	PQfinish(conn);
-	conn = dbconnect();
+	CKPQFinish(&conn);
+	CKPQConn(&conn);
 	if (!(ok = marks_fill(conn)) || everyone_die)
 		goto sukamudai;
 	/* must be after workinfo */
@@ -1778,14 +1786,14 @@ static bool getdata3()
 		if (!(ok = payouts_fill(conn)) || everyone_die)
 			goto sukamudai;
 	}
-	PQfinish(conn);
-	conn = dbconnect();
+	CKPQFinish(&conn);
+	CKPQConn(&conn);
 	if (!key_update) {
 		if (!(ok = markersummary_fill(conn)) || everyone_die)
 			goto sukamudai;
 	}
-	PQfinish(conn);
-	conn = dbconnect();
+	CKPQFinish(&conn);
+	CKPQConn(&conn);
 	if (!key_update) {
 		if (!(ok = shares_fill(conn)) || everyone_die)
 			goto sukamudai;
@@ -1795,7 +1803,7 @@ static bool getdata3()
 
 sukamudai:
 
-	PQfinish(conn);
+	CKPQFinish(&conn);
 	return ok;
 }
 
@@ -6153,7 +6161,7 @@ static void *listener_all(void *arg)
 	else
 		clistener_using_data = true;
 
-	conn = dbconnect();
+	CKPQConn(&conn);
 	now = time(NULL);
 
 	while (!everyone_die) {
@@ -6250,8 +6258,8 @@ static void *listener_all(void *arg)
 
 		// Don't keep a connection for more than ~10s
 		if ((time(NULL) - now) > 10) {
-			PQfinish(conn);
-			conn = dbconnect();
+			CKPQFinish(&conn);
+			CKPQConn(&conn);
 			now = time(NULL);
 		}
 
@@ -6294,9 +6302,7 @@ static void *listener_all(void *arg)
 			}
 		}
 	}
-
-	if (conn)
-		PQfinish(conn);
+	CKPQFinish(&conn);
 
 	if (mythread != 0)
 		LOGNOTICE("%s() %s exiting", __func__, buf);
@@ -7202,7 +7208,7 @@ static void *process_reload(__maybe_unused void *arg)
 	when_add.tv_sec = RELOAD_QUEUE_SLEEP_MS / 1000;
 	when_add.tv_nsec = (RELOAD_QUEUE_SLEEP_MS % 1000) * 1000000;
 
-	conn = dbconnect();
+	CKPQConn(&conn);
 	now = time(NULL);
 
 	while (!everyone_die) {
@@ -7306,8 +7312,8 @@ static void *process_reload(__maybe_unused void *arg)
 
 		// Don't keep a connection for more than ~10s ... of processing
 		if ((time(NULL) - now) > 10) {
-			PQfinish(conn);
-			conn = dbconnect();
+			CKPQFinish(&conn);
+			CKPQConn(&conn);
 			now = time(NULL);
 		}
 
@@ -7322,9 +7328,7 @@ static void *process_reload(__maybe_unused void *arg)
 
 		tick();
 	}
-
-	if (conn)
-		PQfinish(conn);
+	CKPQFinish(&conn);
 
 	if (mythread == 0) {
 		for (i = 1; i < THREAD_LIMIT; i++) {
@@ -7859,7 +7863,7 @@ static void *pqproc(void *arg)
 	when_add.tv_nsec = (CMD_QUEUE_SLEEP_MS % 1000) * 1000000;
 
 	now = time(NULL);
-	conn = dbconnect();
+	CKPQConn(&conn);
 	wqgot = 0;
 
 	// Override checking until pool0 is complete
@@ -7972,8 +7976,8 @@ static void *pqproc(void *arg)
 		/* Don't keep a connection for more than ~10s or ~10000 items
 		 *  but always have a connection open */
 		if ((time(NULL) - now) > 10 || wqgot > 10000) {
-			PQfinish(conn);
-			conn = dbconnect();
+			CKPQFinish(&conn);
+			CKPQConn(&conn);
 			now = time(NULL);
 			wqgot = 0;
 		}
@@ -8043,9 +8047,7 @@ static void *pqproc(void *arg)
 			mutex_unlock(&wq_pool_waitlock);
 		}
 	}
-
-	if (conn)
-		PQfinish(conn);
+	CKPQFinish(&conn);
 
 	if (mythread == 0) {
 		for (i = 1; i < THREAD_LIMIT; i++) {
