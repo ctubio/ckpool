@@ -615,14 +615,8 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	PARCHKVAL(par, 3, params);
 
 	conned = CKPQConn(&conn);
-	// Beginning of a write txn
-	res = CKPQExec(conn, "Begin", CKPQ_WRITE);
-	rescode = CKPQResultStatus(res);
-	CKPQClear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Begin", rescode, conn);
+	if (!CKPQBegin(conn))
 		goto unparam;
-	}
 
 	res = CKPQExecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
@@ -873,14 +867,8 @@ bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item, char *by,
 	PARCHKVAL(par, 3, params);
 
 	conned = CKPQConn(&conn);
-	// Beginning of a write txn
-	res = CKPQExec(conn, "Begin", CKPQ_WRITE);
-	rescode = CKPQResultStatus(res);
-	CKPQClear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Begin", rescode, conn);
+	if (!CKPQBegin(conn))
 		goto unparam;
-	}
 
 	res = CKPQExecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
@@ -1687,13 +1675,8 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	PARCHKVAL(par, 3, params);
 
 	conned = CKPQConn(&conn);
-	res = CKPQExec(conn, "Begin", CKPQ_WRITE);
-	rescode = CKPQResultStatus(res);
-	CKPQClear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Begin", rescode, conn);
+	if (!CKPQBegin(conn))
 		goto unparam;
-	}
 
 	res = CKPQExecParams(conn, upd, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
