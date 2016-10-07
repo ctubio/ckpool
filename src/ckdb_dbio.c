@@ -2786,12 +2786,33 @@ void oc_ips(OPTIONCONTROL *oc, const char *from)
 	}
 }
 
+void oc_trf(OPTIONCONTROL *oc, const char *from)
+{
+	int ct;
+
+	ct = atoi(oc->optionvalue);
+	if (ct < 0 || ct > 64) {
+		LOGERR("%s(%s) ERR set cull_transfer ignored '%s' (%d)"
+			" must be 0..64",
+			from, __func__, oc->optionvalue, ct);
+	} else {
+		K_WLOCK(transfer_free);
+		// ct isn't the value, it's the multiplier
+		cull_transfer = ct * ALLOC_TRANSFER;
+		transfer_free->cull_limit = cull_transfer;
+		K_WUNLOCK(transfer_free);
+		LOGWARNING("%s(%s) set cull_transfer to %d->%d",
+			   from, __func__, ct, cull_transfer);
+	}
+}
+
 OC_TRIGGER oc_trigger[] = {
 	{ SWITCH_STATE_NAME,	true,	oc_switch_state },
 	{ DIFF_PERCENT_NAME,	true,	oc_diff_percent },
 	{ OC_LIMITS,		false,	oc_event_limits },
 	{ OC_OLIMITS,		false,	oc_ovent_limits },
 	{ OC_IPS,		false,	oc_ips },
+	{ CULL_TRANSFER_NAME,	true,	oc_trf },
 	{ NULL, 0, NULL }
 };
 

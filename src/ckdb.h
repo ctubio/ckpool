@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.601"
+#define CKDB_VERSION DB_VERSION"-2.602"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -1563,13 +1563,17 @@ typedef struct transfer {
 // Suggest malloc use MMAP = largest under 2MB
 #define ALLOC_TRANSFER ((int)(2*1024*1024/sizeof(TRANSFER)))
 #define LIMIT_TRANSFER 0
-/* ALLOC_TRANSFER is ~14k, but it should only ever get this big during a reload
- * so set it a bit above that */
-#define CULL_TRANSFER 32768
+// ALLOC_TRANSFER is ~14k, allocated often is 3
+#define CULL_TRANSFER (4 * ALLOC_TRANSFER)
 #define INIT_TRANSFER(_item) INIT_GENERIC(_item, transfer)
 #define DATA_TRANSFER(_var, _item) DATA_GENERIC(_var, _item, transfer, true)
 
 extern K_LIST *transfer_free;
+
+/* Allow defining and adjusting it on a running system
+ *  cull_limit is set to the optionvalue * ALLOC_TRANSFER */
+#define CULL_TRANSFER_NAME "CullTransfer"
+extern int cull_transfer;
 
 #define transfer_data(_item) _transfer_data(_item, WHERE_FFL_HERE)
 

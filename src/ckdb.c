@@ -624,6 +624,7 @@ K_STORE *heartbeatqueue_store;
 
 // TRANSFER
 K_LIST *transfer_free;
+int cull_transfer = CULL_TRANSFER;
 
 // SEQSET
 K_LIST *seqset_free;
@@ -2059,7 +2060,7 @@ static void alloc_storage()
 
 	transfer_free = k_new_list_cull(Transfer, sizeof(TRANSFER),
 					ALLOC_TRANSFER, LIMIT_TRANSFER, true,
-					CULL_TRANSFER);
+					cull_transfer);
 	transfer_free->dsp_func = dsp_transfer;
 
 	users_free = k_new_list("Users", sizeof(USERS),
@@ -2277,6 +2278,9 @@ static void alloc_storage()
 	userinfo_root = new_ktree(NULL, cmp_userinfo, userinfo_free);
 
 #if LOCK_CHECK
+	// Above all needed for optioncontrol_trigger()
+	DLPRIO(optioncontrol, 96);
+
 	DLPRIO(seqset, 91);
 
 	DLPRIO(transfer, 90);
@@ -2301,9 +2305,6 @@ static void alloc_storage()
 	DLPRIO(blocks, 53);
 
 	DLPRIO(userinfo, 50);
-
-	// Uses event_limits
-	DLPRIO(optioncontrol, 49);
 
 	// Needs to check users and ips and uses events_limits
 	DLPRIO(events, 48);
