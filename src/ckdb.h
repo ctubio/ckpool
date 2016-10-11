@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.602"
+#define CKDB_VERSION DB_VERSION"-2.700"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -69,6 +69,10 @@
 
 #define STRINT(x) STRINT2(x)
 #define STRINT2(x) #x
+
+// Same as above but name it what we are using it for
+#define STRMACRO(x) STRMAC2(x)
+#define STRMAC2(x) #x
 
 // So they can fit into a 1 byte flag field
 #define TRUE_STR "Y"
@@ -407,19 +411,33 @@ extern int btc_timeout;
 // Lock access to the above variables so they can be changed
 extern cklock_t btc_lock;
 
-#define EDDB "expirydate"
-#define CDDB "createdate"
-#define CDTRF CDDB
-#define BYDB "createby"
-#define BYTRF BYDB
-#define CODEDB "createcode"
-#define CODETRF CODEDB
-#define INETDB "createinet"
-#define INETTRF INETDB
-#define MDDB "modifydate"
-#define MBYDB "modifyby"
-#define MCODEDB "modifycode"
-#define MINETDB "modifyinet"
+#define _EDDB expirydate
+#define _CDDB createdate
+#define _CDTRF _CDDB
+#define _BYDB createby
+#define _BYTRF _BYDB
+#define _CODEDB createcode
+#define _CODETRF _CODEDB
+#define _INETDB createinet
+#define _INETTRF _INETDB
+#define _MDDB modifydate
+#define _MBYDB modifyby
+#define _MCODEDB modifycode
+#define _MINETDB modifyinet
+
+#define EDDB STRMACRO(_EDDB)
+#define CDDB STRMACRO(_CDDB)
+#define CDTRF STRMACRO(_CDTRF)
+#define BYDB STRMACRO(_BYDB)
+#define BYTRF STRMACRO(_BYTRF)
+#define CODEDB STRMACRO(_CODEDB)
+#define CODETRF STRMACRO(_CODETRF)
+#define INETDB STRMACRO(_INETDB)
+#define INETTRF STRMACRO(_INETTRF)
+#define MDDB STRMACRO(_MDDB)
+#define MBYDB STRMACRO(_MBYDB)
+#define MCODEDB STRMACRO(_MCODEDB)
+#define MINETDB STRMACRO(_MINETDB)
 
 extern char *by_default;
 extern char *inet_default;

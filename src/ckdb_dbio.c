@@ -25,40 +25,74 @@ char *pqerrmsg(PGconn *conn)
 	return buf;
 }
 
-#define PQ_GET_FLD(__res, __row, __name, __fld, __ok) do { \
-		int __col = PQfnumber(__res, __name); \
-		if (__col == -1) { \
-			LOGERR("%s(): Unknown field '%s' row %d", __func__, __name, __row); \
-			__ok = false; \
-		} else { \
-			__fld = PQgetvalue(__res, __row, __col); \
-			if (__fld == NULL) { \
-				LOGERR("%s(): Invalid field '%s' or row %d", __func__, __name, __row); \
+/* *** WARNING: each field used in PQ_VAL_FLD() must (of course) have __num
+ *  defined, but must also (re)initialise it to -1 with each call to PQexec
+ * N.B. it may? not be necessary to reinitialise them with each subsequent
+ *  fetch, however I can't find that clearly documented anywhere, it may change
+ *  in the future, and once per fetch reduces the number of times by a rather
+ *  large factor of 9999 so it doesn't really matter repeating it each fetch */
+#define CKPQFETCHSIZ 9999
+#define CKPQFETCHSTR STRINT(CKPQFETCHSIZ)
+#define FETCHTICK 100000
+#define CKPQFUNDEF -1
+#define CKPQ_VAL_FLD(__res, __row, __num, __name, __fld, __ok) do { \
+		if (__num == CKPQFUNDEF) { \
+			__num = PQfnumber(__res, __name); \
+			if (__num == CKPQFUNDEF) { \
+				LOGERR("%s():%d: Unknown field '%s' row %d", \
+					__func__, __LINE__, __name, __row); \
 				__ok = false; \
-			}\
+			} \
 		} \
+		__fld = PQgetvalue(__res, __row, __num); \
+		if (__fld == NULL) { \
+			LOGERR("%s():%d Invalid field '%s' or row %d", \
+				__func__, __LINE__, __name, __row); \
+			__ok = false; \
+		}\
 	} while (0)
 
+// Allow params to be macros
+
+#define CKPQ_VAL_FLD_tail2(__res, __row, __name, __fld, __ok) \
+	CKPQ_VAL_FLD(__res, __row, __name ## _num__, #__name, __fld, __ok)
+#define CKPQ_VAL_FLD_tail(__res, __row, __name, __fld, __ok) \
+	CKPQ_VAL_FLD_tail2(__res, __row, __name, __fld, __ok)
+#define CKPQ_VAL_FLD_num2(__res, __row, __name, __fld, __ok) \
+	CKPQ_VAL_FLD(__res, __row, __name ## _num, #__name, __fld, __ok)
+#define CKPQ_VAL_FLD_num(__res, __row, __name, __fld, __ok) \
+	CKPQ_VAL_FLD_num2(__res, __row, __name, __fld, __ok)
+#define CKPQADDNUM2(__name) __name ## _num__
+#define CKPQADDNUM(__name) CKPQADDNUM2(__name)
+
 // HISTORY FIELDS
+#define HISTORYDATE_num \
+	int CKPQADDNUM(_CDDB), CKPQADDNUM(_BYDB), CKPQADDNUM(_CODEDB), \
+		CKPQADDNUM(_INETDB), CKPQADDNUM(_EDDB)
+
+#define HISTORYDATE_init \
+	CKPQADDNUM(_CDDB) = CKPQADDNUM(_BYDB) = CKPQADDNUM(_CODEDB) = \
+	CKPQADDNUM(_INETDB) = CKPQADDNUM(_EDDB) = CKPQFUNDEF
+
 #define HISTORYDATEFLDS(_res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(BYDB, _fld, (_data)->createby); \
-		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(CODEDB, _fld, (_data)->createcode); \
-		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(INETDB, _fld, (_data)->createinet); \
-		PQ_GET_FLD(_res, _row, EDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _EDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(EDDB, _fld, (_data)->expirydate); \
@@ -67,23 +101,23 @@ char *pqerrmsg(PGconn *conn)
 
 #define HISTORYDATEIN(_res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_createby = intransient_str(BYDB, _fld); \
-		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_createcode = intransient_str(CODEDB, _fld); \
-		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_createinet = intransient_str(INETDB, _fld); \
-		PQ_GET_FLD(_res, _row, EDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _EDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(EDDB, _fld, (_data)->expirydate); \
@@ -107,74 +141,47 @@ char *pqerrmsg(PGconn *conn)
 	} while (0)
 
 // MODIFY FIELDS
-#define MODIFYDATEFLDPOINTERS(_list, _res, _row, _data, _ok) do { \
-		char *_fld; \
-		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		SET_CREATEBY(_list, (_data)->createby, _fld); \
-		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		SET_CREATECODE(_list, (_data)->createcode, _fld); \
-		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		SET_CREATEINET(_list, (_data)->createinet, _fld); \
-		PQ_GET_FLD(_res, _row, MDDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		TXT_TO_TVDB(MDDB, _fld, (_data)->modifydate); \
-		PQ_GET_FLD(_res, _row, MBYDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		SET_MODIFYBY(_list, (_data)->modifyby, _fld); \
-		PQ_GET_FLD(_res, _row, MCODEDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		SET_MODIFYCODE(_list, (_data)->modifycode, _fld); \
-		PQ_GET_FLD(_res, _row, MINETDB, _fld, _ok); \
-		if (!_ok) \
-			break; \
-		SET_MODIFYINET(_list, (_data)->modifyinet, _fld); \
-		(_data)->pointers = (_data)->pointers; \
-	} while (0)
+#define MODIFYDATE_num \
+	int CKPQADDNUM(_CDDB), CKPQADDNUM(_BYDB), CKPQADDNUM(_CODEDB), \
+		CKPQADDNUM(_INETDB), CKPQADDNUM(_MDDB), CKPQADDNUM(_MBYDB), \
+		CKPQADDNUM(_MCODEDB), CKPQADDNUM(_MINETDB)
+
+#define MODIFYDATE_init \
+	CKPQADDNUM(_CDDB) = CKPQADDNUM(_BYDB) = CKPQADDNUM(_CODEDB) = \
+	CKPQADDNUM(_INETDB) = CKPQADDNUM(_MDDB) = CKPQADDNUM(_MBYDB) = \
+	CKPQADDNUM(_MCODEDB) = CKPQADDNUM(_MINETDB) = CKPQFUNDEF
 
 #define MODIFYDATEIN(_res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_createby = intransient_str(BYDB, _fld); \
-		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_createcode = intransient_str(CODEDB, _fld); \
-		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_createinet = intransient_str(INETDB, _fld); \
-		PQ_GET_FLD(_res, _row, MDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _MDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(MDDB, _fld, (_data)->modifydate); \
-		PQ_GET_FLD(_res, _row, MBYDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _MBYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_modifyby = intransient_str(MBYDB, _fld); \
-		PQ_GET_FLD(_res, _row, MCODEDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _MCODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_modifycode = intransient_str(MCODEDB, _fld); \
-		PQ_GET_FLD(_res, _row, MINETDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _MINETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		(_data)->in_modifyinet = intransient_str(MINETDB, _fld); \
@@ -211,21 +218,29 @@ char *pqerrmsg(PGconn *conn)
 	} while (0)
 
 // SIMPLE FIELDS
+#define SIMPLEDATE_num \
+	int CKPQADDNUM(_CDDB), CKPQADDNUM(_BYDB), CKPQADDNUM(_CODEDB), \
+		CKPQADDNUM(_INETDB)
+
+#define SIMPLEDATE_init \
+	CKPQADDNUM(_CDDB) = CKPQADDNUM(_BYDB) = CKPQADDNUM(_CODEDB) = \
+	CKPQADDNUM(_INETDB) = CKPQFUNDEF
+
 #define SIMPLEDATEFLDS(_res, _row, _data, _ok) do { \
 		char *_fld; \
-		PQ_GET_FLD(_res, _row, CDDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_TVDB(CDDB, _fld, (_data)->createdate); \
-		PQ_GET_FLD(_res, _row, BYDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _BYDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(BYDB, _fld, (_data)->createby); \
-		PQ_GET_FLD(_res, _row, CODEDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _CODEDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(CODEDB, _fld, (_data)->createcode); \
-		PQ_GET_FLD(_res, _row, INETDB, _fld, _ok); \
+		CKPQ_VAL_FLD_tail(_res, _row, _INETDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
 		TXT_TO_STR(INETDB, _fld, (_data)->createinet); \
@@ -484,7 +499,7 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 	PGresult *res;
 	char qry[1024];
 	char *params[5];
-	int n, par = 0;
+	int n, f, par = 0;
 	int64_t lastid;
 	char *field;
 	bool ok;
@@ -517,7 +532,8 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 	}
 
 	ok = true;
-	PQ_GET_FLD(res, 0, "lastid", field, ok);
+	f = CKPQFUNDEF;
+	CKPQ_VAL_FLD(res, 0, f, "lastid", field, ok);
 	if (!ok)
 		goto cleanup;
 	TXT_TO_BIGINT("lastid", field, lastid);
@@ -974,6 +990,11 @@ bool users_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int userid_num, username_num, status_num, emailaddress_num;
+	int joineddate_num, passwordhash_num, secondaryuserid_num, salt_num;
+	int userdata_num, userbits_num;
+	HISTORYDATE_num;
+
 	sel = "select "
 		"userid,username,status,emailaddress,joineddate,"
 		"passwordhash,secondaryuserid,salt,userdata,userbits"
@@ -998,6 +1019,10 @@ bool users_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	userid_num = username_num = status_num = emailaddress_num =
+	joineddate_num = passwordhash_num = secondaryuserid_num = salt_num =
+	userdata_num = userbits_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(users_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(users_free);
@@ -1009,55 +1034,55 @@ bool users_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "userid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("userid", field, row->userid);
 
-		PQ_GET_FLD(res, i, "username", field, ok);
+		CKPQ_VAL_FLD_num(res, i, username, field, ok);
 		if (!ok)
 			break;
 		row->in_username = intransient_str("username", field);
 
-		PQ_GET_FLD(res, i, "status", field, ok);
+		CKPQ_VAL_FLD_num(res, i, status, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("status", field, row->status);
 
-		PQ_GET_FLD(res, i, "emailaddress", field, ok);
+		CKPQ_VAL_FLD_num(res, i, emailaddress, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("emailaddress", field, row->emailaddress);
 
-		PQ_GET_FLD(res, i, "joineddate", field, ok);
+		CKPQ_VAL_FLD_num(res, i, joineddate, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_TVDB("joineddate", field, row->joineddate);
 
-		PQ_GET_FLD(res, i, "passwordhash", field, ok);
+		CKPQ_VAL_FLD_num(res, i, passwordhash, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("passwordhash", field, row->passwordhash);
 
-		PQ_GET_FLD(res, i, "secondaryuserid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, secondaryuserid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("secondaryuserid", field, row->secondaryuserid);
 
-		PQ_GET_FLD(res, i, "salt", field, ok);
+		CKPQ_VAL_FLD_num(res, i, salt, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("salt", field, row->salt);
 
 		// TODO: good case for invariant
-		PQ_GET_FLD(res, i, "userdata", field, ok);
+		CKPQ_VAL_FLD_num(res, i, userdata, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_PTR("userdata", field, row->userdata);
 		LIST_MEM_ADD(users_free, row->userdata);
 		users_databits(row);
 
-		PQ_GET_FLD(res, i, "userbits", field, ok);
+		CKPQ_VAL_FLD_num(res, i, userbits, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("userbits", field, row->userbits);
@@ -1194,7 +1219,7 @@ unparam:
 
 K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 			char *status, char *attstr, char *attstr2,
-			char *attnum, char *attnum2,  char *attdate,
+			char *attnum, char *attnum2, char *attdate,
 			char *attdate2, char *by, char *code,
 			char *inet, tv_t *cd, K_TREE *trf_root,
 			bool begun)
@@ -1349,6 +1374,10 @@ bool useratts_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int userid_num, attname_num, status_num, attstr_num, attstr2_num;
+	int attnum_num, attnum2_num, attdate_num, attdate2_num;
+	HISTORYDATE_num;
+
 	sel = "select "
 		"userid,attname,status,attstr,attstr2,attnum,attnum2"
 		",attdate,attdate2"
@@ -1373,6 +1402,9 @@ bool useratts_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	userid_num = attname_num = status_num = attstr_num = attstr2_num =
+	attnum_num = attnum2_num = attdate_num = attdate2_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(useratts_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(useratts_free);
@@ -1384,47 +1416,47 @@ bool useratts_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "userid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("userid", field, row->userid);
 
-		PQ_GET_FLD(res, i, "attname", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attname, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("attname", field, row->attname);
 
-		PQ_GET_FLD(res, i, "status", field, ok);
+		CKPQ_VAL_FLD_num(res, i, status, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("status", field, row->status);
 
-		PQ_GET_FLD(res, i, "attstr", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attstr, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("attstr", field, row->attstr);
 
-		PQ_GET_FLD(res, i, "attstr2", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attstr2, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("attstr2", field, row->attstr2);
 
-		PQ_GET_FLD(res, i, "attnum", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attnum, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("attnum", field, row->attnum);
 
-		PQ_GET_FLD(res, i, "attnum2", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attnum2, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("attnum2", field, row->attnum2);
 
-		PQ_GET_FLD(res, i, "attdate", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attdate, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_TVDB("attdate", field, row->attdate);
 
-		PQ_GET_FLD(res, i, "attdate2", field, ok);
+		CKPQ_VAL_FLD_num(res, i, attdate2, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_TVDB("attdate2", field, row->attdate2);
@@ -1743,6 +1775,11 @@ bool workers_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int userid_num, workername_num, difficultydefault_num;
+	int idlenotificationenabled_num, idlenotificationtime_num;
+	int workerbits_num, workerid_num;
+	HISTORYDATE_num;
+
 	sel = "declare wk cursor for select "
 		"userid,workername,difficultydefault,"
 		"idlenotificationenabled,idlenotificationtime,workerbits"
@@ -1782,6 +1819,10 @@ bool workers_fill(PGconn *conn)
 
 	n = 0;
 	ok = true;
+	userid_num = workername_num = difficultydefault_num =
+	idlenotificationenabled_num = idlenotificationtime_num =
+	workerbits_num = workerid_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	while ((t = PQntuples(res)) > 0) {
 		for (i = 0; i < t; i++) {
 			K_WLOCK(workers_free);
@@ -1795,32 +1836,32 @@ bool workers_fill(PGconn *conn)
 				break;
 			}
 
-			PQ_GET_FLD(res, i, "userid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("userid", field, row->userid);
 
-			PQ_GET_FLD(res, i, "workername", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workername, field, ok);
 			if (!ok)
 				break;
 			row->in_workername = intransient_str("workername", field);
 
-			PQ_GET_FLD(res, i, "difficultydefault", field, ok);
+			CKPQ_VAL_FLD_num(res, i, difficultydefault, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_INT("difficultydefault", field, row->difficultydefault);
 
-			PQ_GET_FLD(res, i, "idlenotificationenabled", field, ok);
+			CKPQ_VAL_FLD_num(res, i, idlenotificationenabled, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("idlenotificationenabled", field, row->idlenotificationenabled);
 
-			PQ_GET_FLD(res, i, "idlenotificationtime", field, ok);
+			CKPQ_VAL_FLD_num(res, i, idlenotificationtime, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_INT("idlenotificationtime", field, row->idlenotificationtime);
 
-			PQ_GET_FLD(res, i, "workerbits", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workerbits, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("workerbits", field, row->workerbits);
@@ -1829,7 +1870,7 @@ bool workers_fill(PGconn *conn)
 			if (!ok)
 				break;
 
-			PQ_GET_FLD(res, i, "workerid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workerid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("workerid", field, row->workerid);
@@ -1847,13 +1888,17 @@ bool workers_fill(PGconn *conn)
 			n++;
 		}
 		CKPQClear(res);
-		res = CKPQExec(conn, "fetch 9999 in wk", CKPQ_READ);
+		res = CKPQExec(conn, "fetch "CKPQFETCHSTR" in wk", CKPQ_READ);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Fetch next", rescode, conn);
 			ok = false;
 			break;
 		}
+		userid_num = workername_num = difficultydefault_num =
+		idlenotificationenabled_num = idlenotificationtime_num =
+		workerbits_num = workerid_num = CKPQFUNDEF;
+		HISTORYDATE_init;
 	}
 	if (!ok)
 		k_add_head(workers_free, item);
@@ -2121,6 +2166,10 @@ bool paymentaddresses_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int paymentaddressid_num, userid_num, payaddress_num, payratio_num;
+	int payname_num;
+	HISTORYDATE_num;
+
 	sel = "select "
 		"paymentaddressid,userid,payaddress,payratio,payname"
 		HISTORYDATECONTROL
@@ -2144,6 +2193,9 @@ bool paymentaddresses_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	paymentaddressid_num = userid_num = payaddress_num = payratio_num =
+	payname_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(paymentaddresses_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(paymentaddresses_free);
@@ -2155,27 +2207,27 @@ bool paymentaddresses_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "paymentaddressid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, paymentaddressid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("paymentaddressid", field, row->paymentaddressid);
 
-		PQ_GET_FLD(res, i, "userid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("userid", field, row->userid);
 
-		PQ_GET_FLD(res, i, "payaddress", field, ok);
+		CKPQ_VAL_FLD_num(res, i, payaddress, field, ok);
 		if (!ok)
 			break;
 		row->in_payaddress = intransient_str("payaddress", field);
 
-		PQ_GET_FLD(res, i, "payratio", field, ok);
+		CKPQ_VAL_FLD_num(res, i, payratio, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("payratio", field, row->payratio);
 
-		PQ_GET_FLD(res, i, "payname", field, ok);
+		CKPQ_VAL_FLD_num(res, i, payname, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("payname", field, row->payname);
@@ -2364,6 +2416,11 @@ bool payments_fill(PGconn *conn)
 	STRNCPY(tickbuf, TICK_PREFIX"pm 0");
 	cr_msg(false, tickbuf);
 
+	int paymentid_num, payoutid_num, userid_num, subname_num, paydate_num;
+	int payaddress_num, originaltxn_num, amount_num, diffacc_num;
+	int committxn_num, commitblockhash_num;
+	HISTORYDATE_num;
+
 	sel = "declare ps cursor for select "
 		"paymentid,payoutid,userid,subname,paydate,payaddress,"
 		"originaltxn,amount,diffacc,committxn,commitblockhash"
@@ -2400,6 +2457,10 @@ bool payments_fill(PGconn *conn)
 
 	n = 0;
 	ok = true;
+	paymentid_num = payoutid_num = userid_num = subname_num = paydate_num =
+	payaddress_num = originaltxn_num = amount_num = diffacc_num =
+	committxn_num = commitblockhash_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(payments_free);
 	while ((t = PQntuples(res)) > 0) {
 		for (i = 0; i < t; i++) {
@@ -2412,57 +2473,57 @@ bool payments_fill(PGconn *conn)
 				break;
 			}
 
-			PQ_GET_FLD(res, i, "paymentid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, paymentid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("paymentid", field, row->paymentid);
 
-			PQ_GET_FLD(res, i, "payoutid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, payoutid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("payoutid", field, row->payoutid);
 
-			PQ_GET_FLD(res, i, "userid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("userid", field, row->userid);
 
-			PQ_GET_FLD(res, i, "subname", field, ok);
+			CKPQ_VAL_FLD_num(res, i, subname, field, ok);
 			if (!ok)
 				break;
 			row->in_subname = intransient_str("subname", field);
 
-			PQ_GET_FLD(res, i, "paydate", field, ok);
+			CKPQ_VAL_FLD_num(res, i, paydate, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_TVDB("paydate", field, row->paydate);
 
-			PQ_GET_FLD(res, i, "payaddress", field, ok);
+			CKPQ_VAL_FLD_num(res, i, payaddress, field, ok);
 			if (!ok)
 				break;
 			row->in_payaddress = intransient_str("payaddress", field);
 
-			PQ_GET_FLD(res, i, "originaltxn", field, ok);
+			CKPQ_VAL_FLD_num(res, i, originaltxn, field, ok);
 			if (!ok)
 				break;
 			row->in_originaltxn = intransient_str("originaltxn", field);
 
-			PQ_GET_FLD(res, i, "amount", field, ok);
+			CKPQ_VAL_FLD_num(res, i, amount, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("amount", field, row->amount);
 
-			PQ_GET_FLD(res, i, "diffacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffacc", field, row->diffacc);
 
-			PQ_GET_FLD(res, i, "committxn", field, ok);
+			CKPQ_VAL_FLD_num(res, i, committxn, field, ok);
 			if (!ok)
 				break;
 			row->in_committxn = intransient_str("committxn", field);
 
-			PQ_GET_FLD(res, i, "commitblockhash", field, ok);
+			CKPQ_VAL_FLD_num(res, i, commitblockhash, field, ok);
 			if (!ok)
 				break;
 			row->in_commitblockhash = intransient_str("commitblockhash", field);
@@ -2474,7 +2535,7 @@ bool payments_fill(PGconn *conn)
 			add_to_ktree(payments_root, item);
 			k_add_head(payments_store, item);
 
-			if (n == 0 || ((n+1) % 100000) == 0) {
+			if (n == 0 || ((n+1) % FETCHTICK) == 0) {
 				pcom(n+1, pcombuf, sizeof(pcombuf));
 				snprintf(tickbuf, sizeof(tickbuf),
 					 TICK_PREFIX"pm %s", pcombuf);
@@ -2484,13 +2545,17 @@ bool payments_fill(PGconn *conn)
 			n++;
 		}
 		CKPQClear(res);
-		res = CKPQExec(conn, "fetch 9999 in ps", CKPQ_READ);
+		res = CKPQExec(conn, "fetch "CKPQFETCHSTR" in ps", CKPQ_READ);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Fetch next", rescode, conn);
 			ok = false;
 			break;
 		}
+		paymentid_num = payoutid_num = userid_num = subname_num =
+		paydate_num = payaddress_num = originaltxn_num = amount_num =
+		diffacc_num = committxn_num = commitblockhash_num = CKPQFUNDEF;
+		HISTORYDATE_init;
 	}
 	if (!ok)
 		k_add_head(payments_free, item);
@@ -3039,6 +3104,10 @@ bool optioncontrol_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int optionname_num, optionvalue_num, activationdate_num;
+	int activationheight_num;
+	HISTORYDATE_num;
+
 	// No need to keep old versions in ram for now ...
 	sel = "select "
 		"optionname,optionvalue,activationdate,activationheight"
@@ -3066,6 +3135,9 @@ bool optioncontrol_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	optionname_num = optionvalue_num = activationdate_num =
+	activationheight_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(optioncontrol_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(optioncontrol_free);
@@ -3077,23 +3149,23 @@ bool optioncontrol_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "optionname", field, ok);
+		CKPQ_VAL_FLD_num(res, i, optionname, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("optionname", field, row->optionname);
 
-		PQ_GET_FLD(res, i, "optionvalue", field, ok);
+		CKPQ_VAL_FLD_num(res, i, optionvalue, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BLOB("optionvalue", field, row->optionvalue);
 		LIST_MEM_ADD(optioncontrol_free, row->optionvalue);
 
-		PQ_GET_FLD(res, i, "activationdate", field, ok);
+		CKPQ_VAL_FLD_num(res, i, activationdate, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_TVDB("activationdate", field, row->activationdate);
 
-		PQ_GET_FLD(res, i, "activationheight", field, ok);
+		CKPQ_VAL_FLD_num(res, i, activationheight, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("activationheight", field, row->activationheight);
@@ -3310,6 +3382,11 @@ bool workinfo_fill(PGconn *conn)
 	STRNCPY(tickbuf, TICK_PREFIX"wi 0");
 	cr_msg(false, tickbuf);
 
+	int workinfoid_num, poolinstance_num, merklehash_num, prevhash_num;
+	int coinbase1_num, coinbase2_num, version_num, bits_num, ntime_num;
+	int reward_num;
+	HISTORYDATE_num;
+
 	APPEND_REALLOC_INIT(sel, off, len);
 	APPEND_REALLOC(sel, off, len,
 			"declare wi cursor for select "
@@ -3384,6 +3461,10 @@ bool workinfo_fill(PGconn *conn)
 
 	n = 0;
 	ok = true;
+	workinfoid_num = poolinstance_num = merklehash_num = prevhash_num =
+	coinbase1_num = coinbase2_num = version_num = bits_num = ntime_num =
+	reward_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(workinfo_free);
 	while ((t = PQntuples(res)) > 0) {
 		for (i = 0; i < t; i++) {
@@ -3396,7 +3477,7 @@ bool workinfo_fill(PGconn *conn)
 				break;
 			}
 
-			PQ_GET_FLD(res, i, "poolinstance", field, ok);
+			CKPQ_VAL_FLD_num(res, i, poolinstance, field, ok);
 			if (!ok)
 				break;
 			if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
@@ -3406,7 +3487,7 @@ bool workinfo_fill(PGconn *conn)
 			}
 			row->in_poolinstance = intransient_str("poolinstance", field);
 
-			PQ_GET_FLD(res, i, "workinfoid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workinfoid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
@@ -3414,39 +3495,39 @@ bool workinfo_fill(PGconn *conn)
 			row->transactiontree = EMPTY;
 			row->merklehash = EMPTY;
 
-			PQ_GET_FLD(res, i, "prevhash", field, ok);
+			CKPQ_VAL_FLD_num(res, i, prevhash, field, ok);
 			if (!ok)
 				break;
 			row->in_prevhash = intransient_str("prevhash", field);
 
-			PQ_GET_FLD(res, i, "coinbase1", field, ok);
+			CKPQ_VAL_FLD_num(res, i, coinbase1, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BLOB("coinbase1", field, row->coinbase1);
 			LIST_MEM_ADD(workinfo_free, row->coinbase1);
 
-			PQ_GET_FLD(res, i, "coinbase2", field, ok);
+			CKPQ_VAL_FLD_num(res, i, coinbase2, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BLOB("coinbase2", field, row->coinbase2);
 			LIST_MEM_ADD(workinfo_free, row->coinbase2);
 
-			PQ_GET_FLD(res, i, "version", field, ok);
+			CKPQ_VAL_FLD_num(res, i, version, field, ok);
 			if (!ok)
 				break;
 			row->in_version = intransient_str("version", field);
 
-			PQ_GET_FLD(res, i, "bits", field, ok);
+			CKPQ_VAL_FLD_num(res, i, bits, field, ok);
 			if (!ok)
 				break;
 			row->in_bits = intransient_str("bits", field);
 
-			PQ_GET_FLD(res, i, "ntime", field, ok);
+			CKPQ_VAL_FLD_num(res, i, ntime, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("ntime", field, row->ntime);
 
-			PQ_GET_FLD(res, i, "reward", field, ok);
+			CKPQ_VAL_FLD_num(res, i, reward, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("reward", field, row->reward);
@@ -3470,7 +3551,7 @@ bool workinfo_fill(PGconn *conn)
 				dbstatus.newest_workinfoid = row->workinfoid;
 			}
 
-			if (n == 0 || ((n+1) % 100000) == 0) {
+			if (n == 0 || ((n+1) % FETCHTICK) == 0) {
 				pcom(n+1, pcombuf, sizeof(pcombuf));
 				snprintf(tickbuf, sizeof(tickbuf),
 					 TICK_PREFIX"wi %s", pcombuf);
@@ -3480,13 +3561,17 @@ bool workinfo_fill(PGconn *conn)
 			n++;
 		}
 		CKPQClear(res);
-		res = CKPQExec(conn, "fetch 9999 in wi", CKPQ_READ);
+		res = CKPQExec(conn, "fetch "CKPQFETCHSTR" in wi", CKPQ_READ);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Fetch next", rescode, conn);
 			ok = false;
 			break;
 		}
+		workinfoid_num = poolinstance_num = merklehash_num =
+		prevhash_num = coinbase1_num = coinbase2_num = version_num =
+		bits_num = ntime_num = reward_num = CKPQFUNDEF;
+		HISTORYDATE_init;
 	}
 	if (!ok) {
 		free_workinfo_data(item);
@@ -4087,6 +4172,12 @@ bool shares_fill(PGconn *conn)
 	STRNCPY(tickbuf, TICK_PREFIX"sh 0");
 	cr_msg(false, tickbuf);
 
+	int workinfoid_num, userid_num, workername_num, clientid_num;
+	int enonce1_num, nonce2_num, nonce_num, diff_num, sdiff_num, errn_num;
+	int error_num, secondaryuserid_num, ntime_num, minsdiff_num, agent_num;
+	int address_num;
+	HISTORYDATE_num;
+
 	sel = "declare sh cursor for select "
 		"workinfoid,userid,workername,clientid,enonce1,nonce2,nonce,"
 		"diff,sdiff,errn,error,secondaryuserid,ntime,minsdiff,agent,"
@@ -4138,6 +4229,11 @@ bool shares_fill(PGconn *conn)
 
 	n = 0;
 	ok = true;
+	workinfoid_num = userid_num = workername_num = clientid_num =
+	enonce1_num = nonce2_num = nonce_num = diff_num = sdiff_num = errn_num =
+	error_num = secondaryuserid_num = ntime_num = minsdiff_num = agent_num =
+	address_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(shares_free);
 	while ((t = PQntuples(res)) > 0) {
 		for (i = 0; i < t; i++) {
@@ -4150,72 +4246,72 @@ bool shares_fill(PGconn *conn)
 				break;
 			}
 
-			PQ_GET_FLD(res, i, "workinfoid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workinfoid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
 
-			PQ_GET_FLD(res, i, "userid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("userid", field, row->userid);
 
-			PQ_GET_FLD(res, i, "workername", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workername, field, ok);
 			if (!ok)
 				break;
 			row->in_workername = intransient_str("workername", field);
 
-			PQ_GET_FLD(res, i, "clientid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, clientid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_INT("clientid", field, row->clientid);
 
-			PQ_GET_FLD(res, i, "enonce1", field, ok);
+			CKPQ_VAL_FLD_num(res, i, enonce1, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("enonce1", field, row->enonce1);
 
-			PQ_GET_FLD(res, i, "nonce2", field, ok);
+			CKPQ_VAL_FLD_num(res, i, nonce2, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("nonce2", field, row->nonce2);
 
-			PQ_GET_FLD(res, i, "nonce", field, ok);
+			CKPQ_VAL_FLD_num(res, i, nonce, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("nonce", field, row->nonce);
 
-			PQ_GET_FLD(res, i, "diff", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diff, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diff", field, row->diff);
 
-			PQ_GET_FLD(res, i, "sdiff", field, ok);
+			CKPQ_VAL_FLD_num(res, i, sdiff, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("sdiff", field, row->sdiff);
 
-			PQ_GET_FLD(res, i, "errn", field, ok);
+			CKPQ_VAL_FLD_num(res, i, errn, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_INT("errn", field, row->errn);
 
-			PQ_GET_FLD(res, i, "error", field, ok);
+			CKPQ_VAL_FLD_num(res, i, error, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("error", field, row->error);
 
-			PQ_GET_FLD(res, i, "secondaryuserid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, secondaryuserid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("secondaryuserid", field, row->secondaryuserid);
 
-			PQ_GET_FLD(res, i, "ntime", field, ok);
+			CKPQ_VAL_FLD_num(res, i, ntime, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_STR("ntime", field, row->ntime);
 
-			PQ_GET_FLD(res, i, "minsdiff", field, ok);
+			CKPQ_VAL_FLD_num(res, i, minsdiff, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("minsdiff", field, row->sdiff);
@@ -4224,14 +4320,14 @@ bool shares_fill(PGconn *conn)
 			if (!ok)
 				break;
 
-			PQ_GET_FLD(res, i, "agent", field, ok);
+			CKPQ_VAL_FLD_num(res, i, agent, field, ok);
 			if (!ok)
 				break;
 			if (!(*field))
 				no_agent++;
 			TXT_TO_STR("agent", field, row->agent);
 
-			PQ_GET_FLD(res, i, "address", field, ok);
+			CKPQ_VAL_FLD_num(res, i, address, field, ok);
 			if (!ok)
 				break;
 			if (!(*field))
@@ -4241,7 +4337,7 @@ bool shares_fill(PGconn *conn)
 			add_to_ktree(shares_db_root, item);
 			k_add_head(shares_hi_store, item);
 
-			if (n == 0 || ((n+1) % 100000) == 0) {
+			if (n == 0 || ((n+1) % FETCHTICK) == 0) {
 				pcom(n+1, pcombuf, sizeof(pcombuf));
 				snprintf(tickbuf, sizeof(tickbuf),
 					 TICK_PREFIX"sh %s", pcombuf);
@@ -4251,13 +4347,18 @@ bool shares_fill(PGconn *conn)
 			n++;
 		}
 		CKPQClear(res);
-		res = CKPQExec(conn, "fetch 9999 in sh", CKPQ_READ);
+		res = CKPQExec(conn, "fetch "CKPQFETCHSTR" in sh", CKPQ_READ);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Fetch next", rescode, conn);
 			ok = false;
 			break;
 		}
+		workinfoid_num = userid_num = workername_num = clientid_num =
+		enonce1_num = nonce2_num = nonce_num = diff_num = sdiff_num =
+		errn_num = error_num = secondaryuserid_num = ntime_num =
+		minsdiff_num = agent_num = address_num = CKPQFUNDEF;
+		HISTORYDATE_init;
 	}
 	if (!ok)
 		k_add_head(shares_free, item);
@@ -6314,6 +6415,12 @@ bool blocks_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int height_num, blockhash_num, workinfoid_num, userid_num;
+	int workername_num, clientid_num, enonce1_num, nonce2_num, nonce_num;
+	int reward_num, confirmed_num, info_num, diffacc_num, diffinv_num;
+	int shareacc_num, shareinv_num, elapsed_num, statsconfirmed_num;
+	HISTORYDATE_num;
+
 	sel = "select "
 		"height,blockhash,workinfoid,userid,workername,"
 		"clientid,enonce1,nonce2,nonce,reward,confirmed,info,"
@@ -6339,6 +6446,12 @@ bool blocks_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	height_num = blockhash_num = workinfoid_num = userid_num =
+	workername_num = clientid_num = enonce1_num = nonce2_num = nonce_num =
+	reward_num = confirmed_num = info_num = diffacc_num = diffinv_num =
+	shareacc_num = shareinv_num = elapsed_num =
+	statsconfirmed_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(blocks_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(blocks_free);
@@ -6350,92 +6463,92 @@ bool blocks_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "height", field, ok);
+		CKPQ_VAL_FLD_num(res, i, height, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("height", field, row->height);
 
-		PQ_GET_FLD(res, i, "blockhash", field, ok);
+		CKPQ_VAL_FLD_num(res, i, blockhash, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("blockhash", field, row->blockhash);
 
-		PQ_GET_FLD(res, i, "workinfoid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workinfoid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
 
-		PQ_GET_FLD(res, i, "userid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("userid", field, row->userid);
 
-		PQ_GET_FLD(res, i, "workername", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workername, field, ok);
 		if (!ok)
 			break;
 		row->in_workername = intransient_str("workername", field);
 
-		PQ_GET_FLD(res, i, "clientid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, clientid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("clientid", field, row->clientid);
 
-		PQ_GET_FLD(res, i, "enonce1", field, ok);
+		CKPQ_VAL_FLD_num(res, i, enonce1, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("enonce1", field, row->enonce1);
 
-		PQ_GET_FLD(res, i, "nonce2", field, ok);
+		CKPQ_VAL_FLD_num(res, i, nonce2, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("nonce2", field, row->nonce2);
 
-		PQ_GET_FLD(res, i, "nonce", field, ok);
+		CKPQ_VAL_FLD_num(res, i, nonce, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("nonce", field, row->nonce);
 
-		PQ_GET_FLD(res, i, "reward", field, ok);
+		CKPQ_VAL_FLD_num(res, i, reward, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("reward", field, row->reward);
 
-		PQ_GET_FLD(res, i, "confirmed", field, ok);
+		CKPQ_VAL_FLD_num(res, i, confirmed, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("confirmed", field, row->confirmed);
 
-		PQ_GET_FLD(res, i, "info", field, ok);
+		CKPQ_VAL_FLD_num(res, i, info, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("info", field, row->info);
 
-		PQ_GET_FLD(res, i, "diffacc", field, ok);
+		CKPQ_VAL_FLD_num(res, i, diffacc, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("diffacc", field, row->diffacc);
 
-		PQ_GET_FLD(res, i, "diffinv", field, ok);
+		CKPQ_VAL_FLD_num(res, i, diffinv, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("diffinv", field, row->diffinv);
 
-		PQ_GET_FLD(res, i, "shareacc", field, ok);
+		CKPQ_VAL_FLD_num(res, i, shareacc, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("shareacc", field, row->shareacc);
 
-		PQ_GET_FLD(res, i, "shareinv", field, ok);
+		CKPQ_VAL_FLD_num(res, i, shareinv, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("shareinv", field, row->shareinv);
 
-		PQ_GET_FLD(res, i, "elapsed", field, ok);
+		CKPQ_VAL_FLD_num(res, i, elapsed, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("elapsed", field, row->elapsed);
 
-		PQ_GET_FLD(res, i, "statsconfirmed", field, ok);
+		CKPQ_VAL_FLD_num(res, i, statsconfirmed, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("statsconfirmed", field, row->statsconfirmed);
@@ -6639,6 +6752,10 @@ bool miningpayouts_fill(PGconn *conn)
 	STRNCPY(tickbuf, TICK_PREFIX"mp 0");
 	cr_msg(false, tickbuf);
 
+
+	int payoutid_num, userid_num, diffacc_num, amount_num;
+	HISTORYDATE_num;
+
 	sel = "declare mp cursor for select "
 		"payoutid,userid,diffacc,amount"
 		HISTORYDATECONTROL
@@ -6684,6 +6801,8 @@ bool miningpayouts_fill(PGconn *conn)
 
 	n = 0;
 	ok = true;
+	payoutid_num = userid_num = diffacc_num = amount_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(miningpayouts_free);
 	while ((t = PQntuples(res)) > 0) {
 		for (i = 0; i < t; i++) {
@@ -6696,22 +6815,22 @@ bool miningpayouts_fill(PGconn *conn)
 				break;
 			}
 
-			PQ_GET_FLD(res, i, "payoutid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, payoutid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("payoutid", field, row->payoutid);
 
-			PQ_GET_FLD(res, i, "userid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("userid", field, row->userid);
 
-			PQ_GET_FLD(res, i, "diffacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffacc", field, row->diffacc);
 
-			PQ_GET_FLD(res, i, "amount", field, ok);
+			CKPQ_VAL_FLD_num(res, i, amount, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("amount", field, row->amount);
@@ -6723,7 +6842,7 @@ bool miningpayouts_fill(PGconn *conn)
 			add_to_ktree(miningpayouts_root, item);
 			k_add_head(miningpayouts_store, item);
 
-			if (n == 0 || ((n+1) % 100000) == 0) {
+			if (n == 0 || ((n+1) % FETCHTICK) == 0) {
 				pcom(n+1, pcombuf, sizeof(pcombuf));
 				snprintf(tickbuf, sizeof(tickbuf),
 					 TICK_PREFIX"mp %s", pcombuf);
@@ -6733,13 +6852,15 @@ bool miningpayouts_fill(PGconn *conn)
 			n++;
 		}
 		CKPQClear(res);
-		res = CKPQExec(conn, "fetch 9999 in mp", CKPQ_READ);
+		res = CKPQExec(conn, "fetch "CKPQFETCHSTR" in mp", CKPQ_READ);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Fetch next", rescode, conn);
 			ok = false;
 			break;
 		}
+		payoutid_num = userid_num = diffacc_num = amount_num = CKPQFUNDEF;
+		HISTORYDATE_init;
 	}
 	if (!ok)
 		k_add_head(miningpayouts_free, item);
@@ -7174,6 +7295,12 @@ bool payouts_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int payoutid_num, height_num, blockhash_num, minerreward_num;
+	int workinfoidstart_num, workinfoidend_num, elapsed_num, status_num;
+	int diffwanted_num, diffused_num, shareacc_num, lastshareacc_num;
+	int stats_num;
+	HISTORYDATE_num;
+
 	sel = "select "
 		"payoutid,height,blockhash,minerreward,workinfoidstart,workinfoidend,"
 		"elapsed,status,diffwanted,diffused,shareacc,lastshareacc,stats"
@@ -7198,6 +7325,11 @@ bool payouts_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	payoutid_num = height_num = blockhash_num = minerreward_num = 
+	workinfoidstart_num = workinfoidend_num = elapsed_num = status_num =
+	diffwanted_num = diffused_num = shareacc_num = lastshareacc_num =
+	stats_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(payouts_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(payouts_free);
@@ -7209,67 +7341,67 @@ bool payouts_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "payoutid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, payoutid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("payoutid", field, row->payoutid);
 
-		PQ_GET_FLD(res, i, "height", field, ok);
+		CKPQ_VAL_FLD_num(res, i, height, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("height", field, row->height);
 
-		PQ_GET_FLD(res, i, "blockhash", field, ok);
+		CKPQ_VAL_FLD_num(res, i, blockhash, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("blockhash", field, row->blockhash);
 
-		PQ_GET_FLD(res, i, "minerreward", field, ok);
+		CKPQ_VAL_FLD_num(res, i, minerreward, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("minerreward", field, row->minerreward);
 
-		PQ_GET_FLD(res, i, "workinfoidstart", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workinfoidstart, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("workinfoidstart", field, row->workinfoidstart);
 
-		PQ_GET_FLD(res, i, "workinfoidend", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workinfoidend, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("workinfoidend", field, row->workinfoidend);
 
-		PQ_GET_FLD(res, i, "elapsed", field, ok);
+		CKPQ_VAL_FLD_num(res, i, elapsed, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("elapsed", field, row->elapsed);
 
-		PQ_GET_FLD(res, i, "status", field, ok);
+		CKPQ_VAL_FLD_num(res, i, status, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("status", field, row->status);
 
-		PQ_GET_FLD(res, i, "diffwanted", field, ok);
+		CKPQ_VAL_FLD_num(res, i, diffwanted, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("diffwanted", field, row->diffwanted);
 
-		PQ_GET_FLD(res, i, "diffused", field, ok);
+		CKPQ_VAL_FLD_num(res, i, diffused, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("diffused", field, row->diffused);
 
-		PQ_GET_FLD(res, i, "shareacc", field, ok);
+		CKPQ_VAL_FLD_num(res, i, shareacc, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("shareacc", field, row->shareacc);
 
-		PQ_GET_FLD(res, i, "lastshareacc", field, ok);
+		CKPQ_VAL_FLD_num(res, i, lastshareacc, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_TVDB("lastshareacc", field, row->lastshareacc);
 
-		PQ_GET_FLD(res, i, "stats", field, ok);
+		CKPQ_VAL_FLD_num(res, i, stats, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BLOB("stats", field, row->stats);
@@ -7929,6 +8061,10 @@ bool poolstats_fill(PGconn *conn)
 			tm.tm_sec,
 			tzinfo);
 
+	int poolinstance_num, elapsed_num, users_num, workers_num, hashrate_num;
+	int hashrate5m_num, hashrate1hr_num, hashrate24hr_num;
+	SIMPLEDATE_num;
+
 	APPEND_REALLOC_INIT(sel, off, len);
 	APPEND_REALLOC(sel, off, len,
 			"select "
@@ -7959,6 +8095,10 @@ bool poolstats_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	poolinstance_num = elapsed_num = users_num = workers_num =
+	hashrate_num = hashrate5m_num = hashrate1hr_num =
+	hashrate24hr_num = CKPQFUNDEF;
+	SIMPLEDATE_init;
 	K_WLOCK(poolstats_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(poolstats_free);
@@ -7972,7 +8112,7 @@ bool poolstats_fill(PGconn *conn)
 
 		row->stored = true;
 
-		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		CKPQ_VAL_FLD_num(res, i, poolinstance, field, ok);
 		if (!ok)
 			break;
 		if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
@@ -7982,37 +8122,37 @@ bool poolstats_fill(PGconn *conn)
 		}
 		row->in_poolinstance = intransient_str("poolinstance", field);
 
-		PQ_GET_FLD(res, i, "elapsed", field, ok);
+		CKPQ_VAL_FLD_num(res, i, elapsed, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("elapsed", field, row->elapsed);
 
-		PQ_GET_FLD(res, i, "users", field, ok);
+		CKPQ_VAL_FLD_num(res, i, users, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("users", field, row->users);
 
-		PQ_GET_FLD(res, i, "workers", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workers, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_INT("workers", field, row->workers);
 
-		PQ_GET_FLD(res, i, "hashrate", field, ok);
+		CKPQ_VAL_FLD_num(res, i, hashrate, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("hashrate", field, row->hashrate);
 
-		PQ_GET_FLD(res, i, "hashrate5m", field, ok);
+		CKPQ_VAL_FLD_num(res, i, hashrate5m, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("hashrate5m", field, row->hashrate5m);
 
-		PQ_GET_FLD(res, i, "hashrate1hr", field, ok);
+		CKPQ_VAL_FLD_num(res, i, hashrate1hr, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("hashrate1hr", field, row->hashrate1hr);
 
-		PQ_GET_FLD(res, i, "hashrate24hr", field, ok);
+		CKPQ_VAL_FLD_num(res, i, hashrate24hr, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_DOUBLE("hashrate24hr", field, row->hashrate24hr);
@@ -8390,6 +8530,13 @@ bool markersummary_fill(PGconn *conn)
 		}
 	}
 
+	int markerid_num, userid_num, workername_num, diffacc_num, diffsta_num;
+	int diffdup_num, diffhi_num, diffrej_num, shareacc_num, sharesta_num;
+	int sharedup_num, sharehi_num, sharerej_num, sharecount_num;
+	int errorcount_num, firstshare_num, lastshare_num, firstshareacc_num;
+	int lastshareacc_num, lastdiffacc_num;
+	MODIFYDATE_num;
+
 	// TODO: limit how far back
 	sel = "declare ws cursor for select "
 		"markerid,userid,workername,diffacc,diffsta,diffdup,diffhi,"
@@ -8453,6 +8600,12 @@ bool markersummary_fill(PGconn *conn)
 
 	n = 0;
 	ok = true;
+	markerid_num = userid_num = workername_num = diffacc_num = diffsta_num =
+	diffdup_num = diffhi_num = diffrej_num = shareacc_num = sharesta_num =
+	sharedup_num = sharehi_num = sharerej_num = sharecount_num =
+	errorcount_num = firstshare_num = lastshare_num = firstshareacc_num =
+	lastshareacc_num = lastdiffacc_num = CKPQFUNDEF;
+	MODIFYDATE_init;
 	K_WLOCK(markersummary_free);
 	while ((t = PQntuples(res)) > 0) {
 		// Avoid locking them too many times
@@ -8468,102 +8621,102 @@ bool markersummary_fill(PGconn *conn)
 				break;
 			}
 
-			PQ_GET_FLD(res, i, "markerid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, markerid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("markerid", field, row->markerid);
 
-			PQ_GET_FLD(res, i, "userid", field, ok);
+			CKPQ_VAL_FLD_num(res, i, userid, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("userid", field, row->userid);
 
-			PQ_GET_FLD(res, i, "workername", field, ok);
+			CKPQ_VAL_FLD_num(res, i, workername, field, ok);
 			if (!ok)
 				break;
 			row->in_workername = intransient_str("workername", field);
 
-			PQ_GET_FLD(res, i, "diffacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffacc", field, row->diffacc);
 
-			PQ_GET_FLD(res, i, "diffsta", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffsta, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffsta", field, row->diffsta);
 
-			PQ_GET_FLD(res, i, "diffdup", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffdup, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffdup", field, row->diffdup);
 
-			PQ_GET_FLD(res, i, "diffhi", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffhi, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffhi", field, row->diffhi);
 
-			PQ_GET_FLD(res, i, "diffrej", field, ok);
+			CKPQ_VAL_FLD_num(res, i, diffrej, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("diffrej", field, row->diffrej);
 
-			PQ_GET_FLD(res, i, "shareacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, shareacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("shareacc", field, row->shareacc);
 
-			PQ_GET_FLD(res, i, "sharesta", field, ok);
+			CKPQ_VAL_FLD_num(res, i, sharesta, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("sharesta", field, row->sharesta);
 
-			PQ_GET_FLD(res, i, "sharedup", field, ok);
+			CKPQ_VAL_FLD_num(res, i, sharedup, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("sharedup", field, row->sharedup);
 
-			PQ_GET_FLD(res, i, "sharehi", field, ok);
+			CKPQ_VAL_FLD_num(res, i, sharehi, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("sharehi", field, row->sharehi);
 
-			PQ_GET_FLD(res, i, "sharerej", field, ok);
+			CKPQ_VAL_FLD_num(res, i, sharerej, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("sharerej", field, row->sharerej);
 
-			PQ_GET_FLD(res, i, "sharecount", field, ok);
+			CKPQ_VAL_FLD_num(res, i, sharecount, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("sharecount", field, row->sharecount);
 
-			PQ_GET_FLD(res, i, "errorcount", field, ok);
+			CKPQ_VAL_FLD_num(res, i, errorcount, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_BIGINT("errorcount", field, row->errorcount);
 
-			PQ_GET_FLD(res, i, "firstshare", field, ok);
+			CKPQ_VAL_FLD_num(res, i, firstshare, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_TVDB("firstshare", field, row->firstshare);
 
-			PQ_GET_FLD(res, i, "lastshare", field, ok);
+			CKPQ_VAL_FLD_num(res, i, lastshare, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_TVDB("lastshare", field, row->lastshare);
 
-			PQ_GET_FLD(res, i, "firstshareacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, firstshareacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_TVDB("firstshareacc", field, row->firstshareacc);
 
-			PQ_GET_FLD(res, i, "lastshareacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, lastshareacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_TVDB("lastshareacc", field, row->lastshareacc);
 
-			PQ_GET_FLD(res, i, "lastdiffacc", field, ok);
+			CKPQ_VAL_FLD_num(res, i, lastdiffacc, field, ok);
 			if (!ok)
 				break;
 			TXT_TO_DOUBLE("lastdiffacc", field, row->lastdiffacc);
@@ -8605,7 +8758,7 @@ bool markersummary_fill(PGconn *conn)
 
 			userinfo_update(NULL, NULL, row, false);
 
-			if (n == 0 || ((n+1) % 100000) == 0) {
+			if (n == 0 || ((n+1) % FETCHTICK) == 0) {
 				pcom(n+1, pcombuf, sizeof(pcombuf));
 				snprintf(tickbuf, sizeof(tickbuf),
 					 TICK_PREFIX"ms %s", pcombuf);
@@ -8617,13 +8770,20 @@ bool markersummary_fill(PGconn *conn)
 		K_WUNLOCK(userinfo_free);
 		K_RUNLOCK(workmarkers_free);
 		CKPQClear(res);
-		res = CKPQExec(conn, "fetch 9999 in ws", CKPQ_READ);
+		res = CKPQExec(conn, "fetch "CKPQFETCHSTR" in ws", CKPQ_READ);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
 			PGLOGERR("Fetch next", rescode, conn);
 			ok = false;
 			break;
 		}
+		markerid_num = userid_num = workername_num = diffacc_num =
+		diffsta_num = diffdup_num = diffhi_num = diffrej_num =
+		shareacc_num = sharesta_num = sharedup_num = sharehi_num =
+		sharerej_num = sharecount_num = errorcount_num =
+		firstshare_num = lastshare_num = firstshareacc_num =
+		lastshareacc_num = lastdiffacc_num = CKPQFUNDEF;
+		MODIFYDATE_init;
 	}
 	if (!ok) {
 		free_markersummary_data(item);
@@ -8940,6 +9100,10 @@ bool workmarkers_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int markerid_num, poolinstance_num, workinfoidend_num;
+	int workinfoidstart_num, description_num, status_num;
+	HISTORYDATE_num;
+
 	// Allow limiting the load for key_update
 	if (key_update && dbload_workinfoid_start != -1) {
 		sel = "select "
@@ -8977,6 +9141,9 @@ bool workmarkers_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	markerid_num = poolinstance_num = workinfoidend_num =
+	workinfoidstart_num = description_num = status_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(workmarkers_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(workmarkers_free);
@@ -8988,7 +9155,7 @@ bool workmarkers_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		CKPQ_VAL_FLD_num(res, i, poolinstance, field, ok);
 		if (!ok)
 			break;
 		if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
@@ -8998,28 +9165,28 @@ bool workmarkers_fill(PGconn *conn)
 		}
 		row->in_poolinstance = intransient_str("poolinstance", field);
 
-		PQ_GET_FLD(res, i, "markerid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, markerid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("markerid", field, row->markerid);
 
-		PQ_GET_FLD(res, i, "workinfoidend", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workinfoidend, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("workinfoidend", field, row->workinfoidend);
 
-		PQ_GET_FLD(res, i, "workinfoidstart", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workinfoidstart, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("workinfoidstart", field, row->workinfoidstart);
 
-		PQ_GET_FLD(res, i, "description", field, ok);
+		CKPQ_VAL_FLD_num(res, i, description, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_PTR("description", field, row->description);
 		LIST_MEM_ADD(workmarkers_free, row->description);
 
-		PQ_GET_FLD(res, i, "status", field, ok);
+		CKPQ_VAL_FLD_num(res, i, status, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("status", field, row->status);
@@ -9260,6 +9427,10 @@ bool marks_fill(PGconn *conn)
 
 	LOGDEBUG("%s(): select", __func__);
 
+	int poolinstance_num, workinfoid_num, description_num, extra_num;
+	int marktype_num, status_num;
+	HISTORYDATE_num;
+
 	// TODO: limit how far back
 	sel = "select "
 		"poolinstance,workinfoid,description,extra,marktype,status"
@@ -9284,6 +9455,9 @@ bool marks_fill(PGconn *conn)
 	n = PQntuples(res);
 	LOGDEBUG("%s(): tree build count %d", __func__, n);
 	ok = true;
+	poolinstance_num = workinfoid_num = description_num = extra_num = 
+	marktype_num = status_num = CKPQFUNDEF;
+	HISTORYDATE_init;
 	K_WLOCK(marks_free);
 	for (i = 0; i < n; i++) {
 		item = k_unlink_head(marks_free);
@@ -9295,7 +9469,7 @@ bool marks_fill(PGconn *conn)
 			break;
 		}
 
-		PQ_GET_FLD(res, i, "poolinstance", field, ok);
+		CKPQ_VAL_FLD_num(res, i, poolinstance, field, ok);
 		if (!ok)
 			break;
 		if (sys_poolinstance && strcmp(field, sys_poolinstance)) {
@@ -9305,29 +9479,29 @@ bool marks_fill(PGconn *conn)
 		}
 		row->in_poolinstance = intransient_str("poolinstance", field);
 
-		PQ_GET_FLD(res, i, "workinfoid", field, ok);
+		CKPQ_VAL_FLD_num(res, i, workinfoid, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_BIGINT("workinfoid", field, row->workinfoid);
 
-		PQ_GET_FLD(res, i, "description", field, ok);
+		CKPQ_VAL_FLD_num(res, i, description, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_PTR("description", field, row->description);
 		LIST_MEM_ADD(marks_free, row->description);
 
-		PQ_GET_FLD(res, i, "extra", field, ok);
+		CKPQ_VAL_FLD_num(res, i, extra, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_PTR("extra", field, row->extra);
 		LIST_MEM_ADD(marks_free, row->extra);
 
-		PQ_GET_FLD(res, i, "marktype", field, ok);
+		CKPQ_VAL_FLD_num(res, i, marktype, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("marktype", field, row->marktype);
 
-		PQ_GET_FLD(res, i, "status", field, ok);
+		CKPQ_VAL_FLD_num(res, i, status, field, ok);
 		if (!ok)
 			break;
 		TXT_TO_STR("status", field, row->status);
@@ -9367,7 +9541,7 @@ bool check_db_version(PGconn *conn)
 	char *pgv;
 	int fields = 3;
 	bool ok;
-	int n;
+	int n, f;
 
 	LOGDEBUG("%s(): select", __func__);
 
@@ -9397,7 +9571,8 @@ bool check_db_version(PGconn *conn)
 	}
 
 	ok = true;
-	PQ_GET_FLD(res, 0, "vlock", field, ok);
+	f = CKPQFUNDEF;
+	CKPQ_VAL_FLD(res, 0, f, "vlock", field, ok);
 	if (!ok) {
 		LOGEMERG("%s(): Missing field vlock", __func__);
 		CKPQClear(res);
@@ -9412,7 +9587,8 @@ bool check_db_version(PGconn *conn)
 	}
 
 	ok = true;
-	PQ_GET_FLD(res, 0, "version", field, ok);
+	f = CKPQFUNDEF;
+	CKPQ_VAL_FLD(res, 0, f, "version", field, ok);
 	if (!ok) {
 		LOGEMERG("%s(): Missing field version", __func__);
 		CKPQClear(res);
@@ -9426,7 +9602,9 @@ bool check_db_version(PGconn *conn)
 		return false;
 	}
 
-	PQ_GET_FLD(res, 0, "pgv", field, ok);
+	ok = true;
+	f = CKPQFUNDEF;
+	CKPQ_VAL_FLD(res, 0, f, "pgv", field, ok);
 	if (ok)
 		pgv = strdup(field);
 	else
