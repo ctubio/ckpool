@@ -2278,9 +2278,6 @@ static void alloc_storage()
 	userinfo_root = new_ktree(NULL, cmp_userinfo, userinfo_free);
 
 #if LOCK_CHECK
-	// Above all needed for optioncontrol_trigger()
-	DLPRIO(optioncontrol, 96);
-
 	DLPRIO(seqset, 91);
 
 	DLPRIO(transfer, 90);
@@ -2305,6 +2302,9 @@ static void alloc_storage()
 	DLPRIO(blocks, 53);
 
 	DLPRIO(userinfo, 50);
+
+	// Uses event_limits
+	DLPRIO(optioncontrol, 49);
 
 	// Needs to check users and ips and uses events_limits
 	DLPRIO(events, 48);

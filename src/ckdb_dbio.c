@@ -2871,6 +2871,8 @@ void oc_trf(OPTIONCONTROL *oc, const char *from)
 	}
 }
 
+/* Trigger functions shouldn't touch expirydate since the optioncontrol data
+ *  isn't locked - that's the only field that could change */
 OC_TRIGGER oc_trigger[] = {
 	{ SWITCH_STATE_NAME,	true,	oc_switch_state },
 	{ DIFF_PERCENT_NAME,	true,	oc_diff_percent },
@@ -2883,7 +2885,11 @@ OC_TRIGGER oc_trigger[] = {
 
 /* For oc items that aren't date/height controlled, and use global variables
  *  rather than having to look up the value every time it's needed
- * Called from within the write lock that loaded/added the oc_item */
+ * Called from within the write lock that loaded/added the oc_item
+ * The write lock is released before calling the trigger function,
+ *  and regained after it returns, thus expirydate shouldn't be accessed
+ *  since it's value could be changed by another thread, under lock
+ *  None of the other oc field values will change */
 static void optioncontrol_trigger(K_ITEM *oc_item, const char *from)
 {
 	char cd_buf[DATE_BUFSIZ], cd2_buf[DATE_BUFSIZ];
@@ -2909,6 +2915,9 @@ static void optioncontrol_trigger(K_ITEM *oc_item, const char *from)
 			}
 		}
 		if (got > -1) {
+			/* Don't hold the lock during debug messages or
+			 *  during the call to the trigger function */
+			K_WUNLOCK(optioncontrol_free);
 			// If it's date/height controlled, display an ERR
 			if (oc->activationheight != OPTIONCONTROL_HEIGHT ||
 			    tv_newer(&date_begin, &(oc->activationdate)))
@@ -2925,6 +2934,7 @@ static void optioncontrol_trigger(K_ITEM *oc_item, const char *from)
 					OPTIONCONTROL_HEIGHT, cd2_buf);
 			} else
 				oc_trigger[i].func(oc, from);
+			K_WLOCK(optioncontrol_free);
 		}
 	}
 }
@@ -2936,7 +2946,7 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	K_TREE_CTX ctx[1];
 	PGresult *res;
 	K_ITEM *old_item, look;
-	OPTIONCONTROL *row;
+	OPTIONCONTROL *row, *oc;
 	char *upd, *ins;
 	bool ok = false;
 	char *params[4 + HISTORYDATECOUNT];
@@ -3029,12 +3039,12 @@ nostart:
 		free_optioncontrol_data(oc_item);
 		k_add_head(optioncontrol_free, oc_item);
 	} else {
-		// Discard old
+		// Keep old to ensure the new item can be read outside lock
 		if (old_item) {
 			remove_from_ktree(optioncontrol_root, old_item);
-			k_unlink_item(optioncontrol_store, old_item);
-			free_optioncontrol_data(old_item);
-			k_add_head(optioncontrol_free, old_item);
+			DATA_OPTIONCONTROL(oc, old_item);
+			copy_tv(&(oc->expirydate), cd);
+			add_to_ktree(optioncontrol_root, old_item);
 		}
 		add_to_ktree(optioncontrol_root, oc_item);
 		k_add_head(optioncontrol_store, oc_item);
