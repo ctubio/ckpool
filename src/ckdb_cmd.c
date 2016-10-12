@@ -5867,6 +5867,9 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 	K_ITEM *i_file, *i_name, *i_type;
 	char reply[1024] = "", *fil, *name, *typ;
 	size_t siz = sizeof(reply);
+	K_STORE *store = NULL;
+	K_TREE *tree = NULL;
+	bool unknown_typ = true, unknown_name = true, msg = false;
 
 	i_file = require_name(trf_root, "file", 1, NULL, reply, siz);
 	if (!i_file)
@@ -5888,44 +5891,81 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 		typ = "tree";
 
 	if (strcasecmp(typ, "tree") == 0) {
+		unknown_typ = false;
+
 		if (strcasecmp(name, "blocks") == 0)
-			dsp_ktree(blocks_root, fil, NULL);
+			tree = blocks_root;
 
 		if (strcasecmp(name, "transfer") == 0)
-			dsp_ktree(trf_root, fil, NULL);
+			tree = trf_root;
 
 		if (strcasecmp(name, "paymentaddresses") == 0)
-			dsp_ktree(paymentaddresses_root, fil, NULL);
+			tree = paymentaddresses_root;
 
 		if (strcasecmp(name, "paymentaddresses_create") == 0)
-			dsp_ktree(paymentaddresses_root, fil, NULL);
+			tree = paymentaddresses_create_root;
 
 		if (strcasecmp(name, "sharesummary") == 0)
-			dsp_ktree(sharesummary_root, fil, NULL);
+			tree = sharesummary_root;
 
 		if (strcasecmp(name, "userstats") == 0)
-			dsp_ktree(userstats_root, fil, NULL);
+			tree = userstats_root;
 
 		if (strcasecmp(name, "markersummary") == 0)
-			dsp_ktree(markersummary_root, fil, NULL);
+			tree = markersummary_root;
 
 		if (strcasecmp(name, "workmarkers") == 0)
-			dsp_ktree(workmarkers_root, fil, NULL);
-	}
+			tree = workmarkers_root;
 
-	if (strcasecmp(typ, "store") == 0) {
+		if (strcasecmp(name, "idcontrol") == 0)
+			tree = idcontrol_root;
+
+		if (tree) {
+			unknown_name = false;
+			if (tree->master->dsp_func)
+				dsp_ktree(tree, fil, NULL);
+			else {
+				snprintf(reply, siz,
+					 "%s %s has no dsp_func",
+					 typ, name);
+				msg = true;
+			}
+		}
+	} else if (strcasecmp(typ, "store") == 0) {
+		unknown_typ = false;
+
 		if (strcasecmp(name, "blocks") == 0)
-			dsp_kstore(blocks_store, fil, NULL);
+			store = blocks_store;
 
 		if (strcasecmp(name, "markersummary") == 0)
-			dsp_kstore(markersummary_store, fil, NULL);
+			store = markersummary_store;
 
 		if (strcasecmp(name, "msgline") == 0)
-			dsp_kstore(msgline_store, fil, NULL);
+			store = msgline_store;
+
+		if (store) {
+			unknown_name = false;
+			if (store->master->dsp_func)
+				dsp_kstore(store, fil, NULL);
+			else {
+				snprintf(reply, siz,
+					 "%s %s has no dsp_func",
+					 typ, name);
+				msg = true;
+			}
+		}
 	}
 
-	LOGDEBUG("%s.ok.dsp.file='%s'", id, fil);
-	return strdup("ok.dsp");
+	if (unknown_typ) {
+		snprintf(reply, siz, "unknown typ '%s'", typ);
+	} else if (unknown_name) {
+		snprintf(reply, siz, "unknown name '%s' for '%s'", name, typ);
+	} else {
+		if (!msg)
+			snprintf(reply, siz, "ok.dsp.file='%s'", fil);
+	}
+	LOGDEBUG("%s.%s'", id, reply);
+	return strdup(reply);
 #endif
 }
 

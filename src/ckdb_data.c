@@ -2187,6 +2187,52 @@ K_ITEM *find_accountbalance(int64_t userid)
 	return item;
 }
 
+void dsp_idcontrol(K_ITEM *item, FILE *stream)
+{
+	char createdate_buf[DATE_BUFSIZ], modifydate_buf[DATE_BUFSIZ];
+	IDCONTROL *i;
+
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		DATA_IDCONTROL(i, item);
+		tv_to_buf(&(i->createdate), createdate_buf, sizeof(createdate_buf));
+		tv_to_buf(&(i->modifydate), modifydate_buf, sizeof(modifydate_buf));
+		fprintf(stream, " idname='%s' lastid=%"PRId64" cdate='%s'"
+				" cby='%s' ccode='%s' cinet='%s' mdate='%s'"
+				" mby='%s' mcode='%s' minet='%s'\n",
+				i->idname, i->lastid, createdate_buf,
+				i->in_createby, i->in_createcode,
+				i->in_createinet, modifydate_buf,
+				i->in_modifyby, i->in_modifycode,
+				i->in_modifyinet);
+	}
+}
+
+// order by idname asc
+cmp_t cmp_idcontrol(K_ITEM *a, K_ITEM *b)
+{
+	IDCONTROL *ida, *idb;
+	DATA_IDCONTROL(ida, a);
+	DATA_IDCONTROL(idb, b);
+	return CMP_STR(ida->idname, idb->idname);
+}
+
+// idcontrol must be R or W locked
+K_ITEM *find_idcontrol(char *idname)
+{
+	IDCONTROL idcontrol;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *item;
+
+	STRNCPY(idcontrol.idname, idname);
+
+	INIT_IDCONTROL(&look);
+	look.data = (void *)(&idcontrol);
+	item = find_in_ktree(idcontrol_root, &look, ctx);
+	return item;
+}
+
 // order by optionname asc,activationdate asc,activationheight asc,expirydate desc
 cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b)
 {

@@ -496,6 +496,8 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 {
 	ExecStatusType rescode;
 	bool conned = false;
+	IDCONTROL *idcontrol;
+	K_ITEM *item;
 	PGresult *res;
 	char qry[1024];
 	char *params[5];
@@ -505,6 +507,14 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 	bool ok;
 
 	lastid = 0;
+
+	K_WLOCK(idcontrol_free);
+	item = find_idcontrol(idname);
+	if (!item)
+	{
+		LOGERR("%s(): No matching idname='%s' in tree", __func__, idname);
+		goto cleanup;
+	}
 
 	snprintf(qry, sizeof(qry), "select lastid from idcontrol "
 				   "where idname='%s' for update",
@@ -561,11 +571,19 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 	if (!PGOK(rescode)) {
 		PGLOGERR("Update", rescode, conn);
 		lastid = 0;
+	} else {
+		DATA_IDCONTROL(idcontrol, item);
+		idcontrol->lastid = lastid;
+		copy_tv(&(idcontrol->modifydate), cd);
+		idcontrol->in_modifyby = intransient_str(MBYDB, by);
+		idcontrol->in_modifycode = intransient_str(MCODEDB, code);
+		idcontrol->in_modifyinet = intransient_str(MINETDB, inet);
 	}
 
 	for (n = 0; n < par; n++)
 		free(params[n]);
 cleanup:
+	K_WUNLOCK(idcontrol_free);
 	conned = CKPQDisco(&conn, conned);
 	return lastid;
 }
@@ -2591,7 +2609,7 @@ bool idcontrol_add(PGconn *conn, char *idname, char *idvalue, char *by,
 		   char *code, char *inet, tv_t *cd,
 		   __maybe_unused K_TREE *trf_root)
 {
-	K_ITEM *look;
+	K_ITEM *item;
 	IDCONTROL *row;
 	char *params[2 + MODIFYDATECOUNT];
 	int n, par = 0;
@@ -2604,19 +2622,19 @@ bool idcontrol_add(PGconn *conn, char *idname, char *idvalue, char *by,
 	LOGDEBUG("%s(): add", __func__);
 
 	K_WLOCK(idcontrol_free);
-	look = k_unlink_head(idcontrol_free);
+	item = k_unlink_head(idcontrol_free);
 	K_WUNLOCK(idcontrol_free);
 
-	DATA_IDCONTROL(row, look);
+	DATA_IDCONTROL(row, item);
 
 	STRNCPY(row->idname, idname);
 	TXT_TO_BIGINT("idvalue", idvalue, row->lastid);
-	MODIFYDATEINIT(row, cd, by, code, inet);
+	MODIFYDATEINTRANS(row, cd, by, code, inet);
 
 	par = 0;
 	params[par++] = str_to_buf(row->idname, NULL, 0);
 	params[par++] = bigint_to_buf(row->lastid, NULL, 0);
-	MODIFYDATEPARAMS(params, par, row);
+	MODIFYDATEPARAMSIN(params, par, row);
 	PARCHK(par, params);
 
 	ins = "insert into idcontrol "
@@ -2637,9 +2655,104 @@ foil:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
+	/* N.B. The DB key matches the tree key,
+	 *	the tree depends on this to be valid */
 	K_WLOCK(idcontrol_free);
-	k_add_head(idcontrol_free, look);
+	if (ok) {
+		add_to_ktree(idcontrol_root, item);
+		k_add_head(idcontrol_store, item);
+	} else
+		k_add_head(idcontrol_free, item);
 	K_WUNLOCK(idcontrol_free);
+
+	return ok;
+}
+
+bool idcontrol_fill(PGconn *conn)
+{
+	char pcombuf[64];
+	ExecStatusType rescode;
+	PGresult *res;
+	K_ITEM *item;
+	int n, i;
+	IDCONTROL *row;
+	char *field;
+	char *sel;
+	int fields = 2;
+	bool ok;
+
+	LOGDEBUG("%s(): select", __func__);
+
+	int idname_num, lastid_num;
+	MODIFYDATE_num;
+
+	sel = "select "
+		"idname,lastid"
+		MODIFYDATECONTROL
+		" from idcontrol";
+	res = CKPQExec(conn, sel, CKPQ_READ);
+	rescode = CKPQResultStatus(res);
+	if (!PGOK(rescode)) {
+		PGLOGERR("Select", rescode, conn);
+		CKPQClear(res);
+		return false;
+	}
+
+	n = PQnfields(res);
+	if (n != (fields + MODIFYDATECOUNT)) {
+		LOGERR("%s(): Invalid field count - should be %d, but is %d",
+			__func__, fields + MODIFYDATECOUNT, n);
+		CKPQClear(res);
+		return false;
+	}
+
+	n = PQntuples(res);
+	LOGDEBUG("%s(): tree build count %d", __func__, n);
+	ok = true;
+	idname_num = lastid_num = CKPQFUNDEF;
+	MODIFYDATE_init;
+	K_WLOCK(idcontrol_free);
+	for (i = 0; i < n; i++) {
+		item = k_unlink_head(idcontrol_free);
+		DATA_IDCONTROL(row, item);
+		bzero(row, sizeof(*row));
+
+		if (everyone_die) {
+			ok = false;
+			break;
+		}
+
+		CKPQ_VAL_FLD_num(res, i, idname, field, ok);
+		if (!ok)
+			break;
+		TXT_TO_STR("idname", field, row->idname);
+
+		CKPQ_VAL_FLD_num(res, i, lastid, field, ok);
+		if (!ok)
+			break;
+		TXT_TO_BIGINT("lastid", field, row->lastid);
+
+		MODIFYDATEIN(res, i, row, ok);
+		if (!ok)
+			break;
+
+		/* N.B. The DB key matches the tree key,
+		 *	the tree depends on this to be valid */
+		add_to_ktree(idcontrol_root, item);
+		k_add_head(idcontrol_store, item);
+	}
+	if (!ok)
+		k_add_head(idcontrol_free, item);
+
+	K_WUNLOCK(idcontrol_free);
+	CKPQClear(res);
+
+	if (ok) {
+		LOGDEBUG("%s(): built", __func__);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s idcontrol records",
+			   __func__, pcombuf);
+	}
 
 	return ok;
 }
@@ -9671,78 +9784,4 @@ bool check_db_version(PGconn *conn)
 	free(pgv);
 
 	return true;
-}
-
-char *cmd_newid(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
-		char *code, char *inet, __maybe_unused tv_t *cd,
-		K_TREE *trf_root)
-{
-	char reply[1024] = "";
-	size_t siz = sizeof(reply);
-	K_ITEM *i_idname, *i_idvalue, *look;
-	IDCONTROL *row;
-	char *params[2 + MODIFYDATECOUNT];
-	int n, par = 0;
-	bool ok = false;
-	ExecStatusType rescode;
-	bool conned = false;
-	PGresult *res;
-	char *ins;
-
-	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
-
-	i_idname = require_name(trf_root, "idname", 3, (char *)idpatt, reply, siz);
-	if (!i_idname)
-		return strdup(reply);
-
-	i_idvalue = require_name(trf_root, "idvalue", 1, (char *)intpatt, reply, siz);
-	if (!i_idvalue)
-		return strdup(reply);
-
-	K_WLOCK(idcontrol_free);
-	look = k_unlink_head(idcontrol_free);
-	K_WUNLOCK(idcontrol_free);
-
-	DATA_IDCONTROL(row, look);
-
-	STRNCPY(row->idname, transfer_data(i_idname));
-	TXT_TO_BIGINT("idvalue", transfer_data(i_idvalue), row->lastid);
-	MODIFYDATEINIT(row, now, by, code, inet);
-
-	par = 0;
-	params[par++] = str_to_buf(row->idname, NULL, 0);
-	params[par++] = bigint_to_buf(row->lastid, NULL, 0);
-	MODIFYDATEPARAMS(params, par, row);
-	PARCHK(par, params);
-
-	ins = "insert into idcontrol "
-		"(idname,lastid" MODIFYDATECONTROL ") values (" PQPARAM10 ")";
-
-	conned = CKPQConn(&conn);
-	res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
-	rescode = CKPQResultStatus(res);
-	CKPQClear(res);
-	if (!PGOK(rescode)) {
-		PGLOGERR("Insert", rescode, conn);
-		goto foil;
-	}
-
-	ok = true;
-foil:
-	conned = CKPQDisco(&conn, conned);
-	for (n = 0; n < par; n++)
-		free(params[n]);
-
-	K_WLOCK(idcontrol_free);
-	k_add_head(idcontrol_free, look);
-	K_WUNLOCK(idcontrol_free);
-
-	if (!ok) {
-		LOGERR("%s() %s.failed.DBE", __func__, id);
-		return strdup("failed.DBE");
-	}
-	LOGDEBUG("%s.ok.added %s %"PRId64, id, transfer_data(i_idname), row->lastid);
-	snprintf(reply, siz, "ok.added %s %"PRId64,
-				transfer_data(i_idname), row->lastid);
-	return strdup(reply);
 }

@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.702"
+#define CKDB_VERSION DB_VERSION"-2.703"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -2062,7 +2062,7 @@ extern K_STORE *accountadjustment_store;
 typedef struct idcontrol {
 	char idname[TXT_SML+1];
 	int64_t lastid;
-	MODIFYDATECONTROLFIELDS;
+	MODIFYDATECONTROLIN;
 } IDCONTROL;
 
 #define ALLOC_IDCONTROL 16
@@ -2070,8 +2070,7 @@ typedef struct idcontrol {
 #define INIT_IDCONTROL(_item) INIT_GENERIC(_item, idcontrol)
 #define DATA_IDCONTROL(_var, _item) DATA_GENERIC(_var, _item, idcontrol, true)
 
-// These are only used for db access - not stored in memory
-//extern K_TREE *idcontrol_root;
+extern K_TREE *idcontrol_root;
 extern K_LIST *idcontrol_free;
 extern K_STORE *idcontrol_store;
 
@@ -3460,6 +3459,9 @@ extern K_ITEM *find_first_payments(int64_t userid, K_TREE_CTX *ctx);
 extern K_ITEM *find_first_paypayid(int64_t userid, int64_t payoutid, K_TREE_CTX *ctx);
 extern cmp_t cmp_accountbalance(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_accountbalance(int64_t userid);
+extern void dsp_idcontrol(K_ITEM *item, FILE *stream);
+extern cmp_t cmp_idcontrol(K_ITEM *a, K_ITEM *b);
+extern K_ITEM *find_idcontrol(char *idname);
 extern cmp_t cmp_optioncontrol(K_ITEM *a, K_ITEM *b);
 extern K_ITEM *find_optioncontrol(char *optionname, const tv_t *now, int32_t height);
 #define sys_setting(_name, _def, _now) user_sys_setting(0, _name, _def, _now)
@@ -3726,6 +3728,7 @@ extern bool payments_add(PGconn *conn, bool add, K_ITEM *p_item,
 extern bool payments_fill(PGconn *conn);
 extern bool idcontrol_add(PGconn *conn, char *idname, char *idvalue, char *by,
 			  char *code, char *inet, tv_t *cd, K_TREE *trf_root);
+extern bool idcontrol_fill(PGconn *conn);
 extern K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool begun);
 extern K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 				 char *activationdate, char *activationheight,

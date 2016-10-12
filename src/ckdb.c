@@ -688,8 +688,7 @@ K_LIST *accountadjustment_free;
 K_STORE *accountadjustment_store;
 
 // IDCONTROL
-// These are only used for db access - not stored in memory
-//K_TREE *idcontrol_root;
+K_TREE *idcontrol_root;
 K_LIST *idcontrol_free;
 K_STORE *idcontrol_store;
 
@@ -1711,7 +1710,6 @@ PGconn *dbconnect()
 }
 
 /* Load tables required to support auths,adduser,chkpass and newid
- * N.B. idcontrol is DB internal so is always ready
  * OptionControl is loaded first in case it is needed by other loads
  *  (though not yet)
  */
@@ -1725,6 +1723,8 @@ static bool getdata1()
 	if (!(ok = check_db_version(conn)))
 		goto matane;
 	if (!(ok = optioncontrol_fill(conn)))
+		goto matane;
+	if (!(ok = idcontrol_fill(conn)))
 		goto matane;
 	if (!(ok = users_fill(conn)))
 		goto matane;
@@ -2113,6 +2113,8 @@ static void alloc_storage()
 	idcontrol_free = k_new_list("IDControl", sizeof(IDCONTROL),
 					ALLOC_IDCONTROL, LIMIT_IDCONTROL, true);
 	idcontrol_store = k_new_store(idcontrol_free);
+	idcontrol_root = new_ktree(NULL, cmp_idcontrol, idcontrol_free);
+	idcontrol_free->dsp_func = dsp_idcontrol;
 
 	esm_free = k_new_list("ESM", sizeof(ESM), ALLOC_ESM, LIMIT_ESM, true);
 	esm_store = k_new_store(esm_free);
@@ -2331,10 +2333,12 @@ static void alloc_storage()
 
 	DLPRIO(paymentaddresses, 5);
 
+	// Must be above instransient
+	DLPRIO(idcontrol, 3);
+
 	// Don't currently nest any locks in these:
 	DLPRIO(esm, PRIO_TERMINAL);
 	DLPRIO(workers, PRIO_TERMINAL);
-	DLPRIO(idcontrol, PRIO_TERMINAL);
 	DLPRIO(ips, PRIO_TERMINAL);
 	DLPRIO(replies, PRIO_TERMINAL);
 
@@ -2674,7 +2678,7 @@ static void dealloc_storage()
 	esm_report();
 	FREE_ALL(esm);
 
-	FREE_LISTS(idcontrol);
+	FREE_ALL(idcontrol);
 	FREE_ALL(accountbalance);
 	FREE_ALL(payments);
 
