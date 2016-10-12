@@ -978,6 +978,7 @@ K_ITEM *create_missing_user(PGconn *conn, char *username, char *secondaryuserid,
 
 bool users_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -1107,7 +1108,9 @@ bool users_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d users records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s users records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -1362,6 +1365,7 @@ unparam:
 
 bool useratts_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -1476,7 +1480,9 @@ bool useratts_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d useratts records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s useratts records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -1763,6 +1769,7 @@ early:
 
 bool workers_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item = NULL;
@@ -1911,7 +1918,9 @@ flail:
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): fetched %d workers records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): fetched %s workers records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -2154,6 +2163,7 @@ unparam:
 
 bool paymentaddresses_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -2248,7 +2258,9 @@ bool paymentaddresses_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d paymentaddresses records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s paymentaddresses records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -2567,7 +2579,9 @@ flail:
 	CKPQCommit(conn);
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): fetched %d payments records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): fetched %s payments records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -3099,6 +3113,7 @@ K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 
 bool optioncontrol_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -3201,7 +3216,9 @@ bool optioncontrol_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d optioncontrol records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s optioncontrol records",
+			   __func__, pcombuf);
 		LOGWARNING("%s() switch_state initially %d",
 			   __func__, switch_state);
 
@@ -3605,7 +3622,9 @@ flail:
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): fetched %d workinfo records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): fetched %s workinfo records",
+			   __func__, pcombuf);
 	}
 
 	POOLINSTANCE_DBLOAD_MSG(workinfo);
@@ -4380,7 +4399,9 @@ flail:
 	CKPQCommit(conn);
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): fetched %d shares records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): fetched %s shares records",
+			   __func__, pcombuf);
 		if (no_addr || no_agent) {
 			if (no_addr == no_agent) {
 				LOGWARNING(" %d had no address and agent",
@@ -6412,6 +6433,7 @@ flail:
 
 bool blocks_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_TREE_CTX ctx[1];
@@ -6611,7 +6633,9 @@ bool blocks_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d blocks records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s blocks records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -6882,7 +6906,9 @@ flail:
 	CKPQCommit(conn);
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): fetched %d miningpayout records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): fetched %s miningpayout records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -7291,6 +7317,7 @@ matane:
 
 bool payouts_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item, *b_item;
@@ -7459,7 +7486,9 @@ bool payouts_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d payout records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s payout records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -8023,6 +8052,7 @@ unparam:
 // TODO: data selection - only require ?
 bool poolstats_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -8187,7 +8217,9 @@ bool poolstats_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d poolstats records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s poolstats records",
+			   __func__, pcombuf);
 	}
 clean:
 	free(sel);
@@ -8813,8 +8845,12 @@ flail:
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): fetched %d markersummary records", __func__, n);
-		LOGWARNING("%s(): created %d markersummary pool records", __func__, p_n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): fetched %s markersummary records",
+			   __func__, pcombuf);
+		pcom(p_n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): created %s markersummary pool records",
+			   __func__, pcombuf);
 	}
 
 	return ok;
@@ -9096,6 +9132,7 @@ unparam:
 
 bool workmarkers_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item, *wi_item;
@@ -9268,7 +9305,9 @@ bool workmarkers_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d workmarkers records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s workmarkers records",
+			   __func__, pcombuf);
 	}
 
 	POOLINSTANCE_DBLOAD_MSG(workmarkers);
@@ -9425,6 +9464,7 @@ unparam:
 
 bool marks_fill(PGconn *conn)
 {
+	char pcombuf[64];
 	ExecStatusType rescode;
 	PGresult *res;
 	K_ITEM *item;
@@ -9535,7 +9575,9 @@ bool marks_fill(PGconn *conn)
 
 	if (ok) {
 		LOGDEBUG("%s(): built", __func__);
-		LOGWARNING("%s(): loaded %d marks records", __func__, n);
+		pcom(n, pcombuf, sizeof(pcombuf));
+		LOGWARNING("%s(): loaded %s marks records",
+			   __func__, pcombuf);
 	}
 
 	POOLINSTANCE_DBLOAD_MSG(marks);
