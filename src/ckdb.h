@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.703"
+#define CKDB_VERSION DB_VERSION"-2.704"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -355,7 +355,7 @@ extern bool dbload_only_sharesummary;
  *  markersummaries and pplns payouts may not be correct */
 extern bool sharesummary_marks_limit;
 
-// DB users,workers load is complete
+// DB optioncontrol,idcontrol,users,workers,useratts load is complete
 extern bool db_users_complete;
 // DB load is complete
 extern bool db_load_complete;
@@ -367,6 +367,8 @@ extern bool reloading;
 extern bool reloaded_N_files;
 // Data load is complete
 extern bool startup_complete;
+// Set to true when pool0 completes, pool0 = socket data during reload
+extern bool reload_queue_complete;
 // Tell everyone to die
 extern bool everyone_die;
 
@@ -747,6 +749,7 @@ enum cmd_values {
 	CMD_EVENTS,
 	CMD_HIGH,
 	CMD_THREADS,
+	CMD_PAUSE,
 	CMD_END
 };
 
@@ -1450,6 +1453,8 @@ extern int reload_processing;
 extern int cmd_processing;
 extern int sockd_count;
 extern int max_sockd_count;
+extern ts_t breaker_sleep_stt;
+extern int breaker_sleep_ms;
 
 // Trigger breaker() processing
 extern mutex_t bq_reload_waitlock;
@@ -2876,6 +2881,11 @@ extern K_STORE *userstats_eos_store;
 				((_a)->tv_usec == (_b)->tv_usec))
 // newer OR equal
 #define tv_newer_eq(_old, _new) (!(tv_newer(_new, _old)))
+
+#define copy_ts(_dest, _src) do { \
+		(_dest)->tv_sec = (_src)->tv_sec; \
+		(_dest)->tv_nsec = (_src)->tv_nsec; \
+	} while(0)
 
 // WORKERSTATUS from various incoming data
 typedef struct workerstatus {

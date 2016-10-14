@@ -26,7 +26,7 @@
  *	be created irrelevant of any being deleted
  *
  * The threads that can be managed have a command option to set them when
- *  running ckdb and can also be changed via the cmd_threads socket command
+ *  starting ckdb and can also be changed via the cmd_threads socket command
  *
  * The main() 'ckdb' thread starts:
  *	iomsgs() for filelog '_fiomsgs' and console '_ciomsgs'
@@ -71,13 +71,13 @@
  *  completes and just process authorise messages immediately while the
  *  reload runs
  * However, we start the ckpool message queue after loading
- *  the optioncontrol, users, workers and useratts DB tables, before loading
- *  the much larger DB tables, so that ckdb is effectively ready for messages
- *  almost immediately
+ *  the optioncontrol, idcontrol, users, workers and useratts DB tables,
+ *  before loading the much larger DB tables, so that ckdb is effectively
+ *  ready for messages almost immediately
  * The first ckpool message allows us to know where ckpool is up to
  *  in the CCLs - see reload_from() for how this is handled
  * The users table, required for the authorise messages, is always updated
- *  immediately
+ *  in the disk DB immediately
  */
 
 /* Reload data needed
@@ -116,7 +116,7 @@
  *  RAM accountbalance: TODO: created as data is loaded
  *
  *  idcontrol: only userid reuse is critical and the user is added
- *	immeditately to the DB before replying to the add message
+ *	immeditately to the disk DB before replying to the add message
  *
  *  Tables that are/will be written straight to the DB, so are OK:
  *	users, useraccounts, paymentaddresses, payments,
@@ -375,7 +375,7 @@ bool dbload_only_sharesummary = false;
  *  markersummaries and pplns payouts may not be correct */
 bool sharesummary_marks_limit = false;
 
-// DB optioncontrol,users,workers,useratts load is complete
+// DB optioncontrol,idcontrol,users,workers,useratts load is complete
 bool db_users_complete = false;
 // DB load is complete
 bool db_load_complete = false;
@@ -388,7 +388,7 @@ bool reloaded_N_files = false;
 // Data load is complete
 bool startup_complete = false;
 // Set to true when pool0 completes, pool0 = socket data during reload
-static bool reload_queue_complete = false;
+bool reload_queue_complete = false;
 // Tell everyone to die
 bool everyone_die = false;
 // Set to true every time a store is created
@@ -551,6 +551,8 @@ int reload_processing;
 int cmd_processing;
 int sockd_count;
 int max_sockd_count;
+ts_t breaker_sleep_stt;
+int breaker_sleep_ms;
 
 // Trigger breaker() processing
 mutex_t bq_reload_waitlock;
@@ -4516,6 +4518,9 @@ static void *breaker(void *arg)
 	ts_t when, when_add;
 	int i, typ, mythread, done, tot, ret;
 	int breaker_delta = 0;
+	ts_t last_sleep = { 0L, 0L };
+	int last_sleep_ms = 0;
+	bool do_sleep = false;
 
 	setup = (struct breaker_setup *)(arg);
 	mythread = setup->thread;
@@ -4591,7 +4596,11 @@ static void *breaker(void *arg)
 		K_WLOCK(breakqueue_free);
 		bq_item = NULL;
 		was_null = false;
-		if (mythread == 0 && reload && reload_breakdown_threads_delta != 0) {
+		if (breaker_sleep_stt.tv_sec > last_sleep.tv_sec) {
+			copy_ts(&last_sleep, &breaker_sleep_stt);
+			last_sleep_ms = breaker_sleep_ms;
+			do_sleep = true;
+		} else if (mythread == 0 && reload && reload_breakdown_threads_delta != 0) {
 			breaker_delta = reload_breakdown_threads_delta;
 			reload_breakdown_threads_delta = 0;
 		} else if (mythread == 0 && !reload && cmd_breakdown_threads_delta != 0) {
@@ -4620,6 +4629,12 @@ static void *breaker(void *arg)
 			}
 		}
 		K_WUNLOCK(breakqueue_free);
+
+		if (do_sleep) {
+			do_sleep = false;
+			cksleep_ms_r(&last_sleep, last_sleep_ms);
+			continue;
+		}
 
 		// TODO: deal with thread creation/shutdown failure
 		if (breaker_delta != 0) {
@@ -6396,6 +6411,7 @@ static void *process_socket(__maybe_unused void *arg)
 				case CMD_CHKPASS:
 				case CMD_GETATTS:
 				case CMD_THREADS:
+				case CMD_PAUSE:
 				case CMD_HOMEPAGE:
 				case CMD_QUERY:
 					break;
@@ -6597,6 +6613,7 @@ static void *process_socket(__maybe_unused void *arg)
 			case CMD_EVENTS:
 			case CMD_HIGH:
 			case CMD_THREADS:
+			case CMD_PAUSE:
 			case CMD_QUERY:
 				msgline->sockd = bq->sockd;
 				bq->sockd = -1;
@@ -7111,6 +7128,7 @@ static void process_reload_item(PGconn *conn, K_ITEM *bq_item)
 		case CMD_EVENTS:
 		case CMD_HIGH:
 		case CMD_THREADS:
+		case CMD_PAUSE:
 			LOGERR("%s() INVALID message line %"PRIu64
 				" ignored '%.42s...",
 				__func__, bq->count,

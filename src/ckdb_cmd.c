@@ -8510,6 +8510,71 @@ static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
 	return buf;
 }
 
+static char *cmd_pause(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *cd, K_TREE *trf_root,
+			__maybe_unused bool reload_data)
+{
+	K_ITEM *i_name;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char *name;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_name = require_name(trf_root, "name", 1, NULL, reply, siz);
+	if (!i_name)
+		return strdup(reply);
+	name = transfer_data(i_name);
+
+	/* Pause the breaker threads to help culling to take place for some
+	 *  tables that can be culled but 'never' empty due to threads always
+	 *  creating new data before the old data has finished being processed
+	 * N.B. this should only be needed on a sizeable pool, once after
+	 *  the reload completes ... and even 499ms would be a long time to
+	 *  pause in the case of a sizeable pool ... DANGER, WILL ROBINSON! */
+	if (strcasecmp(name, "breaker") == 0) {
+		K_ITEM *i_ms;
+		int ms = 100;
+
+		i_ms = optional_name(trf_root, "ms", 1, NULL, reply, siz);
+		if (*reply)
+			return strdup(reply);
+		if (i_ms) {
+			ms = atoi(transfer_data(i_ms));
+			// 4999 is too long, don't do it!
+			if (ms < 10 || ms > 4999) {
+				snprintf(reply, siz,
+					 "%s ms %d outside range 10-4999",
+					 name, ms);
+				goto out;
+			}
+		}
+
+		if (!reload_queue_complete && !key_update) {
+			snprintf(reply, siz,
+				 "no point pausing %s before reload completes",
+				 name);
+			goto out;
+		}
+
+		/* Use an absolute start time to try to get all threads asleep
+		 *  at the same time */
+		K_WLOCK(breakqueue_free);
+		cksleep_prepare_r(&breaker_sleep_stt);
+		breaker_sleep_ms = ms;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.%s %s%dms pause sent", name,
+					ms > 499 ? "ALERT!!! " : EMPTY, ms);
+	} else
+		snprintf(reply, siz, "unknown name '%s'", name);
+
+out:
+	LOGWARNING("%s() %s.%s", __func__, id, reply);
+	return strdup(reply);
+}
+
 /* The socket command format is as follows:
  *  Basic structure:
  *    cmd.ID.fld1=value1 FLDSEP fld2=value2 FLDSEP fld3=...
@@ -8623,5 +8688,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_EVENTS,	"events",	false,	false,	cmd_events,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
 	{ CMD_HIGH,	"high",		false,	false,	cmd_high,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_THREADS,	"threads",	false,	false,	cmd_threads,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_PAUSE,	"pause",	false,	false,	cmd_pause,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };
