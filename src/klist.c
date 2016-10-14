@@ -206,7 +206,21 @@ K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
 	store->lock = NULL;
 	store->name = list->name;
 	store->do_tail = list->do_tail;
-	list->stores++;
+	store->prev_store = NULL;
+	// Only tracked for lists with a lock
+	if (store->master->lock == NULL) {
+		store->next_store = NULL;
+		store->master->stores++;
+	} else {
+		K_WLOCK(list);
+		// In the master list, next is the head
+		if (list->next_store)
+			list->next_store->prev_store = store;
+		store->next_store = list->next_store;
+		list->next_store = store;
+		list->stores++;
+		K_WUNLOCK(list);
+	}
 
 	return store;
 }
@@ -255,6 +269,7 @@ K_LIST *_k_new_list(const char *name, size_t siz, int allocate, int limit,
 	list->limit = limit;
 	list->do_tail = do_tail;
 	list->cull_limit = cull_limit;
+	list->next_store = list->prev_store = NULL;
 
 	if (!(list->is_lock_only))
 		k_alloc_items(list, KLIST_FFL_PASS);
@@ -718,7 +733,21 @@ K_STORE *_k_free_store(K_STORE *store, KLIST_FFL_ARGS)
 				store->name, __func__, KLIST_FFL_PASS);
 	}
 
-	store->master->stores--;
+	if (store->master->lock == NULL)
+		store->master->stores--;
+	else {
+		K_WLOCK(store->master);
+		// unlink store from the list
+		if (store->prev_store)
+			store->prev_store->next_store = store->next_store;
+		if (store->next_store)
+			store->next_store->prev_store = store->prev_store;
+		// correct the head if we are the head
+		if (store->master->next_store == store)
+			store->master->next_store = store->next_store;
+		store->master->stores--;
+		K_WUNLOCK(store->master);
+	}
 
 	free(store);
 

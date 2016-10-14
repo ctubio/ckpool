@@ -154,6 +154,8 @@ typedef struct k_list {
 	int cull_limit;		// <1 means don't cull, otherwise total to cull at
 	int cull_count;		// number of times culled
 	uint64_t ram;		// ram allocated for data pointers - code must manage it
+	struct k_list *next_store; // list of all stores - the head is next_store in the list master
+	struct k_list *prev_store; //  the stores themselves have their prev and next
 	int stores;		// how many stores it currently has
 #if LOCK_CHECK
 	// Since each thread has it's own k_lock no locking is required on this
