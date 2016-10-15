@@ -7056,7 +7056,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		i_expired = optional_name(trf_root, "expired",
@@ -7142,7 +7142,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_wid)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_BIGINT("wid", transfer_data(i_wid), wid);
 
 		i_expired = optional_name(trf_root, "expired",
@@ -7278,7 +7278,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		int_to_buf(height, reply, sizeof(reply));
@@ -7345,7 +7345,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		int_to_buf(height, reply, sizeof(reply));
@@ -7476,7 +7476,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		int_to_buf(height, reply, sizeof(reply));
@@ -7597,7 +7597,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_wid)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_BIGINT("wid", transfer_data(i_wid), selwid);
 
 		INIT_SHARES(&s_look);
@@ -7729,21 +7729,89 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+#if 0
+	} else if (strcasecmp(request, "transfer") == 0) {
+		/* Code for debugging the transfer stores
+		 *  limit is set to avoid a very large reply,
+		 *  since transfer can be millions of items during a reload */
+		TRANSFER *trf = NULL;
+		K_STORE *trf_store;
+		K_ITEM *trf_item, *i_limit;
+		int store = 0, limit = 20;
+		bool exceeded = false;
+
+		i_limit = optional_name(trf_root, "limit",
+					1, (char *)intpatt,
+					reply, siz);
+		if (*reply) {
+			snprintf(reply, siz, "unknown request '%s'", request);
+			LOGERR("%s() %s.%s", __func__, id, reply);
+			goto badreply;
+		}
+		if (i_limit)
+			limit = atoi(transfer_data(i_limit));
+
+		snprintf(tmp, sizeof(tmp), "limit=%d%c", limit, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		K_RLOCK(transfer_free);
+		trf_store = transfer_free->next_store;
+		while (!exceeded && trf_store) {
+			trf_item = trf_store->head;
+			while (trf_item) {
+				if (rows >= limit) {
+					exceeded = true;
+					break;
+				}
+				DATA_TRANSFER(trf, trf_item);
+				snprintf(tmp, sizeof(tmp), "store:%d=%d%c",
+					 rows, store, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "storename:%d=%s%c",
+					 rows, trf_store->name, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "name:%d=%s%c",
+					 rows, trf->name, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "mvalue:%d=%s%c",
+					 rows, trf->mvalue, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "malloc:%d=%"PRIu64"%c",
+					 rows, trf->msiz, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "intrans:%d=%c%c",
+					 rows, trf->intransient ? 'Y' : 'N',
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				trf_item = trf_item->next;
+				rows++;
+			}
+			trf_store = trf_store->next_store;
+			store++;
+		}
+		K_RUNLOCK(transfer_free);
+
+		snprintf(tmp, sizeof(tmp), "limitexceeded=%c%c",
+			 exceeded ? 'Y' : 'N', FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
+#endif
 	} else {
-		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);
 		LOGERR("%s() %s.%s", __func__, id, reply);
-		return strdup(reply);
+		goto badreply;
 	}
 
 	if (!ok) {
-		free(buf);
 		snprintf(reply, siz, "failed.%s%s%s",
 					request,
 					msg[0] ? " " : "",
 					msg[0] ? msg : "");
 		LOGERR("%s() %s.%s", __func__, id, reply);
-		return strdup(reply);
+		goto badreply;
 	}
 
 	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
@@ -7752,6 +7820,10 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 				     msg[0] ? " " : "",
 				     msg[0] ? msg : "");
 	return buf;
+
+badreply:
+	free(buf);
+	return strdup(reply);
 }
 
 // Query and disable internal lock detection code
