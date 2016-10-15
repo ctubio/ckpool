@@ -7737,14 +7737,13 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		TRANSFER *trf = NULL;
 		K_STORE *trf_store;
 		K_ITEM *trf_item, *i_limit;
-		int store = 0, limit = 20;
+		int stores = 0, limit = 20, tot_stores = 0;
 		bool exceeded = false;
 
 		i_limit = optional_name(trf_root, "limit",
 					1, (char *)intpatt,
 					reply, siz);
 		if (*reply) {
-			snprintf(reply, siz, "unknown request '%s'", request);
 			LOGERR("%s() %s.%s", __func__, id, reply);
 			goto badreply;
 		}
@@ -7765,7 +7764,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 				}
 				DATA_TRANSFER(trf, trf_item);
 				snprintf(tmp, sizeof(tmp), "store:%d=%d%c",
-					 rows, store, FLDSEP);
+					 rows, stores, FLDSEP);
 				APPEND_REALLOC(buf, off, len, tmp);
 				snprintf(tmp, sizeof(tmp), "storename:%d=%s%c",
 					 rows, trf_store->name, FLDSEP);
@@ -7789,12 +7788,32 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 				rows++;
 			}
 			trf_store = trf_store->next_store;
-			store++;
+			stores++;
+		}
+		tot_stores = stores;
+		if (exceeded) {
+			while (trf_store) {
+				trf_store = trf_store->next_store;
+				tot_stores++;
+			}
 		}
 		K_RUNLOCK(transfer_free);
 
+		snprintf(tmp, sizeof(tmp), "rowstores=%d%c",
+			 stores, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "totstores=%d%c",
+			 tot_stores, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
 		snprintf(tmp, sizeof(tmp), "limitexceeded=%c%c",
 			 exceeded ? 'Y' : 'N', FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "store,storename,name,mvalue,malloc,intrans", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 transfer_free->name, FLDSEP, "", FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
