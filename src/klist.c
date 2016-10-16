@@ -191,7 +191,7 @@ static void k_alloc_items(K_LIST *list, KLIST_FFL_ARGS)
 	list->count_up = allocate;
 }
 
-K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
+K_STORE *_k_new_store(K_LIST *list, bool gotlock, KLIST_FFL_ARGS)
 {
 	K_STORE *store;
 
@@ -212,14 +212,16 @@ K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS)
 		store->next_store = NULL;
 		store->master->stores++;
 	} else {
-		K_WLOCK(list);
+		if (!gotlock)
+			K_WLOCK(list);
 		// In the master list, next is the head
 		if (list->next_store)
 			list->next_store->prev_store = store;
 		store->next_store = list->next_store;
 		list->next_store = store;
 		list->stores++;
-		K_WUNLOCK(list);
+		if (!gotlock)
+			K_WUNLOCK(list);
 	}
 
 	return store;

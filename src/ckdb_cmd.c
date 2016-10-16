@@ -3348,7 +3348,7 @@ static char *cmd_heartbeat(__maybe_unused PGconn *conn, char *cmd, char *id,
 		goto pulse;
 	}
 
-	hq_store = k_new_store(heartbeatqueue_free);
+	hq_store = k_new_store_locked(heartbeatqueue_free);
 	k_list_transfer_to_head(heartbeatqueue_store, hq_store);
 	K_WUNLOCK(heartbeatqueue_free);
 

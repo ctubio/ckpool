@@ -668,8 +668,9 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 
 extern void _dsp_kstore(K_STORE *store, char *filename, char *msg, KLIST_FFL_ARGS);
 #define dsp_kstore(_store, _file, _msg) _dsp_kstore(_store, _file, _msg, KLIST_FFL_HERE)
-extern K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS);
-#define k_new_store(_list) _k_new_store(_list, KLIST_FFL_HERE)
+extern K_STORE *_k_new_store(K_LIST *list, bool gotlock, KLIST_FFL_ARGS);
+#define k_new_store(_list) _k_new_store(_list, false, KLIST_FFL_HERE)
+#define k_new_store_locked(_list) _k_new_store(_list, true, KLIST_FFL_HERE)
 extern K_LIST *_k_new_list(const char *name, size_t siz, int allocate,
 			   int limit, bool do_tail, bool lock_only,
 			   bool without_lock, bool local_list,
