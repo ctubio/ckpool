@@ -2916,12 +2916,15 @@ static bool setup_data()
 #define DATASETTRANS(_seqdata, _u) \
 	ENTRYSETTRANS(&((_seqdata)->entry[(_u) & ((_seqdata)->size - 1)]))
 
-// Check for transient missing every 2s
+// Check for transient missing every X seconds
 #define TRANCHECKLIMIT 2.0
 static tv_t last_trancheck;
 // Don't let these messages be slowed down by a trans_process()
 #define TRANCHKSEQOK(_seq) ((_seq) != SEQ_SHARES && (_seq) != SEQ_AUTH && \
 			    (_seq) != SEQ_ADDRAUTH && (_seq) != SEQ_BLOCK)
+
+// How many seconds to allow the build up of trans range messages
+#define TRANSAGELIMIT 10.0
 
 /* time (now) is used, not cd, since cd is only relevant to reloading
  *  and we don't run trans_process() during reloading
@@ -3743,10 +3746,10 @@ setitemdata:
 				found[seq].forced_msg = true;
 			}
 		}
-		// Check if there are any ranges >= 2s old (or forced)
+		// Check if there are any ranges >= the limit (or forced)
 		for (i = 0; i < SEQ_MAX; i++) {
 			if (found[i].forced_msg || (found[i].last.tv_sec != 0 &&
-			    tvdiff(&found_now, &(found[i].last)) >= 2.0)) {
+			    tvdiff(&found_now, &(found[i].last)) >= TRANSAGELIMIT)) {
 				memcpy(&(found_msgs[i]), &(found[i]),
 					sizeof(SEQFOUND));
 				// will be displayed, so erase it
@@ -3780,7 +3783,7 @@ setitemdata:
 				setnow(&found_now);
 				for (i = 0; i < SEQ_MAX; i++) {
 					if (found[i].last.tv_sec != 0 &&
-					    tvdiff(&found_now, &(found[i].last)) >= 2.0) {
+					    tvdiff(&found_now, &(found[i].last)) >= TRANSAGELIMIT) {
 						memcpy(&(found_msgs[i]),
 							&(found[i]),
 							sizeof(SEQFOUND));
