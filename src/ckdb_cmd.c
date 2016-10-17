@@ -7729,6 +7729,15 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+	} else if (strcasecmp(request, "pg") == 0) {
+		K_RLOCK(pgdb_free);
+		snprintf(tmp, sizeof(tmp), "connections=%d%c",
+			 pgdb_count, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		K_RUNLOCK(pgdb_free);
+		rows++;
+
+		ok = true;
 #if 0
 	} else if (strcasecmp(request, "transfer") == 0) {
 		/* Code for debugging the transfer stores

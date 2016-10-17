@@ -434,6 +434,9 @@ bool _CKPQConn(PGconn **conn, WHERE_FFL_ARGS)
 	if (*conn == NULL) {
 		LOGDEBUG("%s(): connecting", __func__);
 		*conn = dbconnect();
+		K_WLOCK(pgdb_free);
+		pgdb_count++;
+		K_WUNLOCK(pgdb_free);
 		return true;
 	}
 	return false;
@@ -445,6 +448,9 @@ bool _CKPQDisco(PGconn **conn, bool conned, WHERE_FFL_ARGS)
 		LOGDEBUG("%s(): disco", __func__);
 		PQfinish(*conn);
 		*conn = NULL;
+		K_WLOCK(pgdb_free);
+		pgdb_count--;
+		K_WUNLOCK(pgdb_free);
 	}
 	return false;
 }

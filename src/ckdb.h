@@ -58,7 +58,7 @@
 
 #define DB_VLOCK "1"
 #define DB_VERSION "1.0.7"
-#define CKDB_VERSION DB_VERSION"-2.714"
+#define CKDB_VERSION DB_VERSION"-2.715"
 
 #define WHERE_FFL " - from %s %s() line %d"
 #define WHERE_FFL_HERE __FILE__, __func__, __LINE__
@@ -444,6 +444,10 @@ extern cklock_t btc_lock;
 extern char *by_default;
 extern char *inet_default;
 extern char *id_default;
+
+// Emulate a list for lock checking
+extern K_LIST *pgdb_free;
+extern int pgdb_count;
 
 // Number of seconds per poolinstance message for run
 #define POOLINSTANCE_MSG_EVERY 30

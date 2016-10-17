@@ -453,6 +453,11 @@ char *by_default = "code";
 char *inet_default = "127.0.0.1";
 char *id_default = "42";
 
+// Emulate a list for lock checking
+K_LIST *pgdb_free;
+// Count of db connections
+int pgdb_count;
+
 // NULL or poolinstance must match
 const char *sys_poolinstance = NULL;
 // lock for accessing all mismatch variables
@@ -2281,6 +2286,9 @@ static void alloc_storage()
 	userinfo_store = k_new_store(userinfo_free);
 	userinfo_root = new_ktree(NULL, cmp_userinfo, userinfo_free);
 
+	// Emulate a list for lock checking
+	pgdb_free = k_lock_only_list("PGDB");
+
 #if LOCK_CHECK
 	DLPRIO(seqset, 91);
 
@@ -2343,6 +2351,7 @@ static void alloc_storage()
 	DLPRIO(workers, PRIO_TERMINAL);
 	DLPRIO(ips, PRIO_TERMINAL);
 	DLPRIO(replies, PRIO_TERMINAL);
+	DLPRIO(pgdb, PRIO_TERMINAL);
 
 	DLPCHECK();
 
