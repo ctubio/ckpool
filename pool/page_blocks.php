@@ -72,6 +72,7 @@ function pctcolour($pct)
 function doblocks($data, $user)
 {
  $blink = '<a href=https://www.blocktrail.com/BTC/block/';
+ $poolfee = 0.9; # pool fee as a % out of 100
 
  $pg = '';
 
@@ -131,7 +132,6 @@ function doblocks($data, $user)
 			$luck = number_format(100 * $ans['s_luck:'.$i], 2);
 			$txm = number_format(100 * $ans['s_txmean:'.$i], 1);
 
-			$poolfee = 0.9; # pool fee as a % out of 100
 			$o = number_format((100 - $poolfee) * $ans['s_txmean:'.$i] / $ans['s_diffmean:'.$i], 2);
 
 			$pg .= "<tr class=$row>";
@@ -146,6 +146,95 @@ function doblocks($data, $user)
 			$pg .= "</tr>\n";
 		}
 		$pg .= "</tbody></table>\n";
+	}
+
+	if ($ans['STATUS'] == 'ok' and isset($ans['rows']) and $ans['rows'] > 0)
+	{
+		$pg .= '<br><h1>Monthly Statistics</h1>';
+		$pg .= "<table cellpadding=0 cellspacing=0 border=0>\n";
+		$pg .= "<thead><tr class=title>";
+		$pg .= "<td class=dl>UTC Month</td>";
+		$pg .= "<td class=dr>Blocks</td>";
+		$pg .= "<td class=dr>Expected</td>";
+		$pg .= "<td class=dr>Mean Diff%</td>";
+		$pg .= "<td class=dr>MeanTx%</td>";
+		$pg .= "<td class=dr>Luck%</td>";
+		$pg .= "<td class=dr>PPS%</td>";
+		$pg .= "</tr></thead>\n";
+
+		$pg .= '<tbody>';
+		$count = $ans['rows'];
+		$rout = $bcount = $bcd = $bmon = $byyyy = $bdiffratio = $btxn = 0;
+		$skipped = false;
+		for ($i = 0; $i < $count; $i++)
+		{
+			$conf = $ans['confirmed:'.$i];
+			// Skip leading orphans
+			if (!$skipped && ($conf == 'O' || $conf == 'R'))
+				continue;
+
+			$skipped = true;
+
+			// If anything is missing, skip this table
+			$diffratio = $ans['diffratio:'.$i];
+			if ($diffratio == '?')
+				break;
+
+			$cd = $ans['firstcreatedate:'.$i];
+			$mon = intval(gmdate('n', $cd));
+			$yyyy = intval(gmdate('Y', $cd));
+			// all orphans after a block must be included with that block
+			if (($conf != 'O' && $conf != 'R')
+			&&  ($mon != $bmon || $yyyy != $byyyy))
+			{
+				if ($bcount != 0)
+				{
+					if (($rout % 2) == 0)
+						$row = 'even';
+					else
+						$row = 'odd';
+
+					$name = gmdate('Y M', $bcd);
+					$exc = number_format($bdiffratio, 2);
+					$md = number_format(100 * $bdiffratio / $bcount, 2);
+					$mr = number_format(100 * $btxn / $bcount, 2);
+					$ml = number_format(100 * $bcount / $bdiffratio, 2);
+					$o = number_format((100 - $poolfee) * ($bcount / $bdiffratio) * ($btxn / $bcount), 2);
+
+					$pg .= "<tr class=$row>";
+					$pg .= "<td class=dl>$name</td>";
+					$pg .= "<td class=dr>$bcount</td>";
+					$pg .= "<td class=dr>$exc</td>";
+					$pg .= "<td class=dr>$md%</td>";
+					$pg .= "<td class=dr>$mr%</td>";
+					$pg .= "<td class=dr>$ml%</td>";
+					$pg .= "<td class=dr>$o%</td>";
+					$pg .= "</tr>\n";
+
+					$rout++;
+				}
+				if ($rout > 7)
+					break;
+
+				$bcd = $cd;
+				$bmon = $mon;
+				$byyyy = $yyyy;
+				$bcount = 0;
+				$bdiffratio = 0;
+				$btxn = 0;
+			}
+			$bdiffratio += floatval($ans['diffratio:'.$i]);
+
+			if ($conf != 'O' and $conf != 'R')
+			{
+				$height = $ans['height:'.$i];
+				$reward = floatval($ans['reward:'.$i]);
+				$re = 5000000000.0 * pow(0.5, floor($height / 210000.0));
+				$btxn += $reward / $re;
+				$bcount++;
+			}
+		}
+		$pg .= '</tbody></table>';
 	}
 
 	if ($ans['STATUS'] == 'ok')
