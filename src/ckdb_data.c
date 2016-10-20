@@ -4973,7 +4973,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		 FLDSEP, cd_buf);
 	DUP_POINTER(payouts_free, payouts->stats, &buf[0]);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	begun = CKPQBegin(conn);
 	if (!begun)
 		goto shazbot;

@@ -140,6 +140,7 @@ extern int btc_listener_threads_delta;
 
 #define BLANK " "
 extern char *EMPTY;
+#define NULLSTR "(null)"
 extern const char *nullstr;
 
 extern const char *true_str;
@@ -447,7 +448,46 @@ extern char *id_default;
 
 // Emulate a list for lock checking
 extern K_LIST *pgdb_free;
+// Count of db connections
 extern int pgdb_count;
+extern __thread char *connect_file;
+extern __thread char *connect_func;
+extern __thread int connect_line;
+extern __thread bool connect_dis;
+/* (WHEN FINISHED) Pause all DB IO (permanently) pause.1.name=pgTABconfirm=Y
+ * Without confirm=Y it will return the pause state
+ * All DB IO commands must take out a read of this lock before
+ *  starting anything that shouldn't be done partially
+ * This also means that the whole of CKDB can lock up for a short
+ *  time if e.g. shift processing has taken the read lock shortly before
+ *  the write lock is taken for the pause request to set the flag
+ * Once pgdb_paused is true, all DB IO will not access the database
+ *  and all web access will be in read only mode i.e. no user changes
+ * All connections to the DB will close and thus DB changes and outages
+ *  can then occur without affecting CKDB at all
+ *   check the connection count with query.1.request=pg
+ * Shift generation is unchanged, Payout generation is permanently disabled
+ * To restart CKDB you must terminate it then rerun it, then CKDB will
+ *  reload/redo all ckpool data it didn't store in the database
+ * The aim is to look the same as a normal running CKDB except doing no
+ *  DB I/O - that will be deferred until CKDB is later restarted
+ * You can't pause CKDB until the dbload has completed, but you can
+ *  during the CCL reload
+ * The function to take out the pause lock increments the thread's
+ *  pause_read_count so each function that expects the lock to be held can
+ *  easily test that and incorrectly calling it multiple times is tracked
+ * If the read lock code is called incorrectly, i.e. a code bug,
+ *  pgdb_pause_disabled will be set to true and the pause command can no
+ *  longer be activated, however if it was already activated, this wont
+ *  affect anything */
+extern cklock_t pgdb_pause_lock;
+extern __thread int pause_read_count;
+extern __thread char *pause_read_file;
+extern __thread char *pause_read_func;
+extern __thread int pause_read_line;
+extern __thread bool pause_read_unlock;
+extern bool pgdb_paused;
+extern bool pgdb_pause_disabled;
 
 // Number of seconds per poolinstance message for run
 #define POOLINSTANCE_MSG_EVERY 30
@@ -3681,6 +3721,10 @@ extern void _CKPQClear(PGresult *res, WHERE_FFL_ARGS);
 #define PGLOGEMERG(_str, _rescode, _conn) PGLOG(LOGEMERG, _str, _rescode, _conn)
 #define PGLOGNOTICE(_str, _rescode, _conn) PGLOG(LOGNOTICE, _str, _rescode, _conn)
 
+extern void _pause_read_lock(WHERE_FFL_ARGS);
+#define pause_read_lock() _pause_read_lock(WHERE_FFL_HERE)
+extern void _pause_read_unlock(WHERE_FFL_ARGS);
+#define pause_read_unlock() _pause_read_unlock(WHERE_FFL_HERE)
 extern char *pqerrmsg(PGconn *conn);
 extern bool _CKPQConn(PGconn **conn, WHERE_FFL_ARGS);
 #define CKPQConn(_conn) _CKPQConn(_conn, WHERE_FFL_HERE)

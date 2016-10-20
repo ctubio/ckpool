@@ -3919,7 +3919,8 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 				*(dot++) = '\0';
 				// If we already had a different one, save it to the DB
 				if (ua_item && strcmp(useratts->attname, attname) != 0) {
-					conned = CKPQConn(&conn);
+					if (CKPQConn(&conn))
+						conned = true;
 					if (!begun) {
 						begun = CKPQBegin(conn);
 						if (!begun) {
@@ -3973,7 +3974,8 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 			t_item = next_in_ktree(ctx);
 		}
 		if (ua_item) {
-			conned = CKPQConn(&conn);
+			if (CKPQConn(&conn))
+				conned = true;
 			if (!begun) {
 				begun = CKPQBegin(conn);
 				if (!begun) {
@@ -3993,7 +3995,7 @@ rollback:
 	CKPQEnd(conn, (reason == NULL));
 
 bats:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	if (reason) {
 		if (ua_item) {
 			K_WLOCK(useratts_free);
@@ -4218,7 +4220,8 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 					reason = "Missing value";
 					goto rollback;
 				}
-				conned = CKPQConn(&conn);
+				if (CKPQConn(&conn))
+					conned = true;
 				if (!begun) {
 					begun = CKPQBegin(conn);
 					if (!begun) {
@@ -4267,7 +4270,8 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 			reason = "Missing value";
 			goto rollback;
 		}
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		if (!begun) {
 			begun = CKPQBegin(conn);
 			if (!begun) {
@@ -4288,7 +4292,7 @@ rollback:
 	if (begun)
 		CKPQEnd(conn, (reason == NULL));
 
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	if (reason) {
 		snprintf(reply, siz, "ERR.%s", reason);
 		LOGERR("%s.%s.%s", cmd, id, reply);
@@ -8479,7 +8483,8 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 	if (strcasecmp(action, "store") == 0) {
 		/* Store the shares_hi_root list in the db now,
 		 * rather than wait for a shift process to do it */
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		count = 0;
 		do {
 			did = false;
@@ -8494,7 +8499,7 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 				count++;
 			}
 		} while (did);
-		conned = CKPQDisco(&conn, conned);
+		CKPQDisco(&conn, conned);
 		if (count) {
 			LOGWARNING("%s() Stored: %d high shares",
 				   __func__, count);

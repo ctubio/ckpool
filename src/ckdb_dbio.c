@@ -9,10 +9,60 @@
 
 #include "ckdb.h"
 
+void _pause_read_lock(WHERE_FFL_ARGS)
+{
+	if (pgdb_pause_disabled)
+		return;
+
+	if (pause_read_count > 0) {
+		LOGEMERG("%s() ERR lock >0 (%d) (%s/%s/%d/%c) pause disabled"
+			 WHERE_FFL,
+			 __func__, pause_read_count, pause_read_file,
+			 pause_read_func, pause_read_line,
+			 pause_read_unlock ? 'U' : 'L', WHERE_FFL_PASS);
+		pgdb_pause_disabled = true;
+		return;
+	}
+
+	ck_rlock(&pgdb_pause_lock);
+	pause_read_count++;
+	pause_read_file = (char *)file;
+	pause_read_func = (char *)func;
+	pause_read_line = line;
+	pause_read_unlock = false;
+}
+
+void _pause_read_unlock(WHERE_FFL_ARGS)
+{
+	if (pgdb_pause_disabled)
+		return;
+
+	if (pause_read_count != 1) {
+		LOGEMERG("%s() ERR lock !=1 (%d) (%s/%s/%d/%c) pause disabled"
+			 WHERE_FFL,
+			 __func__, pause_read_count, pause_read_file,
+			 pause_read_func, pause_read_line,
+			 pause_read_unlock ? 'U' : 'L', WHERE_FFL_PASS);
+		pgdb_pause_disabled = true;
+		return;
+	}
+
+	ck_runlock(&pgdb_pause_lock);
+	pause_read_count--;
+	pause_read_file = (char *)file;
+	pause_read_func = (char *)func;
+	pause_read_line = line;
+	pause_read_unlock = true;
+}
+
 char *pqerrmsg(PGconn *conn)
 {
-	char *ptr, *buf = strdup(PQerrorMessage(conn));
+	char *ptr, *buf;
 
+	if (pgdb_paused)
+		return strdup("pgdb_paused");
+
+	buf = strdup(PQerrorMessage(conn));
 	if (!buf)
 		quithere(1, "malloc OOM");
 	ptr = buf + strlen(buf) - 1;
@@ -36,6 +86,8 @@ char *pqerrmsg(PGconn *conn)
 #define FETCHTICK 100000
 #define CKPQFUNDEF -1
 #define CKPQ_VAL_FLD(__res, __row, __num, __name, __fld, __ok) do { \
+		if (pgdb_paused) \
+			break; \
 		if (__num == CKPQFUNDEF) { \
 			__num = PQfnumber(__res, __name); \
 			if (__num == CKPQFUNDEF) { \
@@ -76,6 +128,8 @@ char *pqerrmsg(PGconn *conn)
 
 #define HISTORYDATEFLDS(_res, _row, _data, _ok) do { \
 		char *_fld; \
+		if (pgdb_paused) \
+			break; \
 		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -101,6 +155,8 @@ char *pqerrmsg(PGconn *conn)
 
 #define HISTORYDATEIN(_res, _row, _data, _ok) do { \
 		char *_fld; \
+		if (pgdb_paused) \
+			break; \
 		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -153,6 +209,8 @@ char *pqerrmsg(PGconn *conn)
 
 #define MODIFYDATEIN(_res, _row, _data, _ok) do { \
 		char *_fld; \
+		if (pgdb_paused) \
+			break; \
 		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -228,6 +286,8 @@ char *pqerrmsg(PGconn *conn)
 
 #define SIMPLEDATEFLDS(_res, _row, _data, _ok) do { \
 		char *_fld; \
+		if (pgdb_paused) \
+			break; \
 		CKPQ_VAL_FLD_tail(_res, _row, _CDDB, _fld, _ok); \
 		if (!_ok) \
 			break; \
@@ -320,6 +380,9 @@ char *pqerrmsg(PGconn *conn)
 // Bug check to ensure no unexpected write txns occur
 PGresult *_CKPQExec(PGconn *conn, const char *qry, bool isread, WHERE_FFL_ARGS)
 {
+	if (pgdb_paused)
+		return NULL;
+
 	// It would slow it down, but could check qry for insert/update/...
 	if (!isread && confirm_sharesummary)
 		quitfrom(1, file, func, line, "BUG: write txn during confirm");
@@ -370,6 +433,9 @@ PGresult *_CKPQExecParams(PGconn *conn, const char *qry,
 			  int resultFormat,
 			  bool isread, WHERE_FFL_ARGS)
 {
+	if (pgdb_paused)
+		return NULL;
+
 	// It would slow it down, but could check qry for insert/update/...
 	if (!isread && confirm_sharesummary)
 		quitfrom(1, file, func, line, "BUG: write txn during confirm");
@@ -421,22 +487,44 @@ PGresult *_CKPQExecParams(PGconn *conn, const char *qry,
 
 ExecStatusType _CKPQResultStatus(PGresult *res, WHERE_FFL_ARGS)
 {
+	if (pgdb_paused)
+		return PGRES_COMMAND_OK;
+
 	return PQresultStatus(res);
 }
 
 void _CKPQClear(PGresult *res, WHERE_FFL_ARGS)
 {
-	PQclear(res);
+	if (!pgdb_paused)
+		PQclear(res);
 }
 
 bool _CKPQConn(PGconn **conn, WHERE_FFL_ARGS)
 {
 	if (*conn == NULL) {
-		LOGDEBUG("%s(): connecting", __func__);
-		*conn = dbconnect();
-		K_WLOCK(pgdb_free);
-		pgdb_count++;
-		K_WUNLOCK(pgdb_free);
+		if (connect_dis == false) {
+			LOGEMERG("%s() ERR already (%s/%s/%d)" WHERE_FFL
+#if LOCK_CHECK
+				 " @%s"
+#endif
+				 , __func__, connect_file, connect_func,
+				 connect_line, WHERE_FFL_PASS
+#if LOCK_CHECK
+				 , my_thread_name
+#endif
+				 );
+		}
+		if (!pgdb_paused) {
+			LOGDEBUG("%s(): connecting", __func__);
+			*conn = dbconnect();
+			K_WLOCK(pgdb_free);
+			pgdb_count++;
+			K_WUNLOCK(pgdb_free);
+			connect_file = (char *)file;
+			connect_func = (char *)func;
+			connect_line = line;
+			connect_dis = false;
+		}
 		return true;
 	}
 	return false;
@@ -451,6 +539,10 @@ bool _CKPQDisco(PGconn **conn, bool conned, WHERE_FFL_ARGS)
 		K_WLOCK(pgdb_free);
 		pgdb_count--;
 		K_WUNLOCK(pgdb_free);
+		connect_file = (char *)file;
+		connect_func = (char *)func;
+		connect_line = line;
+		connect_dis = true;
 	}
 	return false;
 }
@@ -459,6 +551,9 @@ bool _CKPQBegin(PGconn *conn, WHERE_FFL_ARGS)
 {
 	ExecStatusType rescode;
 	PGresult *res;
+
+	if (pgdb_paused)
+		return true;
 
 	res = _CKPQExec(conn, "Begin", CKPQ_WRITE, WHERE_FFL_PASS);
 	rescode = _CKPQResultStatus(res, WHERE_FFL_PASS);
@@ -478,6 +573,9 @@ void _CKPQEnd(PGconn *conn, bool commit, WHERE_FFL_ARGS)
 {
 	ExecStatusType rescode;
 	PGresult *res;
+
+	if (pgdb_paused)
+		return;
 
 	if (commit) {
 		LOGDEBUG("%s(): commit", __func__);
@@ -526,7 +624,8 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 				   "where idname='%s' for update",
 				   idname);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExec(conn, qry, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	if (!PGOK(rescode)) {
@@ -590,7 +689,7 @@ int64_t nextid(PGconn *conn, char *idname, int64_t increment,
 		free(params[n]);
 cleanup:
 	K_WUNLOCK(idcontrol_free);
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	return lastid;
 }
 
@@ -611,6 +710,9 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	int n, par = 0;
 
 	LOGDEBUG("%s(): change", __func__);
+
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
 
 	if (oldhash != NULL)
 		hash = true;
@@ -654,7 +756,8 @@ bool users_update(PGconn *conn, K_ITEM *u_item, char *oldhash,
 	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 	PARCHKVAL(par, 3, params);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!CKPQBegin(conn))
 		goto unparam;
 
@@ -704,7 +807,7 @@ rollback:
 	CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -747,6 +850,9 @@ K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username, char *emailaddress,
 	int n, par = 0;
 
 	LOGDEBUG("%s(): add", __func__);
+
+	if (pgdb_paused && userbits != USER_MISSING)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
 
 	/* 2 attempts to add the same user at the same time will only do it once
 	 * The 2nd attempt will get back the data provided by the 1st
@@ -842,7 +948,8 @@ K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username, char *emailaddress,
 		"secondaryuserid,salt,userdata,userbits"
 		HISTORYDATECONTROL ") values (" PQPARAM15 ")";
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	CKPQClear(res);
@@ -853,7 +960,7 @@ K_ITEM *users_add(PGconn *conn, INTRANSIENT *in_username, char *emailaddress,
 
 	ok = true;
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 unitem:
@@ -893,6 +1000,9 @@ bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item, char *by,
 
 	LOGDEBUG("%s(): replace", __func__);
 
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
+
 	DATA_USERS(users, u_item);
 	DATA_USERS(old_users, old_u_item);
 
@@ -906,7 +1016,8 @@ bool users_replace(PGconn *conn, K_ITEM *u_item, K_ITEM *old_u_item, char *by,
 	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 	PARCHKVAL(par, 3, params);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!CKPQBegin(conn))
 		goto unparam;
 
@@ -954,7 +1065,7 @@ rollback:
 	CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -1154,6 +1265,9 @@ bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun)
 
 	LOGDEBUG("%s(): add", __func__);
 
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
+
 	DATA_USERATTS(useratts, ua_item);
 
 	K_RLOCK(useratts_free);
@@ -1164,7 +1278,8 @@ bool useratts_item_add(PGconn *conn, K_ITEM *ua_item, tv_t *cd, bool begun)
 	/* N.B. the values of the old ua_item record, if it exists,
 	 * are completely ignored i.e. you must provide all values required */
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!begun) {
 		if (!CKPQBegin(conn))
 			goto unparam;
@@ -1224,7 +1339,7 @@ rollback:
 		CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -1258,6 +1373,9 @@ K_ITEM *useratts_add(PGconn *conn, char *username, char *attname,
 	char *st = NULL;
 
 	LOGDEBUG("%s(): add", __func__);
+
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
 
 	K_WLOCK(useratts_free);
 	item = k_unlink_head(useratts_free);
@@ -1339,6 +1457,9 @@ bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd)
 
 	LOGDEBUG("%s(): add", __func__);
 
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
+
 	DATA_USERATTS(useratts, ua_item);
 
 	/* This is pointless if ua_item is part of the tree, however,
@@ -1350,7 +1471,8 @@ bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd)
 	if (item) {
 		DATA_USERATTS(useratts, item);
 
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		upd = "update useratts set "EDDB"=$1 where userid=$2 and "
 			"attname=$3 and "EDDB"=$4";
 		par = 0;
@@ -1371,7 +1493,7 @@ bool useratts_item_expire(PGconn *conn, K_ITEM *ua_item, tv_t *cd)
 	ok = true;
 unparam:
 	if (par) {
-		conned = CKPQDisco(&conn, conned);
+		CKPQDisco(&conn, conned);
 		for (n = 0; n < par; n++)
 			free(params[n]);
 	}
@@ -1550,7 +1672,8 @@ K_ITEM *workers_add(PGconn *conn, int64_t userid, char *workername, bool add_ws,
 
 	DATA_WORKERS(row, item);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	bzero(row, sizeof(*row));
 	row->workerid = nextid(conn, "workerid", (int64_t)1, cd, by, code, inet);
 	if (row->workerid == 0)
@@ -1630,7 +1753,7 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 unitem:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	K_WLOCK(workers_free);
 	if (!ret)
 		k_add_head(workers_free, item);
@@ -1678,6 +1801,9 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	int32_t nottime;
 
 	LOGDEBUG("%s(): update", __func__);
+
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
 
 	/* Two attempts to update the same worker at the same time
 	 *  will determine the final state based on which gets the lock last,
@@ -1736,7 +1862,8 @@ bool workers_update(PGconn *conn, K_ITEM *item, char *difficultydefault,
 	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 	PARCHKVAL(par, 3, params);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!CKPQBegin(conn))
 		goto unparam;
 
@@ -1781,7 +1908,7 @@ rollback:
 	CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 early:
@@ -1975,11 +2102,15 @@ bool paymentaddresses_set(PGconn *conn, int64_t userid, K_STORE *pa_store,
 
 	LOGDEBUG("%s(): add", __func__);
 
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
+
 	// Quick early abort
 	if (pa_store->count > ABS_ADDR_LIMIT)
 		return false;
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	/* This means the nextid updates will rollback on an error, but also
 	 *  means that it will lock the nextid record for the whole update */
 	if (!CKPQBegin(conn))
@@ -2122,7 +2253,7 @@ rollback:
 	CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 	FREENULL(upd);
@@ -2340,7 +2471,8 @@ bool payments_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 	*old_p_item = find_payments(row->payoutid, row->userid, row->in_subname);
 	K_RUNLOCK(payments_free);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!already) {
 		begun = CKPQBegin(conn);
 		if (!begun)
@@ -2426,7 +2558,7 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	if (!already)
 		payments_add_ram(ok, p_item, *old_p_item, cd);
@@ -2646,7 +2778,8 @@ bool idcontrol_add(PGconn *conn, char *idname, char *idvalue, char *by,
 	ins = "insert into idcontrol "
 		"(idname,lastid" MODIFYDATECONTROL ") values (" PQPARAM10 ")";
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	CKPQClear(res);
@@ -2657,7 +2790,7 @@ bool idcontrol_add(PGconn *conn, char *idname, char *idvalue, char *by,
 
 	ok = true;
 foil:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -3087,6 +3220,9 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 
 	LOGDEBUG("%s(): add", __func__);
 
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
+
 	DATA_OPTIONCONTROL(row, oc_item);
 
 	// Enforce the rule that switch_state isn't date/height controlled
@@ -3102,7 +3238,8 @@ K_ITEM *optioncontrol_item_add(PGconn *conn, K_ITEM *oc_item, tv_t *cd, bool beg
 	old_item = find_in_ktree(optioncontrol_root, &look, ctx);
 	K_RUNLOCK(optioncontrol_free);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!begun) {
 		if (!CKPQBegin(conn))
 			goto nostart;
@@ -3160,7 +3297,7 @@ rollback:
 		CKPQEnd(conn, ok);
 
 nostart:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -3201,6 +3338,9 @@ K_ITEM *optioncontrol_add(PGconn *conn, char *optionname, char *optionvalue,
 	OPTIONCONTROL *row;
 
 	LOGDEBUG("%s(): add", __func__);
+
+	if (pgdb_paused)
+		LOGEMERG("ERR: %s() called when paused - data lost", __func__);
 
 	K_WLOCK(optioncontrol_free);
 	item = k_unlink_head(optioncontrol_free);
@@ -3450,7 +3590,8 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 			"prevhash,coinbase1,coinbase2,version,bits,ntime,reward"
 			HISTORYDATECONTROL ") values (" PQPARAM16 ")";
 
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 		rescode = CKPQResultStatus(res);
 		CKPQClear(res);
@@ -3464,7 +3605,7 @@ int64_t workinfo_add(PGconn *conn, char *workinfoidstr,
 
 unparam:
 	if (par) {
-		conned = CKPQDisco(&conn, conned);
+		CKPQDisco(&conn, conned);
 		for (n = 0; n < par; n++)
 			free(params[n]);
 	}
@@ -4232,7 +4373,8 @@ bool shares_db(PGconn *conn, K_ITEM *s_item)
 		"diff,sdiff,errn,error,secondaryuserid,ntime,minsdiff,address,"
 		"agent" HISTORYDATECONTROL ") values (" PQPARAM21 ")";
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	if (!PGOK(rescode)) {
@@ -4250,7 +4392,7 @@ bool shares_db(PGconn *conn, K_ITEM *s_item)
 unparam:
 	if (par) {
 		CKPQClear(res);
-		conned = CKPQDisco(&conn, conned);
+		CKPQDisco(&conn, conned);
 		for (n = 0; n < par; n++)
 			free(params[n]);
 	}
@@ -5215,7 +5357,8 @@ dokey:
 	setnow(&kadd_fin);
 
 	setnow(&db_stt);
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!CKPQBegin(conn)) {
 		setnow(&db_fin);
 		goto flail;
@@ -5264,7 +5407,7 @@ rollback:
 	CKPQEnd(conn, ok);
 
 flail:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	if (reason) {
 		// already displayed the full workmarkers detail at the top
@@ -5522,7 +5665,8 @@ bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm)
 
 	del = "delete from markersummary where markerid=$1";
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExecParams(conn, del, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	if (!PGOK(rescode)) {
@@ -5549,7 +5693,7 @@ bool delete_markersummaries(PGconn *conn, WORKMARKERS *wm)
 unparam:
 	CKPQClear(res);
 flail:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	if (!ok) {
 		if (del_markersummary_store && del_markersummary_store->count) {
@@ -6038,7 +6182,8 @@ bool blocks_stats(PGconn *conn, int32_t height, char *blockhash,
 	params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 	PARCHKVAL(par, 3, params);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!CKPQBegin(conn))
 		goto unparam;
 
@@ -6093,7 +6238,7 @@ rollback:
 	CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -6246,7 +6391,8 @@ bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 				"statsconfirmed"
 				HISTORYDATECONTROL ") values (" PQPARAM23 ")";
 
-			conned = CKPQConn(&conn);
+			if (CKPQConn(&conn))
+				conned = true;
 			res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 			rescode = CKPQResultStatus(res);
 			CKPQClear(res);
@@ -6324,7 +6470,8 @@ bool blocks_add(PGconn *conn, int32_t height, char *blockhash,
 			params[par++] = tv_to_buf((tv_t *)&default_expiry, NULL, 0);
 			PARCHKVAL(par, 3, params);
 
-			conned = CKPQConn(&conn);
+			if (CKPQConn(&conn))
+				conned = true;
 			// New is mostly a copy of the old
 			copy_blocks(row, oldblocks);
 			STRNCPY(row->confirmed, confirmed);
@@ -6464,7 +6611,7 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 flail:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	K_RLOCK(workinfo_free);
 	K_WLOCK(blocks_free);
@@ -6810,7 +6957,8 @@ bool miningpayouts_add(PGconn *conn, bool add, K_ITEM *mp_item,
 	*old_mp_item = find_miningpayouts(row->payoutid, row->userid);
 	K_RUNLOCK(miningpayouts_free);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!already) {
 		begun = CKPQBegin(conn);
 		if (!begun)
@@ -6879,7 +7027,7 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	if (!already)
 		miningpayouts_add_ram(ok, mp_item, *old_mp_item, cd);
@@ -7090,7 +7238,8 @@ bool payouts_add(PGconn *conn, bool add, K_ITEM *p_item, K_ITEM **old_p_item,
 	*old_p_item = find_payouts(row->height, row->blockhash);
 	K_RUNLOCK(payouts_free);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	if (!already) {
 		begun = CKPQBegin(conn);
 		if (!begun)
@@ -7179,7 +7328,7 @@ unparam:
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	if (!already)
 		payouts_add_ram(ok, p_item, *old_p_item, cd);
@@ -7221,7 +7370,8 @@ K_ITEM *payouts_full_expire(PGconn *conn, int64_t payoutid, tv_t *now, bool lock
 		goto matane;
 	}
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	begun = CKPQBegin(conn);
 	if (!begun)
 		goto matane;
@@ -7420,7 +7570,7 @@ matane:
 		K_WUNLOCK(payouts_free);
 	}
 
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 
 	if (lock)
 		K_WUNLOCK(process_pplns_free);
@@ -8128,7 +8278,8 @@ bool poolstats_add(PGconn *conn, bool store, INTRANSIENT *in_poolinstance,
 			"hashrate5m,hashrate1hr,hashrate24hr"
 			SIMPLEDATECONTROL ") values (" PQPARAM12 ")";
 
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 		rescode = CKPQResultStatus(res);
 		if (!PGOK(rescode)) {
@@ -8151,7 +8302,7 @@ bool poolstats_add(PGconn *conn, bool store, INTRANSIENT *in_poolinstance,
 unparam:
 	if (store) {
 		CKPQClear(res);
-		conned = CKPQDisco(&conn, conned);
+		CKPQDisco(&conn, conned);
 		for (n = 0; n < par; n++)
 			free(params[n]);
 	}
@@ -8586,7 +8737,8 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 		 row->diffacc);
 	FREENULL(st);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	CKPQClear(res);
@@ -8597,7 +8749,7 @@ bool markersummary_add(PGconn *conn, K_ITEM *ms_item, char *by, char *code,
 
 	ok = true;
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -9031,7 +9183,8 @@ bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
 		 row->diffacc);
 	FREENULL(st);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	res = CKPQExecParams(conn, ins, par, NULL, (const char **)params, NULL, NULL, 0, CKPQ_WRITE);
 	rescode = CKPQResultStatus(res);
 	CKPQClear(res);
@@ -9046,7 +9199,7 @@ bool keysummary_add(PGconn *conn, K_ITEM *ks_item, char *by, char *code,
 
 	ok = true;
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -9103,7 +9256,8 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 		LOGDEBUG("%s(): updating old", __func__);
 
 		DATA_WORKMARKERS(oldworkmarkers, old_wm_item);
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		if (!already) {
 			begun = CKPQBegin(conn);
 			if (!begun)
@@ -9157,7 +9311,8 @@ bool _workmarkers_process(PGconn *conn, bool already, bool add,
 		DATA_WORKMARKERS(row, wm_item);
 		bzero(row, sizeof(*row));
 
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		if (!already && !begun) {
 			begun = CKPQBegin(conn);
 			if (!begun)
@@ -9215,7 +9370,7 @@ rollback:
 		CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 
@@ -9461,7 +9616,8 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 		LOGDEBUG("%s(): updating old", __func__);
 
 		DATA_MARKS(oldmarks, old_m_item);
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		begun = CKPQBegin(conn);
 		if (!begun)
 			goto unparam;
@@ -9533,7 +9689,8 @@ bool _marks_process(PGconn *conn, bool add, char *poolinstance,
 		HISTORYDATEPARAMS(params, par, row);
 		PARCHK(par, params);
 
-		conned = CKPQConn(&conn);
+		if (CKPQConn(&conn))
+			conned = true;
 		if (!begun) {
 			begun = CKPQBegin(conn);
 			if (!begun)
@@ -9555,7 +9712,7 @@ rollback:
 		CKPQEnd(conn, ok);
 
 unparam:
-	conned = CKPQDisco(&conn, conned);
+	CKPQDisco(&conn, conned);
 	for (n = 0; n < par; n++)
 		free(params[n]);
 

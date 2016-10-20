@@ -211,7 +211,7 @@ static int replier_count = 0;
 static cklock_t replier_lock;
 
 char *EMPTY = "";
-const char *nullstr = "(null)";
+const char *nullstr = NULLSTR;
 
 const char *true_str = "true";
 const char *false_str = "false";
@@ -457,6 +457,19 @@ char *id_default = "42";
 K_LIST *pgdb_free;
 // Count of db connections
 int pgdb_count;
+__thread char *connect_file = NULLSTR;
+__thread char *connect_func = NULLSTR;
+__thread int connect_line = 0;
+__thread bool connect_dis = true;
+// Pause all DB IO (permanently)
+cklock_t pgdb_pause_lock;
+__thread int pause_read_count = 0;
+__thread char *pause_read_file = NULLSTR;
+__thread char *pause_read_func = NULLSTR;
+__thread int pause_read_line = 0;
+__thread bool pause_read_unlock = false;
+bool pgdb_paused = false;
+bool pgdb_pause_disabled = false;
 
 // NULL or poolinstance must match
 const char *sys_poolinstance = NULL;
@@ -9654,6 +9667,7 @@ int main(int argc, char **argv)
 	cklock_init(&listener_all_lock);
 	cklock_init(&last_lock);
 	cklock_init(&btc_lock);
+	cklock_init(&pgdb_pause_lock);
 	cklock_init(&poolinstance_lock);
 	cklock_init(&seq_found_lock);
 
