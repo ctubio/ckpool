@@ -479,8 +479,17 @@ session_start();
 #
 include_once('db.php');
 #
+global $disable_login;
+$disable_login = false;
+if (file_exists('../pool/disable_login.php'))
+ include_once('../pool/disable_login.php');
+#
 function validUserPass($user, $pass, $twofa)
 {
+ global $disable_login;
+ if ($disable_login == true)
+	exit(0);
+ #
  $rep = checkPass($user, $pass, $twofa);
  if ($rep != null)
 	$ans = repDecode($rep);
