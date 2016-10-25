@@ -487,6 +487,8 @@ if (file_exists('../pool/disable_login.php'))
 function validUserPass($user, $pass, $twofa)
 {
  global $disable_login;
+ if (function_exists('checklogin'))
+	checklogin($user);
  if ($disable_login == true)
 	exit(0);
  #
