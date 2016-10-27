@@ -69,6 +69,41 @@ function pctcolour($pct)
  return array($fg, $bg);
 }
 #
+function mthcolour($luck)
+{
+ if ($luck == 1.0)
+ {
+	$fg = 'white';
+	$bg = 'black';
+ }
+ else if ($luck > 1.0)
+ {
+	// 1.0 .. 1.1 (> 1.1 = max)
+	$grn = ($luck - 1.0) * 2550.0;
+	if ($grn > 255)
+		$grn = 255;
+	if ($grn < 0)
+		$grn = 0;
+	if ($grn > 190)
+		$fg = 'blue';
+	else
+		$fg = 'white';
+	$bg = sprintf("#00%02x00", $grn);
+ }
+ else
+ {
+	// 0.9 .. 1.0 (< 0.9 = max)
+	$red = (1.0 - $luck) * 2550.0;
+	if ($red > 255)
+		$red = 255;
+	if ($red < 0)
+		$red = 0;
+	$fg = 'white';
+	$bg = sprintf("#%02x0000", $red);
+ }
+ return array($fg, $bg);
+}
+#
 function statstable($poolfee, $ans, $data)
 {
 	if ($ans['STATUS'] != 'ok' or !isset($ans['s_rows']) or $ans['s_rows'] < 1)
@@ -203,18 +238,20 @@ function monthtable($poolfee, $ans, $limit)
 					$bcol = 'darkgreen';
 				$md = number_format(100 * $bdiffratio / $bcount, 2);
 				$mr = number_format(100 * $btxn / $bcount, 2);
-				$ml = number_format(100 * $bcount / $bdiffratio, 2);
+				$ml = $bcount / $bdiffratio;
+				$mldsp = number_format(100 * $ml, 2);
 				$oa = (100 - $poolfee) * ($bcount / $bdiffratio) * ($btxn / $bcount);
 				$odsp = number_format($oa, 2);
+				list($fg, $bg) = mthcolour($ml);
 
 				$pg .= "<tr class=$row>";
 				$pg .= "<td class=dl>$name$dots</td>";
 				$pg .= "<td class=dr>${phrdsp}Hs</td>";
-				$pg .= "<td class=dr><b><font color=$bcol>$bcount</font></b></td>";
+				$pg .= "<td class=dr bgcolor=$bg><font color=$fg>$bcount</font></td>";
 				$pg .= "<td class=dr>$exc</td>";
 				$pg .= "<td class=dr>$md%</td>";
 				$pg .= "<td class=dr>$mr%</td>";
-				$pg .= "<td class=dr>$ml%</td>";
+				$pg .= "<td class=dr>$mldsp%</td>";
 				$pg .= "<td class=dr>$odsp%</td>";
 				$pg .= "</tr>\n";
 
