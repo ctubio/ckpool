@@ -182,8 +182,6 @@ void _dsp_ktree(K_TREE *tree, char *filename, char *msg, KTREE_FFL_ARGS)
 	if (!(tree->master->dsp_func))
 		FAIL("NULLDSP NULL dsp_func in %s", tree->master->name);
 
-	_TREE_READ(tree, true, file, func, line);
-
 	now_t = time(NULL);
 	localtime_r(&now_t, &tm);
 	snprintf(stamp, sizeof(stamp),
@@ -210,12 +208,16 @@ void _dsp_ktree(K_TREE *tree, char *filename, char *msg, KTREE_FFL_ARGS)
 
 	if (tree->root->isNil == No)
 	{
+		K_RLOCK(tree->master);
+
 		item = first_in_ktree(tree, ctx);
 		while (item)
 		{
 			tree->master->dsp_func(item, stream);
 			item = next_in_ktree(ctx);
 		}
+		K_RUNLOCK(tree->master);
+
 		fprintf(stream, "End\n\n");
 	}
 	else

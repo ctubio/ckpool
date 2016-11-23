@@ -72,8 +72,9 @@ static char *cmd_adduser(PGconn *conn, char *cmd, char *id, tv_t *now, char *by,
 		if (event == EVENT_OK) {
 			u_item = users_add(conn, in_username,
 						 transfer_data(i_emailaddress),
-						 transfer_data(i_passwordhash), 0,
-						 by, code, inet, now, trf_root);
+						 transfer_data(i_passwordhash),
+						 NULL, 0, by, code, inet, now,
+						 trf_root);
 		}
 	}
 
@@ -3116,7 +3117,7 @@ static char *cmd_auth_do(PGconn *conn, char *cmd, char *id, char *by,
 				DATA_OPTIONCONTROL(optioncontrol, oc_item);
 				u_item = users_add(conn, in_username, EMPTY,
 						   optioncontrol->optionvalue,
-						   0, by, code, inet, cd,
+						   NULL, 0, by, code, inet, cd,
 						   trf_root);
 			} else
 				ok = false;
@@ -3347,7 +3348,7 @@ static char *cmd_heartbeat(__maybe_unused PGconn *conn, char *cmd, char *id,
 		goto pulse;
 	}
 
-	hq_store = k_new_store(heartbeatqueue_free);
+	hq_store = k_new_store_locked(heartbeatqueue_free);
 	k_list_transfer_to_head(heartbeatqueue_store, hq_store);
 	K_WUNLOCK(heartbeatqueue_free);
 
@@ -3871,8 +3872,6 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	ExecStatusType rescode;
-	PGresult *res;
 	bool conned = false;
 	K_ITEM *t_item, *u_item, *ua_item = NULL;
 	INTRANSIENT *in_username;
@@ -3920,21 +3919,14 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 				*(dot++) = '\0';
 				// If we already had a different one, save it to the DB
 				if (ua_item && strcmp(useratts->attname, attname) != 0) {
-					if (conn == NULL) {
-						conn = dbconnect();
+					if (CKPQConn(&conn))
 						conned = true;
-					}
 					if (!begun) {
-						// Beginning of a write txn
-						res = PQexec(conn, "Begin", CKPQ_WRITE);
-						rescode = PQresultStatus(res);
-						PQclear(res);
-						if (!PGOK(rescode)) {
-							PGLOGERR("Begin", rescode, conn);
+						begun = CKPQBegin(conn);
+						if (!begun) {
 							reason = "DBERR";
 							goto bats;
 						}
-						begun = true;
 					}
 					if (useratts_item_add(conn, ua_item, now, begun)) {
 						ua_item = NULL;
@@ -3982,21 +3974,14 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 			t_item = next_in_ktree(ctx);
 		}
 		if (ua_item) {
-			if (conn == NULL) {
-				conn = dbconnect();
+			if (CKPQConn(&conn))
 				conned = true;
-			}
 			if (!begun) {
-				// Beginning of a write txn
-				res = PQexec(conn, "Begin", CKPQ_WRITE);
-				rescode = PQresultStatus(res);
-				PQclear(res);
-				if (!PGOK(rescode)) {
-					PGLOGERR("Begin", rescode, conn);
+				begun = CKPQBegin(conn);
+				if (!begun) {
 					reason = "DBERR";
 					goto bats;
 				}
-				begun = true;
 			}
 			if (!useratts_item_add(conn, ua_item, now, begun)) {
 				reason = "DBERR";
@@ -4006,15 +3991,11 @@ static char *cmd_setatts(PGconn *conn, char *cmd, char *id,
 		}
 	}
 rollback:
-	if (!reason)
-		res = PQexec(conn, "Commit", CKPQ_WRITE);
-	else
-		res = PQexec(conn, "Rollback", CKPQ_WRITE);
 
-	PQclear(res);
+	CKPQEnd(conn, (reason == NULL));
+
 bats:
-	if (conned)
-		PQfinish(conn);
+	CKPQDisco(&conn, conned);
 	if (reason) {
 		if (ua_item) {
 			K_WLOCK(useratts_free);
@@ -4206,8 +4187,6 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 			 __maybe_unused tv_t *notcd, K_TREE *trf_root,
 			 __maybe_unused bool reload_data)
 {
-	ExecStatusType rescode;
-	PGresult *res;
 	bool conned = false;
 	K_ITEM *t_item, *oc_item = NULL, *ok = NULL;
 	K_TREE_CTX ctx[1];
@@ -4241,21 +4220,14 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 					reason = "Missing value";
 					goto rollback;
 				}
-				if (conn == NULL) {
-					conn = dbconnect();
+				if (CKPQConn(&conn))
 					conned = true;
-				}
 				if (!begun) {
-					// Beginning of a write txn
-					res = PQexec(conn, "Begin", CKPQ_WRITE);
-					rescode = PQresultStatus(res);
-					PQclear(res);
-					if (!PGOK(rescode)) {
-						PGLOGERR("Begin", rescode, conn);
+					begun = CKPQBegin(conn);
+					if (!begun) {
 						reason = "DBERR";
 						goto rollback;
 					}
-					begun = true;
 				}
 				ok = optioncontrol_item_add(conn, oc_item, now, begun);
 				oc_item = NULL;
@@ -4298,21 +4270,14 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 			reason = "Missing value";
 			goto rollback;
 		}
-		if (conn == NULL) {
-			conn = dbconnect();
+		if (CKPQConn(&conn))
 			conned = true;
-		}
 		if (!begun) {
-			// Beginning of a write txn
-			res = PQexec(conn, "Begin", CKPQ_WRITE);
-			rescode = PQresultStatus(res);
-			PQclear(res);
-			if (!PGOK(rescode)) {
-				PGLOGERR("Begin", rescode, conn);
+			begun = CKPQBegin(conn);
+			if (!begun) {
 				reason = "DBERR";
 				goto rollback;
 			}
-			begun = true;
 		}
 		ok = optioncontrol_item_add(conn, oc_item, now, begun);
 		oc_item = NULL;
@@ -4324,17 +4289,10 @@ static char *cmd_setopts(PGconn *conn, char *cmd, char *id,
 		}
 	}
 rollback:
-	if (begun) {
-		if (reason)
-			res = PQexec(conn, "Rollback", CKPQ_WRITE);
-		else
-			res = PQexec(conn, "Commit", CKPQ_WRITE);
+	if (begun)
+		CKPQEnd(conn, (reason == NULL));
 
-		PQclear(res);
-	}
-
-	if (conned)
-		PQfinish(conn);
+	CKPQDisco(&conn, conned);
 	if (reason) {
 		snprintf(reply, siz, "ERR.%s", reason);
 		LOGERR("%s.%s.%s", cmd, id, reply);
@@ -5903,45 +5861,116 @@ static char *cmd_dsp(__maybe_unused PGconn *conn, __maybe_unused char *cmd,
 		     __maybe_unused K_TREE *trf_root,
 		     __maybe_unused bool reload_data)
 {
-	__maybe_unused K_ITEM *i_file;
-	__maybe_unused char reply[1024] = "";
-	__maybe_unused size_t siz = sizeof(reply);
-
 	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
 
-	// WARNING: This is a gaping security hole - only use in development
+#if 1
 	LOGDEBUG("%s.disabled.dsp", id);
 	return strdup("disabled.dsp");
-/*
+#else
+	// WARNING: This is a gaping security hole - only use in development
+	K_ITEM *i_file, *i_name, *i_type;
+	char reply[1024] = "", *fil, *name, *typ;
+	size_t siz = sizeof(reply);
+	K_STORE *store = NULL;
+	K_TREE *tree = NULL;
+	bool unknown_typ = true, unknown_name = true, msg = false;
+
 	i_file = require_name(trf_root, "file", 1, NULL, reply, siz);
 	if (!i_file)
 		return strdup(reply);
 
-	dsp_ktree(blocks_free, blocks_root, transfer_data(i_file), NULL);
+	i_name = require_name(trf_root, "name", 1, NULL, reply, siz);
+	if (!i_name)
+		return strdup(reply);
 
-	dsp_ktree(transfer_free, trf_root, transfer_data(i_file), NULL);
+	i_type = optional_name(trf_root, "type", 1, NULL, reply, siz);
+	if (*reply)
+		return strdup(reply);
 
-	dsp_ktree(paymentaddresses_free, paymentaddresses_root,
-		  transfer_data(i_file), NULL);
+	fil = transfer_data(i_file);
+	name = transfer_data(i_name);
+	if (i_type)
+		typ = transfer_data(i_type);
+	else
+		typ = "tree";
 
-	dsp_ktree(paymentaddresses_create_free, paymentaddresses_root,
-		  transfer_data(i_file), NULL);
+	if (strcasecmp(typ, "tree") == 0) {
+		unknown_typ = false;
 
-	dsp_ktree(sharesummary_free, sharesummary_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "blocks") == 0)
+			tree = blocks_root;
 
-	dsp_ktree(userstats_free, userstats_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "transfer") == 0)
+			tree = trf_root;
 
-	dsp_ktree(markersummary_free, markersummary_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "paymentaddresses") == 0)
+			tree = paymentaddresses_root;
 
-	dsp_ktree(workmarkers_free, workmarkers_root,
-		  transfer_data(i_file), NULL);
+		if (strcasecmp(name, "paymentaddresses_create") == 0)
+			tree = paymentaddresses_create_root;
 
-	LOGDEBUG("%s.ok.dsp.file='%s'", id, transfer_data(i_file));
-	return strdup("ok.dsp");
-*/
+		if (strcasecmp(name, "sharesummary") == 0)
+			tree = sharesummary_root;
+
+		if (strcasecmp(name, "userstats") == 0)
+			tree = userstats_root;
+
+		if (strcasecmp(name, "markersummary") == 0)
+			tree = markersummary_root;
+
+		if (strcasecmp(name, "workmarkers") == 0)
+			tree = workmarkers_root;
+
+		if (strcasecmp(name, "idcontrol") == 0)
+			tree = idcontrol_root;
+
+		if (tree) {
+			unknown_name = false;
+			if (tree->master->dsp_func)
+				dsp_ktree(tree, fil, NULL);
+			else {
+				snprintf(reply, siz,
+					 "%s %s has no dsp_func",
+					 typ, name);
+				msg = true;
+			}
+		}
+	} else if (strcasecmp(typ, "store") == 0) {
+		unknown_typ = false;
+
+		if (strcasecmp(name, "blocks") == 0)
+			store = blocks_store;
+
+		if (strcasecmp(name, "markersummary") == 0)
+			store = markersummary_store;
+
+		if (strcasecmp(name, "msgline") == 0)
+			store = msgline_store;
+
+		if (store) {
+			unknown_name = false;
+			if (store->master->dsp_func)
+				dsp_kstore(store, fil, NULL);
+			else {
+				snprintf(reply, siz,
+					 "%s %s has no dsp_func",
+					 typ, name);
+				msg = true;
+			}
+		}
+	}
+
+	if (unknown_typ) {
+		snprintf(reply, siz, "unknown typ '%s'", typ);
+	} else if (unknown_name) {
+		snprintf(reply, siz, "unknown name '%s' for '%s'", name, typ);
+	} else {
+		if (!msg)
+			snprintf(reply, siz, "ok.dsp.file='%s'", fil);
+	}
+	LOGDEBUG("%s.%s'", id, reply);
+	return strdup(reply);
+#endif
 }
 
 static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
@@ -5954,7 +5983,7 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	char tmp[1024], *buf;
 	const char *name;
 	size_t len, off;
-	uint64_t ram, ram2, tot = 0;
+	int64_t ram, ram2, tot = 0;
 	K_LIST *klist;
 	K_LISTS *klists;
 	int rows = 0;
@@ -5999,8 +6028,8 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 
 		snprintf(tmp, sizeof(tmp),
 			 "name:%d=%s%s%s%cinitial:%d=%d%callocated:%d=%d%c"
-			 "instore:%d=%d%cram:%d=%"PRIu64"%c"
-			 "ram2:%d=%"PRIu64"%ccull:%d=%d%c",
+			 "instore:%d=%d%cram:%d=%"PRId64"%c"
+			 "ram2:%d=%"PRId64"%ccull:%d=%d%ccull_limit:%d=%d%c",
 			 rows, name, istree ? " (tree)" : "",
 			 klist->is_lock_only ? " (lock)" : "", FLDSEP,
 			 rows, klist->allocate, FLDSEP,
@@ -6008,7 +6037,8 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 			 rows, klist->total - klist->count, FLDSEP,
 			 rows, ram, FLDSEP,
 			 rows, ram2, FLDSEP,
-			 rows, klist->cull_count, FLDSEP);
+			 rows, klist->cull_count, FLDSEP,
+			 rows, klist->cull_limit, FLDSEP);
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		tot += ram + ram2;
@@ -6018,13 +6048,13 @@ static char *cmd_stats(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 	ck_wunlock(&lock_check_lock);
 
-	snprintf(tmp, sizeof(tmp), "totalram=%"PRIu64"%c", tot, FLDSEP);
+	snprintf(tmp, sizeof(tmp), "totalram=%"PRId64"%c", tot, FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp),
 		 "rows=%d%cflds=%s%c",
 		 rows, FLDSEP,
-		 "name,initial,allocated,instore,ram,cull", FLDSEP);
+		 "name,initial,allocated,instore,ram,cull,cull_limit", FLDSEP);
 	APPEND_REALLOC(buf, off, len, tmp);
 
 	snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s", "Stats", FLDSEP, "");
@@ -7030,7 +7060,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		i_expired = optional_name(trf_root, "expired",
@@ -7116,7 +7146,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_wid)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_BIGINT("wid", transfer_data(i_wid), wid);
 
 		i_expired = optional_name(trf_root, "expired",
@@ -7252,7 +7282,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		int_to_buf(height, reply, sizeof(reply));
@@ -7319,7 +7349,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		int_to_buf(height, reply, sizeof(reply));
@@ -7450,7 +7480,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_height)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_INT("height", transfer_data(i_height), height);
 
 		int_to_buf(height, reply, sizeof(reply));
@@ -7571,7 +7601,7 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 					1, (char *)intpatt,
 					reply, siz);
 		if (!i_wid)
-			return strdup(reply);
+			goto badreply;
 		TXT_TO_BIGINT("wid", transfer_data(i_wid), selwid);
 
 		INIT_SHARES(&s_look);
@@ -7703,21 +7733,117 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 		APPEND_REALLOC(buf, off, len, tmp);
 
 		ok = true;
+	} else if (strcasecmp(request, "pg") == 0) {
+		K_RLOCK(pgdb_free);
+		snprintf(tmp, sizeof(tmp), "connections=%d%c",
+			 pgdb_count, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		K_RUNLOCK(pgdb_free);
+		rows++;
+
+		ok = true;
+#if 0
+	} else if (strcasecmp(request, "transfer") == 0) {
+		/* Code for debugging the transfer stores
+		 *  limit is set to avoid a very large reply,
+		 *  since transfer can be millions of items during a reload */
+		TRANSFER *trf = NULL;
+		K_STORE *trf_store;
+		K_ITEM *trf_item, *i_limit;
+		int stores = 0, limit = 20, tot_stores = 0;
+		bool exceeded = false;
+
+		i_limit = optional_name(trf_root, "limit",
+					1, (char *)intpatt,
+					reply, siz);
+		if (*reply) {
+			LOGERR("%s() %s.%s", __func__, id, reply);
+			goto badreply;
+		}
+		if (i_limit)
+			limit = atoi(transfer_data(i_limit));
+
+		snprintf(tmp, sizeof(tmp), "limit=%d%c", limit, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		K_RLOCK(transfer_free);
+		trf_store = transfer_free->next_store;
+		while (!exceeded && trf_store) {
+			trf_item = trf_store->head;
+			while (trf_item) {
+				if (rows >= limit) {
+					exceeded = true;
+					break;
+				}
+				DATA_TRANSFER(trf, trf_item);
+				snprintf(tmp, sizeof(tmp), "store:%d=%d%c",
+					 rows, stores, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "storename:%d=%s%c",
+					 rows, trf_store->name, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "name:%d=%s%c",
+					 rows, trf->name, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "mvalue:%d=%s%c",
+					 rows, trf->mvalue, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp),
+					 "malloc:%d=%"PRIu64"%c",
+					 rows, trf->msiz, FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+				snprintf(tmp, sizeof(tmp), "intrans:%d=%c%c",
+					 rows, trf->intransient ? 'Y' : 'N',
+					 FLDSEP);
+				APPEND_REALLOC(buf, off, len, tmp);
+
+				trf_item = trf_item->next;
+				rows++;
+			}
+			trf_store = trf_store->next_store;
+			stores++;
+		}
+		tot_stores = stores;
+		if (exceeded) {
+			while (trf_store) {
+				trf_store = trf_store->next_store;
+				tot_stores++;
+			}
+		}
+		K_RUNLOCK(transfer_free);
+
+		snprintf(tmp, sizeof(tmp), "rowstores=%d%c",
+			 stores, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "totstores=%d%c",
+			 tot_stores, FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "limitexceeded=%c%c",
+			 exceeded ? 'Y' : 'N', FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		snprintf(tmp, sizeof(tmp), "flds=%s%c",
+			 "store,storename,name,mvalue,malloc,intrans", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+		snprintf(tmp, sizeof(tmp), "arn=%s%carp=%s%c",
+			 transfer_free->name, FLDSEP, "", FLDSEP);
+		APPEND_REALLOC(buf, off, len, tmp);
+
+		ok = true;
+#endif
 	} else {
-		free(buf);
 		snprintf(reply, siz, "unknown request '%s'", request);
 		LOGERR("%s() %s.%s", __func__, id, reply);
-		return strdup(reply);
+		goto badreply;
 	}
 
 	if (!ok) {
-		free(buf);
 		snprintf(reply, siz, "failed.%s%s%s",
 					request,
 					msg[0] ? " " : "",
 					msg[0] ? msg : "");
 		LOGERR("%s() %s.%s", __func__, id, reply);
-		return strdup(reply);
+		goto badreply;
 	}
 
 	snprintf(tmp, sizeof(tmp), "rows=%d", rows);
@@ -7726,6 +7852,10 @@ static char *cmd_query(__maybe_unused PGconn *conn, char *cmd, char *id,
 				     msg[0] ? " " : "",
 				     msg[0] ? msg : "");
 	return buf;
+
+badreply:
+	free(buf);
+	return strdup(reply);
 }
 
 // Query and disable internal lock detection code
@@ -8353,10 +8483,8 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 	if (strcasecmp(action, "store") == 0) {
 		/* Store the shares_hi_root list in the db now,
 		 * rather than wait for a shift process to do it */
-		if (!conn) {
-			conn = dbconnect();
+		if (CKPQConn(&conn))
 			conned = true;
-		}
 		count = 0;
 		do {
 			did = false;
@@ -8371,8 +8499,7 @@ static char *cmd_high(PGconn *conn, char *cmd, char *id,
 				count++;
 			}
 		} while (did);
-		if (conned)
-			PQfinish(conn);
+		CKPQDisco(&conn, conned);
 		if (count) {
 			LOGWARNING("%s() Stored: %d high shares",
 				   __func__, count);
@@ -8463,6 +8590,22 @@ static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
 		K_WUNLOCK(breakqueue_free);
 		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
 		return strdup(reply);
+	} else if (strcasecmp(name, "cl") == 0 ||
+		   strcasecmp(name, "cmd_listener") == 0) {
+		K_WLOCK(workqueue_free);
+		// Just overwrite whatever's there
+		cmd_listener_threads_delta = delta_value;
+		K_WUNLOCK(workqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
+	} else if (strcasecmp(name, "bl") == 0 ||
+		   strcasecmp(name, "btc_listener") == 0) {
+		K_WLOCK(workqueue_free);
+		// Just overwrite whatever's there
+		btc_listener_threads_delta = delta_value;
+		K_WUNLOCK(workqueue_free);
+		snprintf(reply, siz, "ok.delta %d request sent", delta_value);
+		return strdup(reply);
 	} else {
 		snprintf(reply, siz, "unknown name '%s'", name);
 		LOGERR("%s() %s.%s", __func__, id, reply);
@@ -8470,6 +8613,71 @@ static char *cmd_threads(__maybe_unused PGconn *conn, char *cmd, char *id,
 	}
 
 	return buf;
+}
+
+static char *cmd_pause(__maybe_unused PGconn *conn, char *cmd, char *id,
+			__maybe_unused tv_t *now, __maybe_unused char *by,
+			__maybe_unused char *code, __maybe_unused char *inet,
+			__maybe_unused tv_t *cd, K_TREE *trf_root,
+			__maybe_unused bool reload_data)
+{
+	K_ITEM *i_name;
+	char reply[1024] = "";
+	size_t siz = sizeof(reply);
+	char *name;
+
+	LOGDEBUG("%s(): cmd '%s'", __func__, cmd);
+
+	i_name = require_name(trf_root, "name", 1, NULL, reply, siz);
+	if (!i_name)
+		return strdup(reply);
+	name = transfer_data(i_name);
+
+	/* Pause the breaker threads to help culling to take place for some
+	 *  tables that can be culled but 'never' empty due to threads always
+	 *  creating new data before the old data has finished being processed
+	 * N.B. this should only be needed on a sizeable pool, once after
+	 *  the reload completes ... and even 499ms would be a long time to
+	 *  pause in the case of a sizeable pool ... DANGER, WILL ROBINSON! */
+	if (strcasecmp(name, "breaker") == 0) {
+		K_ITEM *i_ms;
+		int ms = 100;
+
+		i_ms = optional_name(trf_root, "ms", 1, NULL, reply, siz);
+		if (*reply)
+			return strdup(reply);
+		if (i_ms) {
+			ms = atoi(transfer_data(i_ms));
+			// 4999 is too long, don't do it!
+			if (ms < 10 || ms > 4999) {
+				snprintf(reply, siz,
+					 "%s ms %d outside range 10-4999",
+					 name, ms);
+				goto out;
+			}
+		}
+
+		if (!reload_queue_complete && !key_update) {
+			snprintf(reply, siz,
+				 "no point pausing %s before reload completes",
+				 name);
+			goto out;
+		}
+
+		/* Use an absolute start time to try to get all threads asleep
+		 *  at the same time */
+		K_WLOCK(breakqueue_free);
+		cksleep_prepare_r(&breaker_sleep_stt);
+		breaker_sleep_ms = ms;
+		K_WUNLOCK(breakqueue_free);
+		snprintf(reply, siz, "ok.%s %s%dms pause sent", name,
+					ms > 499 ? "ALERT!!! " : EMPTY, ms);
+	} else
+		snprintf(reply, siz, "unknown name '%s'", name);
+
+out:
+	LOGWARNING("%s() %s.%s", __func__, id, reply);
+	return strdup(reply);
 }
 
 /* The socket command format is as follows:
@@ -8585,5 +8793,6 @@ struct CMDS ckdb_cmds[] = {
 	{ CMD_EVENTS,	"events",	false,	false,	cmd_events,	SEQ_NONE,	ACCESS_SYSTEM | ACCESS_WEB },
 	{ CMD_HIGH,	"high",		false,	false,	cmd_high,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_THREADS,	"threads",	false,	false,	cmd_threads,	SEQ_NONE,	ACCESS_SYSTEM },
+	{ CMD_PAUSE,	"pause",	false,	false,	cmd_pause,	SEQ_NONE,	ACCESS_SYSTEM },
 	{ CMD_END,	NULL,		false,	false,	NULL,		SEQ_NONE,	0 }
 };

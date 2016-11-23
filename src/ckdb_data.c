@@ -18,7 +18,7 @@ void free_transfer_data(TRANSFER *transfer)
 		FREENULL(transfer->mvalue);
 }
 
-void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
+void free_msgline_data(K_ITEM *item, bool t_lock)
 {
 	K_ITEM *t_item = NULL;
 	TRANSFER *transfer;
@@ -40,11 +40,6 @@ void free_msgline_data(K_ITEM *item, bool t_lock, bool t_cull)
 			K_WLOCK(transfer_free);
 		transfer_free->ram -= ram2;
 		k_list_transfer_to_head(msgline->trf_store, transfer_free);
-		if (t_cull) {
-			if (transfer_free->count == transfer_free->total &&
-			    transfer_free->total >= ALLOC_TRANSFER * CULL_TRANSFER)
-				k_cull_list(transfer_free);
-		}
 		if (t_lock)
 			K_WUNLOCK(transfer_free);
 		msgline->trf_store = k_free_store(msgline->trf_store);
@@ -510,8 +505,26 @@ void _txt_to_double(char *nam, char *fld, double *data, size_t siz, WHERE_FFL_AR
 
 char *_data_to_buf(enum data_type typ, void *data, char *buf, size_t siz, WHERE_FFL_ARGS)
 {
+	static bool had_null = false;
 	struct tm tm;
 	double d;
+
+	// Return an empty string but only log a console message the first time
+	if (!data) {
+		// locking doesn't matter - if we get extra messages
+		if (!had_null) {
+			had_null = true;
+			LOGEMERG("%s() BUG - called with null data - check"
+				 " log file" WHERE_FFL,
+				 __func__, WHERE_FFL_PASS);
+		}
+		LOGNOTICE("%s() BUG - called with null data typ=%d" WHERE_FFL,
+			  __func__, (int)typ, WHERE_FFL_PASS);
+		if (!buf)
+			buf = malloc(1);
+		*buf = '\0';
+		return buf;
+	}
 
 	if (!buf) {
 		switch (typ) {
@@ -816,6 +829,37 @@ char *_intransient_str(char *fldnam, char *value, WHERE_FFL_ARGS)
 	return in->str;
 }
 
+void dsp_msgline(K_ITEM *item, FILE *stream)
+{
+	K_ITEM *t_item;
+	MSGLINE *m;
+	int c;
+
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		DATA_MSGLINE(m, item);
+		if (m->trf_store)
+			c = m->trf_store->count;
+		else
+			c = 0;
+
+		fprintf(stream, " which=%d id='%s' cmd='%s' msg='%.42s' "
+				"trf_store=%c count=%d\n",
+				m->which_cmds, m->id, m->cmd, m->msg,
+				m->trf_store ? 'Y' : 'N', c);
+
+		if (m->trf_store) {
+			t_item = m->trf_store->head;
+			while (t_item) {
+				fputc(' ', stream);
+				dsp_transfer(t_item, stream);
+				t_item = t_item->next;
+			}
+		}
+	}
+}
+
 // For mutiple variable function calls that need the data
 char *_transfer_data(K_ITEM *item, WHERE_FFL_ARGS)
 {
@@ -856,8 +900,10 @@ void dsp_transfer(K_ITEM *item, FILE *stream)
 		fprintf(stream, "%s() called with (null) item\n", __func__);
 	else {
 		DATA_TRANSFER(t, item);
-		fprintf(stream, " name='%s' mvalue='%s' malloc=%"PRIu64"\n",
-				t->name, t->mvalue, t->msiz);
+		fprintf(stream, " name='%s' mvalue='%s' malloc=%"PRIu64
+				" intransient=%c\n",
+				t->name, t->mvalue, t->msiz,
+				t->intransient ? 'Y' : 'N');
 	}
 }
 
@@ -2138,6 +2184,52 @@ K_ITEM *find_accountbalance(int64_t userid)
 	K_RLOCK(accountbalance_free);
 	item = find_in_ktree(accountbalance_root, &look, ctx);
 	K_RUNLOCK(accountbalance_free);
+	return item;
+}
+
+void dsp_idcontrol(K_ITEM *item, FILE *stream)
+{
+	char createdate_buf[DATE_BUFSIZ], modifydate_buf[DATE_BUFSIZ];
+	IDCONTROL *i;
+
+	if (!item)
+		fprintf(stream, "%s() called with (null) item\n", __func__);
+	else {
+		DATA_IDCONTROL(i, item);
+		tv_to_buf(&(i->createdate), createdate_buf, sizeof(createdate_buf));
+		tv_to_buf(&(i->modifydate), modifydate_buf, sizeof(modifydate_buf));
+		fprintf(stream, " idname='%s' lastid=%"PRId64" cdate='%s'"
+				" cby='%s' ccode='%s' cinet='%s' mdate='%s'"
+				" mby='%s' mcode='%s' minet='%s'\n",
+				i->idname, i->lastid, createdate_buf,
+				i->in_createby, i->in_createcode,
+				i->in_createinet, modifydate_buf,
+				i->in_modifyby, i->in_modifycode,
+				i->in_modifyinet);
+	}
+}
+
+// order by idname asc
+cmp_t cmp_idcontrol(K_ITEM *a, K_ITEM *b)
+{
+	IDCONTROL *ida, *idb;
+	DATA_IDCONTROL(ida, a);
+	DATA_IDCONTROL(idb, b);
+	return CMP_STR(ida->idname, idb->idname);
+}
+
+// idcontrol must be R or W locked
+K_ITEM *find_idcontrol(char *idname)
+{
+	IDCONTROL idcontrol;
+	K_TREE_CTX ctx[1];
+	K_ITEM look, *item;
+
+	STRNCPY(idcontrol.idname, idname);
+
+	INIT_IDCONTROL(&look);
+	look.data = (void *)(&idcontrol);
+	item = find_in_ktree(idcontrol_root, &look, ctx);
 	return item;
 }
 
@@ -4881,7 +4973,8 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 		 FLDSEP, cd_buf);
 	DUP_POINTER(payouts_free, payouts->stats, &buf[0]);
 
-	conned = CKPQConn(&conn);
+	if (CKPQConn(&conn))
+		conned = true;
 	begun = CKPQBegin(conn);
 	if (!begun)
 		goto shazbot;
@@ -4984,6 +5077,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 						    (double)(pa->payratio) /
 						    (double)paytotal;
 				used += d64;
+				payments->in_originaltxn =
+					payments->in_committxn =
+					payments->in_commitblockhash = EMPTY;
 				k_add_tail_nolock(pay_store, pay_item);
 				ok = payments_add(conn, true, pay_item,
 						  &(payments->old_item),
@@ -5013,6 +5109,9 @@ bool process_pplns(int32_t height, char *blockhash, tv_t *addr_cd)
 				payments->amount = amount;
 				payments->diffacc = miningpayouts->diffacc;
 				used = amount;
+				payments->in_originaltxn =
+					payments->in_committxn =
+					payments->in_commitblockhash = EMPTY;
 				k_add_tail_nolock(pay_store, pay_item);
 				ok = payments_add(conn, true, pay_item,
 						  &(payments->old_item),
@@ -6345,7 +6444,7 @@ K_ITEM *_find_markersummary(int64_t markerid, int64_t workinfoid,
 bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 			  tv_t *cd, K_TREE *trf_root)
 {
-	PGconn *conn;
+	PGconn *conn = NULL;
 	K_TREE_CTX ctx[1];
 	WORKMARKERS *workmarkers;
 	K_ITEM *wm_item, *wm_last = NULL, *s_item = NULL;
@@ -6375,7 +6474,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 		return false;
 	}
 
-	conn = dbconnect();
+	CKPQConn(&conn);
 
 	/* Store all shares in the DB before processing the workmarker
 	 * This way we know that the high shares in the DB will match the start
@@ -6434,7 +6533,7 @@ bool make_markersummaries(bool msg, char *by, char *code, char *inet,
 		   tvdiff(&proc_lock_fin, &proc_lock_got));
 
 flailed:
-	PQfinish(conn);
+	CKPQDisco(&conn, true);
 
 	if (count > 0) {
 		LOGWARNING("%s() Stored: %d high shares %.3fs",

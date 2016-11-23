@@ -151,8 +151,11 @@ typedef struct k_list {
 	int data_mem_count;	// how many item data memory buffers have been allocated
 	void **data_memory;	// allocated item data memory buffers
 	void (*dsp_func)(K_ITEM *, FILE *); // optional data display to a file
-	int cull_count;
+	int cull_limit;		// <1 means don't cull, otherwise total to cull at
+	int cull_count;		// number of times culled
 	uint64_t ram;		// ram allocated for data pointers - code must manage it
+	struct k_list *next_store; // list of all stores - the head is next_store in the list master
+	struct k_list *prev_store; //  the stores themselves have their prev and next
 	int stores;		// how many stores it currently has
 #if LOCK_CHECK
 	// Since each thread has it's own k_lock no locking is required on this
@@ -663,18 +666,23 @@ static inline K_ITEM *list_rtail(K_LIST *list)
 #define STORE_HEAD_NOLOCK(_s) LIST_HEAD_NOLOCK(_s)
 #define STORE_TAIL_NOLOCK(_s) LIST_TAIL_NOLOCK(_s)
 
-extern K_STORE *_k_new_store(K_LIST *list, KLIST_FFL_ARGS);
-#define k_new_store(_list) _k_new_store(_list, KLIST_FFL_HERE)
+extern void _dsp_kstore(K_STORE *store, char *filename, char *msg, KLIST_FFL_ARGS);
+#define dsp_kstore(_store, _file, _msg) _dsp_kstore(_store, _file, _msg, KLIST_FFL_HERE)
+extern K_STORE *_k_new_store(K_LIST *list, bool gotlock, KLIST_FFL_ARGS);
+#define k_new_store(_list) _k_new_store(_list, false, KLIST_FFL_HERE)
+#define k_new_store_locked(_list) _k_new_store(_list, true, KLIST_FFL_HERE)
 extern K_LIST *_k_new_list(const char *name, size_t siz, int allocate,
 			   int limit, bool do_tail, bool lock_only,
 			   bool without_lock, bool local_list,
-			   const char *name2, KLIST_FFL_ARGS);
+			   const char *name2, int cull_limit, KLIST_FFL_ARGS);
 #define k_new_list(_name, _siz, _allocate, _limit, _do_tail) \
-	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, false, false, NULL, KLIST_FFL_HERE)
+	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, false, false, NULL, 0, KLIST_FFL_HERE)
 #define k_lock_only_list(_name) \
-	_k_new_list(_name, 1, 1, 1, true, true, false, false, NULL, KLIST_FFL_HERE)
+	_k_new_list(_name, 1, 1, 1, true, true, false, false, NULL, 0, KLIST_FFL_HERE)
 #define k_new_tree_list(_name, _siz, _allocate, _limit, _do_tail, _local_tree, _name2) \
-	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, true, _local_tree, _name2, KLIST_FFL_HERE)
+	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, true, _local_tree, _name2, 0, KLIST_FFL_HERE)
+#define k_new_list_cull(_name, _siz, _allocate, _limit, _do_tail, _cull) \
+	_k_new_list(_name, _siz, _allocate, _limit, _do_tail, false, false, false, NULL, _cull, KLIST_FFL_HERE)
 extern K_ITEM *_k_unlink_head(K_LIST *list, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS);
 #define k_unlink_head(_list) _k_unlink_head(_list, true, KLIST_FFL_HERE)
 #define k_unlink_head_nolock(_list) _k_unlink_head(_list, false, KLIST_FFL_HERE)
@@ -709,8 +717,5 @@ extern K_LIST *_k_free_list(K_LIST *list, KLIST_FFL_ARGS);
 #define k_free_list(_list) _k_free_list(_list, KLIST_FFL_HERE)
 extern K_STORE *_k_free_store(K_STORE *store, KLIST_FFL_ARGS);
 #define k_free_store(_store) _k_free_store(_store, KLIST_FFL_HERE)
-extern void _k_cull_list(K_LIST *list, LOCK_MAYBE bool chklock, KLIST_FFL_ARGS);
-#define k_cull_list(_list) _k_cull_list(_list, true, KLIST_FFL_HERE)
-//#define k_cull_list_nolock(_list) _k_cull_list(_list, false, KLIST_FFL_HERE)
 
 #endif
