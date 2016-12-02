@@ -2760,6 +2760,7 @@ static void free_proxy(proxy_t *proxy)
 	/* Delete any shares in the proxy's hashtable. */
 	if (dsdata) {
 		share_t *share, *tmpshare;
+		workbase_t *wb, *tmpwb;
 
 		mutex_lock(&dsdata->share_lock);
 		HASH_ITER(hh, dsdata->shares, share, tmpshare) {
@@ -2767,6 +2768,13 @@ static void free_proxy(proxy_t *proxy)
 			dealloc(share);
 		}
 		mutex_unlock(&dsdata->share_lock);
+
+		ck_wlock(&dsdata->workbase_lock);
+		HASH_ITER(hh, dsdata->workbases, wb, tmpwb) {
+			HASH_DEL(dsdata->workbases, wb);
+			clear_workbase(wb);
+		}
+		ck_wunlock(&dsdata->workbase_lock);
 	}
 
 	free(proxy->sdata);
