@@ -2755,6 +2755,20 @@ static void generator_drop_proxy(ckpool_t *ckp, const int64_t id, const int subi
 
 static void free_proxy(proxy_t *proxy)
 {
+	sdata_t *dsdata = proxy->sdata;
+
+	/* Delete any shares in the proxy's hashtable. */
+	if (dsdata) {
+		share_t *share, *tmpshare;
+
+		mutex_lock(&dsdata->share_lock);
+		HASH_ITER(hh, dsdata->shares, share, tmpshare) {
+			HASH_DEL(dsdata->shares, share);
+			dealloc(share);
+		}
+		mutex_unlock(&dsdata->share_lock);
+	}
+
 	free(proxy->sdata);
 	free(proxy);
 }
