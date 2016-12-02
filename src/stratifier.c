@@ -2517,7 +2517,8 @@ static void update_subscribe(ckpool_t *ckp, const char *cmd)
  * subproxies. */
 static void recruit_best_userproxy(sdata_t *sdata, const int userid, const int recruits)
 {
-	proxy_t *proxy, *subproxy, *tmp, *subtmp, *best = NULL;
+	proxy_t *proxy, *subproxy, *tmp, *subtmp;
+	int id = -1;
 
 	mutex_lock(&sdata->proxy_lock);
 	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
@@ -2528,13 +2529,13 @@ static void recruit_best_userproxy(sdata_t *sdata, const int userid, const int r
 		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
 			if (subproxy->dead)
 				continue;
-			best = proxy;
+			id = proxy->id;
 		}
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	if (best)
-		generator_recruit(sdata->ckp, best->id, recruits);
+	if (id != -1)
+		generator_recruit(sdata->ckp, id, recruits);
 }
 
 /* Check how much headroom the userid proxies have and reconnect any clients
