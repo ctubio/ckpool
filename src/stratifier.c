@@ -2213,13 +2213,17 @@ out_unlock:
 	return headroom;
 }
 
-static int64_t proxy_headroom(sdata_t *sdata, const int userid)
+/* Returns the headroom available for more clients of the best alive user proxy
+ * for userid. */
+static int64_t best_userproxy_headroom(sdata_t *sdata, const int userid)
 {
 	proxy_t *proxy, *subproxy, *tmp, *subtmp;
 	int64_t headroom = 0;
 
 	mutex_lock(&sdata->proxy_lock);
 	HASH_ITER(hh, sdata->proxies, proxy, tmp) {
+		bool alive = false;
+
 		if (proxy->userid < userid)
 			continue;
 		if (proxy->userid > userid)
@@ -2227,8 +2231,13 @@ static int64_t proxy_headroom(sdata_t *sdata, const int userid)
 		HASH_ITER(sh, proxy->subproxies, subproxy, subtmp) {
 			if (subproxy->dead)
 				continue;
+			alive = true;
 			headroom += subproxy->max_clients - subproxy->clients;
 		}
+		/* Proxies are ordered by priority so first available will be
+		 * the best priority */
+		if (alive)
+			break;
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
@@ -2542,7 +2551,7 @@ static void recruit_best_userproxy(sdata_t *sdata, const int userid, const int r
  * that are not bound to it that should be */
 static void check_userproxies(sdata_t *sdata, proxy_t *proxy, const int userid)
 {
-	int64_t headroom = proxy_headroom(sdata, userid);
+	int64_t headroom = best_userproxy_headroom(sdata, userid);
 	stratum_instance_t *client, *tmpclient;
 	int reconnects = 0;
 
@@ -4416,7 +4425,7 @@ static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, const int 
 		if (best->id != global->id || current_headroom(ckp_sdata, &proxy) < 2)
 			generator_recruit(ckp, global->id, 1);
 	} else {
-		if (proxy_headroom(ckp_sdata, userid) < 2)
+		if (best_userproxy_headroom(ckp_sdata, userid) < 2)
 			generator_recruit(ckp, best->id, 1);
 	}
 	return best->sdata;
