@@ -3082,7 +3082,10 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	msg->client_id = client_id;
-	ckmsgq_add(sdata->ssends, msg);
+	if (likely(ckmsgq_add(sdata->ssends, msg)))
+		return;
+	json_decref(msg->json_msg);
+	free(msg);
 }
 
 static void drop_client(ckpool_t *ckp, sdata_t *sdata, const int64_t id)

@@ -203,7 +203,7 @@ ckmsgq_t *create_ckmsgqs(ckpool_t *ckp, const char *name, const void *func, cons
 
 /* Generic function for adding messages to a ckmsgq linked list and signal the
  * ckmsgq parsing thread(s) to wake up and process it. */
-void _ckmsgq_add(ckmsgq_t *ckmsgq, void *data, const char *file, const char *func, const int line)
+bool _ckmsgq_add(ckmsgq_t *ckmsgq, void *data, const char *file, const char *func, const int line)
 {
 	ckmsg_t *msg;
 
@@ -212,7 +212,7 @@ void _ckmsgq_add(ckmsgq_t *ckmsgq, void *data, const char *file, const char *fun
 		/* Discard data if we're unlucky enough to be sending it to
 		 * msg queues not set up during start up */
 		free(data);
-		return;
+		return false;
 	}
 	while (unlikely(!ckmsgq->active))
 		cksleep_ms(10);
@@ -225,6 +225,8 @@ void _ckmsgq_add(ckmsgq_t *ckmsgq, void *data, const char *file, const char *fun
 	DL_APPEND(ckmsgq->msgs, msg);
 	pthread_cond_broadcast(ckmsgq->cond);
 	mutex_unlock(ckmsgq->lock);
+
+	return true;
 }
 
 /* Return whether there are any messages queued in the ckmsgq linked list. */
