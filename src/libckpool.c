@@ -442,8 +442,8 @@ void _cksem_destroy(sem_t *sem, const char *file, const char *func, const int li
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 {
 	char *url_begin, *url_end, *ipv6_begin, *ipv6_end, *port_start = NULL;
+	char *url_address, *port, *tmp;
 	int url_len, port_len = 0;
-	char *url_address, *port;
 	size_t hlen;
 
 	if (!url) {
@@ -498,8 +498,16 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 	} else
 		strcpy(port, "80");
 
+	/*
+	 * This function may be called with sockaddr_* already set as it may
+	 * be getting updated so we need to free the old entries safely.
+	 * Use a temporary variable so they never dereference */
+	tmp = *sockaddr_port;
 	*sockaddr_port = port;
+	free(tmp);
+	tmp = *sockaddr_url;
 	*sockaddr_url = url_address;
+	free(tmp);
 
 	return true;
 }
