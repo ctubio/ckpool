@@ -2492,6 +2492,7 @@ static void parse_delproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 		goto out;
 	}
 	json_get_int(&id, val, "id");
+	json_decref(val);
 	proxy = proxy_by_id(gdata, id);
 	if (!proxy) {
 		val = json_errormsg("Proxy id %d not found", id);
