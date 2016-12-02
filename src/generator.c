@@ -1466,7 +1466,7 @@ static void submit_share(gdata_t *gdata, json_t *val)
 	msg = ckzalloc(sizeof(stratum_msg_t));
 	msg->json_msg = val;
 	share_id = add_share(gdata, client_id, proxi->diff);
-	json_object_set_nocheck(val, "id", json_integer(share_id));
+	json_set_int(val, "id", share_id);
 
 	/* Add the new message to the psend list */
 	mutex_lock(&gdata->psend_lock);
