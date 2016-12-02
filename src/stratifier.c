@@ -3569,35 +3569,37 @@ static json_t *userinfo(const user_instance_t *user)
 
 static void getuser(sdata_t *sdata, const char *buf, int *sockd)
 {
+	json_t *val = NULL, *res = NULL;
 	char *username = NULL;
 	user_instance_t *user;
 	json_error_t err_val;
-	json_t *val = NULL;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_string(&username, val, "user")) {
-		val = json_errormsg("Failed to find user key");
+		res = json_errormsg("Failed to find user key");
 		goto out;
 	}
 	if (!strlen(username)) {
-		val = json_errormsg("Zero length user key");
+		res = json_errormsg("Zero length user key");
 		goto out;
 	}
 	user = get_user(sdata, username);
-	val = userinfo(user);
+	res = userinfo(user);
 out:
+	if (val)
+		json_decref(val);
 	free(username);
-	send_api_response(val, *sockd);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
 static void userclients(sdata_t *sdata, const char *buf, int *sockd)
 {
-	json_t *val = NULL, *client_arr;
+	json_t *val = NULL, *res = NULL, *client_arr;
 	stratum_instance_t *client;
 	char *username = NULL;
 	user_instance_t *user;
@@ -3605,15 +3607,15 @@ static void userclients(sdata_t *sdata, const char *buf, int *sockd)
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_string(&username, val, "user")) {
-		val = json_errormsg("Failed to find user key");
+		res = json_errormsg("Failed to find user key");
 		goto out;
 	}
 	if (!strlen(username)) {
-		val = json_errormsg("Zero length user key");
+		res = json_errormsg("Zero length user key");
 		goto out;
 	}
 	user = get_user(sdata, username);
@@ -3625,32 +3627,34 @@ static void userclients(sdata_t *sdata, const char *buf, int *sockd)
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	JSON_CPACK(val, "{ss,so}", "user", username, "clients", client_arr);
+	JSON_CPACK(res, "{ss,so}", "user", username, "clients", client_arr);
 out:
+	if (val)
+		json_decref(val);
 	free(username);
-	send_api_response(val, *sockd);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
 static void workerclients(sdata_t *sdata, const char *buf, int *sockd)
 {
+	json_t *val = NULL, *res = NULL, *client_arr;
 	char *tmp, *username, *workername = NULL;
-	json_t *val = NULL, *client_arr;
 	stratum_instance_t *client;
 	user_instance_t *user;
 	json_error_t err_val;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_string(&workername, val, "worker")) {
-		val = json_errormsg("Failed to find worker key");
+		res = json_errormsg("Failed to find worker key");
 		goto out;
 	}
 	if (!strlen(workername)) {
-		val = json_errormsg("Zero length worker key");
+		res = json_errormsg("Zero length worker key");
 		goto out;
 	}
 	tmp = strdupa(workername);
@@ -3666,10 +3670,12 @@ static void workerclients(sdata_t *sdata, const char *buf, int *sockd)
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	JSON_CPACK(val, "{ss,so}", "worker", workername, "clients", client_arr);
+	JSON_CPACK(res, "{ss,so}", "worker", workername, "clients", client_arr);
 out:
+	if (val)
+		json_decref(val);
 	free(workername);
-	send_api_response(val, *sockd);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
@@ -3688,32 +3694,34 @@ static json_t *workerinfo(const user_instance_t *user, const worker_instance_t *
 static void getworker(sdata_t *sdata, const char *buf, int *sockd)
 {
 	char *tmp, *username, *workername = NULL;
+	json_t *val = NULL, *res = NULL;
 	worker_instance_t *worker;
 	user_instance_t *user;
 	json_error_t err_val;
-	json_t *val = NULL;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_string(&workername, val, "worker")) {
-		val = json_errormsg("Failed to find worker key");
+		res = json_errormsg("Failed to find worker key");
 		goto out;
 	}
 	if (!strlen(workername)) {
-		val = json_errormsg("Zero length worker key");
+		res = json_errormsg("Zero length worker key");
 		goto out;
 	}
 	tmp = strdupa(workername);
 	username = strsep(&tmp, "._");
 	user = get_user(sdata, username);
 	worker = get_worker(sdata, user, workername);
-	val = workerinfo(user, worker);
+	res = workerinfo(user, worker);
 out:
+	if (val)
+		json_decref(val);
 	free(workername);
-	send_api_response(val, *sockd);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
@@ -3784,35 +3792,38 @@ static json_t *clientinfo(const stratum_instance_t *client)
 	json_set_double(val, "bestdiff", client->best_diff);
 	json_set_int(val, "proxyid", client->proxyid);
 	json_set_int(val, "subproxyid", client->subproxyid);
+
 	return val;
 }
 
 static void getclient(sdata_t *sdata, const char *buf, int *sockd)
 {
+	json_t *val = NULL, *res = NULL;
 	stratum_instance_t *client;
 	json_error_t err_val;
-	json_t *val = NULL;
 	int64_t client_id;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_int64(&client_id, val, "id")) {
-		val = json_errormsg("Failed to find id key");
+		res = json_errormsg("Failed to find id key");
 		goto out;
 	}
 	client = ref_instance_by_id(sdata, client_id);
 	if (!client) {
-		val = json_errormsg("Failed to find client %"PRId64, client_id);
+		res = json_errormsg("Failed to find client %"PRId64, client_id);
 		goto out;
 	}
-	val = clientinfo(client);
+	res = clientinfo(client);
 
 	dec_instance_ref(sdata, client);
 out:
-	send_api_response(val, *sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
@@ -3836,7 +3847,7 @@ static void getclients(sdata_t *sdata, int *sockd)
 
 static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
 {
-	json_t *val = NULL, *client_arr;
+	json_t *val = NULL, *res = NULL, *client_arr;
 	stratum_instance_t *client;
 	char *username = NULL;
 	user_instance_t *user;
@@ -3844,15 +3855,15 @@ static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_string(&username, val, "user")) {
-		val = json_errormsg("Failed to find user key");
+		res = json_errormsg("Failed to find user key");
 		goto out;
 	}
 	if (!strlen(username)) {
-		val = json_errormsg("Zero length user key");
+		res = json_errormsg("Zero length user key");
 		goto out;
 	}
 	user = get_user(sdata, username);
@@ -3864,32 +3875,34 @@ static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	JSON_CPACK(val, "{ss,so}", "user", username, "clients", client_arr);
+	JSON_CPACK(res, "{ss,so}", "user", username, "clients", client_arr);
 out:
+	if (val)
+		json_decref(val);
 	free(username);
-	send_api_response(val, *sockd);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
 static void worker_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
 {
+	json_t *val = NULL, *res = NULL, *client_arr;
 	char *tmp, *username, *workername = NULL;
-	json_t *val = NULL, *client_arr;
 	stratum_instance_t *client;
 	user_instance_t *user;
 	json_error_t err_val;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_string(&workername, val, "worker")) {
-		val = json_errormsg("Failed to find worker key");
+		res = json_errormsg("Failed to find worker key");
 		goto out;
 	}
 	if (!strlen(workername)) {
-		val = json_errormsg("Zero length worker key");
+		res = json_errormsg("Zero length worker key");
 		goto out;
 	}
 	tmp = strdupa(workername);
@@ -3905,10 +3918,12 @@ static void worker_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	JSON_CPACK(val, "{ss,so}", "worker", workername, "clients", client_arr);
+	JSON_CPACK(res, "{ss,so}", "worker", workername, "clients", client_arr);
 out:
+	if (val)
+		json_decref(val);
 	free(workername);
-	send_api_response(val, *sockd);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
@@ -3940,18 +3955,18 @@ static json_t *json_proxyinfo(const proxy_t *proxy)
 
 static void getproxy(sdata_t *sdata, const char *buf, int *sockd)
 {
+	json_t *val = NULL, *res = NULL;
 	json_error_t err_val;
-	json_t *val = NULL;
 	int id, subid = 0;
 	proxy_t *proxy;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_int(&id, val, "id")) {
-		val = json_errormsg("Failed to find id key");
+		res = json_errormsg("Failed to find id key");
 		goto out;
 	}
 	json_get_int(&subid, val, "subid");
@@ -3960,18 +3975,20 @@ static void getproxy(sdata_t *sdata, const char *buf, int *sockd)
 	else
 		proxy = existing_subproxy(sdata, id, subid);
 	if (!proxy) {
-		val = json_errormsg("Failed to find proxy %d:%d", id, subid);
+		res = json_errormsg("Failed to find proxy %d:%d", id, subid);
 		goto out;
 	}
-	val = json_proxyinfo(proxy);
+	res = json_proxyinfo(proxy);
 out:
-	send_api_response(val, *sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
 static void proxyinfo(sdata_t *sdata, const char *buf, int *sockd)
 {
-	json_t *val = NULL, *arr_val = json_array();
+	json_t *val = NULL, *res = NULL, *arr_val = json_array();
 	proxy_t *proxy, *subproxy;
 	bool all = true;
 	int userid = 0;
@@ -3992,41 +4009,45 @@ static void proxyinfo(sdata_t *sdata, const char *buf, int *sockd)
 	}
 	mutex_unlock(&sdata->proxy_lock);
 
-	JSON_CPACK(val, "{so}", "proxies", arr_val);
-	send_api_response(val, *sockd);
+	if (val)
+		json_decref(val);
+	JSON_CPACK(res, "{so}", "proxies", arr_val);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
 static void setproxy(sdata_t *sdata, const char *buf, int *sockd)
 {
+	json_t *val = NULL, *res = NULL;
 	json_error_t err_val;
-	json_t *val = NULL;
 	int id, priority;
 	proxy_t *proxy;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_int(&id, val, "id")) {
-		val = json_errormsg("Failed to find id key");
+		res = json_errormsg("Failed to find id key");
 		goto out;
 	}
 	if (!json_get_int(&priority, val, "priority")) {
-		val = json_errormsg("Failed to find priority key");
+		res = json_errormsg("Failed to find priority key");
 		goto out;
 	}
 	proxy = existing_proxy(sdata, id);
 	if (!proxy) {
-		val = json_errormsg("Failed to find proxy %d", id);
+		res = json_errormsg("Failed to find proxy %d", id);
 		goto out;
 	}
 	if (priority != proxy_prio(proxy))
 		set_proxy_prio(sdata, proxy, priority);
-	val = json_proxyinfo(proxy);
+	res = json_proxyinfo(proxy);
 out:
-	send_api_response(val, *sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, *sockd);
 	_Close(sockd);
 }
 
