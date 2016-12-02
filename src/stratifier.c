@@ -2824,6 +2824,7 @@ static void reap_proxies(ckpool_t *ckp, sdata_t *sdata)
 		/* Should we reap the parent proxy too?*/
 		if (!proxy->deleted || proxy->subproxy_count > 1 || proxy->bound_clients)
 			continue;
+		HASH_DELETE(sh, proxy->subproxies, proxy);
 		HASH_DELETE(hh, sdata->proxies, proxy);
 		free_proxy(proxy);
 	}
