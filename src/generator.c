@@ -2309,7 +2309,7 @@ static void send_list(gdata_t *gdata, const int sockd)
 static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 {
 	proxy_instance_t *proxy, *subproxy, *tmp;
-	json_t *val = NULL, *array_val;
+	json_t *val = NULL, *res = NULL, *array_val;
 	json_error_t err_val;
 	int64_t id;
 
@@ -2317,38 +2317,40 @@ static void send_sublist(gdata_t *gdata, const int sockd, const char *buf)
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (unlikely(!json_get_int64(&id, val, "id"))) {
-		val = json_errormsg("Failed to get ID in send_sublist JSON: %s", buf);
+		res = json_errormsg("Failed to get ID in send_sublist JSON: %s", buf);
 		goto out;
 	}
 	proxy = proxy_by_id(gdata, id);
 	if (unlikely(!proxy)) {
-		val = json_errormsg("Failed to find proxy %"PRId64" in send_sublist", id);
+		res = json_errormsg("Failed to find proxy %"PRId64" in send_sublist", id);
 		goto out;
 	}
 
 	mutex_lock(&gdata->lock);
 	HASH_ITER(sh, proxy->subproxies, subproxy, tmp) {
-		JSON_CPACK(val, "{si,ss,ss,sf,sb,sb}",
+		JSON_CPACK(res, "{si,ss,ss,sf,sb,sb}",
 			"subid", subproxy->id,
 			"auth", subproxy->auth, "pass", subproxy->pass,
 			"diff", subproxy->diff,
 			"disabled", subproxy->disabled, "alive", subproxy->alive);
 		if (subproxy->enonce1) {
-			json_set_string(val, "enonce1", subproxy->enonce1);
-			json_set_int(val, "nonce1len", subproxy->nonce1len);
-			json_set_int(val, "nonce2len", subproxy->nonce2len);
+			json_set_string(res, "enonce1", subproxy->enonce1);
+			json_set_int(res, "nonce1len", subproxy->nonce1len);
+			json_set_int(res, "nonce2len", subproxy->nonce2len);
 		}
-		json_array_append_new(array_val, val);
+		json_array_append_new(array_val, res);
 	}
 	mutex_unlock(&gdata->lock);
 
-	JSON_CPACK(val, "{so}", "subproxies", array_val);
+	JSON_CPACK(res, "{so}", "subproxies", array_val);
 out:
-	send_api_response(val, sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, sockd);
 }
 
 static proxy_instance_t *__add_proxy(ckpool_t *ckp, gdata_t *gdata, const int num);
@@ -2393,15 +2395,15 @@ static void add_userproxy(ckpool_t *ckp, gdata_t *gdata, const int userid,
 static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
 {
 	char *url = NULL, *auth = NULL, *pass = NULL;
+	json_t *val = NULL, *res = NULL;
 	proxy_instance_t *proxy;
 	json_error_t err_val;
-	json_t *val = NULL;
 	int id, userid;
 	bool global;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	json_get_string(&url, val, "url");
@@ -2411,9 +2413,8 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 		global = false;
 	else
 		global = true;
-	json_decref(val);
 	if (unlikely(!url || !auth || !pass)) {
-		val = json_errormsg("Failed to decode url/auth/pass in addproxy %s", buf);
+		res = json_errormsg("Failed to decode url/auth/pass in addproxy %s", buf);
 		goto out;
 	}
 
@@ -2437,15 +2438,17 @@ static void parse_addproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const
 		LOGNOTICE("Adding user %d proxy %d:%s", userid, id, proxy->url);
 	prepare_proxy(proxy);
 	if (global) {
-		JSON_CPACK(val, "{si,ss,ss,ss}",
+		JSON_CPACK(res, "{si,ss,ss,ss}",
 			"id", proxy->id, "url", url, "auth", auth, "pass", pass);
 	} else {
-		JSON_CPACK(val, "{si,ss,ss,ss,si}",
+		JSON_CPACK(res, "{si,ss,ss,ss,si}",
 			"id", proxy->id, "url", url, "auth", auth, "pass", pass,
 			"userid", proxy->userid);
 	}
 out:
-	send_api_response(val, sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, sockd);
 }
 
 static void delete_proxy(ckpool_t *ckp, gdata_t *gdata, proxy_instance_t *proxy)
@@ -2481,51 +2484,52 @@ static void delete_proxy(ckpool_t *ckp, gdata_t *gdata, proxy_instance_t *proxy)
 
 static void parse_delproxy(ckpool_t *ckp, gdata_t *gdata, const int sockd, const char *buf)
 {
+	json_t *val = NULL, *res = NULL;
 	proxy_instance_t *proxy;
 	json_error_t err_val;
-	json_t *val = NULL;
 	int id = -1;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	json_get_int(&id, val, "id");
-	json_decref(val);
 	proxy = proxy_by_id(gdata, id);
 	if (!proxy) {
-		val = json_errormsg("Proxy id %d not found", id);
+		res = json_errormsg("Proxy id %d not found", id);
 		goto out;
 	}
-	JSON_CPACK(val, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
+	JSON_CPACK(res, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
 		   "auth", proxy->auth, "pass", proxy->pass);
 
 	LOGNOTICE("Deleting proxy %d:%s", proxy->id, proxy->url);
 	delete_proxy(ckp, gdata, proxy);
 out:
-	send_api_response(val, sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, sockd);
 }
 
 static void parse_ableproxy(gdata_t *gdata, const int sockd, const char *buf, bool disable)
 {
+	json_t *val = NULL, *res = NULL;
 	proxy_instance_t *proxy;
 	json_error_t err_val;
-	json_t *val = NULL;
 	int id = -1;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	json_get_int(&id, val, "id");
 	proxy = proxy_by_id(gdata, id);
 	if (!proxy) {
-		val = json_errormsg("Proxy id %d not found", id);
+		res = json_errormsg("Proxy id %d not found", id);
 		goto out;
 	}
-	JSON_CPACK(val, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
+	JSON_CPACK(res, "{si,ss,ss,ss}", "id", proxy->id, "url", proxy->url,
 		   "auth", proxy->auth, "pass", proxy->pass);
 	if (proxy->disabled != disable) {
 		proxy->disabled = disable;
@@ -2538,7 +2542,9 @@ static void parse_ableproxy(gdata_t *gdata, const int sockd, const char *buf, bo
 	} else
 		reconnect_proxy(proxy);
 out:
-	send_api_response(val, sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, sockd);
 }
 
 static void send_stats(gdata_t *gdata, const int sockd)
@@ -2635,37 +2641,39 @@ static json_t *proxystats(const proxy_instance_t *proxy)
 
 static void parse_proxystats(gdata_t *gdata, const int sockd, const char *buf)
 {
+	json_t *val = NULL, *res = NULL;
 	proxy_instance_t *proxy;
 	json_error_t err_val;
 	bool totals = false;
-	json_t *val = NULL;
 	int id, subid = 0;
 
 	val = json_loads(buf, 0, &err_val);
 	if (unlikely(!val)) {
-		val = json_encode_errormsg(&err_val);
+		res = json_encode_errormsg(&err_val);
 		goto out;
 	}
 	if (!json_get_int(&id, val, "id")) {
-		val = json_errormsg("Failed to find id key");
+		res = json_errormsg("Failed to find id key");
 		goto out;
 	}
 	if (!json_get_int(&subid, val, "subid"))
 		totals = true;
 	proxy = proxy_by_id(gdata, id);
 	if (!proxy) {
-		val = json_errormsg("Proxy id %d not found", id);
+		res = json_errormsg("Proxy id %d not found", id);
 		goto out;
 	}
 	if (!totals)
 		proxy = subproxy_by_id(proxy, subid);
 	if (!proxy) {
-		val = json_errormsg("Proxy id %d:%d not found", id, subid);
+		res = json_errormsg("Proxy id %d:%d not found", id, subid);
 		goto out;
 	}
-	val = proxystats(proxy);
+	res = proxystats(proxy);
 out:
-	send_api_response(val, sockd);
+	if (val)
+		json_decref(val);
+	send_api_response(res, sockd);
 }
 
 static void parse_globaluser(ckpool_t *ckp, gdata_t *gdata, const char *buf)
