@@ -2187,13 +2187,6 @@ static void *userproxy_recv(void *arg)
 		if (unlikely(!proxy->authorised))
 			continue;
 
-		if ((event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) &&
-		    !(event.events & EPOLLIN)) {
-			LOGNOTICE("Proxy %d:%d %s hung up in epoll_wait", proxy->id,
-				  proxy->subid, proxy->url);
-			disable_subproxy(gdata, proxy->parent, proxy);
-			continue;
-		}
 		now = time(NULL);
 
 		mutex_lock(&gdata->notify_lock);
@@ -2219,23 +2212,35 @@ static void *userproxy_recv(void *arg)
 		timeout = 0;
 		cs = &proxy->cs;
 
+#if 0
+		/* Is this needed at all? */
 		if (!proxy->alive)
 			continue;
+#endif
 
-		cksem_wait(&cs->sem);
-		while ((ret = read_socket_line(cs, &timeout)) > 0) {
-			/* proxy may have been recycled here if it is not a
-			 * parent and reconnect was issued */
-			if (parse_method(ckp, proxy, cs->buf))
-				continue;
-			/* If it's not a method it should be a share result */
-			if (!parse_share(gdata, proxy, cs->buf)) {
-				LOGNOTICE("Proxy %d:%d unhandled stratum message: %s",
-					  proxy->id, proxy->subid, cs->buf);
+		if (likely(event.events & EPOLLIN)) {
+			cksem_wait(&cs->sem);
+			while ((ret = read_socket_line(cs, &timeout)) > 0) {
+				timeout = 0;
+				/* proxy may have been recycled here if it is not a
+				 * parent and reconnect was issued */
+				if (parse_method(ckp, proxy, cs->buf))
+					continue;
+				/* If it's not a method it should be a share result */
+				if (!parse_share(gdata, proxy, cs->buf)) {
+					LOGNOTICE("Proxy %d:%d unhandled stratum message: %s",
+						  proxy->id, proxy->subid, cs->buf);
+				}
 			}
-			timeout = 0;
+			cksem_post(&cs->sem);
 		}
-		cksem_post(&cs->sem);
+
+		if ((event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))) {
+			LOGNOTICE("Proxy %d:%d %s hung up in epoll_wait", proxy->id,
+				  proxy->subid, proxy->url);
+			disable_subproxy(gdata, proxy->parent, proxy);
+			continue;
+		}
 	}
 	return NULL;
 }
