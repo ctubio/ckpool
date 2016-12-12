@@ -4082,6 +4082,17 @@ static void get_poolstats(sdata_t *sdata, int *sockd)
 	_Close(sockd);
 }
 
+static void get_uptime(sdata_t *sdata, int *sockd)
+{
+	time_t now_t = time(NULL);
+	int uptime = sdata->stats.start_time.tv_sec - now_t;
+	json_t *val;
+
+	JSON_CPACK(val, "{si}", "uptime", uptime);
+	send_api_response(val, *sockd);
+	_Close(sockd);
+}
+
 static void srecv_process(ckpool_t *ckp, json_t *val);
 
 /* For emergency use only, flushes all pending ckdbq messages */
@@ -4213,6 +4224,10 @@ retry:
 	}
 	if (cmdmatch(buf, "ucinfo")) {
 		user_clientinfo(sdata, buf + 7, &umsg->sockd);
+		goto retry;
+	}
+	if (cmdmatch(buf,"uptime")) {
+		get_uptime(sdata, &umsg->sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "wcinfo")) {
