@@ -1947,6 +1947,16 @@ void decay_time(double *f, double fadd, double fsecs, double interval)
 		*f = 0;
 }
 
+/* Sanity check to prevent clock adjustments backwards from screwing up stats */
+double sane_tdiff(tv_t *end, tv_t *start)
+{
+	double tdiff = tvdiff(end, start);
+
+	if (unlikely(tdiff < 0.001))
+		tdiff = 0.001;
+	return tdiff;
+}
+
 /* Convert a double value into a truncated string for displaying with its
  * associated suitable for Mega, Giga etc. Buf array needs to be long enough */
 void suffix_string(double val, char *buf, size_t bufsiz, int sigdigits)

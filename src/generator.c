@@ -109,6 +109,22 @@ struct proxy_instance {
 	double total_rejected; /* "" */
 	tv_t last_share;
 
+	/* Diff shares per second for 1/5/60... minute rolling averages */
+	double dsps1;
+	double dsps5;
+	double dsps60;
+	double dsps360;
+	double dsps1440;
+	tv_t last_decay;
+
+	/* Total diff shares per second for all subproxies */
+	double tdsps1; /* Used only by parent proxy structures */
+	double tdsps5; /* "" */
+	double tdsps60; /* "" */
+	double tdsps360; /* "" */
+	double tdsps1440; /* "" */
+	tv_t total_last_decay;
+
 	bool no_params; /* Doesn't want any parameters on subscribe */
 
 	bool global;	/* Part of the global list of proxies */
@@ -1489,6 +1505,28 @@ static void clear_notify(notify_instance_t *ni)
 	free(ni);
 }
 
+/* Entered with proxy_lock held */
+static void __decay_proxy(proxy_instance_t *proxy, proxy_instance_t * parent, const double diff)
+{
+	double tdiff;
+	tv_t now_t;
+
+	tv_time(&now_t);
+	tdiff = sane_tdiff(&now_t, &proxy->last_decay);
+	decay_time(&proxy->dsps1, diff, tdiff, MIN1);
+	decay_time(&proxy->dsps5, diff, tdiff, MIN5);
+	decay_time(&proxy->dsps60, diff, tdiff, HOUR);
+	decay_time(&proxy->dsps1440, diff, tdiff, DAY);
+	copy_tv(&proxy->last_decay, &now_t);
+
+	tdiff = sane_tdiff(&now_t, &parent->total_last_decay);
+	decay_time(&parent->tdsps1, diff, tdiff, MIN1);
+	decay_time(&parent->tdsps5, diff, tdiff, MIN5);
+	decay_time(&parent->tdsps60, diff, tdiff, HOUR);
+	decay_time(&parent->tdsps1440, diff, tdiff, DAY);
+	copy_tv(&parent->total_last_decay, &now_t);
+}
+
 static void account_shares(proxy_instance_t *proxy, const double diff, const bool result)
 {
 	proxy_instance_t *parent = proxy->parent;
@@ -1497,9 +1535,11 @@ static void account_shares(proxy_instance_t *proxy, const double diff, const boo
 	if (result) {
 		proxy->diff_accepted += diff;
 		parent->total_accepted += diff;
+		__decay_proxy(proxy, parent, diff);
 	} else {
 		proxy->diff_rejected += diff;
 		parent->total_rejected += diff;
+		__decay_proxy(proxy, parent, 0);
 	}
 	mutex_unlock(&parent->proxy_lock);
 }
@@ -2615,11 +2655,16 @@ static void send_stats(gdata_t *gdata, const int sockd)
 	send_api_response(val, sockd);
 }
 
-static json_t *proxystats(const proxy_instance_t *proxy)
+static json_t *proxystats(proxy_instance_t *proxy)
 {
-	json_t *val;
+	proxy_instance_t *parent = proxy->parent;
+	json_t *val = json_object();
 
-	val = json_object();
+	mutex_lock(&parent->proxy_lock);
+	/* Opportunity to update hashrate just before we report it without
+	 * needing to check on idle proxies regularly */
+	__decay_proxy(proxy, parent, 0);
+
 	json_set_int(val, "id", proxy->id);
 	json_set_int(val, "userid", proxy->userid);
 	json_set_string(val, "url", proxy->url);
@@ -2633,7 +2678,15 @@ static json_t *proxystats(const proxy_instance_t *proxy)
 		json_set_double(val, "total_accepted", proxy->total_accepted);
 		json_set_double(val, "total_rejected", proxy->total_rejected);
 		json_set_int(val, "subproxies", proxy->subproxy_count);
+		json_set_double(val, "tdsps1", proxy->tdsps1);
+		json_set_double(val, "tdsps5", proxy->tdsps5);
+		json_set_double(val, "tdsps60", proxy->tdsps60);
+		json_set_double(val, "tdsps1440", proxy->tdsps1440);
 	}
+	json_set_double(val, "dsps1", proxy->dsps1);
+	json_set_double(val, "dsps5", proxy->dsps5);
+	json_set_double(val, "dsps60", proxy->dsps60);
+	json_set_double(val, "dsps1440", proxy->dsps1440);
 	json_set_double(val, "accepted", proxy->diff_accepted);
 	json_set_double(val, "rejected", proxy->diff_rejected);
 	json_set_int(val, "lastshare", proxy->last_share.tv_sec);
@@ -2641,6 +2694,8 @@ static json_t *proxystats(const proxy_instance_t *proxy)
 	json_set_bool(val, "disabled", proxy->disabled);
 	json_set_bool(val, "alive", proxy->alive);
 	json_set_int(val, "maxclients", proxy->clients_per_proxy);
+	mutex_unlock(&parent->proxy_lock);
+
 	return val;
 }
 

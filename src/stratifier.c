@@ -30,14 +30,6 @@
 #include "connector.h"
 #include "generator.h"
 
-#define MIN1	60
-#define MIN5	300
-#define MIN15	900
-#define HOUR	3600
-#define HOUR6	21600
-#define DAY	86400
-#define WEEK	604800
-
 /* Consistent across all pool instances */
 static const char *workpadding = "000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000";
 static const char *scriptsig_header = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff";
@@ -4668,16 +4660,6 @@ static double dsps_from_key(json_t *val, const char *key)
 	}
 	free(string);
 	return ret;
-}
-
-/* Sanity check to prevent clock adjustments backwards from screwing up stats */
-static double sane_tdiff(tv_t *end, tv_t *start)
-{
-	double tdiff = tvdiff(end, start);
-
-	if (unlikely(tdiff < 0.001))
-		tdiff = 0.001;
-	return tdiff;
 }
 
 static void decay_client(stratum_instance_t *client, double diff, tv_t *now_t)
