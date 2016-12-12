@@ -4076,8 +4076,7 @@ static void get_poolstats(sdata_t *sdata, int *sockd)
 
 static void get_uptime(sdata_t *sdata, int *sockd)
 {
-	time_t now_t = time(NULL);
-	int uptime = sdata->stats.start_time.tv_sec - now_t;
+	int uptime = time(NULL) - sdata->stats.start_time.tv_sec;
 	json_t *val;
 
 	JSON_CPACK(val, "{si}", "uptime", uptime);
