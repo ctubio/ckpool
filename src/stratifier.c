@@ -4341,6 +4341,10 @@ static bool new_enonce1(ckpool_t *ckp, sdata_t *ckp_sdata, sdata_t *sdata, strat
 		}
 	}
 
+	/* Still initialising */
+	if (unlikely(!sdata->current_workbase))
+		return false;
+
 	/* instance_lock protects enonce1_64. Incrementing a little endian 64bit
 	 * number ensures that no matter how many of the bits we take from the
 	 * left depending on nonce2 length, we'll always get a changing value
