@@ -1007,6 +1007,15 @@ static void send_stratifier_delproxy(ckpool_t *ckp, const int id, const int subi
 	send_proc(ckp->stratifier, buf);
 }
 
+/* Close the subproxy socket if it's open and remove it from the epoll list */
+static void close_proxy_socket(proxy_instance_t *proxy, proxy_instance_t *subproxy)
+{
+	if (subproxy->cs.fd > 0) {
+		epoll_ctl(proxy->epfd, EPOLL_CTL_DEL, subproxy->cs.fd, NULL);
+		Close(subproxy->cs.fd);
+	}
+}
+
 /* Remove the subproxy from the proxi list and put it on the dead list.
  * Further use of the subproxy pointer may point to a new proxy but will not
  * dereference. This will only disable subproxies so parent proxies need to
@@ -1015,10 +1024,7 @@ static void disable_subproxy(gdata_t *gdata, proxy_instance_t *proxi, proxy_inst
 {
 	subproxy->alive = false;
 	send_stratifier_deadproxy(gdata->ckp, subproxy->id, subproxy->subid);
-	if (subproxy->cs.fd > 0) {
-		epoll_ctl(proxi->epfd, EPOLL_CTL_DEL, subproxy->cs.fd, NULL);
-		Close(subproxy->cs.fd);
-	}
+	close_proxy_socket(proxi, subproxy);
 	if (parent_proxy(subproxy))
 		return;
 
@@ -2505,7 +2511,7 @@ static void delete_proxy(ckpool_t *ckp, gdata_t *gdata, proxy_instance_t *proxy)
 	HASH_DEL(gdata->proxies, proxy);
 	/* Disable all its threads */
 	pthread_cancel(proxy->pth_precv);
-	Close(proxy->cs.fd);
+	close_proxy_socket(proxy, proxy);
 	mutex_unlock(&gdata->lock);
 
 	/* Recycle all its subproxies */
@@ -2517,6 +2523,7 @@ static void delete_proxy(ckpool_t *ckp, gdata_t *gdata, proxy_instance_t *proxy)
 		mutex_unlock(&proxy->proxy_lock);
 
 		if (subproxy) {
+			close_proxy_socket(proxy, subproxy);
 			send_stratifier_delproxy(ckp, subproxy->id, subproxy->subid);
 			if (proxy != subproxy)
 				store_proxy(gdata, subproxy);
