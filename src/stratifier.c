@@ -7812,6 +7812,7 @@ void *stratifier(void *arg)
 
 	randomiser = time(NULL);
 	sdata->enonce1_64 = htole64(randomiser);
+	sdata->session_id = randomiser;
 	/* Set the initial id to time as high bits so as to not send the same
 	 * id on restarts */
 	randomiser <<= 32;
