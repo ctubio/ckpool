@@ -1186,14 +1186,18 @@ static void *urecv_process(void *arg)
 			LOGWARNING("Failed to find method from upstream pool json %s",
 				   cs->buf);
 			json_decref(val);
-			goto nomsg;
+			goto decref;
 		}
-		if (!safecmp(method, "submitblock"))
+		if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
+			parse_remote_txns(ckp, val);
+		else if (!safecmp(method, "submitblock"))
 			parse_remote_submitblock(ckp, val, cs->buf);
 		else if (!safecmp(method, "pong"))
 			LOGDEBUG("Received upstream pong");
 		else
 			LOGWARNING("Unrecognised upstream method %s", method);
+decref:
+		json_decref(val);
 nomsg:
 		cksem_post(&cs->sem);
 

@@ -10,6 +10,7 @@
 #ifndef STRATIFIER_H
 #define STRATIFIER_H
 
+void parse_remote_txns(ckpool_t *ckp, const json_t *val);
 void stratifier_add_recv(ckpool_t *ckp, json_t *val);
 void *stratifier(void *arg);
 
