@@ -83,6 +83,10 @@ struct workbase {
 	int64_t id;
 	char idstring[20];
 
+	/* Actual ID if this workbase belongs to a remote pool, offset by this
+	 * value to the id field */
+	int64_t remote_offset;
+
 	ts_t gentime;
 	tv_t retired;
 
@@ -884,7 +888,19 @@ static void send_postponed(sdata_t *sdata)
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
 			     const int msg_type);
 
-static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
+static void upstream_msgtype(ckpool_t *ckp, const json_t *val, const int msg_type)
+{
+	json_t *json_msg = json_deep_copy(val);
+	char *buf;
+
+	json_set_string(json_msg, "method", stratum_msgs[msg_type]);
+	ASPRINTF(&buf, "upstream=%s", json_dumps(json_msg, JSON_EOL));
+	json_decref(json_msg);
+	send_proc(ckp->connector, buf);
+	free(buf);
+}
+
+static void send_node_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 {
 	stratum_instance_t *client;
 	ckmsg_t *bulk_send = NULL;
@@ -935,6 +951,9 @@ static void send_node_workinfo(sdata_t *sdata, const workbase_t *wb)
 	}
 	ck_runlock(&sdata->instance_lock);
 
+	if (ckp->remote)
+		upstream_msgtype(ckp, wb_val, SM_WORKINFO);
+
 	json_decref(wb_val);
 
 	/* We send workinfo postponed till after the stratum updates are sent
@@ -974,7 +993,7 @@ static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 			"createinet", ckp->serverurl[0]);
 	ckdbq_add(ckp, ID_WORKINFO, val);
 	if (!ckp->proxy)
-		send_node_workinfo(sdata, wb);
+		send_node_workinfo(ckp, sdata, wb);
 }
 
 static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
@@ -1015,9 +1034,14 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 	 * setting the workbase_id */
 	ck_wlock(&sdata->workbase_lock);
 	ckp_sdata->workbases_generated++;
-	if (!ckp->proxy)
+	/* With trusted remote workinfos, we still use the global workbase_id
+	 * to identify them so they can still be sequential, while the real id
+	 * is stored offset by remote_offset */
+	if (!ckp->proxy) {
 		wb->id = sdata->workbase_id++;
-	else
+		if (wb->remote_offset)
+			wb->remote_offset -= wb->id;
+	} else
 		sdata->workbase_id = wb->id;
 	if (strncmp(wb->prevhash, sdata->lasthash, 64)) {
 		char bin[32], swap[32];
@@ -1168,18 +1192,6 @@ static void add_txn(ckpool_t *ckp, sdata_t *sdata, txntable_t **txns, const char
 	HASH_ADD_STR(*txns, hash, txn);
 }
 
-static void upstream_txns(ckpool_t *ckp, const json_t *txn_val)
-{
-	json_t *json_msg = json_deep_copy(txn_val);
-	char *buf;
-
-	json_set_string(json_msg, "method", stratum_msgs[SM_TRANSACTIONS]);
-	ASPRINTF(&buf, "upstream=%s", json_dumps(json_msg, JSON_EOL));
-	json_decref(json_msg);
-	send_proc(ckp->connector, buf);
-	free(buf);
-}
-
 static void send_node_transactions(ckpool_t *ckp, sdata_t *sdata, const json_t *txn_val)
 {
 	stratum_instance_t *client;
@@ -1215,7 +1227,7 @@ static void send_node_transactions(ckpool_t *ckp, sdata_t *sdata, const json_t *
 	ck_runlock(&sdata->instance_lock);
 
 	if (ckp->remote)
-		upstream_txns(ckp, txn_val);
+		upstream_msgtype(ckp, txn_val, SM_TRANSACTIONS);
 
 	if (bulk_send) {
 		LOGINFO("Sending transactions to mining nodes");
@@ -1578,6 +1590,9 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 
 	wb->ckp = ckp;
 	json_int64cpy(&wb->id, val, "jobid");
+	/* With remote trusted nodes, the id will end up being replaced in
+	 * add_base and we can maintain the original value by using an offset */
+	wb->remote_offset = wb->id;
 	json_strcpy(wb->target, val, "target");
 	json_dblcpy(&wb->diff, val, "diff");
 	json_uintcpy(&wb->version, val, "version");
@@ -1592,7 +1607,12 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	json_strdup(&wb->flags, val, "flags");
 	/* First see if the server uses the old communication format */
 	json_intcpy(&wb->txns, val, "transactions");
-	if (wb->txns) {
+	if (!ckp->proxy) {
+		/* This is a workbase from a trusted remote */
+		json_strdup(&wb->txn_hashes, val, "txn_hashes");
+		wb->merkle_array = json_object_dup(val, "merklehash");
+		json_intcpy(&wb->merkles, val, "merkles");
+	} else if (wb->txns) {
 		int i;
 
 		json_strdup(&wb->txn_data, val, "txn_data");
@@ -6468,6 +6488,8 @@ void parse_remote_txns(ckpool_t *ckp, const json_t *val)
 		LOGNOTICE("Submitted %d remote transactions", added);
 }
 
+#define parse_remote_workinfo(ckp, val) add_node_base(ckp, val)
+
 /* Get the remote worker count once per minute from all the remote servers */
 static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
 {
@@ -6560,6 +6582,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		parse_remote_shares(ckp, sdata, val, buf);
 	else if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
 		parse_remote_txns(ckp, val);
+	else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
+		parse_remote_workinfo(ckp, val);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
 	else if (!safecmp(method, "submitblock"))
