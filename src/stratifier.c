@@ -6487,35 +6487,6 @@ static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, cons
 	LOGINFO("Added %"PRId64" remote shares to worker %s", diff, workername);
 }
 
-/* In remote mode we simply submit them to our bitcoind to guarantee fast
- * block change and compact block propagation between pools. */
-void parse_remote_txns(ckpool_t *ckp, const json_t *val)
-{
-	json_t *txn_array, *txn_val, *data_val;
-	int i, arr_size;
-	int added = 0;
-
-	txn_array = json_object_get(val, "transaction");
-	arr_size = json_array_size(txn_array);
-
-	for (i = 0; i < arr_size; i++) {
-		const char *data;
-
-		txn_val = json_array_get(txn_array, i);
-		data_val = json_object_get(txn_val, "data");
-		data = json_string_value(data_val);
-		if (unlikely(!data)) {
-			LOGERR("Failed to get hash/data in parse_remote_txns");
-			continue;
-		}
-		submit_transaction(ckp, data);
-		added++;
-	}
-
-	if (added)
-		LOGNOTICE("Submitted %d remote transactions", added);
-}
-
 static void send_auth_response(sdata_t *sdata, const int64_t client_id, const bool ret,
 			       json_t *id_val, json_t *err_val)
 {
@@ -6692,40 +6663,6 @@ static void send_remote_pong(sdata_t *sdata, stratum_instance_t *client)
 	stratum_add_send(sdata, json_msg, client->id, SM_PONG);
 }
 
-static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratum_instance_t *client)
-{
-	json_t *method_val = json_object_get(val, "method");
-	char *buf = json_dumps(val, 0);
-	const char *method;
-
-	LOGDEBUG("Got remote message %s", buf);
-	method = json_string_value(method_val);
-	if (unlikely(!method_val || !method)) {
-		LOGWARNING("Failed to get method from remote message %s", buf);
-		goto out;
-	}
-	if (likely(!safecmp(method, "shares")))
-		parse_remote_shares(ckp, sdata, val, buf);
-	else if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
-		parse_remote_txns(ckp, val);
-	else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
-		parse_remote_workinfo(ckp, val);
-	else if (!safecmp(method, stratum_msgs[SM_AUTH]))
-		parse_remote_auth(ckp, sdata, val, client, client->id);
-	else if (!safecmp(method, "workers"))
-		parse_remote_workers(sdata, val, buf);
-	else if (!safecmp(method, "submitblock"))
-		parse_remote_blocksubmit(ckp, val, buf);
-	else if (!safecmp(method, "block"))
-		parse_remote_block(sdata, val, buf);
-	else if (!safecmp(method, "ping"))
-		send_remote_pong(sdata, client);
-	else
-		LOGWARNING("unrecognised trusted message %s", buf);
-out:
-	free(buf);
-}
-
 static void add_node_txns(ckpool_t *ckp, sdata_t *sdata, const json_t *val)
 {
 	json_t *txn_array, *txn_val, *data_val, *hash_val;
@@ -6768,7 +6705,46 @@ static void add_node_txns(ckpool_t *ckp, sdata_t *sdata, const json_t *val)
 	ck_wunlock(&sdata->workbase_lock);
 
 	if (added)
-		LOGINFO("Stratifier added %d node transactions", added);
+		LOGINFO("Stratifier added %d remote transactions", added);
+}
+
+void parse_remote_txns(ckpool_t *ckp, const json_t *val)
+{
+	add_node_txns(ckp, ckp->sdata, val);
+}
+
+static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratum_instance_t *client)
+{
+	json_t *method_val = json_object_get(val, "method");
+	char *buf = json_dumps(val, 0);
+	const char *method;
+
+	LOGDEBUG("Got remote message %s", buf);
+	method = json_string_value(method_val);
+	if (unlikely(!method_val || !method)) {
+		LOGWARNING("Failed to get method from remote message %s", buf);
+		goto out;
+	}
+	if (likely(!safecmp(method, "shares")))
+		parse_remote_shares(ckp, sdata, val, buf);
+	else if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
+		add_node_txns(ckp, sdata, val);
+	else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
+		parse_remote_workinfo(ckp, val);
+	else if (!safecmp(method, stratum_msgs[SM_AUTH]))
+		parse_remote_auth(ckp, sdata, val, client, client->id);
+	else if (!safecmp(method, "workers"))
+		parse_remote_workers(sdata, val, buf);
+	else if (!safecmp(method, "submitblock"))
+		parse_remote_blocksubmit(ckp, val, buf);
+	else if (!safecmp(method, "block"))
+		parse_remote_block(sdata, val, buf);
+	else if (!safecmp(method, "ping"))
+		send_remote_pong(sdata, client);
+	else
+		LOGWARNING("unrecognised trusted message %s", buf);
+out:
+	free(buf);
 }
 
 /* Entered with client holding ref count */
