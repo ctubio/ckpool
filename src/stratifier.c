@@ -3030,7 +3030,7 @@ static stratum_instance_t *__stratum_add_instance(ckpool_t *ckp, int64_t id, con
 			sprintf(client->identity, "node:%"PRId64" subclient:%"PRId64,
 				pass_id, id);
 		} else {
-			sprintf(client->identity, "passthrough:%"PRId64" subclient:%"PRId64,
+			sprintf(client->identity, "remote:%"PRId64" subclient:%"PRId64,
 				pass_id, id);
 		}
 	} else
@@ -3147,8 +3147,21 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 		return;
 	}
 
-	if (passthrough_subclient(client_id))
-		json_set_string(val, "node.method", stratum_msgs[msg_type]);
+	if (passthrough_subclient(client_id)) {
+		int64_t remote_id = client_id >> 32;
+		stratum_instance_t *remote;
+
+		remote = ref_instance_by_id(sdata, remote_id);
+		if (unlikely(!remote)) {
+			json_decref(val);
+			return;
+		}
+		if (remote->node)
+			json_set_string(val, "node.method", stratum_msgs[msg_type]);
+		else if (remote->remote)
+			json_set_string(val, "method", stratum_msgs[msg_type]);
+		dec_instance_ref(sdata, remote);
+	}
 	LOGDEBUG("Sending stratum message %s", stratum_msgs[msg_type]);
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
@@ -5292,6 +5305,12 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 			ret = true;
 		}
 	}
+
+	/* We do the preauth etc. in remote mode, and leave final auth to
+	 * upstream pool to complete. */
+	if (ckp->remote)
+		goto out;
+
 	if (ret) {
 		client->authorised = ret;
 		user->authorised = ret;
@@ -6490,6 +6509,39 @@ void parse_remote_txns(ckpool_t *ckp, const json_t *val)
 
 #define parse_remote_workinfo(ckp, val) add_node_base(ckp, val)
 
+static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratum_instance_t *remote,
+			      const int64_t remote_id)
+{
+	json_t *params, *method, *id_val;
+	stratum_instance_t *client;
+	const char *address;
+	json_params_t *jp;
+	int64_t client_id;
+
+	json_get_int64(&client_id, val, "clientid");
+	/* Encode remote server client_id into remote client's id */
+	client_id = (remote_id << 32) | (client_id & 0xffffffffll);
+	id_val = json_object_get(val, "id");
+	method = json_object_get(val, "method");
+	params = json_object_get(val, "params");
+	jp = create_json_params(client_id, method, params, id_val);
+
+	/* This is almost certainly the first time we'll see this client_id so
+	 * create a new stratum instance temporarily just for auth with a plan
+	 * to drop the client id locally once we finish with it */
+	ck_wlock(&sdata->instance_lock);
+	client = __instance_by_id(sdata, client_id);
+	if (likely(!client))
+		client = __stratum_add_instance(ckp, client_id, remote->address, remote->server);
+	__inc_instance_ref(client);
+	ck_wunlock(&sdata->instance_lock);
+
+	json_strdup(&client->useragent, val, "useragent");
+	json_strcpy(client->enonce1, val, "enonce1");
+	json_strcpy(client->address, val, "address");
+	ckmsgq_add(sdata->sauthq, jp);
+}
+
 /* Get the remote worker count once per minute from all the remote servers */
 static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
 {
@@ -6584,6 +6636,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		parse_remote_txns(ckp, val);
 	else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
 		parse_remote_workinfo(ckp, val);
+	else if (!safecmp(method, stratum_msgs[SM_AUTH]))
+		parse_remote_auth(ckp, sdata, val, client, client->id);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
 	else if (!safecmp(method, "submitblock"))
@@ -6948,6 +7002,33 @@ static stratum_instance_t *preauth_ref_instance_by_id(sdata_t *sdata, const int6
 	return client;
 }
 
+/* Send the auth upstream in trusted remote mode, allowing the connector to
+ * asynchronously receive the response and return the auth response. */
+static void upstream_auth(ckpool_t *ckp, stratum_instance_t *client, json_params_t *jp)
+{
+	user_instance_t *user = client->user_instance;
+	json_t *val = json_object();
+	char cdfield[64];
+	char *msg;
+	ts_t now;
+
+	ts_realtime(&now);
+	sprintf(cdfield, "%lu,%lu", now.tv_sec, now.tv_nsec);
+
+	json_set_object(val, "params", jp->params);
+	json_set_object(val, "id", jp->id_val);
+	json_set_object(val, "method", jp->method);
+	json_set_string(val, "method", stratum_msgs[SM_AUTH]);
+
+	json_set_string(val, "useragent", client->useragent ? : "");
+	json_set_string(val, "enonce1", client->enonce1 ? : "");
+	json_set_string(val, "address", client->address);
+	json_set_int(val, "clientid", client->id);
+	msg = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_COMPACT | JSON_EOL);
+	json_decref(val);
+	connector_upstream_msg(ckp, msg);
+}
+
 static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
 	json_t *result_val, *json_msg, *err_val = NULL;
@@ -6961,12 +7042,19 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	client = preauth_ref_instance_by_id(sdata, client_id);
 	if (unlikely(!client)) {
 		LOGINFO("Authoriser failed to find client id %"PRId64" in hashtable!", client_id);
-		goto out;
+		goto out_noclient;
 	}
 
 	result_val = parse_authorise(client, jp->params, &err_val, &errnum);
 	if (json_is_true(result_val)) {
 		char *buf;
+
+		/* So far okay in remote mode, remainder to be done by upstream
+		 * pool */
+		if (ckp->remote) {
+			upstream_auth(ckp, client, jp);
+			goto out;
+		}
 
 		ASPRINTF(&buf, "Authorised, welcome to %s %s!", ckp->name,
 			 client->user_instance->username);
@@ -7001,8 +7089,8 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 		stratum_send_diff(sdata, client);
 	}
 out:
-	if (client)
-		dec_instance_ref(sdata, client);
+	dec_instance_ref(sdata, client);
+out_noclient:
 	discard_json_params(jp);
 
 }
