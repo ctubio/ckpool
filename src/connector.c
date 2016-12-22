@@ -356,17 +356,24 @@ out:
 /* Client must hold a reference count */
 static int drop_client(cdata_t *cdata, client_instance_t *client)
 {
-	bool passthrough = client->passthrough;
+	bool passthrough = client->passthrough, remote = client->remote;
+	char address_name[INET6_ADDRSTRLEN];
 	int64_t client_id = client->id;
 	int fd = -1;
 
+	strcpy(address_name, client->address_name);
 	ck_wlock(&cdata->lock);
 	fd = __drop_client(cdata, client);
 	ck_wunlock(&cdata->lock);
 
 	if (fd > -1) {
-		if (passthrough)
-			LOGNOTICE("Connector dropped passthrough %"PRId64, client_id);
+		if (passthrough) {
+			LOGNOTICE("Connector dropped passthrough %"PRId64" %s",
+				  client_id, address_name);
+		} else if (remote) {
+			LOGWARNING("Remote trusted server client %"PRId64" %s disconnected",
+				   client_id, address_name);
+		}
 		LOGDEBUG("Connector dropped fd %d", fd);
 	}
 
