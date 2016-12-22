@@ -312,6 +312,7 @@ struct stratum_instance {
 	int subproxyid; /* Which subproxy */
 
 	bool trusted; /* Is this a trusted remote server */
+	bool remote; /* Is this a remote client on a trusted remote server */
 };
 
 struct share {
@@ -5218,6 +5219,41 @@ static void check_global_user(ckpool_t *ckp, user_instance_t *user, stratum_inst
 	send_generator(ckp, buf, GEN_LAX);
 }
 
+/* Manage the response to auth, client must hold ref */
+static void client_auth(ckpool_t *ckp, stratum_instance_t *client, user_instance_t *user,
+			const bool ret)
+{
+	if (ret) {
+		client->authorised = ret;
+		user->authorised = ret;
+		if (ckp->proxy) {
+			LOGNOTICE("Authorised client %s to proxy %d:%d, worker %s as user %s",
+				  client->identity, client->proxyid, client->subproxyid,
+			          client->workername, user->username);
+			if (ckp->userproxy)
+				check_global_user(ckp, user, client);
+		} else {
+			LOGNOTICE("Authorised client %s worker %s as user %s",
+				  client->identity, client->workername, user->username);
+		}
+		user->failed_authtime = 0;
+		user->auth_backoff = DEFAULT_AUTH_BACKOFF; /* Reset auth backoff time */
+		user->throttled = false;
+	} else {
+		LOGNOTICE("Client %s %s worker %s failed to authorise as user %s",
+			  client->identity, client->address, client->workername,
+		          user->username);
+		user->failed_authtime = time(NULL);
+		user->auth_backoff <<= 1;
+		/* Cap backoff time to 10 mins */
+		if (user->auth_backoff > 600)
+			user->auth_backoff = 600;
+		client->reject = 3;
+	}
+	/* We can set this outside of lock safely */
+	client->authorising = false;
+}
+
 /* Needs to be entered with client holding a ref count. */
 static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_val,
 			       json_t **err_val, int *errnum)
@@ -5308,35 +5344,8 @@ static json_t *parse_authorise(stratum_instance_t *client, const json_t *params_
 
 	/* We do the preauth etc. in remote mode, and leave final auth to
 	 * upstream pool to complete. */
-	if (ckp->remote)
-		goto out;
-
-	if (ret) {
-		client->authorised = ret;
-		user->authorised = ret;
-		if (ckp->proxy) {
-			LOGNOTICE("Authorised client %s to proxy %d:%d, worker %s as user %s",
-				  client->identity, client->proxyid, client->subproxyid, buf, user->username);
-			if (ckp->userproxy)
-				check_global_user(ckp, user, client);
-		} else {
-			LOGNOTICE("Authorised client %s worker %s as user %s",
-				  client->identity, buf, user->username);
-		}
-		user->failed_authtime = 0;
-		user->auth_backoff = DEFAULT_AUTH_BACKOFF; /* Reset auth backoff time */
-		user->throttled = false;
-	} else {
-		LOGNOTICE("Client %s %s worker %s failed to authorise as user %s",
-			  client->identity, client->address, buf,user->username);
-		user->failed_authtime = time(NULL);
-		user->auth_backoff <<= 1;
-		/* Cap backoff time to 10 mins */
-		if (user->auth_backoff > 600)
-			user->auth_backoff = 600;
-	}
-	/* We can set this outside of lock safely */
-	client->authorising = false;
+	if (!ckp->remote)
+		client_auth(ckp, client, user, ret);
 out:
 	return json_boolean(ret);
 }
@@ -6507,6 +6516,70 @@ void parse_remote_txns(ckpool_t *ckp, const json_t *val)
 		LOGNOTICE("Submitted %d remote transactions", added);
 }
 
+static void send_auth_response(sdata_t *sdata, const int64_t client_id, const bool ret,
+			       json_t *id_val, json_t *err_val)
+{
+	json_t *json_msg = json_object();
+
+	json_object_set_new_nocheck(json_msg, "result", json_boolean(ret));
+	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
+	json_object_set(json_msg, "id", id_val);
+	stratum_add_send(sdata, json_msg, client_id, SM_AUTHRESULT);
+}
+
+static void send_auth_success(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *client)
+{
+	char *buf;
+
+	ASPRINTF(&buf, "Authorised, welcome to %s %s!", ckp->name,
+		 client->user_instance->username);
+	stratum_send_message(sdata, client, buf);
+	free(buf);
+}
+
+static void send_auth_failure(sdata_t *sdata, stratum_instance_t *client)
+{
+	stratum_send_message(sdata, client, "Failed authorisation :(");
+}
+
+void parse_upstream_auth(ckpool_t *ckp, json_t *val)
+{
+	json_t *json_msg, *id_val = NULL, *err_val = NULL;
+	sdata_t *sdata = ckp->sdata;
+	stratum_instance_t *client;
+	bool ret, warn = false;
+	int64_t client_id;
+
+	id_val = json_object_get(val, "id");
+	if (unlikely(!id_val))
+		goto out;
+	if (unlikely(!json_get_int64(&client_id, val, "client_id")))
+		goto out;
+	if (unlikely(!json_get_bool(&ret, val, "result")))
+		goto out;
+	err_val = json_object_get(val, "error");
+	client = ref_instance_by_id(sdata, client_id);
+	if (!client) {
+		LOGINFO("Failed to find client id %"PRId64" in parse_upstream_auth",
+		        client_id);
+		goto out;
+	}
+	if (ret)
+		send_auth_success(ckp, sdata, client);
+	else
+		send_auth_failure(sdata, client);
+	send_auth_response(sdata, client_id, ret, id_val, err_val);
+	client_auth(ckp, client, client->user_instance, ret);
+	dec_instance_ref(sdata, client);
+out:
+	if (unlikely(warn)) {
+		char *s = json_dumps(val, 0);
+
+		LOGWARNING("Failed to get valid upstream result in parse_upstream_auth %s", s);
+		free(s);
+	}
+}
+
 #define parse_remote_workinfo(ckp, val) add_node_base(ckp, val)
 
 static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratum_instance_t *remote,
@@ -6534,11 +6607,12 @@ static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 	if (likely(!client))
 		client = __stratum_add_instance(ckp, client_id, remote->address, remote->server);
 	__inc_instance_ref(client);
-	ck_wunlock(&sdata->instance_lock);
-
+	client->remote = true;
 	json_strdup(&client->useragent, val, "useragent");
 	json_strcpy(client->enonce1, val, "enonce1");
 	json_strcpy(client->address, val, "address");
+	ck_wunlock(&sdata->instance_lock);
+
 	ckmsgq_add(sdata->sauthq, jp);
 }
 
@@ -7031,11 +7105,12 @@ static void upstream_auth(ckpool_t *ckp, stratum_instance_t *client, json_params
 
 static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 {
-	json_t *result_val, *json_msg, *err_val = NULL;
+	json_t *result_val, *err_val = NULL;
 	sdata_t *sdata = ckp->sdata;
 	stratum_instance_t *client;
 	int64_t mindiff, client_id;
 	int errnum = 0;
+	bool ret;
 
 	client_id = jp->client_id;
 
@@ -7046,34 +7121,31 @@ static void sauth_process(ckpool_t *ckp, json_params_t *jp)
 	}
 
 	result_val = parse_authorise(client, jp->params, &err_val, &errnum);
-	if (json_is_true(result_val)) {
-		char *buf;
-
+	ret = json_is_true(result_val);
+	if (ret) {
 		/* So far okay in remote mode, remainder to be done by upstream
 		 * pool */
 		if (ckp->remote) {
 			upstream_auth(ckp, client, jp);
 			goto out;
 		}
-
-		ASPRINTF(&buf, "Authorised, welcome to %s %s!", ckp->name,
-			 client->user_instance->username);
-		stratum_send_message(sdata, client, buf);
-		free(buf);
+		send_auth_success(ckp, sdata, client);
 	} else {
 		if (errnum < 0)
 			stratum_send_message(sdata, client, "Authorisations temporarily offline :(");
 		else
-			stratum_send_message(sdata, client, "Failed authorisation :(");
+			send_auth_failure(sdata, client);
 	}
-	json_msg = json_object();
-	json_object_set_new_nocheck(json_msg, "result", result_val);
-	json_object_set_new_nocheck(json_msg, "error", err_val ? err_val : json_null());
-	steal_json_id(json_msg, jp);
-	stratum_add_send(sdata, json_msg, client_id, SM_AUTHRESULT);
-
-	if (!json_is_true(result_val))
+	send_auth_response(sdata, client_id, ret, jp->id_val, err_val);
+	if (!ret)
 		goto out;
+
+	if (client->remote) {
+		/* We don't need to keep a record of clients on remote trusted
+		 * servers after auth'ing them. */
+		client->dropped = true;
+		goto out;
+	}
 
 	/* Update the client now if they have set a valid mindiff different
 	 * from the startdiff. suggest_diff overrides worker mindiff */

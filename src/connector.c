@@ -1204,7 +1204,9 @@ static void *urecv_process(void *arg)
 			goto decref;
 		}
 		if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
-			parse_remote_txns(ckp, val);
+			parse_upstream_txns(ckp, val);
+		else if (!safecmp(method, stratum_msgs[SM_AUTHRESULT]))
+			parse_upstream_auth(ckp, val);
 		else if (!safecmp(method, "submitblock"))
 			parse_remote_submitblock(ckp, val, cs->buf);
 		else if (!safecmp(method, "pong"))
