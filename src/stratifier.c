@@ -311,7 +311,7 @@ struct stratum_instance {
 	int proxyid; /* Which proxy id  */
 	int subproxyid; /* Which subproxy */
 
-	bool remote; /* Is this a trusted remote server */
+	bool trusted; /* Is this a trusted remote server */
 };
 
 struct share {
@@ -2923,7 +2923,7 @@ static void __drop_client(sdata_t *sdata, stratum_instance_t *client, bool lazil
 
 	if (unlikely(client->node))
 		DL_DELETE(sdata->node_instances, client);
-	if (unlikely(client->remote))
+	if (unlikely(client->trusted))
 		DL_DELETE(sdata->remote_instances, client);
 	if (client->workername) {
 		if (user) {
@@ -3107,7 +3107,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 		if (sdata != ckp_sdata && client->sdata != sdata)
 			continue;
 
-		if (!client_active(client) || client->node || client->remote)
+		if (!client_active(client) || client->node || client->trusted)
 			continue;
 
 		/* Only send messages to whitelisted clients */
@@ -3158,7 +3158,7 @@ static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_i
 		}
 		if (remote->node)
 			json_set_string(val, "node.method", stratum_msgs[msg_type]);
-		else if (remote->remote)
+		else if (remote->trusted)
 			json_set_string(val, "method", stratum_msgs[msg_type]);
 		dec_instance_ref(sdata, remote);
 	}
@@ -6134,7 +6134,7 @@ static void add_mining_node(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *c
 static void add_remote_server(sdata_t *sdata, stratum_instance_t *client)
 {
 	ck_wlock(&sdata->instance_lock);
-	client->remote = true;
+	client->trusted = true;
 	DL_APPEND(sdata->remote_instances, client);
 	ck_wunlock(&sdata->instance_lock);
 }
@@ -6900,7 +6900,7 @@ static void srecv_process(ckpool_t *ckp, json_t *val)
 	if (unlikely(noid))
 		LOGINFO("Stratifier added instance %s server %d", client->identity, server);
 
-	if (client->remote)
+	if (client->trusted)
 		parse_trusted_msg(ckp, sdata, msg->json_msg, client);
 	else if (ckp->node)
 		node_client_msg(ckp, msg->json_msg, client);
@@ -7493,7 +7493,7 @@ static void *statsupdate(void *arg)
 			 * connector if they still exist */
 			if (client->dropped)
 				connector_test_client(ckp, client->id);
-			else if (client->node || client->remote) {
+			else if (client->node || client->trusted) {
 				/* Do nothing to these */
 			} else if (!client->authorised) {
 				/* Test for clients that haven't authed in over a minute
