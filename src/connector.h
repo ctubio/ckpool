@@ -10,6 +10,7 @@
 #ifndef CONNECTOR_H
 #define CONNECTOR_H
 
+void connector_upstream_msg(ckpool_t *ckp, char *msg);
 void connector_add_message(ckpool_t *ckp, json_t *val);
 void *connector(void *arg);
 

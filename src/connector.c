@@ -167,6 +167,14 @@ struct connector_data {
 
 typedef struct connector_data cdata_t;
 
+void connector_upstream_msg(ckpool_t *ckp, char *msg)
+{
+	cdata_t *cdata = ckp->cdata;
+
+	LOGDEBUG("Upstreaming %s", msg);
+	ckmsgq_add(cdata->upstream_sends, msg);
+}
+
 /* Increase the reference count of instance */
 static void __inc_instance_ref(client_instance_t *client)
 {
@@ -1374,12 +1382,6 @@ retry:
 		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 
 		ckmsgq_add(cdata->cmpq, val);
-	} else if (cmdmatch(buf, "upstream=")) {
-		char *msg = strdup(buf + 9);
-
-		LOGDEBUG("Upstreaming %s", msg);
-		ckmsgq_add(cdata->upstream_sends, msg);
-		goto retry;
 	} else if (cmdmatch(buf, "dropclient")) {
 		client_instance_t *client;
 
