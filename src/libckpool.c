@@ -539,6 +539,22 @@ bool url_from_sockaddr(const struct sockaddr *addr, char *url, char *port)
 	return true;
 }
 
+/* Helper for getaddrinfo with the same API that retries while getting
+ * EAI_AGAIN error */
+static int addrgetinfo(const char *node, const char *service,
+                       const struct addrinfo *hints,
+                       struct addrinfo **res)
+{
+	int ret;
+
+	do {
+		ret = getaddrinfo(node, service, hints, res);
+	} while (ret == EAI_AGAIN);
+
+	return ret;
+}
+
+
 bool addrinfo_from_url(const char *url, const char *port, struct addrinfo *addrinfo)
 {
 	struct addrinfo *servinfo, hints;
@@ -547,7 +563,7 @@ bool addrinfo_from_url(const char *url, const char *port, struct addrinfo *addri
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	servinfo = addrinfo;
-	if (getaddrinfo(url, port, &hints, &servinfo) != 0)
+	if (addrgetinfo(url, port, &hints, &servinfo) != 0)
 		return false;
 	if (!servinfo)
 		return false;
@@ -662,7 +678,7 @@ int bind_socket(char *url, char *port)
 	hints.ai_socktype = SOCK_STREAM;
 	servinfo = &servinfobase;
 
-	if (getaddrinfo(url, port, &hints, &servinfo) != 0) {
+	if (addrgetinfo(url, port, &hints, &servinfo) != 0) {
 		LOGWARNING("Failed to resolve (?wrong URL) %s:%s", url, port);
 		return sockd;
 	}
@@ -699,7 +715,7 @@ int connect_socket(char *url, char *port)
 	memset(&servinfobase, 0, sizeof(struct addrinfo));
 	servinfo = &servinfobase;
 
-	if (getaddrinfo(url, port, &hints, &servinfo) != 0) {
+	if (addrgetinfo(url, port, &hints, &servinfo) != 0) {
 		LOGWARNING("Failed to resolve (?wrong URL) %s:%s", url, port);
 		goto out;
 	}
@@ -771,7 +787,7 @@ int round_trip(char *url)
 	memset(&servinfobase, 0, sizeof(struct addrinfo));
 	p = &servinfobase;
 
-	if (getaddrinfo(url, port, &hints, &p) != 0) {
+	if (addrgetinfo(url, port, &hints, &p) != 0) {
 		LOGWARNING("Failed to resolve (?wrong URL) %s:%s", url, port);
 		return ret;
 	}
