@@ -971,7 +971,7 @@ static void send_node_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *
 	}
 }
 
-static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
+static json_t *generate_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 {
 	char cdfield[64];
 	json_t *val;
@@ -994,6 +994,13 @@ static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", ckp->serverurl[0]);
+	return val;
+}
+
+static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
+{
+	json_t *val = generate_workinfo(ckp, sdata, wb);
+
 	ckdbq_add(ckp, ID_WORKINFO, val);
 	if (!ckp->proxy)
 		send_node_workinfo(ckp, sdata, wb);
@@ -1578,7 +1585,7 @@ out_unlock:
 	return ret;
 }
 
-static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, const json_t *wb_val)
+static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 {
 	workbase_t *tmp, *tmpa;
 	json_t *val;
@@ -1608,10 +1615,7 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, const
 	HASH_ADD_I64(sdata->remote_workbases, id, wb);
 	ck_wunlock(&sdata->workbase_lock);
 
-	/* Remove unwanted entry, add extra info and submit it to ckdb */
-	json_object_del(val, "method");
-	/* Create a new copy for use by ckdbq_add */
-	val = json_deep_copy(wb_val);
+	val = generate_workinfo(ckp, sdata, wb);
 	/* Replace workinfoid with mapped id */
 	json_set_int64(val, "workinfoid", wb->mapped_id);
 	ckdbq_add(ckp, ID_WORKINFO, val);
@@ -1696,7 +1700,7 @@ static void add_node_base(ckpool_t *ckp, json_t *val, bool trusted)
 	/* If this is from a remote trusted server, add it to the
 	 * remote_workbases hashtable */
 	if (trusted)
-		add_remote_base(ckp, sdata, wb, val);
+		add_remote_base(ckp, sdata, wb);
 	else
 		add_base(ckp, sdata, wb, &new_block);
 	if (new_block)
