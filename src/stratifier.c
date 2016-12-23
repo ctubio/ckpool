@@ -5606,7 +5606,12 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	DL_APPEND(sdata->block_solves, block_ckmsg);
 	mutex_unlock(&sdata->block_lock);
 
-	ckdbq_add(ckp, ID_BLOCK, val);
+	if (ckp->remote) {
+		json_set_string(val, "name", ckp->name);
+		upstream_msgtype(ckp, val, SM_BLOCK);
+		json_decref(val);
+	} else
+		ckdbq_add(ckp, ID_BLOCK, val);
 }
 
 /* Needs to be entered with client holding a ref count. */
