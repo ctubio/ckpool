@@ -1608,6 +1608,9 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, const
 	HASH_ADD_I64(sdata->remote_workbases, id, wb);
 	ck_wunlock(&sdata->workbase_lock);
 
+	/* Remove unwanted entry, add extra info and submit it to ckdb */
+	json_object_del(val, "method");
+	/* Create a new copy for use by ckdbq_add */
 	val = json_deep_copy(wb_val);
 	/* Replace workinfoid with mapped id */
 	json_set_int64(val, "workinfoid", wb->mapped_id);
