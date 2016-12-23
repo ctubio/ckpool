@@ -83,9 +83,8 @@ struct workbase {
 	int64_t id;
 	char idstring[20];
 
-	/* Actual ID if this workbase belongs to a remote pool, offset by this
-	 * value to the id field */
-	int64_t remote_offset;
+	/* The id a remote workinfo is mapped to locally */
+	int64_t mapped_id;
 
 	ts_t gentime;
 	tv_t retired;
@@ -463,6 +462,9 @@ struct stratifier_data {
 	workbase_t *current_workbase;
 	int workbases_generated;
 	txntable_t *txns;
+
+	/* Workbases from remote trusted servers */
+	workbase_t *remote_workbases;
 
 	/* Is this a node and unable to rebuild workinfos due to lack of txns */
 	bool wbincomplete;
@@ -1035,14 +1037,9 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 	 * setting the workbase_id */
 	ck_wlock(&sdata->workbase_lock);
 	ckp_sdata->workbases_generated++;
-	/* With trusted remote workinfos, we still use the global workbase_id
-	 * to identify them so they can still be sequential, while the real id
-	 * is stored offset by remote_offset */
-	if (!ckp->proxy) {
+	if (!ckp->proxy)
 		wb->id = sdata->workbase_id++;
-		if (wb->remote_offset)
-			wb->remote_offset -= wb->id;
-	} else
+	else
 		sdata->workbase_id = wb->id;
 	if (strncmp(wb->prevhash, sdata->lasthash, 64)) {
 		char bin[32], swap[32];
@@ -1581,7 +1578,37 @@ out_unlock:
 	return ret;
 }
 
-static void add_node_base(ckpool_t *ckp, json_t *val)
+static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
+{
+	workbase_t *tmp, *tmpa;
+
+	ts_realtime(&wb->gentime);
+
+	ck_wlock(&sdata->workbase_lock);
+	sdata->workbases_generated++;
+	wb->mapped_id = sdata->workbase_id++;
+	HASH_ITER(hh, sdata->remote_workbases, tmp, tmpa) {
+		if (HASH_COUNT(sdata->remote_workbases) < 3)
+			break;
+		if (wb == tmp)
+			continue;
+		/*  Age old workbases older than 10 minutes old */
+		if (tmp->gentime.tv_sec < wb->gentime.tv_sec - 600) {
+			HASH_DEL(sdata->remote_workbases, tmp);
+			ck_wunlock(&sdata->workbase_lock);
+
+			/* Drop lock to send this */
+			send_ageworkinfo(ckp, tmp->mapped_id);
+			clear_workbase(tmp);
+
+			ck_wlock(&sdata->workbase_lock);
+		}
+	}
+	HASH_ADD_I64(sdata->remote_workbases, id, wb);
+	ck_wunlock(&sdata->workbase_lock);
+}
+
+static void add_node_base(ckpool_t *ckp, json_t *val, bool trusted)
 {
 	workbase_t *wb = ckzalloc(sizeof(workbase_t));
 	sdata_t *sdata = ckp->sdata;
@@ -1591,9 +1618,6 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 
 	wb->ckp = ckp;
 	json_int64cpy(&wb->id, val, "jobid");
-	/* With remote trusted nodes, the id will end up being replaced in
-	 * add_base and we can maintain the original value by using an offset */
-	wb->remote_offset = wb->id;
 	json_strcpy(wb->target, val, "target");
 	json_dblcpy(&wb->diff, val, "diff");
 	json_uintcpy(&wb->version, val, "version");
@@ -1660,7 +1684,12 @@ static void add_node_base(ckpool_t *ckp, json_t *val)
 	LOGDEBUG("Header: %s", header);
 	hex2bin(wb->headerbin, header, 112);
 
-	add_base(ckp, sdata, wb, &new_block);
+	/* If this is from a remote trusted server, add it to the
+	 * remote_workbases hashtable */
+	if (trusted)
+		add_remote_base(ckp, sdata, wb);
+	else
+		add_base(ckp, sdata, wb, &new_block);
 	if (new_block)
 		LOGNOTICE("Block hash changed to %s", sdata->lastswaphash);
 }
@@ -6440,7 +6469,9 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	worker_instance_t *worker;
 	const char *workername;
 	double diff, sdiff = 0;
+	int64_t id, mapped_id;
 	user_instance_t *user;
+	workbase_t *wb;
 	tv_t now_t;
 
 	workername = json_string_value(workername_val);
@@ -6482,6 +6513,20 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	val = json_deep_copy(val);
 	if (likely(user->secondaryuserid))
 		json_set_string(val, "secondaryuserid", user->secondaryuserid);
+	/* Adjust workinfo id to virtual value */
+	json_get_int64(&id, val, "workinfoid");
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_FIND_I64(sdata->remote_workbases, &id, wb);
+	if (likely(wb))
+		mapped_id = wb->mapped_id;
+	else
+		mapped_id = id;
+	ck_runlock(&sdata->workbase_lock);
+
+	/* Replace value with mapped id */
+	json_set_int64(val, "workinfoid", mapped_id);
+
 	ckdbq_add(ckp, ID_SHARES, val);
 }
 
@@ -6549,7 +6594,7 @@ out:
 	}
 }
 
-#define parse_remote_workinfo(ckp, val) add_node_base(ckp, val)
+#define parse_remote_workinfo(ckp, val) add_node_base(ckp, val, true)
 
 static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratum_instance_t *remote,
 			      const int64_t remote_id)
@@ -6817,7 +6862,7 @@ static void parse_node_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 			add_node_txns(ckp, sdata, val);
 			break;
 		case SM_WORKINFO:
-			add_node_base(ckp, val);
+			add_node_base(ckp, val, false);
 			break;
 		case SM_BLOCK:
 			submit_node_block(ckp, sdata, val);
