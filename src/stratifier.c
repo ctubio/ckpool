@@ -1578,9 +1578,10 @@ out_unlock:
 	return ret;
 }
 
-static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
+static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, const json_t *wb_val)
 {
 	workbase_t *tmp, *tmpa;
+	json_t *val;
 
 	ts_realtime(&wb->gentime);
 
@@ -1606,6 +1607,11 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	}
 	HASH_ADD_I64(sdata->remote_workbases, id, wb);
 	ck_wunlock(&sdata->workbase_lock);
+
+	val = json_deep_copy(wb_val);
+	/* Replace workinfoid with mapped id */
+	json_set_int64(val, "workinfoid", wb->mapped_id);
+	ckdbq_add(ckp, ID_WORKINFO, val);
 }
 
 static void add_node_base(ckpool_t *ckp, json_t *val, bool trusted)
@@ -1687,7 +1693,7 @@ static void add_node_base(ckpool_t *ckp, json_t *val, bool trusted)
 	/* If this is from a remote trusted server, add it to the
 	 * remote_workbases hashtable */
 	if (trusted)
-		add_remote_base(ckp, sdata, wb);
+		add_remote_base(ckp, sdata, wb, val);
 	else
 		add_base(ckp, sdata, wb, &new_block);
 	if (new_block)
