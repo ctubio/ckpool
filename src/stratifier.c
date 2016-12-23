@@ -5383,16 +5383,6 @@ static double time_bias(const double tdiff, const double period)
 	return 1.0 - 1.0 / exp(dexp);
 }
 
-static void upstream_shares(ckpool_t *ckp, const char *workername, const int64_t diff,
-			    const double sdiff)
-{
-	char *msg;
-
-	ASPRINTF(&msg, "{\"method\":\"shares\",\"workername\":\"%s\",\"diff\":%"PRId64",\"sdiff\":%lf}\n",
-		 workername, diff, sdiff);
-	connector_upstream_msg(ckp, msg);
-}
-
 /* Needs to be entered with client holding a ref count. */
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double diff, const bool valid,
 		       const bool submit, const double sdiff)
@@ -5416,9 +5406,6 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	if (valid) {
 		worker->shares += diff;
 		user->shares += diff;
-		/* Send shares to the upstream pool in trusted remote node */
-		if (ckp->remote)
-			upstream_shares(ckp, worker->workername, diff, sdiff);
 	} else if (!submit)
 		return;
 
@@ -5904,7 +5891,11 @@ out_unlock:
 		} else
 			LOGERR("Failed to fopen %s", fname);
 	}
-	ckdbq_add(ckp, ID_SHARES, val);
+	if (ckp->remote) {
+		upstream_msgtype(ckp, val, SM_SHARE);
+		json_decref(val);
+	} else
+		ckdbq_add(ckp, ID_SHARES, val);
 out:
 	if (!sdata->wbincomplete && ((!result && !submit) || !share)) {
 		/* Is this the first in a run of invalids? */
@@ -6443,14 +6434,13 @@ static void submit_transaction(ckpool_t *ckp, const char *hash)
 	free(buf);
 }
 
-static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
+static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
 {
 	json_t *workername_val = json_object_get(val, "workername");
 	worker_instance_t *worker;
 	const char *workername;
+	double diff, sdiff = 0;
 	user_instance_t *user;
-	double sdiff = 0;
-	int64_t diff;
 	tv_t now_t;
 
 	workername = json_string_value(workername_val);
@@ -6458,7 +6448,7 @@ static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, cons
 		LOGWARNING("Failed to get workername from remote message %s", buf);
 		return;
 	}
-	if (unlikely(!json_get_int64(&diff, val, "diff") || diff < 1)) {
+	if (unlikely(!json_get_double(&diff, val, "diff") || diff < 1)) {
 		LOGWARNING("Unable to parse valid diff from remote message %s", buf);
 		return;
 	}
@@ -6484,7 +6474,15 @@ static void parse_remote_shares(ckpool_t *ckp, sdata_t *sdata, json_t *val, cons
 	decay_user(user, diff, &now_t);
 	copy_tv(&user->last_share, &now_t);
 
-	LOGINFO("Added %"PRId64" remote shares to worker %s", diff, workername);
+	LOGINFO("Added %.0lf remote shares to worker %s", diff, workername);
+
+	/* Remove unwanted entry, add extra info and submit it to ckdb */
+	json_object_del(val, "method");
+	/* Create a new copy for use by ckdbq_add */
+	val = json_deep_copy(val);
+	if (likely(user->secondaryuserid))
+		json_set_string(val, "secondaryuserid", user->secondaryuserid);
+	ckdbq_add(ckp, ID_SHARES, val);
 }
 
 static void send_auth_response(sdata_t *sdata, const int64_t client_id, const bool ret,
@@ -6725,8 +6723,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		LOGWARNING("Failed to get method from remote message %s", buf);
 		goto out;
 	}
-	if (likely(!safecmp(method, "shares")))
-		parse_remote_shares(ckp, sdata, val, buf);
+	if (likely(!safecmp(method, stratum_msgs[SM_SHARE])))
+		parse_remote_share(ckp, sdata, val, buf);
 	else if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
 		add_node_txns(ckp, sdata, val);
 	else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
