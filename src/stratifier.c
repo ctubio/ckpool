@@ -3362,16 +3362,6 @@ static json_t *user_stats(const user_instance_t *user)
 	return val;
 }
 
-static void upstream_block(ckpool_t *ckp, const int height, const char *workername,
-			   const double diff)
-{
-	char *msg;
-
-	ASPRINTF(&msg, "{\"method\":\"block\",\"workername\":\"%s\",\"diff\":%lf,\"height\":%d,\"name\":\"%s\"}\n",
-		 workername, diff, height, ckp->name);
-	connector_upstream_msg(ckp, msg);
-}
-
 static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
@@ -3420,10 +3410,13 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 		json_set_string(val, "createcode", __func__);
 		json_get_int(&height, val, "height");
 		json_get_double(&diff, val, "diff");
-		ckdbq_add(ckp, ID_BLOCK, val);
+		if (ckp->remote) {
+			json_set_string(val, "name", ckp->name);
+			upstream_msgtype(ckp, val, SM_BLOCK);
+			json_decref(val);
+		} else
+			ckdbq_add(ckp, ID_BLOCK, val);
 		free(found);
-		if (ckp->remote)
-			upstream_block(ckp, height, workername, diff);
 	}
 
 	if (!workername) {
@@ -6711,7 +6704,7 @@ static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf
 	send_generator(ckp, gbt_block, GEN_PRIORITY);
 }
 
-static void parse_remote_block(sdata_t *sdata, json_t *val, const char *buf)
+static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
 {
 	json_t *workername_val = json_object_get(val, "workername"),
 		*name_val = json_object_get(val, "name");
@@ -6738,6 +6731,10 @@ static void parse_remote_block(sdata_t *sdata, json_t *val, const char *buf)
 	LOGWARNING("%s", msg);
 	stratum_broadcast_message(sdata, msg);
 	free(msg);
+
+	/* Make a duplicate for use by ckdbq_add */
+	val = json_deep_copy(val);
+	ckdbq_add(ckp, ID_BLOCK, val);
 }
 
 static void send_remote_pong(sdata_t *sdata, stratum_instance_t *client)
@@ -6820,12 +6817,12 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		parse_remote_auth(ckp, sdata, val, client, client->id);
 	else if (!safecmp(method, stratum_msgs[SM_SHAREERR]))
 		parse_remote_shareerr(ckp, sdata, val, buf);
+	else if (!safecmp(method, stratum_msgs[SM_BLOCK]))
+		parse_remote_block(ckp, sdata, val, buf);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
 	else if (!safecmp(method, "submitblock"))
 		parse_remote_blocksubmit(ckp, val, buf);
-	else if (!safecmp(method, "block"))
-		parse_remote_block(sdata, val, buf);
 	else if (!safecmp(method, "ping"))
 		send_remote_pong(sdata, client);
 	else
