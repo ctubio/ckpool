@@ -5953,10 +5953,11 @@ out:
 	}
 
 	if (!share) {
-		if (!CKP_STANDALONE(ckp)) {
+		if (!CKP_STANDALONE(ckp) || ckp->remote) {
 			val = json_object();
 			json_set_int(val, "clientid", client->id);
-			json_set_string(val, "secondaryuserid", user->secondaryuserid);
+			if (user->secondaryuserid)
+				json_set_string(val, "secondaryuserid", user->secondaryuserid);
 			json_set_string(val, "enonce1", client->enonce1);
 			json_set_int(val, "workinfoid", sdata->current_workbase->id);
 			json_set_string(val, "workername", client->workername);
@@ -5967,7 +5968,11 @@ out:
 			json_set_string(val, "createby", "code");
 			json_set_string(val, "createcode", __func__);
 			json_set_string(val, "createinet", ckp->serverurl[client->server]);
-			ckdbq_add(ckp, ID_SHAREERR, val);
+			if (ckp->remote) {
+				upstream_msgtype(ckp, val, SM_SHAREERR);
+				json_decref(val);
+			} else
+				ckdbq_add(ckp, ID_SHAREERR, val);
 		}
 		LOGINFO("Invalid share from client %s: %s", client->identity, client->workername);
 	}
@@ -6530,6 +6535,43 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	ckdbq_add(ckp, ID_SHARES, val);
 }
 
+static void parse_remote_shareerr(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
+{
+	user_instance_t *user = NULL;
+	int64_t id, mapped_id;
+	const char *workername;
+	workbase_t *wb;
+
+	workername = json_string_value(json_object_get(val, "workername"));
+	if (unlikely(!workername)) {
+		LOGWARNING("Failed to find workername in parse_remote_shareerr %s", buf);
+		return;
+	}
+	user = generate_remote_user(ckp, workername);
+
+	/* Remove unwanted entry, add extra info and submit it to ckdb */
+	json_object_del(val, "method");
+	/* Create a new copy for use by ckdbq_add */
+	val = json_deep_copy(val);
+	if (likely(user->secondaryuserid))
+		json_set_string(val, "secondaryuserid", user->secondaryuserid);
+	/* Adjust workinfo id to virtual value */
+	json_get_int64(&id, val, "workinfoid");
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_FIND_I64(sdata->remote_workbases, &id, wb);
+	if (likely(wb))
+		mapped_id = wb->mapped_id;
+	else
+		mapped_id = id;
+	ck_runlock(&sdata->workbase_lock);
+
+	/* Replace value with mapped id */
+	json_set_int64(val, "workinfoid", mapped_id);
+
+	ckdbq_add(ckp, ID_SHAREERR, val);
+}
+
 static void send_auth_response(sdata_t *sdata, const int64_t client_id, const bool ret,
 			       json_t *id_val, json_t *err_val)
 {
@@ -6776,6 +6818,8 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		parse_remote_workinfo(ckp, val);
 	else if (!safecmp(method, stratum_msgs[SM_AUTH]))
 		parse_remote_auth(ckp, sdata, val, client, client->id);
+	else if (!safecmp(method, stratum_msgs[SM_SHAREERR]))
+		parse_remote_shareerr(ckp, sdata, val, buf);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
 	else if (!safecmp(method, "submitblock"))
