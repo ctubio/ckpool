@@ -502,12 +502,20 @@ bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port)
 	 * This function may be called with sockaddr_* already set as it may
 	 * be getting updated so we need to free the old entries safely.
 	 * Use a temporary variable so they never dereference */
-	tmp = *sockaddr_port;
-	*sockaddr_port = port;
-	free(tmp);
-	tmp = *sockaddr_url;
-	*sockaddr_url = url_address;
-	free(tmp);
+	if (*sockaddr_port && !safecmp(*sockaddr_port, port))
+		free(port);
+	else {
+		tmp = *sockaddr_port;
+		*sockaddr_port = port;
+		free(tmp);
+	}
+	if (*sockaddr_url && !safecmp(*sockaddr_url, url_address))
+		free(url_address);
+	else {
+		tmp = *sockaddr_url;
+		*sockaddr_url = url_address;
+		free(tmp);
+	}
 
 	return true;
 }
