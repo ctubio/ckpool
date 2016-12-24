@@ -971,7 +971,7 @@ static void send_node_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *
 	}
 }
 
-static json_t *generate_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
+static json_t *generate_workinfo(ckpool_t *ckp, const workbase_t *wb)
 {
 	char cdfield[64];
 	json_t *val;
@@ -999,7 +999,7 @@ static json_t *generate_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t
 
 static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 {
-	json_t *val = generate_workinfo(ckp, sdata, wb);
+	json_t *val = generate_workinfo(ckp, wb);
 
 	ckdbq_add(ckp, ID_WORKINFO, val);
 	if (!ckp->proxy)
@@ -1615,7 +1615,7 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	HASH_ADD_I64(sdata->remote_workbases, id, wb);
 	ck_wunlock(&sdata->workbase_lock);
 
-	val = generate_workinfo(ckp, sdata, wb);
+	val = generate_workinfo(ckp, wb);
 	/* Replace workinfoid with mapped id */
 	json_set_int64(val, "workinfoid", wb->mapped_id);
 	ckdbq_add(ckp, ID_WORKINFO, val);
@@ -5440,7 +5440,7 @@ static double time_bias(const double tdiff, const double period)
 
 /* Needs to be entered with client holding a ref count. */
 static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double diff, const bool valid,
-		       const bool submit, const double sdiff)
+		       const bool submit)
 {
 	sdata_t *ckp_sdata = ckp->sdata, *sdata = client->sdata;
 	worker_instance_t *worker = client->worker_instance;
@@ -5911,7 +5911,7 @@ out_unlock:
 		submit_share(client, id, nonce2, ntime, nonce);
 	}
 
-	add_submit(ckp, client, diff, result, submit, sdiff);
+	add_submit(ckp, client, diff, result, submit);
 
 	/* Now write to the pool's sharelog. */
 	val = json_object();
@@ -6604,7 +6604,7 @@ static void send_auth_failure(sdata_t *sdata, stratum_instance_t *client)
 
 void parse_upstream_auth(ckpool_t *ckp, json_t *val)
 {
-	json_t *json_msg, *id_val = NULL, *err_val = NULL;
+	json_t *id_val = NULL, *err_val = NULL;
 	sdata_t *sdata = ckp->sdata;
 	stratum_instance_t *client;
 	bool ret, warn = false;
@@ -6647,7 +6647,6 @@ static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 {
 	json_t *params, *method, *id_val;
 	stratum_instance_t *client;
-	const char *address;
 	json_params_t *jp;
 	int64_t client_id;
 
@@ -7149,7 +7148,6 @@ static stratum_instance_t *preauth_ref_instance_by_id(sdata_t *sdata, const int6
  * asynchronously receive the response and return the auth response. */
 static void upstream_auth(ckpool_t *ckp, stratum_instance_t *client, json_params_t *jp)
 {
-	user_instance_t *user = client->user_instance;
 	json_t *val = json_object();
 	char cdfield[64];
 	char *msg;
