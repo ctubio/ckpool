@@ -3424,7 +3424,6 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 		json_get_int(&height, val, "height");
 		json_get_double(&diff, val, "diff");
 		if (ckp->remote) {
-			json_set_string(val, "name", ckp->name);
 			upstream_msgtype(ckp, val, SM_BLOCK);
 			json_decref(val);
 		} else
@@ -6731,15 +6730,13 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	int height = 0;
 	char *msg;
 
+	name = json_string_value(name_val);
+	if (!name_val || !name)
+		goto out_add;
 	workername = json_string_value(workername_val);
 	if (unlikely(!workername_val || !workername)) {
 		LOGWARNING("Failed to get workername from remote message %s", buf);
 		workername = "";
-	}
-	name = json_string_value(name_val);
-	if (unlikely(!name_val || !name)) {
-		LOGWARNING("Failed to get name from remote message %s", buf);
-		name = "";
 	}
 	if (unlikely(!json_get_int(&height, val, "height")))
 		LOGWARNING("Failed to get height from remote message %s", buf);
@@ -6749,7 +6746,7 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	LOGWARNING("%s", msg);
 	stratum_broadcast_message(sdata, msg);
 	free(msg);
-
+out_add:
 	/* Make a duplicate for use by ckdbq_add */
 	val = json_deep_copy(val);
 	ckdbq_add(ckp, ID_BLOCK, val);
