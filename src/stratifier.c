@@ -3375,6 +3375,26 @@ static json_t *user_stats(const user_instance_t *user)
 	return val;
 }
 
+/* Adjust workinfo id to virtual value for remote trusted workinfos */
+static void remap_workinfo_id(sdata_t *sdata, json_t *val)
+{
+	int64_t mapped_id, id;
+	workbase_t *wb;
+
+	json_get_int64(&id, val, "workinfoid");
+
+	ck_rlock(&sdata->workbase_lock);
+	HASH_FIND_I64(sdata->remote_workbases, &id, wb);
+	if (likely(wb))
+		mapped_id = wb->mapped_id;
+	else
+		mapped_id = id;
+	ck_runlock(&sdata->workbase_lock);
+
+	/* Replace value with mapped id */
+	json_set_int64(val, "workinfoid", mapped_id);
+}
+
 static void block_solve(ckpool_t *ckp, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
@@ -3424,6 +3444,7 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 		json_get_int(&height, val, "height");
 		json_get_double(&diff, val, "diff");
 		if (ckp->remote) {
+			remap_workinfo_id(sdata, val);
 			upstream_msgtype(ckp, val, SM_BLOCK);
 			json_decref(val);
 		} else
@@ -5607,6 +5628,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 
 	if (ckp->remote) {
 		json_set_string(val, "name", ckp->name);
+		remap_workinfo_id(sdata, val);
 		upstream_msgtype(ckp, val, SM_BLOCK);
 		json_decref(val);
 	} else
@@ -6484,9 +6506,7 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	worker_instance_t *worker;
 	const char *workername;
 	double diff, sdiff = 0;
-	int64_t id, mapped_id;
 	user_instance_t *user;
-	workbase_t *wb;
 	tv_t now_t;
 
 	workername = json_string_value(workername_val);
@@ -6528,19 +6548,7 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	val = json_deep_copy(val);
 	if (likely(user->secondaryuserid))
 		json_set_string(val, "secondaryuserid", user->secondaryuserid);
-	/* Adjust workinfo id to virtual value */
-	json_get_int64(&id, val, "workinfoid");
-
-	ck_rlock(&sdata->workbase_lock);
-	HASH_FIND_I64(sdata->remote_workbases, &id, wb);
-	if (likely(wb))
-		mapped_id = wb->mapped_id;
-	else
-		mapped_id = id;
-	ck_runlock(&sdata->workbase_lock);
-
-	/* Replace value with mapped id */
-	json_set_int64(val, "workinfoid", mapped_id);
+	remap_workinfo_id(sdata, val);
 
 	ckdbq_add(ckp, ID_SHARES, val);
 }
@@ -6548,9 +6556,7 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 static void parse_remote_shareerr(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
 {
 	user_instance_t *user = NULL;
-	int64_t id, mapped_id;
 	const char *workername;
-	workbase_t *wb;
 
 	workername = json_string_value(json_object_get(val, "workername"));
 	if (unlikely(!workername)) {
@@ -6565,19 +6571,7 @@ static void parse_remote_shareerr(ckpool_t *ckp, sdata_t *sdata, json_t *val, co
 	val = json_deep_copy(val);
 	if (likely(user->secondaryuserid))
 		json_set_string(val, "secondaryuserid", user->secondaryuserid);
-	/* Adjust workinfo id to virtual value */
-	json_get_int64(&id, val, "workinfoid");
-
-	ck_rlock(&sdata->workbase_lock);
-	HASH_FIND_I64(sdata->remote_workbases, &id, wb);
-	if (likely(wb))
-		mapped_id = wb->mapped_id;
-	else
-		mapped_id = id;
-	ck_runlock(&sdata->workbase_lock);
-
-	/* Replace value with mapped id */
-	json_set_int64(val, "workinfoid", mapped_id);
+	remap_workinfo_id(sdata, val);
 
 	ckdbq_add(ckp, ID_SHAREERR, val);
 }
