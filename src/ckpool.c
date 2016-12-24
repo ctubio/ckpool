@@ -1735,7 +1735,7 @@ int main(int argc, char **argv)
 			case 't':
 				if (ckp.proxy)
 					quit(1, "Cannot set a proxy type and trusted remote mode");
-				ckp.remote = true;
+				ckp.standalone = ckp.remote = true;
 				break;
 			case 'u':
 				if (ckp.proxy || ckp.redirector || ckp.passthrough || ckp.node)
