@@ -3444,7 +3444,6 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 		json_get_int(&height, val, "height");
 		json_get_double(&diff, val, "diff");
 		if (ckp->remote) {
-			remap_workinfo_id(sdata, val);
 			upstream_msgtype(ckp, val, SM_BLOCK);
 			json_decref(val);
 		} else
@@ -5628,7 +5627,6 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 
 	if (ckp->remote) {
 		json_set_string(val, "name", ckp->name);
-		remap_workinfo_id(sdata, val);
 		upstream_msgtype(ckp, val, SM_BLOCK);
 		json_decref(val);
 	} else
@@ -6742,6 +6740,8 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 out_add:
 	/* Make a duplicate for use by ckdbq_add */
 	val = json_deep_copy(val);
+	remap_workinfo_id(sdata, val);
+
 	ckdbq_add(ckp, ID_BLOCK, val);
 }
 
