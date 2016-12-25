@@ -291,6 +291,7 @@ enum stratum_msgtype {
 	SM_PONG,
 	SM_TRANSACTIONS,
 	SM_SHAREERR,
+	SM_WORKERSTATS,
 	SM_NONE
 };
 
@@ -315,6 +316,7 @@ static const char __maybe_unused *stratum_msgs[] = {
 	"pong",
 	"transactions",
 	"shareerr",
+	"workerstats",
 	""
 };
 
