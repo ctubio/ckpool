@@ -6659,8 +6659,6 @@ static void parse_remote_workerstats(ckpool_t *ckp, json_t *val, const int64_t r
 	client_id = (remote_id << 32) | (client_id & 0xffffffffll);
 	json_set_int64(val, "clientid", client_id);
 
-	/* Rename the pool instance to match main pool (for now?) */
-	json_set_string(val, "poolinstance", ckp->name);
 	ckdbq_add(ckp, ID_WORKERSTATS, val);
 }
 
@@ -6841,6 +6839,9 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		LOGWARNING("Failed to get method from remote message %s", buf);
 		goto out;
 	}
+	/* Rename the pool instance to match main pool (for now?) */
+	json_set_string(val, "poolinstance", ckp->name);
+
 	if (likely(!safecmp(method, stratum_msgs[SM_SHARE])))
 		parse_remote_share(ckp, sdata, val, buf);
 	else if (!safecmp(method, stratum_msgs[SM_TRANSACTIONS]))
