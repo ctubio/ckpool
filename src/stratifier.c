@@ -986,7 +986,7 @@ static void send_node_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *
 	}
 }
 
-static json_t *generate_workinfo(ckpool_t *ckp, const workbase_t *wb)
+static json_t *generate_workinfo(ckpool_t *ckp, const workbase_t *wb, const char *func)
 {
 	char cdfield[64];
 	json_t *val;
@@ -1007,14 +1007,14 @@ static json_t *generate_workinfo(ckpool_t *ckp, const workbase_t *wb)
 			"merklehash", json_deep_copy(wb->merkle_array),
 			"createdate", cdfield,
 			"createby", "code",
-			"createcode", __func__,
+			"createcode", func,
 			"createinet", ckp->serverurl[0]);
 	return val;
 }
 
 static void send_workinfo(ckpool_t *ckp, sdata_t *sdata, const workbase_t *wb)
 {
-	json_t *val = generate_workinfo(ckp, wb);
+	json_t *val = generate_workinfo(ckp, wb, __func__);
 
 	ckdbq_add(ckp, ID_WORKINFO, val);
 	if (!ckp->proxy)
@@ -1630,7 +1630,7 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	HASH_ADD_I64(sdata->remote_workbases, id, wb);
 	ck_wunlock(&sdata->workbase_lock);
 
-	val = generate_workinfo(ckp, wb);
+	val = generate_workinfo(ckp, wb, __func__);
 	/* Replace workinfoid with mapped id */
 	json_set_int64(val, "workinfoid", wb->mapped_id);
 	ckdbq_add(ckp, ID_WORKINFO, val);
