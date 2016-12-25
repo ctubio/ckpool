@@ -6658,6 +6658,9 @@ static void parse_remote_workerstats(ckpool_t *ckp, json_t *val, const int64_t r
 	/* Encode remote server client_id into remote client's id */
 	client_id = (remote_id << 32) | (client_id & 0xffffffffll);
 	json_set_int64(val, "clientid", client_id);
+
+	/* Rename the pool instance to match main pool (for now?) */
+	json_set_string(val, "poolinstance", ckp->name);
 	ckdbq_add(ckp, ID_WORKERSTATS, val);
 }
 
