@@ -342,8 +342,8 @@ void empty_buffer(connsock_t *cs);
 int set_sendbufsize(ckpool_t *ckp, const int fd, const int len);
 int set_recvbufsize(ckpool_t *ckp, const int fd, const int len);
 int read_socket_line(connsock_t *cs, float *timeout);
-void _send_proc(const proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
-#define send_proc(pi, msg) _send_proc(&(pi), msg, __FILE__, __func__, __LINE__)
+void _queue_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line);
+#define send_proc(pi, msg) _queue_proc(&(pi), msg, __FILE__, __func__, __LINE__)
 char *_send_recv_proc(const proc_instance_t *pi, const char *msg, int writetimeout, int readtimedout,
 		      const char *file, const char *func, const int line);
 #define send_recv_proc(pi, msg) _send_recv_proc(&(pi), msg, UNIX_WRITE_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)

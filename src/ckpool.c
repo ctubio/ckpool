@@ -709,37 +709,26 @@ out:
 	return ret;
 }
 
-/* Send a single message to a process instance when there will be no response,
- * closing the socket immediately. */
-void _send_proc(const proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
+/* We used to send messages between each proc_instance via unix sockets when
+ * ckpool was a multi-process model but that is no longer required so we can
+ * place the messages directly on the other proc_instance's queue until we
+ * deprecate this mechanism. */
+void _queue_proc(proc_instance_t *pi, const char *msg, const char *file, const char *func, const int line)
 {
-	char *path = pi->us.path;
-	bool ret = false;
-	int sockd;
+	unix_msg_t *umsg;
 
 	if (unlikely(!msg || !strlen(msg))) {
-		LOGERR("Attempted to send null message to %s in send_proc", pi->processname);
+		LOGWARNING("Null msg passed to queue_proc from %s %s:%d", file, func, line);
 		return;
 	}
+	umsg = ckalloc(sizeof(unix_msg_t));
+	umsg->sockd = -1;
+	umsg->buf = strdup(msg);
 
-	if (unlikely(!path || !strlen(path))) {
-		LOGERR("Attempted to send message %s to null path in send_proc", msg ? msg : "");
-		goto out;
-	}
-
-	sockd = open_unix_client(path);
-	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s", path);
-		goto out;
-	}
-	if (unlikely(!send_unix_msg(sockd, msg)))
-		LOGWARNING("Failed to send %s to socket %s", msg, path);
-	else
-		ret = true;
-	Close(sockd);
-out:
-	if (unlikely(!ret))
-		LOGERR("Failure in send_proc from %s %s:%d", file, func, line);
+	mutex_lock(&pi->rmsg_lock);
+	DL_APPEND(pi->unix_msgs, umsg);
+	pthread_cond_signal(&pi->rmsg_cond);
+	mutex_unlock(&pi->rmsg_lock);
 }
 
 /* Send a single message to a process instance and retrieve the response, then

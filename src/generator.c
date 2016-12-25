@@ -787,7 +787,7 @@ out:
 
 static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_t *ni);
 
-static void reconnect_generator(const ckpool_t *ckp)
+static void reconnect_generator(ckpool_t *ckp)
 {
 	send_proc(ckp->generator, "reconnect");
 }

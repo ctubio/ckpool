@@ -1155,7 +1155,7 @@ static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
 	return buf;
 }
 
-static void send_generator(const ckpool_t *ckp, const char *msg, const int prio)
+static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->sdata;
 	bool set;
@@ -2342,7 +2342,7 @@ static int64_t best_userproxy_headroom(sdata_t *sdata, const int userid)
 
 static void reconnect_client(sdata_t *sdata, stratum_instance_t *client);
 
-static void generator_recruit(const ckpool_t *ckp, const int proxyid, const int recruits)
+static void generator_recruit(ckpool_t *ckp, const int proxyid, const int recruits)
 {
 	char buf[256];
 
@@ -4529,7 +4529,7 @@ static proxy_t *__best_subproxy(proxy_t *proxy)
  * in proxy mode where we find a subproxy based on the current proxy with room
  * for more clients. Signal the generator to recruit more subproxies if we are
  * running out of room. */
-static sdata_t *select_sdata(const ckpool_t *ckp, sdata_t *ckp_sdata, const int userid)
+static sdata_t *select_sdata(ckpool_t *ckp, sdata_t *ckp_sdata, const int userid)
 {
 	proxy_t *global, *proxy, *tmp, *best = NULL;
 
