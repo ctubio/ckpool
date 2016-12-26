@@ -5512,7 +5512,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 static void
 test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uchar *data,
 		const uchar *hash, const double diff, const char *coinbase, int cblen,
-		const char *nonce2, const char *nonce, const uint32_t ntime32)
+		const char *nonce2, const char *nonce, const uint32_t ntime32, const bool stale)
 {
 	char blockhash[68], cdfield[64];
 	sdata_t *sdata = client->sdata;
@@ -5526,7 +5526,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	if (diff < sdata->current_workbase->network_diff * 0.999)
 		return;
 
-	LOGWARNING("Possible block solve diff %f !", diff);
+	LOGWARNING("Possible %sblock solve diff %f !", stale ? "stale share " : "", diff);
 	/* Can't submit a block in proxy mode without the transactions */
 	if (!ckp->node && wb->proxy)
 		return;
@@ -5573,7 +5573,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 
 /* Needs to be entered with client holding a ref count. */
 static double submission_diff(const stratum_instance_t *client, const workbase_t *wb, const char *nonce2,
-			      const uint32_t ntime32, const char *nonce, uchar *hash)
+			      const uint32_t ntime32, const char *nonce, uchar *hash, const bool stale)
 {
 	char *coinbase;
 	uchar swap[80];
@@ -5586,7 +5586,7 @@ static double submission_diff(const stratum_instance_t *client, const workbase_t
 	ret = share_diff(coinbase, client->enonce1bin, wb, nonce2, ntime32, nonce, hash, swap, &cblen);
 
 	/* Test we haven't solved a block regardless of share status */
-	test_blocksolve(client, wb, swap, hash, ret, coinbase, cblen, nonce2, nonce, ntime32);
+	test_blocksolve(client, wb, swap, hash, ret, coinbase, cblen, nonce2, nonce, ntime32, stale);
 
 	free(coinbase);
 
@@ -5660,11 +5660,11 @@ static void check_best_diff(ckpool_t *ckp, sdata_t *sdata, user_instance_t *user
 static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 			    const json_t *params_val, json_t **err_val)
 {
-	bool share = false, result = false, invalid = true, submit = false;
-	user_instance_t *user = client->user_instance;
+	bool share = false, result = false, invalid = true, submit = false, stale = false;
 	double diff = client->diff, wdiff = 0, sdiff = -1;
 	char hexhash[68] = {}, sharehash[32], cdfield[64];
 	const char *workername, *job_id, *ntime, *nonce;
+	user_instance_t *user = client->user_instance;
 	char *fname = NULL, *s, *nonce2;
 	sdata_t *sdata = client->sdata;
 	enum share_err err = SE_NONE;
@@ -5766,7 +5766,9 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 		memcpy(nonce2, tmp, nlen);
 		nonce2[len] = '\0';
 	}
-	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash);
+	if (id < sdata->blockchange_id)
+		stale = true;
+	sdiff = submission_diff(client, wb, nonce2, ntime32, nonce, hash, stale);
 	if (sdiff > client->best_diff) {
 		worker_instance_t *worker = client->worker_instance;
 
@@ -5778,7 +5780,7 @@ static json_t *parse_submit(stratum_instance_t *client, json_t *json_msg,
 	bswap_256(sharehash, hash);
 	__bin2hex(hexhash, sharehash, 32);
 
-	if (id < sdata->blockchange_id) {
+	if (stale) {
 		/* Accept shares if they're received on remote nodes before the
 		 * workbase was retired. */
 		if (client->latency) {
