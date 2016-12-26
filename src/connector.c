@@ -676,9 +676,12 @@ static void *receiver(void *arg)
 	}
 
 	/* Wait for the stratifier to be ready for us */
-	do {
+	while (42) {
 		buf = send_recv_proc(ckp->stratifier, "ping");
-	} while (!buf);
+		if (buf)
+			break;
+		cksleep_ms(10);
+	};
 	free(buf);
 
 	while (42) {

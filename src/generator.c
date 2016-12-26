@@ -3101,14 +3101,16 @@ void *generator(void *arg)
 	gdata->ckp = ckp;
 
 	if (ckp->proxy) {
-		char *buf = NULL;
+		char *buf;
 
 		/* Wait for the stratifier to be ready for us */
-		do {
-			cksleep_ms(10);
+		while (42) {
 			buf = send_recv_proc(ckp->stratifier, "ping");
-		} while (!buf);
-		dealloc(buf);
+			if (buf)
+				break;
+			cksleep_ms(10);
+		};
+		free(buf);
 		proxy_mode(ckp, pi);
 	} else
 		server_mode(ckp, pi);

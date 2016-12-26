@@ -8021,9 +8021,9 @@ void *stratifier(void *arg)
 	pthread_t pth_blockupdate, pth_statsupdate, pth_heartbeat;
 	ckpool_t *ckp = pi->ckp;
 	int64_t randomiser;
-	char *buf = NULL;
 	sdata_t *sdata;
 	int threads;
+	char *buf;
 
 	rename_proc(pi->processname);
 	LOGWARNING("%s stratifier starting", ckp->name);
@@ -8033,12 +8033,15 @@ void *stratifier(void *arg)
 	sdata->verbose = true;
 
 	/* Wait for the generator to have something for us */
-	do {
+	while (42) {
 		if (ckp->proxy)
 			break;
 		buf = send_recv_proc(ckp->generator, "ping");
-	} while (!buf);
-	dealloc(buf);
+		if (buf)
+			break;
+		cksleep_ms(10);
+	};
+	free(buf);
 
 	if (!ckp->proxy) {
 		if (!generator_checkaddr(ckp, ckp->btcaddress)) {
