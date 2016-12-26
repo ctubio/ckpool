@@ -858,6 +858,29 @@ out:
 	return ret;
 }
 
+bool generator_checkaddr(ckpool_t *ckp, const char *addr)
+{
+	gdata_t *gdata = ckp->gdata;
+	server_instance_t *si;
+	int ret = false;
+	connsock_t *cs;
+
+	/* Use temporary variables to prevent deref while accessing */
+	si = gdata->current_si;
+	if (unlikely(!si)) {
+		LOGWARNING("No live current server in generator_checkaddr");
+		goto out;
+	}
+	cs = &si->cs;
+	if (unlikely(!cs)) {
+		LOGWARNING("No live connsock for current server in generator_checkaddr");
+		goto out;
+	}
+	ret = validate_address(cs, addr);
+out:
+	return ret;
+}
+
 static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;

@@ -1120,29 +1120,6 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 	}
 }
 
-/* Mandatory send_recv to the generator which sets the message priority if this
- * message is higher priority. Races galore on gen_priority mean this might
- * read the wrong priority but occasional wrong values are harmless. */
-static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
-{
-	sdata_t *sdata = ckp->sdata;
-	char *buf = NULL;
-	bool set;
-
-	if (prio > sdata->gen_priority) {
-		sdata->gen_priority = prio;
-		set = true;
-	} else
-		set = false;
-	buf = _send_recv_proc(&ckp->generator, msg, UNIX_WRITE_TIMEOUT, RPC_TIMEOUT, __FILE__, __func__, __LINE__);
-	if (unlikely(!buf))
-		buf = strdup("failed");
-	if (set)
-		sdata->gen_priority = 0;
-
-	return buf;
-}
-
 static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->sdata;
@@ -4718,22 +4695,6 @@ static json_t *parse_subscribe(stratum_instance_t *client, const int64_t client_
 	return ret;
 }
 
-static bool test_address(ckpool_t *ckp, const char *address)
-{
-	bool ret = false;
-	char *buf, *msg;
-
-	ASPRINTF(&msg, "checkaddr:%s", address);
-	/* Must wait for a response here */
-	buf = __send_recv_generator(ckp, msg, GEN_LAX);
-	dealloc(msg);
-	if (!buf)
-		return ret;
-	ret = cmdmatch(buf, "true");
-	dealloc(buf);
-	return ret;
-}
-
 static double dsps_from_key(json_t *val, const char *key)
 {
 	char *string, *endptr;
@@ -5030,7 +4991,7 @@ static user_instance_t *generate_user(ckpool_t *ckp, stratum_instance_t *client,
 
 	/* Is this a btc address based username? */
 	if (!ckp->proxy && (new_user || !user->btcaddress) && (len > 26 && len < 35))
-		user->btcaddress = test_address(ckp, username);
+		user->btcaddress = generator_checkaddr(ckp, username);
 	if (new_user) {
 		LOGNOTICE("Added new user %s%s", username, user->btcaddress ?
 			  " as address based registration" : "");
@@ -6459,7 +6420,7 @@ static user_instance_t *generate_remote_user(ckpool_t *ckp, const char *workerna
 
 	/* Is this a btc address based username? */
 	if (!ckp->proxy && (new_user || !user->btcaddress) && (len > 26 && len < 35))
-		user->btcaddress = test_address(ckp, username);
+		user->btcaddress = generator_checkaddr(ckp, username);
 	if (new_user) {
 		LOGNOTICE("Added new remote user %s%s", username, user->btcaddress ?
 			  " as address based registration" : "");
@@ -8098,7 +8059,7 @@ void *stratifier(void *arg)
 	dealloc(buf);
 
 	if (!ckp->proxy) {
-		if (!test_address(ckp, ckp->btcaddress)) {
+		if (!generator_checkaddr(ckp, ckp->btcaddress)) {
 			LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
 			goto out;
 		}
@@ -8113,7 +8074,7 @@ void *stratifier(void *arg)
 			sdata->pubkeytxnlen = 25;
 		}
 
-		if (test_address(ckp, ckp->donaddress)) {
+		if (generator_checkaddr(ckp, ckp->donaddress)) {
 			ckp->donvalid = true;
 			if (script_address(ckp->donaddress)) {
 				sdata->donkeytxnlen = 23;
