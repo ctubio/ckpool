@@ -476,12 +476,12 @@ retry:
 		}
 	} else if (cmdmatch(buf, "stratifierstats")) {
 		LOGDEBUG("Listener received stratifierstats request");
-		msg = send_recv_proc(ckp->stratifier, "stats");
+		msg = stratifier_stats(ckp, ckp->sdata);
 		send_unix_msg(sockd, msg);
 		dealloc(msg);
 	} else if (cmdmatch(buf, "connectorstats")) {
 		LOGDEBUG("Listener received connectorstats request");
-		msg = send_recv_proc(ckp->connector, "stats");
+		msg = connector_stats(ckp->cdata, 0);
 		send_unix_msg(sockd, msg);
 		dealloc(msg);
 	} else if (cmdmatch(buf, "ckdbflush")) {

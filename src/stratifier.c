@@ -3570,10 +3570,11 @@ static void ckmsgq_stats(ckmsgq_t *ckmsgq, const int size, json_t **val)
 	JSON_CPACK(*val, "{si,si,si}", "count", objects, "memory", memsize, "generated", generated);
 }
 
-static char *stratifier_stats(ckpool_t *ckp, sdata_t *sdata)
+char *stratifier_stats(ckpool_t *ckp, void *data)
 {
 	json_t *val = json_object(), *subval;
 	int objects, generated;
+	sdata_t *sdata = data;
 	int64_t memsize;
 	char *buf;
 

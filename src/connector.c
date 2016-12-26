@@ -1293,11 +1293,12 @@ static void drop_passthrough_client(cdata_t *cdata, const int64_t id)
 	send_client(cdata, id, msg);
 }
 
-static char *connector_stats(cdata_t *cdata, const int runtime)
+char *connector_stats(void *data, const int runtime)
 {
 	json_t *val = json_object(), *subval;
 	client_instance_t *client;
 	int objects, generated;
+	cdata_t *cdata = data;
 	sender_send_t *send;
 	int64_t memsize;
 	char *buf;

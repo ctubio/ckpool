@@ -12,6 +12,7 @@
 
 void connector_upstream_msg(ckpool_t *ckp, char *msg);
 void connector_add_message(ckpool_t *ckp, json_t *val);
+char *connector_stats(void *data, const int runtime);
 void *connector(void *arg);
 
 #endif /* CONNECTOR_H */
