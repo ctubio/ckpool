@@ -1143,19 +1143,6 @@ static char *__send_recv_generator(ckpool_t *ckp, const char *msg, const int pri
 	return buf;
 }
 
-/* Conditionally send_recv a message only if it's equal or higher priority than
- * any currently being serviced. NULL is returned if the request is not
- * processed for priority reasons, "failed" for an actual failure. */
-static char *send_recv_generator(ckpool_t *ckp, const char *msg, const int prio)
-{
-	sdata_t *sdata = ckp->sdata;
-	char *buf = NULL;
-
-	if (prio >= sdata->gen_priority)
-		buf = __send_recv_generator(ckp, msg, prio);
-	return buf;
-}
-
 static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
 {
 	sdata_t *sdata = ckp->sdata;
@@ -4390,26 +4377,28 @@ static void *blockupdate(void *arg)
 {
 	ckpool_t *ckp = (ckpool_t *)arg;
 	sdata_t *sdata = ckp->sdata;
-	char *buf = NULL;
-	char request[8];
+	char hash[68];
 
 	pthread_detach(pthread_self());
 	rename_proc("blockupdate");
-	buf = send_recv_proc(ckp->generator, "getbest");
-	if (!cmdmatch(buf, "failed"))
-		sprintf(request, "getbest");
-	else
-		sprintf(request, "getlast");
 
 	while (42) {
-		dealloc(buf);
-		buf = send_recv_generator(ckp, request, GEN_LAX);
-		if (buf && cmdmatch(buf, "notify"))
-			cksleep_ms(5000);
-		else if (buf && strcmp(buf, sdata->lastswaphash) && !cmdmatch(buf, "failed"))
-			update_base(sdata, GEN_PRIORITY);
-		else
-			cksleep_ms(ckp->blockpoll);
+		int ret;
+
+		ret = generator_getbest(ckp, hash);
+		switch (ret) {
+			case GETBEST_NOTIFY:
+				cksleep_ms(5000);
+				break;
+			case GETBEST_SUCCESS:
+				if (strcmp(hash, sdata->lastswaphash)) {
+					update_base(sdata, GEN_PRIORITY);
+					break;
+				}
+			case GETBEST_FAILED:
+			default:
+				cksleep_ms(ckp->blockpoll);
+		}
 	}
 	return NULL;
 }

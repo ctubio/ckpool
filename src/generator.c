@@ -827,6 +827,37 @@ out:
 	return val;
 }
 
+int generator_getbest(ckpool_t *ckp, char *hash)
+{
+	gdata_t *gdata = ckp->gdata;
+	int ret = GETBEST_FAILED;
+	server_instance_t *si;
+	connsock_t *cs;
+
+	/* Use temporary variables to prevent deref while accessing */
+	si = gdata->current_si;
+	if (unlikely(!si)) {
+		LOGWARNING("No live current server in generator_getbest");
+		goto out;
+	}
+	if (si->notify) {
+		ret = GETBEST_NOTIFY;
+		goto out;
+	}
+	cs = &si->cs;
+	if (unlikely(!cs)) {
+		LOGWARNING("No live connsock for current server in generator_getbest");
+		goto out;
+	}
+	if (unlikely(!get_bestblockhash(cs, hash))) {
+		LOGWARNING("Failed to get best block hash from %s:%s", cs->url, cs->port);
+		goto out;
+	}
+	ret = GETBEST_SUCCESS;
+out:
+	return ret;
+}
+
 static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
 {
 	const char *prev_hash, *bbversion, *nbit, *ntime;
