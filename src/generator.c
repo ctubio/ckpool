@@ -810,10 +810,6 @@ json_t *generator_genbase(ckpool_t *ckp)
 		goto out;
 	}
 	cs = &si->cs;
-	if (unlikely(!cs)) {
-		LOGWARNING("No live connsock for current server in generator_genbase");
-		goto out;
-	}
 	if (unlikely(!gen_gbtbase(cs, &gbt))) {
 		LOGWARNING("Failed to get block template from %s:%s", cs->url, cs->port);
 		si->alive = cs->alive = false;
@@ -834,7 +830,6 @@ int generator_getbest(ckpool_t *ckp, char *hash)
 	server_instance_t *si;
 	connsock_t *cs;
 
-	/* Use temporary variables to prevent deref while accessing */
 	si = gdata->current_si;
 	if (unlikely(!si)) {
 		LOGWARNING("No live current server in generator_getbest");
@@ -845,10 +840,6 @@ int generator_getbest(ckpool_t *ckp, char *hash)
 		goto out;
 	}
 	cs = &si->cs;
-	if (unlikely(!cs)) {
-		LOGWARNING("No live connsock for current server in generator_getbest");
-		goto out;
-	}
 	if (unlikely(!get_bestblockhash(cs, hash))) {
 		LOGWARNING("Failed to get best block hash from %s:%s", cs->url, cs->port);
 		goto out;
@@ -865,17 +856,12 @@ bool generator_checkaddr(ckpool_t *ckp, const char *addr)
 	int ret = false;
 	connsock_t *cs;
 
-	/* Use temporary variables to prevent deref while accessing */
 	si = gdata->current_si;
 	if (unlikely(!si)) {
 		LOGWARNING("No live current server in generator_checkaddr");
 		goto out;
 	}
 	cs = &si->cs;
-	if (unlikely(!cs)) {
-		LOGWARNING("No live connsock for current server in generator_checkaddr");
-		goto out;
-	}
 	ret = validate_address(cs, addr);
 out:
 	return ret;
