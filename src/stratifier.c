@@ -516,9 +516,6 @@ struct stratifier_data {
 	mutex_t block_lock;
 	ckmsg_t *block_solves;
 
-	/* Generator message priority */
-	int gen_priority;
-
 	int proxy_count; /* Total proxies generated (not necessarily still alive) */
 	proxy_t *proxy; /* Current proxy in use */
 	proxy_t *proxies; /* Hashlist of all proxies */
@@ -1118,21 +1115,6 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 		age_share_hashtable(sdata, aged->id);
 		clear_workbase(aged);
 	}
-}
-
-static void send_generator(ckpool_t *ckp, const char *msg, const int prio)
-{
-	sdata_t *sdata = ckp->sdata;
-	bool set;
-
-	if (prio > sdata->gen_priority) {
-		sdata->gen_priority = prio;
-		set = true;
-	} else
-		set = false;
-	send_proc(ckp->generator, msg);
-	if (set)
-		sdata->gen_priority = 0;
 }
 
 static void broadcast_ping(sdata_t *sdata);
@@ -1806,7 +1788,7 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	strcat(gbt_block, hexcoinbase);
 	if (wb->txns)
 		realloc_strcat(&gbt_block, wb->txn_data);
-	send_generator(ckp, gbt_block, GEN_PRIORITY);
+	send_proc(ckp->generator, gbt_block);
 	free(gbt_block);
 }
 
@@ -2295,7 +2277,7 @@ static void generator_recruit(ckpool_t *ckp, const int proxyid, const int recrui
 	sprintf(buf, "recruit=%d:%d", proxyid, recruits);
 	LOGINFO("Stratifer requesting %d more subproxies of proxy %d from generator",
 		recruits, proxyid);
-	send_generator(ckp, buf, GEN_PRIORITY);
+	send_proc(ckp->generator,buf);
 }
 
 /* Find how much headroom we have and connect up to that many clients that are
@@ -2801,7 +2783,7 @@ static void generator_drop_proxy(ckpool_t *ckp, const int64_t id, const int subi
 	char msg[256];
 
 	sprintf(msg, "dropproxy=%ld:%d", id, subid);
-	send_generator(ckp, msg, GEN_LAX);
+	send_proc(ckp->generator,msg);
 }
 #endif
 
@@ -5217,7 +5199,7 @@ static void check_global_user(ckpool_t *ckp, user_instance_t *user, stratum_inst
 
 	sprintf(buf, "globaluser=%d:%d:%"PRId64":%s,%s", proxyid, user->id, client->id,
 		user->username, client->password);
-	send_generator(ckp, buf, GEN_LAX);
+	send_proc(ckp->generator,buf);
 }
 
 /* Manage the response to auth, client must hold ref */
@@ -6438,7 +6420,7 @@ static void submit_transaction(ckpool_t *ckp, const char *hash)
 	if (unlikely(!ckp->generator_ready))
 		return;
 	ASPRINTF(&buf, "submittxn:%s", hash);
-	send_generator(ckp, buf, GEN_LAX);
+	send_proc(ckp->generator,buf);
 	free(buf);
 }
 
@@ -6666,7 +6648,7 @@ static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf
 		return;
 	}
 	LOGWARNING("Submitting possible downstream block!");
-	send_generator(ckp, gbt_block, GEN_PRIORITY);
+	send_proc(ckp->generator, gbt_block);
 }
 
 static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
