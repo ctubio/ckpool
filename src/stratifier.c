@@ -1765,9 +1765,9 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	flip_32(swap32, hash);
 	__bin2hex(blockhash, swap32, 32);
 
-	/* Message format: "submitblock:hash,data" */
-	sprintf(gbt_block, "submitblock:%s,", blockhash);
-	__bin2hex(gbt_block + 12 + 64 + 1, data, 80);
+	/* Message format: "hash,data" */
+	sprintf(gbt_block, "%s,", blockhash);
+	__bin2hex(gbt_block + 64 + 1, data, 80);
 	if (txns < 0xfd) {
 		uint8_t val8 = txns;
 
@@ -1788,7 +1788,7 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	strcat(gbt_block, hexcoinbase);
 	if (wb->txns)
 		realloc_strcat(&gbt_block, wb->txn_data);
-	send_proc(ckp->generator, gbt_block);
+	generator_submitblock(ckp, gbt_block);
 	free(gbt_block);
 }
 
@@ -3429,6 +3429,11 @@ static void block_solve(ckpool_t *ckp, const char *blockhash)
 	reset_bestshares(sdata);
 }
 
+void stratifier_block_solve(ckpool_t *ckp, const char *blockhash)
+{
+	block_solve(ckp, blockhash);
+}
+
 static void block_reject(sdata_t *sdata, const char *blockhash)
 {
 	ckmsg_t *block, *tmp, *found = NULL;
@@ -3466,6 +3471,11 @@ static void block_reject(sdata_t *sdata, const char *blockhash)
 	free(found);
 
 	LOGWARNING("Submitted, but had block %d rejected", height);
+}
+
+void stratifier_block_reject(ckpool_t *ckp, const char *blockhash)
+{
+	block_reject(ckp->sdata, blockhash);
 }
 
 /* Some upstream pools (like p2pool) don't update stratum often enough and
@@ -6638,17 +6648,16 @@ static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
  * we no longer do it. */
 static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf)
 {
-	json_t *submitblock_val;
-	const char *gbt_block;
+	char *gbt_block;
 
-	submitblock_val = json_object_get(val, "submitblock");
-	gbt_block = json_string_value(submitblock_val);
+	json_strdup(&gbt_block, val, "submitblock");
 	if (unlikely(!gbt_block)) {
 		LOGWARNING("Failed to get submitblock data from remote message %s", buf);
 		return;
 	}
 	LOGWARNING("Submitting possible downstream block!");
-	send_proc(ckp->generator, gbt_block);
+	generator_submitblock(ckp, gbt_block + 12);
+	free(gbt_block);
 }
 
 static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
