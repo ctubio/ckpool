@@ -1442,7 +1442,6 @@ static void *do_update(void *arg)
 	bool ret = false;
 	workbase_t *wb;
 	time_t now_t;
-	char *buf;
 
 	pthread_detach(pthread_self());
 	rename_proc("updater");
@@ -1458,12 +1457,8 @@ static void *do_update(void *arg)
 	} else
 		cksem_wait(&sdata->update_sem);
 retry:
-	buf = send_recv_generator(ckp, "getbase", prio);
-	if (unlikely(!buf)) {
-		LOGNOTICE("Get base in update_base delayed due to higher priority request");
-		goto out;
-	}
-	if (unlikely(cmdmatch(buf, "failed"))) {
+	val = generator_genbase(ckp);
+	if (unlikely(!val)) {
 		if (retries++ < 5 || prio == GEN_PRIORITY) {
 			LOGWARNING("Generator returned failure in update_base, retry #%d", retries);
 			goto retry;
@@ -1476,7 +1471,6 @@ retry:
 
 	wb = ckzalloc(sizeof(workbase_t));
 	wb->ckp = ckp;
-	val = json_loads(buf, 0, NULL);
 
 	json_strcpy(wb->target, val, "target");
 	json_dblcpy(&wb->diff, val, "diff");
@@ -1542,7 +1536,6 @@ out:
 		LOGINFO("Broadcast ping due to failed stratum base update");
 		broadcast_ping(sdata);
 	}
-	dealloc(buf);
 out_free:
 	free(ur->pth);
 	free(ur);

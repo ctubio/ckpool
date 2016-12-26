@@ -13,6 +13,7 @@
 #include "config.h"
 
 void generator_add_send(ckpool_t *ckp, json_t *val);
+json_t *generator_genbase(ckpool_t *ckp);
 void *generator(void *arg);
 
 #endif /* GENERATOR_H */

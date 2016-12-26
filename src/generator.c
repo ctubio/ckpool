@@ -180,6 +180,8 @@ struct generator_data {
 	share_msg_t *shares;
 	int64_t share_id;
 
+	server_instance_t *current_si;
+
 	proxy_instance_t *current_proxy;
 };
 
@@ -242,7 +244,7 @@ out:
 }
 
 /* Find the highest priority server alive and return it */
-static server_instance_t *live_server(ckpool_t *ckp)
+static server_instance_t *live_server(ckpool_t *ckp, gdata_t *gdata)
 {
 	server_instance_t *alive = NULL;
 	connsock_t *cs;
@@ -275,6 +277,7 @@ retry:
 	sleep(5);
 	goto retry;
 living:
+	gdata->current_si = alive;
 	cs = &alive->cs;
 	LOGINFO("Connected to live server %s:%s", cs->url, cs->port);
 	send_proc(ckp->connector, alive ? "accept" : "reject");
@@ -321,7 +324,7 @@ static void gen_loop(proc_instance_t *pi)
 reconnect:
 	clear_unix_msg(&umsg);
 	old_si = si;
-	si = live_server(ckp);
+	si = live_server(ckp, ckp->gdata);
 	if (!si)
 		goto out;
 	if (unlikely(!ckp->generator_ready)) {
@@ -790,6 +793,38 @@ static void send_notify(ckpool_t *ckp, proxy_instance_t *proxi, notify_instance_
 static void reconnect_generator(ckpool_t *ckp)
 {
 	send_proc(ckp->generator, "reconnect");
+}
+
+json_t *generator_genbase(ckpool_t *ckp)
+{
+	gdata_t *gdata = ckp->gdata;
+	server_instance_t *si;
+	gbtbase_t gbt = {};
+	json_t *val = NULL;
+	connsock_t *cs;
+
+	/* Use temporary variables to prevent deref while accessing */
+	si = gdata->current_si;
+	if (unlikely(!si)) {
+		LOGWARNING("No live current server in generator_genbase");
+		goto out;
+	}
+	cs = &si->cs;
+	if (unlikely(!cs)) {
+		LOGWARNING("No live connsock for current server in generator_genbase");
+		goto out;
+	}
+	if (unlikely(!gen_gbtbase(cs, &gbt))) {
+		LOGWARNING("Failed to get block template from %s:%s", cs->url, cs->port);
+		si->alive = cs->alive = false;
+		reconnect_generator(ckp);
+		goto out;
+	}
+	val = gbt.json;
+	gbt.json = NULL;
+	clear_gbtbase(&gbt);
+out:
+	return val;
 }
 
 static bool parse_notify(ckpool_t *ckp, proxy_instance_t *proxi, json_t *val)
@@ -2800,7 +2835,7 @@ reconnect:
 
 	if (ckp->node) {
 		old_si = si;
-		si = live_server(ckp);
+		si = live_server(ckp, gdata);
 		if (!si)
 			goto out;
 		cs = &si->cs;
