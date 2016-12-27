@@ -124,6 +124,7 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		if (logfd > 0)
 			ckmsgq_add(global_ckp->logger, strdup(log));
 		free(buf);
+		free(log);
 	}
 }
 
