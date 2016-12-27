@@ -653,7 +653,6 @@ static void *receiver(void *arg)
 	ckpool_t *ckp = cdata->ckp;
 	uint64_t serverfds, i;
 	int ret, epfd;
-	char *buf;
 
 	rename_proc("creceiver");
 
@@ -676,13 +675,8 @@ static void *receiver(void *arg)
 	}
 
 	/* Wait for the stratifier to be ready for us */
-	while (42) {
-		buf = send_recv_proc(ckp->stratifier, "ping");
-		if (buf)
-			break;
+	while (!ckp->stratifier_ready)
 		cksleep_ms(10);
-	};
-	free(buf);
 
 	while (42) {
 		uint64_t edu64;
@@ -1362,7 +1356,6 @@ static void connector_loop(proc_instance_t *pi, cdata_t *cdata)
 	int ret = 0;
 	char *buf;
 
-	LOGWARNING("%s connector ready", ckp->name);
 	last_stats = cdata->start_time;
 
 retry:
@@ -1607,6 +1600,9 @@ void *connector(void *arg)
 	cdata->cevents = create_ckmsgqs(ckp, "cevent", &client_event_processor, threads);
 	create_pthread(&cdata->pth_receiver, receiver, cdata);
 	cdata->start_time = time(NULL);
+
+	ckp->connector_ready = true;
+	LOGWARNING("%s connector ready", ckp->name);
 
 	connector_loop(pi, cdata);
 out:
