@@ -3664,7 +3664,6 @@ out:
 		json_decref(val);
 	free(username);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void userclients(sdata_t *sdata, const char *buf, int *sockd)
@@ -3703,7 +3702,6 @@ out:
 		json_decref(val);
 	free(username);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void workerclients(sdata_t *sdata, const char *buf, int *sockd)
@@ -3746,7 +3744,6 @@ out:
 		json_decref(val);
 	free(workername);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static json_t *workerinfo(const user_instance_t *user, const worker_instance_t *worker)
@@ -3792,7 +3789,6 @@ out:
 		json_decref(val);
 	free(workername);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void getworkers(sdata_t *sdata, int *sockd)
@@ -3813,7 +3809,6 @@ static void getworkers(sdata_t *sdata, int *sockd)
 
 	JSON_CPACK(val, "{so}", "workers", worker_arr);
 	send_api_response(val, *sockd);
-	_Close(sockd);
 }
 
 static void getusers(sdata_t *sdata, int *sockd)
@@ -3831,7 +3826,6 @@ static void getusers(sdata_t *sdata, int *sockd)
 
 	JSON_CPACK(val, "{so}", "users", user_array);
 	send_api_response(val, *sockd);
-	_Close(sockd);
 }
 
 static json_t *clientinfo(const stratum_instance_t *client)
@@ -3894,7 +3888,6 @@ out:
 	if (val)
 		json_decref(val);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void getclients(sdata_t *sdata, int *sockd)
@@ -3912,7 +3905,6 @@ static void getclients(sdata_t *sdata, int *sockd)
 
 	JSON_CPACK(val, "{so}", "clients", client_arr);
 	send_api_response(val, *sockd);
-	_Close(sockd);
 }
 
 static void user_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
@@ -3951,7 +3943,6 @@ out:
 		json_decref(val);
 	free(username);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void worker_clientinfo(sdata_t *sdata, const char *buf, int *sockd)
@@ -3994,7 +3985,6 @@ out:
 		json_decref(val);
 	free(workername);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 /* Return the user masked priority value of the proxy */
@@ -4053,7 +4043,6 @@ out:
 	if (val)
 		json_decref(val);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void proxyinfo(sdata_t *sdata, const char *buf, int *sockd)
@@ -4083,7 +4072,6 @@ static void proxyinfo(sdata_t *sdata, const char *buf, int *sockd)
 		json_decref(val);
 	JSON_CPACK(res, "{so}", "proxies", arr_val);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void setproxy(sdata_t *sdata, const char *buf, int *sockd)
@@ -4118,7 +4106,6 @@ out:
 	if (val)
 		json_decref(val);
 	send_api_response(res, *sockd);
-	_Close(sockd);
 }
 
 static void get_poolstats(sdata_t *sdata, int *sockd)
@@ -4138,7 +4125,6 @@ static void get_poolstats(sdata_t *sdata, int *sockd)
 	mutex_unlock(&sdata->stats_lock);
 
 	send_api_response(val, *sockd);
-	_Close(sockd);
 }
 
 static void get_uptime(sdata_t *sdata, int *sockd)
@@ -4148,7 +4134,6 @@ static void get_uptime(sdata_t *sdata, int *sockd)
 
 	JSON_CPACK(val, "{si}", "uptime", uptime);
 	send_api_response(val, *sockd);
-	_Close(sockd);
 }
 
 static void srecv_process(ckpool_t *ckp, json_t *val);
@@ -4183,6 +4168,7 @@ static void stratum_loop(ckpool_t *ckp, proc_instance_t *pi)
 
 retry:
 	if (umsg) {
+		Close(umsg->sockd);
 		free(umsg->buf);
 		dealloc(umsg);
 	}
@@ -4212,14 +4198,12 @@ retry:
 		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 
 		/* This is a message for a node */
-		Close(umsg->sockd);
 		ckmsgq_add(sdata->srecvs, val);
 		goto retry;
 	}
 	if (cmdmatch(buf, "ping")) {
 		LOGDEBUG("Stratifier received ping request");
 		send_unix_msg(umsg->sockd, "pong");
-		Close(umsg->sockd);
 		goto retry;
 	}
 	if (cmdmatch(buf, "stats")) {
@@ -4228,7 +4212,6 @@ retry:
 		LOGDEBUG("Stratifier received stats request");
 		msg = stratifier_stats(ckp, sdata);
 		send_unix_msg(umsg->sockd, msg);
-		Close(umsg->sockd);
 		goto retry;
 	}
 	/* Parse API commands here to return a message to sockd */
@@ -4293,7 +4276,6 @@ retry:
 		goto retry;
 	}
 
-	Close(umsg->sockd);
 	LOGDEBUG("Stratifier received request: %s", buf);
 	if (cmdmatch(buf, "update")) {
 		update_base(sdata, GEN_PRIORITY);
