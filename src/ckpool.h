@@ -176,6 +176,8 @@ struct ckpool_instance {
 
 	/* Logger message queue */
 	ckmsgq_t *logger;
+	ckmsgq_t *console_logger;
+
 	/* Process instance data of parent/child processes */
 	proc_instance_t main;
 

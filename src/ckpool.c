@@ -53,20 +53,20 @@ static bool open_logfile(ckpool_t *ckp)
 	return true;
 }
 
+/* Use ckmsgqs for logging to console and files to prevent logmsg from blocking
+ * on any delays. */
+static void console_log(ckpool_t __maybe_unused *ckp, char *msg)
+{
+	fprintf(stderr, "\33[2K\r%s", msg);
+	fflush(stderr);
+
+	free(msg);
+}
+
 static void proclog(ckpool_t *ckp, char *msg)
 {
-	time_t log_t;
+	time_t log_t = time(NULL);
 
-	if (unlikely(!msg)) {
-		fprintf(stderr, "Proclog received null message");
-		return;
-	}
-	if (unlikely(!strlen(msg))) {
-		fprintf(stderr, "Proclog received zero length message");
-		free(msg);
-		return;
-	}
-	log_t = time(NULL);
 	/* Reopen log file every minute, allowing us to move/rename it and
 	 * create a new logfile */
 	if (log_t > ckp->lastopen_t + 60) {
@@ -85,7 +85,7 @@ static void proclog(ckpool_t *ckp, char *msg)
 void logmsg(int loglevel, const char *fmt, ...) {
 	if (global_ckp->loglevel >= loglevel && fmt) {
 		int logfd = global_ckp->logfd;
-		char *buf = NULL;
+		char *buf = NULL, *log;
 		struct tm tm;
 		tv_t now_tv;
 		int ms;
@@ -96,6 +96,14 @@ void logmsg(int loglevel, const char *fmt, ...) {
 		VASPRINTF(&buf, fmt, ap);
 		va_end(ap);
 
+		if (unlikely(!buf)) {
+			fprintf(stderr, "Null buffer sent to logmsg\n");
+			return;
+		}
+		if (unlikely(!strlen(buf))) {
+			fprintf(stderr, "Zero length string sent to logmsg\n");
+			return;
+		}
 		tv_time(&now_tv);
 		ms = (int)(now_tv.tv_usec / 1000);
 		localtime_r(&(now_tv.tv_sec), &tm);
@@ -106,23 +114,15 @@ void logmsg(int loglevel, const char *fmt, ...) {
 				tm.tm_hour,
 				tm.tm_min,
 				tm.tm_sec, ms);
-		if (loglevel <= LOG_WARNING) {
-			fprintf(stderr, "\33[2K\r");
-			if (loglevel <= LOG_ERR && errno != 0)
-				fprintf(stderr, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
-			else
-				fprintf(stderr, "%s %s\n", stamp, buf);
-			fflush(stderr);
-		}
-		if (logfd > 0) {
-			char *msg;
+		if (loglevel <= LOG_ERR && errno != 0)
+			ASPRINTF(&log, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
+		else
+			ASPRINTF(&log, "%s %s\n", stamp, buf);
 
-			if (loglevel <= LOG_ERR && errno != 0)
-				ASPRINTF(&msg, "%s %s with errno %d: %s\n", stamp, buf, errno, strerror(errno));
-			else
-				ASPRINTF(&msg, "%s %s\n", stamp, buf);
-			ckmsgq_add(global_ckp->logger, msg);
-		}
+		if (loglevel <= LOG_WARNING)
+			ckmsgq_add(global_ckp->console_logger, strdup(log));
+		if (logfd > 0)
+			ckmsgq_add(global_ckp->logger, strdup(log));
 		free(buf);
 	}
 }
@@ -1069,6 +1069,7 @@ static void rm_namepid(const proc_instance_t *pi)
 static void launch_logger(ckpool_t *ckp)
 {
 	ckp->logger = create_ckmsgq(ckp, "logger", &proclog);
+	ckp->console_logger = create_ckmsgq(ckp, "conlog", &console_log);
 }
 
 static void clean_up(ckpool_t *ckp)
