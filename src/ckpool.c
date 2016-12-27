@@ -346,41 +346,6 @@ static int pid_wait(const pid_t pid, const int ms)
 	return ret;
 }
 
-static int _send_procmsg(proc_instance_t *pi, const char *buf, const char *file, const char *func, const int line)
-{
-	char *path = pi->us.path;
-	int ret = -1;
-	int sockd;
-
-	if (unlikely(!path || !strlen(path))) {
-		LOGERR("Attempted to send message %s to null path in send_proc from %s %s:%d",
-		       buf ? buf : "", file, func, line);
-		goto out;
-	}
-	if (unlikely(!buf || !strlen(buf))) {
-		LOGERR("Attempted to send null message to socket %s in send_proc from %s %s:%d",
-		       path, file, func, line);
-		goto out;
-	}
-	sockd = open_unix_client(path);
-	if (unlikely(sockd < 0)) {
-		LOGWARNING("Failed to open socket %s in send_procmsg from %s %s:%d",
-			   path, file, func, line);
-		goto out;
-	}
-	if (unlikely(!send_unix_msg(sockd, buf)))
-		LOGWARNING("Failed to send %s to socket %s from %s %s:%d", buf,
-			   path, file, func, line);
-	else
-		ret = sockd;
-out:
-	if (unlikely(ret == -1))
-		LOGERR("Failure in send_procmsg from %s %s:%d", file, func, line);
-	return ret;
-}
-
-#define send_procmsg(PI, BUF) _send_procmsg(&(PI), BUF, __FILE__, __func__, __LINE__)
-
 static void api_message(ckpool_t *ckp, char **buf, int *sockd)
 {
 	apimsg_t *apimsg = ckalloc(sizeof(apimsg_t));
@@ -438,31 +403,21 @@ retry:
 			send_unix_msg(sockd, "success");
 		}
 	} else if (cmdmatch(buf, "getxfd")) {
-		int connfd = send_procmsg(ckp->connector, buf);
+		int fdno = -1;
 
-		if (connfd > 0) {
-			int newfd = get_fd(connfd);
-
-			if (newfd > 0) {
-				LOGDEBUG("Sending new fd %d", newfd);
-				send_fd(newfd, sockd);
-				Close(newfd);
-			} else
-				LOGWARNING("Failed to get_fd");
-			Close(connfd);
-		} else
-			LOGWARNING("Failed to send_procmsg to connector");
+		sscanf(buf, "getxfd%d", &fdno);
+		connector_send_fd(ckp, fdno, sockd);
 	} else if (cmdmatch(buf, "accept")) {
 		LOGWARNING("Listener received accept message, accepting clients");
-		send_procmsg(ckp->connector, "accept");
+		send_proc(ckp->connector, "accept");
 		send_unix_msg(sockd, "accepting");
 	} else if (cmdmatch(buf, "reject")) {
 		LOGWARNING("Listener received reject message, rejecting clients");
-		send_procmsg(ckp->connector, "reject");
+		send_proc(ckp->connector, "reject");
 		send_unix_msg(sockd, "rejecting");
 	} else if (cmdmatch(buf, "reconnect")) {
 		LOGWARNING("Listener received request to send reconnect to clients");
-		send_procmsg(ckp->stratifier, buf);
+		send_proc(ckp->stratifier, buf);
 		send_unix_msg(sockd, "reconnecting");
 	} else if (cmdmatch(buf, "restart")) {
 		LOGWARNING("Listener received restart message, attempting handover");
@@ -486,7 +441,7 @@ retry:
 		dealloc(msg);
 	} else if (cmdmatch(buf, "ckdbflush")) {
 		LOGWARNING("Received ckdb flush message");
-		send_procmsg(ckp->stratifier, buf);
+		send_proc(ckp->stratifier, buf);
 		send_unix_msg(sockd, "flushing");
 	} else {
 		LOGINFO("Listener received unhandled message: %s", buf);

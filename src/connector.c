@@ -1347,6 +1347,16 @@ char *connector_stats(void *data, const int runtime)
 	return buf;
 }
 
+void connector_send_fd(ckpool_t *ckp, const int fdno, const int sockd)
+{
+	cdata_t *cdata = ckp->cdata;
+
+	if (fdno > -1 && fdno < ckp->serverurls)
+		send_fd(cdata->serverfd[fdno], sockd);
+	else
+		LOGWARNING("Connector asked to send invalid fd %d", fdno);
+}
+
 static void connector_loop(proc_instance_t *pi, cdata_t *cdata)
 {
 	unix_msg_t *umsg = NULL;
