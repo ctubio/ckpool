@@ -136,6 +136,8 @@ struct workbase {
 
 	ckpool_t *ckp;
 	bool proxy; /* This workbase is proxied work */
+
+	bool incomplete; /* This is a remote workinfo without all the txn data */
 };
 
 typedef struct workbase workbase_t;
@@ -1579,9 +1581,16 @@ static void add_node_base(ckpool_t *ckp, json_t *val, bool trusted)
 	json_intcpy(&wb->txns, val, "transactions");
 	if (!ckp->proxy) {
 		/* This is a workbase from a trusted remote */
+		json_intcpy(&wb->txns, val, "txns");
 		json_strdup(&wb->txn_hashes, val, "txn_hashes");
 		wb->merkle_array = json_object_dup(val, "merklehash");
 		json_intcpy(&wb->merkles, val, "merkles");
+		txnhashes = json_object_get(val, "txn_hashes");
+		if (!rebuild_txns(ckp, sdata, wb, txnhashes)) {
+			LOGWARNING("Unable to rebuild transactions to create workinfo from remote, will be unable to submit block locally");
+			wb->incomplete = true;
+			wb->txns = 0;
+		}
 	} else if (wb->txns) {
 		int i;
 
@@ -1788,6 +1797,7 @@ process_block(ckpool_t *ckp, const workbase_t *wb, const char *coinbase, const i
 	strcat(gbt_block, hexcoinbase);
 	if (wb->txns)
 		realloc_strcat(&gbt_block, wb->txn_data);
+
 	generator_submitblock(ckp, gbt_block);
 	free(gbt_block);
 }
@@ -1831,7 +1841,7 @@ static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 		goto out;
 	}
 
-	LOGWARNING("Possible upstream block solve diff %f !", diff);
+	LOGWARNING("Possible upstream block solve diff %lf !", diff);
 
 	ts_realtime(&ts_now);
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
@@ -5508,7 +5518,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	if (diff < sdata->current_workbase->network_diff * 0.999)
 		return;
 
-	LOGWARNING("Possible %sblock solve diff %f !", stale ? "stale share " : "", diff);
+	LOGWARNING("Possible %sblock solve diff %lf !", stale ? "stale share " : "", diff);
 	/* Can't submit a block in proxy mode without the transactions */
 	if (!ckp->node && wb->proxy)
 		return;
@@ -5517,11 +5527,10 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
 	process_block(ckp, wb, coinbase, cblen, data, hash, swap32, blockhash);
-
 	send_node_block(sdata, client->enonce1, nonce, nonce2, ntime32, wb->id,
 			diff, client->id);
 
-	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,ss,ss,ss,ss}",
+	JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,sf,ss,ss,ss,ss}",
 			"height", wb->height,
 			"blockhash", blockhash,
 			"confirmed", "n",
@@ -5533,12 +5542,12 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 			"nonce2", nonce2,
 			"nonce", nonce,
 			"reward", wb->coinbasevalue,
+		        "diff", diff,
 			"createdate", cdfield,
 			"createby", "code",
 			"createcode", __func__,
 			"createinet", ckp->serverurl[client->server]);
 	val_copy = json_deep_copy(val);
-	json_set_double(val_copy, "diff", diff);
 	block_ckmsg = ckalloc(sizeof(ckmsg_t));
 	block_ckmsg->data = val_copy;
 
@@ -5547,7 +5556,16 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	mutex_unlock(&sdata->block_lock);
 
 	if (ckp->remote) {
+		char *buf;
+
 		json_set_string(val, "name", ckp->name);
+		json_set_int(val, "cblen", cblen);
+		buf = bin2hex(coinbase, cblen);
+		json_set_string(val, "coinbasehex", buf);
+		free(buf);
+		buf = bin2hex(data, 80);
+		json_set_string(val, "swaphex", buf);
+		free(buf);
 		upstream_json_msgtype(ckp, val, SM_BLOCK);
 	} else
 		ckdbq_add(ckp, ID_BLOCK, val);
@@ -6644,18 +6662,57 @@ static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf
 	free(gbt_block);
 }
 
+/* Attempt to submit a remote block locally by recreating it from its workinfo
+ * in addition to sending it to ckdb */
 static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
 {
 	json_t *workername_val = json_object_get(val, "workername"),
 		*name_val = json_object_get(val, "name");
-	const char *workername, *name;
+	const char *workername, *name, *coinbasehex, *swaphex, *cnfrm;
+	workbase_t *wb = NULL;
 	double diff = 0;
 	int height = 0;
+	int64_t id = 0;
 	char *msg;
+	int cblen;
 
 	name = json_string_value(name_val);
 	if (!name_val || !name)
 		goto out_add;
+
+	/* If this is the confirm block message don't try to resubmit it */
+	cnfrm = json_string_value(json_object_get(val, "confirmed"));
+	if (cnfrm && cnfrm[0] == '1')
+		goto out_add;
+	json_get_int64(&id, val, "workinfoid");
+	coinbasehex = json_string_value(json_object_get(val, "coinbasehex"));
+	swaphex = json_string_value(json_object_get(val, "swaphex"));
+	json_get_int(&cblen, val, "cblen");
+	json_get_double(&diff, val, "diff");
+
+	if (likely(id && coinbasehex && swaphex && cblen)) {
+		ck_rlock(&sdata->workbase_lock);
+		HASH_FIND_I64(sdata->remote_workbases, &id, wb);
+		if (wb && wb->incomplete)
+			wb = NULL;
+		ck_runlock(&sdata->workbase_lock);
+	}
+
+	if (unlikely(!wb))
+		LOGWARNING("Inadequate data locally to attempt submit of remote block");
+	else {
+		uchar swap[80], hash[32], hash1[32], swap32[32];
+		char *coinbase = alloca(cblen);
+		char blockhash[68];
+
+		LOGWARNING("Possible remote block solve diff %lf !", diff);
+		hex2bin(coinbase, coinbasehex, cblen);
+		hex2bin(swap, swaphex, 80);
+		sha256(swap, 80, hash1);
+		sha256(hash1, 32, hash);
+		process_block(ckp, wb, coinbase, cblen, swap, hash, swap32, blockhash);
+	}
+
 	workername = json_string_value(workername_val);
 	if (unlikely(!workername_val || !workername)) {
 		LOGWARNING("Failed to get workername from remote message %s", buf);
@@ -6663,8 +6720,6 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	}
 	if (unlikely(!json_get_int(&height, val, "height")))
 		LOGWARNING("Failed to get height from remote message %s", buf);
-	if (unlikely(!json_get_double(&diff, val, "diff")))
-		LOGWARNING("Failed to get diff from remote message %s", buf);
 	ASPRINTF(&msg, "Block %d solved by %s @ %s!", height, workername, name);
 	LOGWARNING("%s", msg);
 	stratum_broadcast_message(sdata, msg);
