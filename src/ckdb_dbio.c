@@ -503,16 +503,16 @@ bool _CKPQConn(PGconn **conn, WHERE_FFL_ARGS)
 {
 	if (*conn == NULL) {
 		if (connect_dis == false) {
-			LOGEMERG("%s() ERR already (%s/%s/%d)" WHERE_FFL
+			LOGNOTICE("%s() already (%s/%s/%d)" WHERE_FFL
 #if LOCK_CHECK
-				 " @%s"
+				  " @%s"
 #endif
-				 , __func__, connect_file, connect_func,
-				 connect_line, WHERE_FFL_PASS
+				  , __func__, connect_file, connect_func,
+				  connect_line, WHERE_FFL_PASS
 #if LOCK_CHECK
-				 , my_thread_name
+				  , my_thread_name
 #endif
-				 );
+			);
 		}
 		if (!pgdb_paused) {
 			LOGDEBUG("%s(): connecting", __func__);
