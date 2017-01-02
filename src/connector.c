@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 Con Kolivas
+ * Copyright 2014-2017 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -1210,6 +1210,8 @@ static void *urecv_process(void *arg)
 			parse_upstream_txns(ckp, val);
 		else if (!safecmp(method, stratum_msgs[SM_AUTHRESULT]))
 			parse_upstream_auth(ckp, val);
+		else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
+			parse_upstream_workinfo(ckp, val);
 		else if (!safecmp(method, "submitblock"))
 			parse_remote_submitblock(ckp, val, cs->buf);
 		else if (!safecmp(method, "pong"))
