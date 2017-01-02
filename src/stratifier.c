@@ -6158,8 +6158,13 @@ static void send_node_all_txns(sdata_t *sdata, const stratum_instance_t *client)
 	}
 	ck_runlock(&sdata->workbase_lock);
 
-	JSON_CPACK(val, "{ss,so}", "node.method", stratum_msgs[SM_TRANSACTIONS],
-		   "transaction", txn_array);
+	if (client->trusted) {
+		JSON_CPACK(val, "{ss,so}", "method", stratum_msgs[SM_TRANSACTIONS],
+			   "transaction", txn_array);
+	} else {
+		JSON_CPACK(val, "{ss,so}", "node.method", stratum_msgs[SM_TRANSACTIONS],
+			   "transaction", txn_array);
+	}
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	msg->client_id = client->id;
@@ -6206,7 +6211,11 @@ static void add_remote_server(sdata_t *sdata, stratum_instance_t *client)
 	ck_wlock(&sdata->instance_lock);
 	client->trusted = true;
 	DL_APPEND(sdata->remote_instances, client);
+	__inc_instance_ref(client);
 	ck_wunlock(&sdata->instance_lock);
+
+	send_node_all_txns(sdata, client);
+	dec_instance_ref(sdata, client);
 }
 
 /* Enter with client holding ref count */
