@@ -891,11 +891,26 @@ static void send_postponed(sdata_t *sdata)
 static void stratum_add_send(sdata_t *sdata, json_t *val, const int64_t client_id,
 			     const int msg_type);
 
-/* Send a json msg to an upstream trusted remote server */
-static void upstream_json(ckpool_t *ckp, const json_t *val)
+/* Strip fields that will be recreated upstream or won't be used to minimise
+ * bandwidth. */
+static void strip_fields(ckpool_t *ckp, json_t *val)
 {
-	char *msg = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_COMPACT | JSON_EOL);
+	json_object_del(val, "poolinstance");
+	json_object_del(val, "createby");
+	if (!ckp->upstream_ckdb) {
+		json_object_del(val, "createdate");
+		json_object_del(val, "createcode");
+		json_object_del(val, "createinet");
+	}
+}
 
+/* Send a json msg to an upstream trusted remote server */
+static void upstream_json(ckpool_t *ckp, json_t *val)
+{
+	char *msg;
+
+	strip_fields(ckp, val);
+	msg = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_COMPACT | JSON_EOL);
 	/* Connector absorbs and frees msg */
 	connector_upstream_msg(ckp, msg);
 }
@@ -5937,7 +5952,7 @@ out:
 			json_set_string(val, "createby", "code");
 			json_set_string(val, "createcode", __func__);
 			json_set_string(val, "createinet", ckp->serverurl[client->server]);
-			if (ckp->remote)
+			if (ckp->remote && ckp->upstream_ckdb)
 				upstream_json_msgtype(ckp, val, SM_SHAREERR);
 			else
 				ckdbq_add(ckp, ID_SHAREERR, val);
@@ -6802,8 +6817,11 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		LOGWARNING("Failed to get method from remote message %s", buf);
 		goto out;
 	}
-	/* Rename the pool instance to match main pool (for now?) */
-	json_set_string(val, "poolinstance", ckp->name);
+	if (!CKP_STANDALONE(ckp)) {
+		/* Rename the pool instance to match main pool (for now?) */
+		json_set_string(val, "poolinstance", ckp->name);
+		json_set_string(val, "createby", "remote");
+	}
 
 	if (likely(!safecmp(method, stratum_msgs[SM_SHARE])))
 		parse_remote_share(ckp, sdata, val, buf);
@@ -7504,7 +7522,7 @@ static void update_workerstats(ckpool_t *ckp, sdata_t *sdata)
 
 	/* Add all entries outside of the instance lock */
 	DL_FOREACH_SAFE(json_list, entry, tmpentry) {
-		if (ckp->remote)
+		if (ckp->remote && ckp->upstream_ckdb)
 			upstream_json_msgtype(ckp, entry->val, SM_WORKERSTATS);
 		else
 			ckdbq_add(ckp, ID_WORKERSTATS, entry->val);
