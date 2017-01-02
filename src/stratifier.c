@@ -5578,6 +5578,63 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	stratum_send_diff(sdata, client);
 }
 
+static void add_remote_blockdata(ckpool_t *ckp, json_t *val, const int cblen, const char *coinbase,
+				 const uchar *data)
+{
+	char *buf;
+
+	json_set_string(val, "name", ckp->name);
+	json_set_int(val, "cblen", cblen);
+	buf = bin2hex(coinbase, cblen);
+	json_set_string(val, "coinbasehex", buf);
+	free(buf);
+	buf = bin2hex(data, 80);
+	json_set_string(val, "swaphex", buf);
+	free(buf);
+}
+
+static void
+downstream_block(ckpool_t *ckp, sdata_t *sdata, const json_t *val, const int cblen,
+		 const char *coinbase, const uchar *data, int64_t client_id)
+{
+	json_t *block_val = json_deep_copy(val);
+	stratum_instance_t *client;
+	ckmsg_t *bulk_send = NULL;
+	int messages = 0;
+
+	/* Strip unnecessary fields and add extra fields needed */
+	strip_fields(ckp, block_val);
+	json_set_string(block_val, "method", stratum_msgs[SM_BLOCK]);
+	add_remote_blockdata(ckp, block_val, cblen, coinbase, data);
+
+	ck_rlock(&sdata->instance_lock);
+	DL_FOREACH(sdata->remote_instances, client) {
+		ckmsg_t *client_msg;
+		json_t *json_msg;
+		smsg_t *msg;
+
+		/* Don't send remote workinfo back to same remote */
+		if (client->id == client_id)
+			continue;
+		json_msg = json_deep_copy(block_val);
+		client_msg = ckalloc(sizeof(ckmsg_t));
+		msg = ckzalloc(sizeof(smsg_t));
+		msg->json_msg = json_msg;
+		msg->client_id = client->id;
+		client_msg->data = msg;
+		DL_APPEND(bulk_send, client_msg);
+		messages++;
+	}
+	ck_runlock(&sdata->instance_lock);
+
+	json_decref(block_val);
+
+	if (bulk_send) {
+		LOGINFO("Sending block to %d remote servers", messages);
+		ssend_bulk_postpone(sdata, bulk_send, messages);
+	}
+}
+
 /* We should already be holding the workbase_lock. Needs to be entered with
  * client holding a ref count. */
 static void
@@ -5635,19 +5692,12 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	mutex_unlock(&sdata->block_lock);
 
 	if (ckp->remote) {
-		char *buf;
-
-		json_set_string(val, "name", ckp->name);
-		json_set_int(val, "cblen", cblen);
-		buf = bin2hex(coinbase, cblen);
-		json_set_string(val, "coinbasehex", buf);
-		free(buf);
-		buf = bin2hex(data, 80);
-		json_set_string(val, "swaphex", buf);
-		free(buf);
+		add_remote_blockdata(ckp, val, cblen, coinbase, data);
 		upstream_json_msgtype(ckp, val, SM_BLOCK);
-	} else
+	} else {
+		downstream_block(ckp, sdata, val, cblen, coinbase, data, 0);
 		ckdbq_add(ckp, ID_BLOCK, val);
+	}
 }
 
 /* Needs to be entered with client holding a ref count. */
@@ -6739,22 +6789,6 @@ static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
 	LOGDEBUG("Adding %d remote workers to user %s", workers, username);
 }
 
-/* This is here to support older trusted nodes submitting blocks this way but
- * we no longer do it. */
-static void parse_remote_blocksubmit(ckpool_t *ckp, json_t *val, const char *buf)
-{
-	char *gbt_block;
-
-	json_strdup(&gbt_block, val, "submitblock");
-	if (unlikely(!gbt_block)) {
-		LOGWARNING("Failed to get submitblock data from remote message %s", buf);
-		return;
-	}
-	LOGWARNING("Submitting possible downstream block!");
-	generator_submitblock(ckp, gbt_block + 12);
-	free(gbt_block);
-}
-
 /* Attempt to submit a remote block locally by recreating it from its workinfo
  * in addition to sending it to ckdb */
 static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
@@ -6818,11 +6852,24 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	stratum_broadcast_message(sdata, msg);
 	free(msg);
 out_add:
+	if (CKP_STANDALONE(ckp))
+		return;
+
 	/* Make a duplicate for use by ckdbq_add */
 	val = json_deep_copy(val);
 	remap_workinfo_id(sdata, val);
 
 	ckdbq_add(ckp, ID_BLOCK, val);
+}
+
+void parse_upstream_block(ckpool_t *ckp, json_t *val)
+{
+	char *buf;
+	sdata_t *sdata = ckp->sdata;
+
+	buf = json_dumps(val, 0);
+	parse_remote_block(ckp, sdata, val, buf);
+	free(buf);
 }
 
 static void send_remote_pong(sdata_t *sdata, stratum_instance_t *client)
@@ -6907,8 +6954,6 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 		parse_remote_block(ckp, sdata, val, buf);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
-	else if (!safecmp(method, "submitblock"))
-		parse_remote_blocksubmit(ckp, val, buf);
 	else if (!safecmp(method, "ping"))
 		send_remote_pong(sdata, client);
 	else

@@ -1142,19 +1142,6 @@ out:
 	free(buf);
 }
 
-static void parse_remote_submitblock(ckpool_t *ckp, const json_t *val, const char *buf)
-{
-	const char *gbt_block = json_string_value(json_object_get(val, "submitblock"));
-
-	if (unlikely(!gbt_block)) {
-		LOGWARNING("Failed to find submitblock data from upstream submitblock method %s",
-			   buf);
-		return;
-	}
-	LOGWARNING("Submitting possible upstream block!");
-	send_proc(ckp->generator, gbt_block);
-}
-
 static void ping_upstream(cdata_t *cdata)
 {
 	char *buf;
@@ -1212,8 +1199,8 @@ static void *urecv_process(void *arg)
 			parse_upstream_auth(ckp, val);
 		else if (!safecmp(method, stratum_msgs[SM_WORKINFO]))
 			parse_upstream_workinfo(ckp, val);
-		else if (!safecmp(method, "submitblock"))
-			parse_remote_submitblock(ckp, val, cs->buf);
+		else if (!safecmp(method, stratum_msgs[SM_BLOCK]))
+			parse_upstream_block(ckp, val);
 		else if (!safecmp(method, "pong"))
 			LOGDEBUG("Received upstream pong");
 		else
