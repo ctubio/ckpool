@@ -1590,8 +1590,8 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	ck_wunlock(&sdata->workbase_lock);
 
 	val = generate_workinfo(ckp, wb, __func__);
-	/* Replace workinfoid with mapped id */
-	json_set_int64(val, "workinfoid", wb->mapped_id);
+	/* Replace jobid with mapped id */
+	json_set_int64(val, "jobid", wb->mapped_id);
 
 	/* If this is the upstream pool, send a copy of this to all OTHER remote
 	 * trusted servers as well */
@@ -5593,19 +5593,11 @@ static void add_remote_blockdata(ckpool_t *ckp, json_t *val, const int cblen, co
 	free(buf);
 }
 
-static void
-downstream_block(ckpool_t *ckp, sdata_t *sdata, const json_t *val, const int cblen,
-		 const char *coinbase, const uchar *data, int64_t client_id)
+static void downstream_blockdata(sdata_t *sdata, const json_t *val, int64_t client_id)
 {
-	json_t *block_val = json_deep_copy(val);
 	stratum_instance_t *client;
 	ckmsg_t *bulk_send = NULL;
 	int messages = 0;
-
-	/* Strip unnecessary fields and add extra fields needed */
-	strip_fields(ckp, block_val);
-	json_set_string(block_val, "method", stratum_msgs[SM_BLOCK]);
-	add_remote_blockdata(ckp, block_val, cblen, coinbase, data);
 
 	ck_rlock(&sdata->instance_lock);
 	DL_FOREACH(sdata->remote_instances, client) {
@@ -5616,7 +5608,7 @@ downstream_block(ckpool_t *ckp, sdata_t *sdata, const json_t *val, const int cbl
 		/* Don't send remote workinfo back to same remote */
 		if (client->id == client_id)
 			continue;
-		json_msg = json_deep_copy(block_val);
+		json_msg = json_deep_copy(val);
 		client_msg = ckalloc(sizeof(ckmsg_t));
 		msg = ckzalloc(sizeof(smsg_t));
 		msg->json_msg = json_msg;
@@ -5627,12 +5619,24 @@ downstream_block(ckpool_t *ckp, sdata_t *sdata, const json_t *val, const int cbl
 	}
 	ck_runlock(&sdata->instance_lock);
 
-	json_decref(block_val);
-
 	if (bulk_send) {
 		LOGINFO("Sending block to %d remote servers", messages);
 		ssend_bulk_postpone(sdata, bulk_send, messages);
 	}
+}
+
+static void
+downstream_block(ckpool_t *ckp, sdata_t *sdata, const json_t *val, const int cblen,
+		 const char *coinbase, const uchar *data)
+{
+	json_t *block_val = json_deep_copy(val);
+
+	/* Strip unnecessary fields and add extra fields needed */
+	strip_fields(ckp, block_val);
+	json_set_string(block_val, "method", stratum_msgs[SM_BLOCK]);
+	add_remote_blockdata(ckp, block_val, cblen, coinbase, data);
+	downstream_blockdata(sdata, block_val, 0);
+	json_decref(block_val);
 }
 
 /* We should already be holding the workbase_lock. Needs to be entered with
@@ -5695,7 +5699,7 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 		add_remote_blockdata(ckp, val, cblen, coinbase, data);
 		upstream_json_msgtype(ckp, val, SM_BLOCK);
 	} else {
-		downstream_block(ckp, sdata, val, cblen, coinbase, data, 0);
+		downstream_block(ckp, sdata, val, cblen, coinbase, data);
 		ckdbq_add(ckp, ID_BLOCK, val);
 	}
 }
@@ -6791,7 +6795,8 @@ static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
 
 /* Attempt to submit a remote block locally by recreating it from its workinfo
  * in addition to sending it to ckdb */
-static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf)
+static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const char *buf,
+			       const int64_t client_id)
 {
 	json_t *workername_val = json_object_get(val, "workername"),
 		*name_val = json_object_get(val, "name");
@@ -6811,6 +6816,7 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	cnfrm = json_string_value(json_object_get(val, "confirmed"));
 	if (cnfrm && cnfrm[0] == '1')
 		goto out_add;
+
 	json_get_int64(&id, val, "workinfoid");
 	coinbasehex = json_string_value(json_object_get(val, "coinbasehex"));
 	swaphex = json_string_value(json_object_get(val, "swaphex"));
@@ -6852,12 +6858,11 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	stratum_broadcast_message(sdata, msg);
 	free(msg);
 out_add:
-	if (CKP_STANDALONE(ckp))
-		return;
-
 	/* Make a duplicate for use by ckdbq_add */
 	val = json_deep_copy(val);
 	remap_workinfo_id(sdata, val);
+	if (!ckp->remote)
+		downstream_blockdata(sdata, val, client_id);
 
 	ckdbq_add(ckp, ID_BLOCK, val);
 }
@@ -6868,7 +6873,7 @@ void parse_upstream_block(ckpool_t *ckp, json_t *val)
 	sdata_t *sdata = ckp->sdata;
 
 	buf = json_dumps(val, 0);
-	parse_remote_block(ckp, sdata, val, buf);
+	parse_remote_block(ckp, sdata, val, buf, 0);
 	free(buf);
 }
 
@@ -6951,7 +6956,7 @@ static void parse_trusted_msg(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 	else if (!safecmp(method, stratum_msgs[SM_SHAREERR]))
 		parse_remote_shareerr(ckp, sdata, val, buf);
 	else if (!safecmp(method, stratum_msgs[SM_BLOCK]))
-		parse_remote_block(ckp, sdata, val, buf);
+		parse_remote_block(ckp, sdata, val, buf, client->id);
 	else if (!safecmp(method, "workers"))
 		parse_remote_workers(sdata, val, buf);
 	else if (!safecmp(method, "ping"))
