@@ -6823,7 +6823,6 @@ static void add_node_txns(ckpool_t *ckp, sdata_t *sdata, const json_t *val)
 	txn_array = json_object_get(val, "transaction");
 	arr_size = json_array_size(txn_array);
 
-	ck_wlock(&sdata->workbase_lock);
 	for (i = 0; i < arr_size; i++) {
 		const char *hash, *data;
 
@@ -6836,11 +6835,16 @@ static void add_node_txns(ckpool_t *ckp, sdata_t *sdata, const json_t *val)
 			LOGERR("Failed to get hash/data in add_node_txns");
 			continue;
 		}
+
+		ck_rlock(&sdata->workbase_lock);
 		HASH_FIND_STR(sdata->txns, hash, txn);
 		if (txn) {
 			txn->refcount = 100;
+			ck_runlock(&sdata->workbase_lock);
 			continue;
 		}
+		ck_runlock(&sdata->workbase_lock);
+
 		submit_transaction(ckp, data);
 		txn = ckzalloc(sizeof(txntable_t));
 		memcpy(txn->hash, hash, 65);
@@ -6849,10 +6853,13 @@ static void add_node_txns(ckpool_t *ckp, sdata_t *sdata, const json_t *val)
 		 * upstream pool to ensure we never age them faster than the
 		 * pool does. */
 		txn->refcount = 100;
+
+		ck_wlock(&sdata->workbase_lock);
 		HASH_ADD_STR(sdata->txns, hash, txn);
+		ck_wunlock(&sdata->workbase_lock);
+
 		added++;
 	}
-	ck_wunlock(&sdata->workbase_lock);
 
 	if (added)
 		LOGINFO("Stratifier added %d remote transactions", added);
