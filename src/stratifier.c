@@ -46,6 +46,9 @@ struct pool_stats {
 	int users;
 	int disconnected;
 
+	int remote_workers;
+	int remote_users;
+
 	/* Absolute shares stats */
 	int64_t unaccounted_shares;
 	int64_t accounted_shares;
@@ -7929,11 +7932,11 @@ static void *statsupdate(void *arg)
 		double ghs, ghs1, ghs5, ghs15, ghs60, ghs360, ghs1440, ghs10080, per_tdiff;
 		char suffix1[16], suffix5[16], suffix15[16], suffix60[16], cdfield[64];
 		char suffix360[16], suffix1440[16], suffix10080[16];
+		int remote_users = 0, remote_workers = 0, idle_workers = 0;
 		log_entry_t *log_entries = NULL;
 		char_entry_t *char_list = NULL;
 		stratum_instance_t *client;
 		user_instance_t *user;
-		int idle_workers = 0;
 		char *fname, *s, *sp;
 		tv_t now, diff;
 		ts_t ts_now;
@@ -8079,8 +8082,15 @@ static void *statsupdate(void *arg)
 					"shares", user->shares,
 					"bestshare", user->best_diff);
 
-			/* Reset the remote_workers count once per minute */
-			user->remote_workers = 0;
+			if (user->remote_workers) {
+				remote_workers += user->remote_workers;
+				/* Reset the remote_workers count once per minute */
+				user->remote_workers = 0;
+				/* We check this unlocked but transiently
+				 * wrong is harmless */
+				if (!user->workers)
+					remote_users++;
+			}
 
 			ASPRINTF(&fname, "%s/users/%s", ckp->logdir, user->username);
 			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
@@ -8094,6 +8104,13 @@ static void *statsupdate(void *arg)
 			json_decref(val);
 			if (ckp->remote)
 				upstream_workers(ckp, user);
+		}
+
+		if (remote_workers) {
+			mutex_lock(&sdata->stats_lock);
+			stats->remote_workers = remote_workers;
+			stats->remote_users = remote_users;
+			mutex_unlock(&sdata->stats_lock);
 		}
 
 		/* Dump log entries out of instance_lock */
@@ -8269,6 +8286,12 @@ static void *statsupdate(void *arg)
 			decay_time(&stats->dsps10080, unaccounted_diff_shares, 1.875, WEEK);
 			mutex_unlock(&sdata->stats_lock);
 		}
+
+		/* Reset remote workers every minute since we measure it once
+		 * every minute only. */
+		mutex_lock(&sdata->stats_lock);
+		stats->remote_workers = stats->remote_users = 0;
+		mutex_unlock(&sdata->stats_lock);
 	}
 
 	return NULL;
