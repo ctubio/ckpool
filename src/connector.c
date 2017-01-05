@@ -876,16 +876,17 @@ static void redirect_client(ckpool_t *ckp, client_instance_t *client)
 
 /* Look for accepted shares in redirector mode to know we can redirect this
  * client to a protected server. */
-static void test_redirector_shares(ckpool_t *ckp, cdata_t *cdata, client_instance_t *client, const char *buf)
+static bool test_redirector_shares(cdata_t *cdata, client_instance_t *client, const char *buf)
 {
 	json_t *val = json_loads(buf, 0, NULL);
 	share_t *share, *found = NULL;
+	bool ret = false;
 	int64_t id;
 
 	if (!val) {
 		/* Can happen when responding to invalid json from client */
 		LOGINFO("Invalid json response to client %"PRId64 "%s", client->id, buf);
-		return;
+		return ret;
 	}
 	if (!json_get_int64(&id, val, "id")) {
 		LOGINFO("Failed to find response id");
@@ -920,7 +921,7 @@ static void test_redirector_shares(ckpool_t *ckp, cdata_t *cdata, client_instanc
 		}
 		LOGNOTICE("Found accepted share for client %"PRId64" - redirecting",
 			   client->id);
-		redirect_client(ckp, client);
+		ret = true;
 
 		/* Clear the list now since we don't need it any more */
 		ck_wlock(&cdata->lock);
@@ -932,6 +933,7 @@ static void test_redirector_shares(ckpool_t *ckp, cdata_t *cdata, client_instanc
 	}
 out:
 	json_decref(val);
+	return ret;
 }
 
 /* Send a client by id a heap allocated buffer, allowing this function to
@@ -941,6 +943,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 	ckpool_t *ckp = cdata->ckp;
 	sender_send_t *sender_send;
 	client_instance_t *client;
+	bool redirect = false;
 	int len;
 
 	if (unlikely(!buf)) {
@@ -1002,7 +1005,7 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			stratifier_add_recv(ckp, val);
 		}
 		if (ckp->redirector && !client->redirected)
-			test_redirector_shares(ckp, cdata, client, buf);
+			redirect = test_redirector_shares(cdata, client, buf);
 	}
 out:
 	sender_send = ckzalloc(sizeof(sender_send_t));
@@ -1015,6 +1018,10 @@ out:
 	DL_APPEND(cdata->sender_sends, sender_send);
 	pthread_cond_signal(&cdata->sender_cond);
 	mutex_unlock(&cdata->sender_lock);
+
+	/* Redirect after sending response to shares */
+	if (unlikely(redirect))
+		redirect_client(ckp, client);
 }
 
 static bool client_exists(cdata_t *cdata, const int64_t id)
