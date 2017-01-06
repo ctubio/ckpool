@@ -3316,6 +3316,11 @@ static inline bool client_active(stratum_instance_t *client)
 	return (client->authorised && !client->dropped);
 }
 
+static inline bool remote_server(stratum_instance_t *client)
+{
+	return (client->node || client->passthrough || client->trusted);
+}
+
 /* Ask the connector asynchronously to send us dropclient commands if this
  * client no longer exists. */
 static void connector_test_client(ckpool_t *ckp, const int64_t id)
@@ -3356,7 +3361,7 @@ static void stratum_broadcast(sdata_t *sdata, json_t *val, const int msg_type)
 		if (sdata != ckp_sdata && client->sdata != sdata)
 			continue;
 
-		if (!client_active(client) || client->node || client->trusted)
+		if (!client_active(client) || remote_server(client))
 			continue;
 
 		/* Only send messages to whitelisted clients */
@@ -7963,7 +7968,7 @@ static void *statsupdate(void *arg)
 			 * connector if they still exist */
 			if (client->dropped)
 				connector_test_client(ckp, client->id);
-			else if (client->node || client->trusted) {
+			else if (remote_server(client)) {
 				/* Do nothing to these */
 			} else if (!client->authorised) {
 				/* Test for clients that haven't authed in over a minute
