@@ -73,6 +73,8 @@ struct client_instance {
 
 	/* Has this client already been told to redirect */
 	bool redirected;
+	/* Has this client been authorised in redirector mode */
+	bool authorised;
 
 	/* Time this client started blocking, 0 when not blocked */
 	time_t blocked_time;
@@ -587,6 +589,19 @@ static client_instance_t *ref_client_by_id(cdata_t *cdata, int64_t id)
 	return client;
 }
 
+static void redirect_client(ckpool_t *ckp, client_instance_t *client);
+
+static bool redirect_matches(cdata_t *cdata, client_instance_t *client)
+{
+	redirect_t *redirect;
+
+	ck_rlock(&cdata->lock);
+	HASH_FIND_STR(cdata->redirects, client->address_name, redirect);
+	ck_runlock(&cdata->lock);
+
+	return redirect;
+}
+
 static void client_event_processor(ckpool_t *ckp, struct epoll_event *event)
 {
 	const uint32_t events = event->events;
@@ -1004,8 +1019,15 @@ static void send_client(cdata_t *cdata, const int64_t id, char *buf)
 			json_object_set_new_nocheck(val, "server", json_integer(client->server));
 			stratifier_add_recv(ckp, val);
 		}
-		if (ckp->redirector && !client->redirected)
-			redirect = test_redirector_shares(cdata, client, buf);
+		if (ckp->redirector && !client->redirected && client->authorised) {
+			/* If clients match the IP of clients that have already
+			 * been whitelisted as finding valid shares then
+			 * redirect them immediately. */
+			if (redirect_matches(cdata, client))
+				redirect = true;
+			else
+				redirect = test_redirector_shares(cdata, client, buf);
+		}
 	}
 out:
 	sender_send = ckzalloc(sizeof(sender_send_t));
@@ -1019,7 +1041,7 @@ out:
 	pthread_cond_signal(&cdata->sender_cond);
 	mutex_unlock(&cdata->sender_lock);
 
-	/* Redirect after sending response to shares */
+	/* Redirect after sending response to shares and authorise */
 	if (unlikely(redirect))
 		redirect_client(ckp, client);
 }
@@ -1257,6 +1279,7 @@ out:
 
 static void client_message_processor(ckpool_t *ckp, json_t *json_msg)
 {
+	cdata_t *cdata = ckp->cdata;
 	int64_t client_id;
 	char *msg;
 
@@ -1268,8 +1291,23 @@ static void client_message_processor(ckpool_t *ckp, json_t *json_msg)
 	if (client_id > 0xffffffffll)
 		json_object_set_new_nocheck(json_msg, "client_id", json_integer(client_id & 0xffffffffll));
 
+	/* Flag redirector clients once they've been authorised */
+	if (ckp->redirector) {
+		client_instance_t *client = ref_client_by_id(cdata, client_id);
+
+		if (likely(client)) {
+			if (!client->redirected && !client->authorised) {
+				json_t *method_val = json_object_get(json_msg, "node.method");
+				const char *method = json_string_value(method_val);
+
+				if (!safecmp(method, stratum_msgs[SM_AUTHRESULT]))
+					client->authorised = true;
+			}
+			dec_instance_ref(cdata, client);
+		}
+	}
 	msg = json_dumps(json_msg, JSON_EOL | JSON_COMPACT);
-	send_client(ckp->cdata, client_id, msg);
+	send_client(cdata, client_id, msg);
 	json_decref(json_msg);
 }
 
