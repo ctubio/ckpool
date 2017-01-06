@@ -6894,7 +6894,6 @@ static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 	client = __instance_by_id(sdata, client_id);
 	if (likely(!client))
 		client = __stratum_add_instance(ckp, client_id, remote->address, remote->server);
-	__inc_instance_ref(client);
 	client->remote = true;
 	json_strdup(&client->useragent, val, "useragent");
 	json_strcpy(client->enonce1, val, "enonce1");
