@@ -469,6 +469,9 @@ struct stratifier_data {
 
 	uint64_t enonce1_64;
 
+	/* For protecting the txntable data */
+	cklock_t txn_lock;
+
 	/* For protecting the hashtable data */
 	cklock_t workbase_lock;
 
@@ -1175,7 +1178,7 @@ static bool add_txn(ckpool_t *ckp, sdata_t *sdata, txntable_t **txns, const char
 
 	/* Look for transactions we already know about and increment their
 	 * refcount if we're still using them. */
-	ck_rlock(&sdata->workbase_lock);
+	ck_wlock(&sdata->txn_lock);
 	HASH_FIND_STR(sdata->txns, hash, txn);
 	if (txn) {
 		if (!local)
@@ -1184,7 +1187,7 @@ static bool add_txn(ckpool_t *ckp, sdata_t *sdata, txntable_t **txns, const char
 			txn->refcount = REFCOUNT_LOCAL;
 		txn->seen = found = true;
 	}
-	ck_runlock(&sdata->workbase_lock);
+	ck_wunlock(&sdata->txn_lock);
 
 	if (found)
 		return false;
@@ -1283,7 +1286,7 @@ static void update_txns(ckpool_t *ckp, sdata_t *sdata, txntable_t *txns, bool lo
 
 	/* Find which transactions have their refcount decremented to zero
 	 * and remove them. */
-	ck_wlock(&sdata->workbase_lock);
+	ck_wlock(&sdata->txn_lock);
 	HASH_ITER(hh, sdata->txns, tmp, tmpa) {
 		json_t *txn_val;
 
@@ -1319,7 +1322,7 @@ static void update_txns(ckpool_t *ckp, sdata_t *sdata, txntable_t *txns, bool lo
 		HASH_ADD_STR(sdata->txns, hash, tmp);
 		added++;
 	}
-	ck_wunlock(&sdata->workbase_lock);
+	ck_wunlock(&sdata->txn_lock);
 
 	if (added) {
 		JSON_CPACK(val, "{so}", "transaction", txn_array);
@@ -1681,7 +1684,7 @@ static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 
 		memcpy(hash, hashes + i * 65, 64);
 
-		ck_wlock(&sdata->workbase_lock);
+		ck_wlock(&sdata->txn_lock);
 		HASH_FIND_STR(sdata->txns, hash, txn);
 		if (likely(txn)) {
 			txn->refcount = REFCOUNT_REMOTE;
@@ -1690,7 +1693,7 @@ static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 				   "hash", hash, "data", txn->data);
 			json_array_append_new(txn_array, txn_val);
 		}
-		ck_wunlock(&sdata->workbase_lock);
+		ck_wunlock(&sdata->txn_lock);
 
 		if (likely(txn_val))
 			continue;
@@ -1704,7 +1707,7 @@ static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 		}
 
 		/* We've found it, let's add it to the table */
-		ck_wlock(&sdata->workbase_lock);
+		ck_wlock(&sdata->txn_lock);
 		/* One last check in case it got added while we dropped the lock */
 		HASH_FIND_STR(sdata->txns, hash, txn);
 		if (likely(!txn)) {
@@ -1720,7 +1723,7 @@ static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 				   "hash", hash, "data", txn->data);
 			json_array_append_new(txn_array, txn_val);
 		}
-		ck_wunlock(&sdata->workbase_lock);
+		ck_wunlock(&sdata->txn_lock);
 	}
 
 	if (ret) {
@@ -3128,6 +3131,7 @@ static void free_proxy(proxy_t *proxy)
 		}
 		mutex_unlock(&dsdata->share_lock);
 
+		/* Do we need to check readcount here if freeing the proxy? */
 		ck_wlock(&dsdata->workbase_lock);
 		HASH_ITER(hh, dsdata->workbases, wb, tmpwb) {
 			HASH_DEL(dsdata->workbases, wb);
@@ -6431,12 +6435,12 @@ static void send_node_all_txns(sdata_t *sdata, const stratum_instance_t *client)
 
 	txn_array = json_array();
 
-	ck_rlock(&sdata->workbase_lock);
+	ck_rlock(&sdata->txn_lock);
 	HASH_ITER(hh, sdata->txns, txn, tmp) {
 		JSON_CPACK(txn_val, "{ss,ss}", "hash", txn->hash, "data", txn->data);
 		json_array_append_new(txn_array, txn_val);
 	}
-	ck_runlock(&sdata->workbase_lock);
+	ck_runlock(&sdata->txn_lock);
 
 	if (client->trusted) {
 		JSON_CPACK(val, "{ss,so}", "method", stratum_msgs[SM_TRANSACTIONS],
@@ -7127,7 +7131,7 @@ static json_t *get_hash_transactions(sdata_t *sdata, const json_t *hashes)
 	int found = 0;
 	size_t index;
 
-	ck_rlock(&sdata->workbase_lock);
+	ck_rlock(&sdata->txn_lock);
 	json_array_foreach(hashes, index, arr_val) {
 		const char *hash = json_string_value(arr_val);
 		json_t *txn_val;
@@ -7141,7 +7145,7 @@ static json_t *get_hash_transactions(sdata_t *sdata, const json_t *hashes)
 		json_array_append_new(txn_array, txn_val);
 		found++;
 	}
-	ck_runlock(&sdata->workbase_lock);
+	ck_runlock(&sdata->txn_lock);
 
 	return txn_array;
 }
@@ -8574,6 +8578,7 @@ void *stratifier(void *arg)
 	create_pthread(&pth_heartbeat, ckdb_heartbeat, ckp);
 	read_poolstats(ckp);
 
+	cklock_init(&sdata->txn_lock);
 	cklock_init(&sdata->workbase_lock);
 	if (!ckp->proxy)
 		create_pthread(&pth_blockupdate, blockupdate, ckp);
