@@ -1080,8 +1080,8 @@ static void send_ageworkinfo(ckpool_t *ckp, const int64_t id)
  * pool mode but unique to each subproxy in proxy mode */
 static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_block)
 {
-	workbase_t *tmp, *tmpa, *aged = NULL;
 	sdata_t *ckp_sdata = ckp->sdata;
+	workbase_t *tmp, *tmpa;
 	int len, ret;
 
 	ts_realtime(&wb->gentime);
@@ -1119,6 +1119,11 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 	if (ckp->logshares)
 		sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
+	HASH_ADD_I64(sdata->workbases, id, wb);
+	if (sdata->current_workbase)
+		tv_time(&sdata->current_workbase->retired);
+	sdata->current_workbase = wb;
+
 	/* Is this long enough to ensure we don't dereference a workbase
 	 * immediately? Should be unless clock changes 10 minutes so we use
 	 * ts_realtime */
@@ -1127,19 +1132,21 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 			break;
 		if (wb == tmp)
 			continue;
-		if (wb->readcount)
+		if (tmp->readcount)
 			continue;
 		/*  Age old workbases older than 10 minutes old */
 		if (tmp->gentime.tv_sec < wb->gentime.tv_sec - 600) {
 			HASH_DEL(sdata->workbases, tmp);
-			aged = tmp;
-			break;
+			ck_wunlock(&sdata->workbase_lock);
+
+			/* Drop lock to avoid recursive locks */
+			send_ageworkinfo(ckp, tmp->id);
+			age_share_hashtable(sdata, tmp->id);
+			clear_workbase(tmp);
+
+			ck_wlock(&sdata->workbase_lock);
 		}
 	}
-	HASH_ADD_I64(sdata->workbases, id, wb);
-	if (sdata->current_workbase)
-		tv_time(&sdata->current_workbase->retired);
-	sdata->current_workbase = wb;
 	ck_wunlock(&sdata->workbase_lock);
 
 	if (*new_block)
@@ -1147,14 +1154,6 @@ static void add_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb, bool *new_bl
 
 	if (!ckp->passthrough)
 		send_workinfo(ckp, sdata, wb);
-
-	/* Send the aged work message to ckdb once we have dropped the workbase lock
-	 * to prevent taking recursive locks */
-	if (aged) {
-		send_ageworkinfo(ckp, aged->id);
-		age_share_hashtable(sdata, aged->id);
-		clear_workbase(aged);
-	}
 }
 
 static void broadcast_ping(sdata_t *sdata);
