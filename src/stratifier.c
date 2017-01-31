@@ -7019,9 +7019,11 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 		sha256(swap, 80, hash1);
 		sha256(hash1, 32, hash);
 		gbt_block = process_block(wb, coinbase, cblen, swap, hash, flip32, blockhash);
-		/* Ignore the return value of local_block_submit here as we rely
-		 * on the remote server to give us the ID_BLOCK responses */
-		local_block_submit(ckp, gbt_block, flip32, wb->height);
+		/* We rely on the remote server to give us the ID_BLOCK
+		 * responses, so only use this response to determine if we
+		 * should reset the best shares. */
+		if (local_block_submit(ckp, gbt_block, flip32, wb->height))
+			reset_bestshares(sdata);
 		put_remote_workbase(sdata, wb);
 	}
 
