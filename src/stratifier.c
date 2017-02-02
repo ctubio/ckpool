@@ -2007,10 +2007,26 @@ share_diff(char *coinbase, const uchar *enonce1bin, const workbase_t *wb, const 
 	return diff_from_target(hash);
 }
 
+static void add_remote_blockdata(ckpool_t *ckp, json_t *val, const int cblen, const char *coinbase,
+				 const uchar *data)
+{
+	char *buf;
+
+	json_set_string(val, "name", ckp->name);
+	json_set_int(val, "cblen", cblen);
+	buf = bin2hex(coinbase, cblen);
+	json_set_string(val, "coinbasehex", buf);
+	free(buf);
+	buf = bin2hex(data, 80);
+	json_set_string(val, "swaphex", buf);
+	free(buf);
+}
+
 /* Entered with workbase readcount, grabs instance lock */
-static void send_node_block(sdata_t *sdata, const char *enonce1, const char *nonce,
+static void send_node_block(ckpool_t *ckp, sdata_t *sdata, const char *enonce1, const char *nonce,
 			    const char *nonce2, const uint32_t ntime32, const int64_t jobid,
-			    const double diff, const int64_t client_id)
+			    const double diff, const int64_t client_id,
+			    const char *coinbase, const int cblen, const uchar *data)
 {
 	stratum_instance_t *client;
 	int64_t skip, messages = 0;
@@ -2031,6 +2047,7 @@ static void send_node_block(sdata_t *sdata, const char *enonce1, const char *non
 		json_set_uint32(val, "ntime32", ntime32);
 		json_set_int64(val, "jobid", jobid);
 		json_set_double(val, "diff", diff);
+		add_remote_blockdata(ckp, val, cblen, coinbase, data);
 		DL_FOREACH(sdata->node_instances, client) {
 			ckmsg_t *client_msg;
 			json_t *json_msg;
@@ -2172,7 +2189,8 @@ static void block_reject(json_t *val);
 
 static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 {
-	char *coinbase = NULL, *enonce1 = NULL, *nonce = NULL, *nonce2 = NULL, *gbt_block;
+	char *coinbase = NULL, *enonce1 = NULL, *nonce = NULL, *nonce2 = NULL, *gbt_block,
+		*coinbasehex, *swaphex;
 	uchar *enonce1bin = NULL, hash[32], swap[80], flip32[32];
 	char blockhash[68], cdfield[64];
 	json_t *bval, *bval_copy;
@@ -2219,14 +2237,31 @@ static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 		LOGWARNING("Failed to find workbase with jobid %"PRId64" in node method block", id);
 		goto out;
 	}
-	/* Now we have enough to assemble a block */
-	coinbase = ckalloc(wb->coinb1len + wb->enonce1constlen + wb->enonce1varlen + wb->enonce2varlen + wb->coinb2len);
 	enonce1len = wb->enonce1constlen + wb->enonce1varlen;
-	enonce1bin = ckalloc(enonce1len);
+	enonce1bin = alloca(enonce1len);
 	hex2bin(enonce1bin, enonce1, enonce1len);
 
-	/* Fill in the hashes */
-	share_diff(coinbase, enonce1bin, wb, nonce2, ntime32, nonce, hash, swap, &cblen);
+	/* Get parameters if upstream pool supports them with new format */
+	json_get_string(&coinbasehex, val, "coinbasehex");
+	json_get_int(&cblen, val, "cblen");
+	json_get_string(&swaphex, val, "swaphex");
+	if (coinbasehex && cblen && swaphex) {
+		uchar hash1[32];
+
+		coinbase = alloca(cblen);
+		hex2bin(coinbase, coinbasehex, cblen);
+		hex2bin(swap, swaphex, 80);
+		sha256(swap, 80, hash1);
+		sha256(hash1, 32, hash);
+	} else {
+		/* Rebuild the old way if we can if the upstream pool is using
+		 * the old format only */
+		coinbase = alloca(wb->coinb1len + wb->enonce1constlen + wb->enonce1varlen + wb->enonce2varlen + wb->coinb2len);
+		/* Fill in the hashes */
+		share_diff(coinbase, enonce1bin, wb, nonce2, ntime32, nonce, hash, swap, &cblen);
+	}
+
+	/* Now we have enough to assemble a block */
 	gbt_block = process_block(wb, coinbase, cblen, swap, hash, flip32, blockhash);
 	ret = local_block_submit(ckp, gbt_block, flip32, wb->height);
 
@@ -2253,8 +2288,6 @@ static void submit_node_block(ckpool_t *ckp, sdata_t *sdata, json_t *val)
 	else
 		block_reject(bval_copy);
 out:
-	free(enonce1bin);
-	free(coinbase);
 	free(nonce2);
 	free(nonce);
 	free(enonce1);
@@ -5810,21 +5843,6 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
 	stratum_send_diff(sdata, client);
 }
 
-static void add_remote_blockdata(ckpool_t *ckp, json_t *val, const int cblen, const char *coinbase,
-				 const uchar *data)
-{
-	char *buf;
-
-	json_set_string(val, "name", ckp->name);
-	json_set_int(val, "cblen", cblen);
-	buf = bin2hex(coinbase, cblen);
-	json_set_string(val, "coinbasehex", buf);
-	free(buf);
-	buf = bin2hex(data, 80);
-	json_set_string(val, "swaphex", buf);
-	free(buf);
-}
-
 static void
 downstream_block(ckpool_t *ckp, sdata_t *sdata, const json_t *val, const int cblen,
 		 const char *coinbase, const uchar *data)
@@ -5867,8 +5885,8 @@ test_blocksolve(const stratum_instance_t *client, const workbase_t *wb, const uc
 	sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
 
 	gbt_block = process_block(wb, coinbase, cblen, data, hash, flip32, blockhash);
-	send_node_block(sdata, client->enonce1, nonce, nonce2, ntime32, wb->id,
-			diff, client->id);
+	send_node_block(ckp, sdata, client->enonce1, nonce, nonce2, ntime32, wb->id,
+			diff, client->id, coinbase, cblen, data);
 
 	val = json_object();
 	// JSON_CPACK(val, "{si,ss,ss,sI,ss,ss,sI,ss,ss,ss,sI,sf,ss,ss,ss,ss}",
