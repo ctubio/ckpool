@@ -1695,6 +1695,7 @@ static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	}
 
 	if (ret) {
+		wb->incomplete = false;
 		LOGINFO("Rebuilt txns into workbase with %d transactions", i);
 		/* These two structures are regenerated so free their ram */
 		json_decref(wb->merkle_array);
@@ -1739,10 +1740,9 @@ static void check_incomplete_wbs(ckpool_t *ckp, sdata_t *sdata)
 		HASH_DEL(sdata->remote_workbases, wb);
 		ck_wunlock(&sdata->workbase_lock);
 
-		if (rebuild_txns(ckp, sdata, wb)) {
+		if (rebuild_txns(ckp, sdata, wb))
 			LOGNOTICE("Rebuilt transactions on previously failed remote workinfo");
-			wb->incomplete = false;
-		} else
+		else
 			incomplete++;
 
 		/* Readd it to the hashlist */
