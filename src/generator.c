@@ -2321,6 +2321,7 @@ static void *proxy_recv(void *arg)
 		/* Parse any other messages already fully buffered with a zero
 		 * timeout. */
 		while (message || read_socket_line(cs, &timeout) > 0) {
+			message = false;
 			timeout = 0;
 			/* subproxy may have been recycled here if it is not a
 			 * parent and reconnect was issued */
