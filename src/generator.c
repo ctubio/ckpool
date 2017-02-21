@@ -2363,6 +2363,7 @@ static void *userproxy_recv(void *arg)
 
 	while (42) {
 		proxy_instance_t *proxy, *tmpproxy;
+		bool message = false, hup = false;
 		share_msg_t *share, *tmpshare;
 		notify_instance_t *ni, *tmp;
 		connsock_t *cs;
@@ -2414,7 +2415,6 @@ static void *userproxy_recv(void *arg)
 		}
 		mutex_unlock(&gdata->share_lock);
 
-		timeout = 0;
 		cs = &proxy->cs;
 
 #if 0
@@ -2423,9 +2423,30 @@ static void *userproxy_recv(void *arg)
 			continue;
 #endif
 
+		if ((event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))) {
+			LOGNOTICE("Proxy %d:%d %s hangup in userproxy_recv", proxy->id,
+				  proxy->subid, proxy->url);
+			hup = true;
+		}
+
 		if (likely(event.events & EPOLLIN)) {
+			timeout = 30;
+
 			cksem_wait(&cs->sem);
-			while ((ret = read_socket_line(cs, &timeout)) > 0) {
+			ret = read_socket_line(cs, &timeout);
+			/* If we are unable to read anything within 30
+			 * seconds at this point after EPOLLIN is set
+			 * then the socket is dead. */
+			if (ret < 1) {
+				LOGNOTICE("Proxy %d:%d %s failed to read_socket_line in userproxy_recv",
+					  proxy->id, proxy->subid, proxy->url);
+				hup = true;
+			} else {
+				message = true;
+				timeout = 0;
+			}
+			while (message || (ret = read_socket_line(cs, &timeout)) > 0) {
+				message = false;
 				timeout = 0;
 				/* proxy may have been recycled here if it is not a
 				 * parent and reconnect was issued */
@@ -2440,9 +2461,7 @@ static void *userproxy_recv(void *arg)
 			cksem_post(&cs->sem);
 		}
 
-		if ((event.events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))) {
-			LOGNOTICE("Proxy %d:%d %s hung up in epoll_wait", proxy->id,
-				  proxy->subid, proxy->url);
+		if (hup) {
 			disable_subproxy(gdata, proxy->parent, proxy);
 			continue;
 		}
