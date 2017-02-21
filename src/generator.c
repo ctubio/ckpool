@@ -1756,7 +1756,7 @@ static void send_json_msgq(gdata_t *gdata, cs_msg_t **csmsgq)
 			fd = proxy->cs.fd;
 			ret = send(fd, csmsg->buf + csmsg->ofs, csmsg->len, MSG_DONTWAIT);
 			if (ret < 1) {
-				if (errno == EAGAIN || errno == EWOULDBLOCK || !ret)
+				if (!ret || errno == EAGAIN || errno == EWOULDBLOCK)
 					break;
 				csmsg->len = 0;
 				LOGNOTICE("Proxy %d:%d %s failed to send msg in send_json_msgq, dropping",
