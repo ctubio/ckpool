@@ -1135,6 +1135,19 @@ static void broadcast_ping(sdata_t *sdata);
 #define REFCOUNT_REMOTE	100
 #define REFCOUNT_LOCAL	5
 
+/* Submit the transactions in node/remote mode so the local btcd has all the
+ * transactions that will go into the next blocksolve. */
+static void submit_transaction(ckpool_t *ckp, const char *hash)
+{
+	char *buf;
+
+	if (unlikely(!ckp->generator_ready))
+		return;
+	ASPRINTF(&buf, "submittxn:%s", hash);
+	send_proc(ckp->generator,buf);
+	free(buf);
+}
+
 /* Build a hashlist of all transactions, allowing us to compare with the list of
  * existing transactions to determine which need to be propagated */
 static bool add_txn(ckpool_t *ckp, sdata_t *sdata, txntable_t **txns, const char *hash,
@@ -1161,7 +1174,15 @@ static bool add_txn(ckpool_t *ckp, sdata_t *sdata, txntable_t **txns, const char
 
 	txn = ckzalloc(sizeof(txntable_t));
 	memcpy(txn->hash, hash, 65);
-	txn->data = strdup(data);
+	/* Get the data from our local bitcoind as a way of confirming it
+	 * already knows about this transaction. */
+	txn->data = generator_get_txn(ckp, hash);
+	if (!txn->data) {
+		/* If our local bitcoind hasn't seen this transaction,
+		 * submit it for mempools to be ~synchronised */
+		submit_transaction(ckp, data);
+		txn->data = strdup(data);
+	}
 	if (!local || ckp->node)
 		txn->refcount = REFCOUNT_REMOTE;
 	else
@@ -1212,19 +1233,6 @@ static void send_node_transactions(ckpool_t *ckp, sdata_t *sdata, const json_t *
 		LOGINFO("Sending transactions to mining nodes");
 		ssend_bulk_append(sdata, bulk_send, messages);
 	}
-}
-
-/* Submit the transactions in node/remote mode so the local btcd has all the
- * transactions that will go into the next blocksolve. */
-static void submit_transaction(ckpool_t *ckp, const char *hash)
-{
-	char *buf;
-
-	if (unlikely(!ckp->generator_ready))
-		return;
-	ASPRINTF(&buf, "submittxn:%s", hash);
-	send_proc(ckp->generator,buf);
-	free(buf);
 }
 
 static void submit_transaction_array(ckpool_t *ckp, const json_t *arr)
@@ -1695,6 +1703,7 @@ static bool rebuild_txns(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	}
 
 	if (ret) {
+		wb->incomplete = false;
 		LOGINFO("Rebuilt txns into workbase with %d transactions", i);
 		/* These two structures are regenerated so free their ram */
 		json_decref(wb->merkle_array);
@@ -1739,10 +1748,9 @@ static void check_incomplete_wbs(ckpool_t *ckp, sdata_t *sdata)
 		HASH_DEL(sdata->remote_workbases, wb);
 		ck_wunlock(&sdata->workbase_lock);
 
-		if (rebuild_txns(ckp, sdata, wb)) {
+		if (rebuild_txns(ckp, sdata, wb))
 			LOGNOTICE("Rebuilt transactions on previously failed remote workinfo");
-			wb->incomplete = false;
-		} else
+		else
 			incomplete++;
 
 		/* Readd it to the hashlist */
@@ -7146,12 +7154,8 @@ static void add_node_txns(ckpool_t *ckp, sdata_t *sdata, const json_t *val)
 			continue;
 		}
 
-		if (!add_txn(ckp, sdata, &txns, hash, data, false))
-			continue;
-
-		/* Submit transactions if we haven't seen them before */
-		submit_transaction(ckp, data);
-		added++;
+		if (add_txn(ckp, sdata, &txns, hash, data, false))
+			added++;
 	}
 
 	if (added)
