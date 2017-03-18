@@ -1804,10 +1804,18 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 	ck_wunlock(&sdata->workbase_lock);
 
 	val = generate_workinfo(ckp, wb, __func__);
-	/* Replace jobid with mapped id */
-	json_set_int64(val, "jobid", wb->mapped_id);
+
+	/* Delete existing workinfoid value which is wrong for other remotes,
+	 * nodes, and ckdb */
+	json_object_del(val, "workinfoid");
 
 	wb_val = json_deep_copy(val);
+
+	/* Set jobid with mapped id for other nodes and remotes */
+	json_set_int64(wb_val, "jobid", wb->mapped_id);
+
+	/* Replace workinfoid to mapped id for ckdb */
+	json_set_int64(val, "workinfoid", wb->mapped_id);
 
 	/* Strip unnecessary fields and add extra fields needed */
 	strip_fields(ckp, wb_val);
