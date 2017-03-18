@@ -1805,10 +1805,6 @@ static void add_remote_base(ckpool_t *ckp, sdata_t *sdata, workbase_t *wb)
 
 	val = generate_workinfo(ckp, wb, __func__);
 
-	/* Delete existing workinfoid value which is wrong for other remotes,
-	 * nodes, and ckdb */
-	json_object_del(val, "workinfoid");
-
 	wb_val = json_deep_copy(val);
 
 	/* Set jobid with mapped id for other nodes and remotes */
