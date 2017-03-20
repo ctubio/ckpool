@@ -4557,7 +4557,8 @@ retry:
 		json_t *val = json_loads(buf, JSON_DISABLE_EOF_CHECK, NULL);
 
 		/* This is a message for a node */
-		ckmsgq_add(sdata->srecvs, val);
+		if (likely(val))
+			ckmsgq_add(sdata->srecvs, val);
 		goto retry;
 	}
 	if (cmdmatch(buf, "ping")) {
@@ -7431,6 +7432,11 @@ static void srecv_process(ckpool_t *ckp, json_t *val)
 	smsg_t *msg;
 	int server;
 
+	if (unlikely(!val)) {
+		LOGWARNING("srecv_process received NULL val!");
+		return;
+	}
+
 	msg = ckzalloc(sizeof(smsg_t));
 	msg->json_msg = val;
 	val = json_object_get(msg->json_msg, "client_id");
@@ -7500,10 +7506,15 @@ out:
 	free(buf);
 }
 
-void stratifier_add_recv(ckpool_t *ckp, json_t *val)
+void _stratifier_add_recv(ckpool_t *ckp, json_t *val, const char *file, const char *func, const int line)
 {
-	sdata_t *sdata = ckp->sdata;
+	sdata_t *sdata;
 
+	if (unlikely(!val)) {
+		LOGWARNING("_stratifier_add_recv received NULL val from %s %s:%d", file, func, line);
+		return;
+	}
+	sdata = ckp->sdata;
 	ckmsgq_add(sdata->srecvs, val);
 }
 
