@@ -6972,16 +6972,19 @@ void parse_upstream_workinfo(ckpool_t *ckp, json_t *val)
 }
 
 /* Remap the remote client id to the local one and submit to ckdb */
-static void parse_remote_workerstats(ckpool_t *ckp, json_t *val, const int64_t remote_id)
+static void parse_remote_workerstats(ckpool_t *ckp, const json_t *val, const int64_t remote_id)
 {
 	int64_t client_id;
+	json_t *res;
 
-	json_get_int64(&client_id, val, "clientid");
+	/* Create copy for ckdb to absorb */
+	res = json_deep_copy(val);
+	json_get_int64(&client_id, res, "clientid");
 	/* Encode remote server client_id into remote client's id */
 	client_id = (remote_id << 32) | (client_id & 0xffffffffll);
-	json_set_int64(val, "clientid", client_id);
+	json_set_int64(res, "clientid", client_id);
 
-	ckdbq_add(ckp, ID_WORKERSTATS, val);
+	ckdbq_add(ckp, ID_WORKERSTATS, res);
 }
 
 #define parse_remote_workinfo(ckp, val, client_id) add_node_base(ckp, val, true, client_id)
@@ -7019,7 +7022,7 @@ static void parse_remote_auth(ckpool_t *ckp, sdata_t *sdata, json_t *val, stratu
 }
 
 /* Get the remote worker count once per minute from all the remote servers */
-static void parse_remote_workers(sdata_t *sdata, json_t *val, const char *buf)
+static void parse_remote_workers(sdata_t *sdata, const json_t *val, const char *buf)
 {
 	json_t *username_val = json_object_get(val, "username");
 	user_instance_t *user;
@@ -7046,7 +7049,7 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 			       const int64_t client_id)
 {
 	json_t *workername_val = json_object_get(val, "workername"),
-		*name_val = json_object_get(val, "name");
+		*name_val = json_object_get(val, "name"), *res;
 	const char *workername, *name, *coinbasehex, *swaphex, *cnfrm;
 	workbase_t *wb = NULL;
 	double diff = 0;
@@ -7110,12 +7113,12 @@ static void parse_remote_block(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
 	free(msg);
 out_add:
 	/* Make a duplicate for use by ckdbq_add */
-	val = json_deep_copy(val);
-	remap_workinfo_id(sdata, val, client_id);
+	res = json_deep_copy(val);
+	remap_workinfo_id(sdata, res, client_id);
 	if (!ckp->remote)
-		downstream_json(sdata, val, client_id, SSEND_PREPEND);
+		downstream_json(sdata, res, client_id, SSEND_PREPEND);
 
-	ckdbq_add(ckp, ID_BLOCK, val);
+	ckdbq_add(ckp, ID_BLOCK, res);
 }
 
 void parse_upstream_block(ckpool_t *ckp, json_t *val)
@@ -7197,7 +7200,7 @@ static json_t *get_hash_transactions(sdata_t *sdata, const json_t *hashes)
 	return txn_array;
 }
 
-static json_t *get_reqtxns(sdata_t *sdata, json_t *val, bool downstream)
+static json_t *get_reqtxns(sdata_t *sdata, const json_t *val, bool downstream)
 {
 	json_t *hashes = json_object_get(val, "hash");
 	json_t *txns, *ret = NULL;
@@ -7221,7 +7224,7 @@ out:
 	return ret;
 }
 
-static void parse_remote_reqtxns(sdata_t *sdata, json_t *val, const int64_t client_id)
+static void parse_remote_reqtxns(sdata_t *sdata, const json_t *val, const int64_t client_id)
 {
 	json_t *ret = get_reqtxns(sdata, val, true);
 
