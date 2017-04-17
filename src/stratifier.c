@@ -8184,9 +8184,12 @@ static void *statsupdate(void *arg)
 						"shares", worker->shares,
 						"bestshare", worker->best_diff);
 
-				ASPRINTF(&fname, "%s/workers/%s", ckp->logdir, worker->workername);
-				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
-				add_log_entry(&log_entries, &fname, &s);
+				/* Only log workers of authorised users */
+				if (user->authorised) {
+					ASPRINTF(&fname, "%s/workers/%s", ckp->logdir, worker->workername);
+					s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
+					add_log_entry(&log_entries, &fname, &s);
+				}
 				json_decref(val);
 			}
 
@@ -8234,14 +8237,16 @@ static void *statsupdate(void *arg)
 					remote_users++;
 			}
 
-			ASPRINTF(&fname, "%s/users/%s", ckp->logdir, user->username);
-			s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
-			add_log_entry(&log_entries, &fname, &s);
-			if (!idle) {
-				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
-				ASPRINTF(&sp, "User %s:%s", user->username, s);
-				dealloc(s);
-				add_msg_entry(&char_list, &sp);
+			if (user->authorised) {
+				ASPRINTF(&fname, "%s/users/%s", ckp->logdir, user->username);
+				s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER | JSON_EOL);
+				add_log_entry(&log_entries, &fname, &s);
+				if (!idle) {
+					s = json_dumps(val, JSON_NO_UTF8 | JSON_PRESERVE_ORDER);
+					ASPRINTF(&sp, "User %s:%s", user->username, s);
+					dealloc(s);
+					add_msg_entry(&char_list, &sp);
+				}
 			}
 			json_decref(val);
 			if (ckp->remote)
