@@ -5134,6 +5134,7 @@ static void read_userstats(ckpool_t *ckp, sdata_t *sdata, int tvsec_diff)
 			continue;
 
 		base_username = strdupa(workername);
+		username = strsep(&base_username, "._");
 		if (!username || !strlen(username))
 			username = base_username;
 		len = strlen(username);
